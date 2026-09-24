@@ -17,7 +17,11 @@ jobs:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
       - run: ruff check app tests
-      - run: pytest -q
+      - name: pytest
+        # Failing tests are also printed as annotations, so they show on the commit page.
+        run: |
+          set -o pipefail
+          pytest -q -rfE 2>&1 | tee pytest.txt || { grep -E "^(FAILED|ERROR)" pytest.txt | head -20 | sed 's/^/::error::/'; exit 1; }
 
   web:
     runs-on: ubuntu-latest
