@@ -8,8 +8,9 @@ import pytest
 FIXTURES = Path(__file__).parent / "fixtures" / "generated"
 
 
-@pytest.fixture(scope="session", autouse=True)
-def generated_fixtures() -> None:
+def pytest_sessionstart(session: pytest.Session) -> None:
+    """Generate the test documents before collection: several test modules parametrize over the
+    manifest at import time, and a fresh checkout (CI) does not have them yet."""
     if not (FIXTURES / "manifest.json").exists():
         subprocess.run([sys.executable, str(FIXTURES.parent / "generate.py")], check=True, capture_output=True)
 
