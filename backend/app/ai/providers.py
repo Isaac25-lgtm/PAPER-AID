@@ -12,6 +12,7 @@ from app.core.errors import PermanentStageError, RetryableStageError
 
 UNAVAILABLE = "Processing was delayed by a temporary service problem. We'll keep trying."
 MISCONFIGURED = "PaperAid couldn't reach its AI service. Our team has been notified — you don't need to upload again."
+AI_NOT_CONFIGURED = "AI not configured. This job could not run."
 
 
 @dataclass
@@ -54,7 +55,7 @@ class AnthropicProvider:
         import anthropic
 
         if not settings.ai_configured or settings.anthropic_api_key is None:
-            raise PermanentStageError("PROVIDER_CONFIG", MISCONFIGURED, "ANTHROPIC_API_KEY is not set")
+            raise PermanentStageError("AI_NOT_CONFIGURED", AI_NOT_CONFIGURED, "both AI provider keys are required")
         self._sdk = anthropic
         self._client = anthropic.Anthropic(
             api_key=settings.anthropic_api_key.get_secret_value(), timeout=settings.provider_timeout_sec, max_retries=1
@@ -103,7 +104,7 @@ class OpenAIProvider:
         import openai
 
         if not settings.ai_configured or settings.openai_api_key is None:
-            raise PermanentStageError("PROVIDER_CONFIG", MISCONFIGURED, "OPENAI_API_KEY is not set")
+            raise PermanentStageError("AI_NOT_CONFIGURED", AI_NOT_CONFIGURED, "both AI provider keys are required")
         self._sdk = openai
         self._client = openai.OpenAI(api_key=settings.openai_api_key.get_secret_value(), timeout=settings.provider_timeout_sec, max_retries=1)
 

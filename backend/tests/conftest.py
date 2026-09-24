@@ -33,6 +33,7 @@ def client(tmp_path, monkeypatch):
     models = FakeModels()
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    monkeypatch.setenv("MODEL_PRICES", '{"fake:gpt-6-sol":[0,0,0],"fake:claude-opus-5-5":[0,0,0]}')
     monkeypatch.setenv("ADMIN_EMAILS", '["demo@paperaid.app"]')
     monkeypatch.setattr(orchestration, "provider_for", lambda ref, settings: (models, ref.split(":")[-1]))
     for c in _app_client(tmp_path, monkeypatch):

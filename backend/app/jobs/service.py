@@ -294,6 +294,8 @@ def submit(rt: Runtime, user: User, job_id: str, quote_id: str) -> JobView:
         raise Conflict("Your quote expired. Request a new one.", code="QUOTE_EXPIRED")
     if job.source is None or job.quote.source_sha256 != job.source.sha256:
         raise Conflict("Your file changed after it was priced. Request a new quote.", code="QUOTE_MISMATCH")
+    if any(availability(rt.settings).get(service.value) != "available" for service in job.quote.selection.services()):
+        raise AppError("That service is not available right now.", code="SERVICE_UNAVAILABLE")
     if rt.store.count_active(user.uid) >= rt.settings.max_active_jobs_per_user:
         raise LimitExceeded(
             f"You already have {rt.settings.max_active_jobs_per_user} jobs in progress. Submit this one when one of them finishes.",
@@ -305,6 +307,8 @@ def submit(rt: Runtime, user: User, job_id: str, quote_id: str) -> JobView:
     def accept(j: Job) -> Job | None:
         # Re-checked inside the transaction: a concurrent upload or submit may have changed the job.
         if j.status != JobStatus.QUOTED or j.quote is None or j.quote.id != quote_id or j.source is None or j.quote.source_sha256 != j.source.sha256:
+            return None
+        if any(availability(settings).get(service.value) != "available" for service in j.quote.selection.services()):
             return None
         if j.quote.guideline_sha256 is not None and (j.guideline is None or j.guideline.sha256 != j.quote.guideline_sha256):
             return None

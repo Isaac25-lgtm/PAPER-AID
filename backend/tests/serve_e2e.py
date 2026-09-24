@@ -16,7 +16,14 @@ DATA = Path(__file__).resolve().parents[1] / ".data_e2e"
 def main() -> None:
     shutil.rmtree(DATA, ignore_errors=True)  # every browser-test run starts empty
     os.environ.update(
-        {"DATA_DIR": str(DATA), "OPENAI_API_KEY": "sk-e2e", "ANTHROPIC_API_KEY": "sk-e2e", "ADMIN_EMAILS": '["demo@paperaid.app"]', "ENV": "local"}
+        {
+            "DATA_DIR": str(DATA),
+            "OPENAI_API_KEY": "sk-e2e",
+            "ANTHROPIC_API_KEY": "sk-e2e",
+            "MODEL_PRICES": '{"fake:gpt-6-sol":[0,0,0],"fake:claude-opus-5-5":[0,0,0]}',
+            "ADMIN_EMAILS": '["demo@paperaid.app"]',
+            "ENV": "local",
+        }
     )
     from app.ai import orchestration
     from app.main import create_app

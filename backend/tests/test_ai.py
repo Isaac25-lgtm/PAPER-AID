@@ -13,7 +13,12 @@ from app.core.errors import PermanentStageError, RetryableStageError
 
 
 def real_settings(**overrides) -> Settings:
-    return Settings(anthropic_api_key="sk-test", openai_api_key="sk-test", **overrides)
+    return Settings(
+        anthropic_api_key="sk-test",
+        openai_api_key="sk-test",
+        model_prices={"anthropic:gpt-6-sol": (0, 0, 0), "anthropic:m": (0, 0, 0)},
+        **overrides,
+    )
 
 
 def anthropic_response(payload: dict, stop="end_turn"):
@@ -446,6 +451,24 @@ def test_gpt_6_sol_is_priced_at_its_published_rate():
 
     assert costs.price_for("openai", "gpt-6-sol") == (2.0, 10.0, 0.20)
     assert costs.cost_usd("openai", "gpt-6-sol", 1_000_000, 100_000, 0) == pytest.approx(3.0)
+
+
+def test_unpriced_model_is_rejected_before_a_paid_call():
+    from app.ai import costs
+    from app.core.errors import PermanentStageError
+
+    with pytest.raises(PermanentStageError, match="MODEL_PRICE_NOT_CONFIGURED"):
+        costs.estimate_usd("openai", "unknown-model", 1000, 1000)
+    assert costs.price_for("openai", "unknown-model", {"openai:unknown-model": (1.0, 2.0, 0.1)}) == (1.0, 2.0, 0.1)
+
+
+@pytest.mark.parametrize("model", ["openai:gpt-6-sol", "anthropic:claude-opus-5-5"])
+def test_a_worker_without_keys_fails_as_ai_not_configured(model):
+    settings = Settings(openai_api_key=None, anthropic_api_key=None)
+    with pytest.raises(PermanentStageError) as failure:
+        providers.provider_for(model, settings)
+    assert failure.value.code == "AI_NOT_CONFIGURED"
+    assert failure.value.user_message.startswith("AI not configured")
 
 
 def test_every_paid_call_renews_the_lease_first(monkeypatch):

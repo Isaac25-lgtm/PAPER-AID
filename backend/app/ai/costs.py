@@ -4,8 +4,8 @@ from app.core.errors import PermanentStageError
 
 PRICE_TABLE_VERSION = "2026-09"
 
-# (uncached input, output, cached input), standard short-context rates. Unknown models use a
-# deliberately high default so the budget guard errs on the side of stopping; MODEL_PRICES overrides.
+# (uncached input, output, cached input), standard short-context rates. A model without
+# an explicit price is unavailable: a guessed rate would make the cost guard unreliable.
 PRICES: dict[str, tuple[float, float, float]] = {
     "openai:gpt-6-sol": (2.0, 10.0, 0.20),
     "anthropic:claude-opus-5-5": (4.0, 20.0, 0.20),
@@ -13,15 +13,15 @@ PRICES: dict[str, tuple[float, float, float]] = {
     "anthropic:claude-sonnet-5": (2.0, 10.0, 0.20),
     "anthropic:claude-haiku-4-5": (1.0, 5.0, 0.10),
 }
-DEFAULT_PRICE = (6.0, 30.0, 0.60)
-
-
 Prices = dict[str, tuple[float, float, float]]
 
 
 def price_for(provider: str, model: str, overrides: Prices | None = None) -> tuple[float, float, float]:
     key = f"{provider}:{model}"
-    return (overrides or {}).get(key) or PRICES.get(key, DEFAULT_PRICE)
+    price = (overrides or {}).get(key) or PRICES.get(key)
+    if price is None:
+        raise PermanentStageError("MODEL_PRICE_NOT_CONFIGURED", "AI pricing is not configured for this model.", f"model={key}")
+    return price
 
 
 def cost_usd(provider: str, model: str, input_tokens: int, output_tokens: int, cached_tokens: int, overrides: Prices | None = None) -> float:

@@ -248,7 +248,7 @@ export function HeroPreview() {
           </div>
           <span className="ml-auto flex items-center gap-1.5 text-[10px] font-medium text-fg-subtle">
             <span className={clsx('size-1.5 rounded-full', scene.scanning ? 'animate-pulse bg-amber-400' : 'bg-brand-500')} />
-            {scene.scanning ? 'Analysing' : 'Live'}
+            {scene.scanning ? 'Analysing…' : scene.formatted ? 'Reviewed' : 'Reviewing'}
           </span>
         </div>
 

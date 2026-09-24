@@ -563,3 +563,13 @@ def test_without_ai_keys_the_ai_services_cannot_be_quoted_or_run(client, monkeyp
     _upload(client, job_id, "source", "simple_essay.docx")
     response = client.post(f"/api/jobs/{job_id}/quote", headers=STUDENT, json={"selection": REFINE_FORMAT})
     assert response.status_code == 400 and response.json()["code"] == "SERVICE_UNAVAILABLE"
+
+
+def test_an_old_ai_quote_cannot_be_submitted_after_keys_are_removed(client, monkeypatch):
+    from app.runtime import get_runtime
+
+    job_id, quote = start_job(client)
+    monkeypatch.setattr(get_runtime().settings, "openai_api_key", None)
+    response = client.post(f"/api/jobs/{job_id}/submit", headers=STUDENT, json={"quoteId": quote["id"]})
+    assert response.status_code == 400 and response.json()["code"] == "SERVICE_UNAVAILABLE"
+    assert get_runtime().store.get(job_id).status == "QUOTED"
