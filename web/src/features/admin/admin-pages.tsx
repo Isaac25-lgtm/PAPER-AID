@@ -1,16 +1,17 @@
 import { clsx } from 'clsx'
-import { ArrowLeft, Copy, Search } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { ArrowLeft, Copy, Search, Wallet as WalletIcon } from 'lucide-react'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router'
-import { Button } from '../../components/ui/button'
+import { Button, ButtonLink } from '../../components/ui/button'
 import { Input, Select } from '../../components/ui/field'
 import { Dialog } from '../../components/ui/overlays'
 import { Alert, Card, EmptyState, PageHeader, Skeleton } from '../../components/ui/primitives'
 import { DataError, useData, type JobQuery } from '../../lib/data'
 import { formatDateTime, formatDuration, formatNumber, formatRelative, formatUGX } from '../../lib/format'
 import { SERVICES, SERVICE_ORDER, STAGE_LABELS, STATUS_LABELS } from '../../lib/services'
-import type { AdminJob, AdminSummary, JobStatus, ServiceId } from '../../lib/types'
+import type { AdminJob, AdminSummary, JobStatus, ServiceId, WalletSummary } from '../../lib/types'
 import { useTitle } from '../../lib/use-title'
+import { walletChanged } from '../../lib/use-wallet'
 import { serviceNames, StatusBadge } from '../jobs/job-bits'
 
 const usd = (n: number) => `$${n.toFixed(n < 1 ? 3 : 2)}`
@@ -74,9 +75,14 @@ export function AdminOverviewPage() {
         description="What's queued, what failed, and what it cost. Paper content is never shown here."
         actions={
           summary && (
-            <Button variant={summary.processingEnabled ? 'secondary' : 'primary'} size="sm" onClick={() => setConfirmSwitch(true)}>
-              {summary.processingEnabled ? 'Pause processing' : 'Resume processing'}
-            </Button>
+            <div className="flex gap-2">
+              <ButtonLink to="/admin/credits" variant="secondary" size="sm">
+                <WalletIcon className="size-4" aria-hidden /> Credits
+              </ButtonLink>
+              <Button variant={summary.processingEnabled ? 'secondary' : 'primary'} size="sm" onClick={() => setConfirmSwitch(true)}>
+                {summary.processingEnabled ? 'Pause processing' : 'Resume processing'}
+              </Button>
+            </div>
           )
         }
       />
@@ -389,6 +395,98 @@ export function AdminJobPage() {
       >
         {error && <Alert tone="danger">{error}</Alert>}
       </Dialog>
+    </>
+  )
+}
+
+export function AdminCreditsPage() {
+  useTitle('Credits · Admin')
+  const data = useData()
+  const [wallets, setWallets] = useState<WalletSummary[] | null>(null)
+  const [search, setSearch] = useState('')
+  const [email, setEmail] = useState('')
+  const [amount, setAmount] = useState('')
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
+
+  const load = useCallback((term: string) => data.admin.listWallets(term).then(setWallets), [data])
+  useEffect(() => {
+    const t = setTimeout(() => load(search.trim()), 200)
+    return () => clearTimeout(t)
+  }, [load, search])
+
+  const grant = async (event: FormEvent) => {
+    event.preventDefault()
+    const value = Number(amount)
+    if (!Number.isInteger(value) || value <= 0) return setResult({ tone: 'danger', text: 'Enter a whole number of UGX above zero.' })
+    setBusy(true)
+    setResult(null)
+    try {
+      const updated = await data.admin.grantCredits(email.trim(), value, note)
+      setResult({ tone: 'success', text: `Added ${formatUGX(value)} to ${updated.email}. Their balance is now ${formatUGX(updated.available)}.` })
+      walletChanged() // the admin may have credited their own account
+      setAmount('')
+      setNote('')
+      await load(search.trim())
+    } catch (e) {
+      setResult({ tone: 'danger', text: e instanceof DataError ? e.message : 'The credits could not be added.' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <>
+      <Link to="/admin" className="mb-4 inline-flex items-center gap-1.5 text-sm font-medium text-fg-muted hover:text-fg">
+        <ArrowLeft className="size-4" aria-hidden /> Operations
+      </Link>
+      <PageHeader title="Credits" description="Add credits to a student's balance: test credits while payments are not live, refunds or goodwill later." />
+      <div className="grid items-start gap-6 lg:grid-cols-[22rem_1fr]">
+        <Card className="p-5">
+          <h2 className="text-sm font-semibold">Add credits</h2>
+          <form className="mt-4 space-y-4" onSubmit={grant}>
+            <Input label="Student email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} hint="They must have signed in once." />
+            <Input label="Amount (UGX)" inputMode="numeric" required value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9]/g, ''))} />
+            <Input label="Note (optional)" value={note} maxLength={120} onChange={(e) => setNote(e.target.value)} hint="Shown in the student's credit history." />
+            {result && <Alert tone={result.tone}>{result.text}</Alert>}
+            <Button type="submit" className="w-full" loading={busy}>
+              Add credits
+            </Button>
+          </form>
+        </Card>
+        <Card className="overflow-hidden">
+          <div className="border-b border-line p-4">
+            <Input label="Find a student" placeholder="Email" value={search} onChange={(e) => setSearch(e.target.value)} />
+          </div>
+          {wallets === null ? (
+            <Skeleton className="m-4 h-24" />
+          ) : wallets.length === 0 ? (
+            <p className="p-4 text-sm text-fg-muted">No matching students have opened their credits yet.</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="bg-surface-subtle text-left text-xs text-fg-subtle">
+                <tr>
+                  <th className="px-4 py-2.5 font-medium">Student</th>
+                  <th className="px-4 py-2.5 text-right font-medium">Available</th>
+                  <th className="px-4 py-2.5 text-right font-medium">Held</th>
+                  <th className="hidden px-4 py-2.5 text-right font-medium sm:table-cell">Last activity</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-line">
+                {wallets.map((w) => (
+                  <tr key={w.email} className="cursor-pointer hover:bg-surface-subtle" onClick={() => setEmail(w.email)}>
+                    <td className="px-4 py-2.5">{w.email}</td>
+                    <td className="px-4 py-2.5 text-right font-medium">{formatUGX(w.available)}</td>
+                    <td className="px-4 py-2.5 text-right text-fg-muted">{formatUGX(w.held)}</td>
+                    <td className="hidden px-4 py-2.5 text-right text-fg-subtle sm:table-cell">{formatRelative(w.updatedAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </Card>
+      </div>
     </>
   )
 }

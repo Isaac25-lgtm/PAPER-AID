@@ -100,7 +100,7 @@ const FAQ = [
   },
   {
     q: 'What does the estimate cost?',
-    a: 'Refinement and University templates need a short AI scan to size the work. That scan has a small charge, shown before it runs, and it counts toward your job if you go ahead. If the scan fails, it is refunded. AI Check and APA or Harvard formatting are priced from your paper’s length with no scan.',
+    a: 'Refinement needs a short AI scan to size the work: which passages need attention and how. The most the scan can cost is shown before you start it, you pay only what it actually costs, and it counts toward your job if you go ahead. If the scan fails, it is not charged. AI Check, University templates and APA or Harvard formatting are priced from the length of your paper (and guide) with no scan.',
   },
   {
     q: 'Can the final price be higher than the estimate?',
@@ -141,8 +141,8 @@ export function PricingPage() {
                 there is to work on.
               </li>
               <li>
-                <span className="font-semibold text-fg">2. We size the work.</span> For refinement and University templates, a short AI scan finds the
-                passages or rules that need attention. AI Check and APA or Harvard formatting are priced from length alone.
+                <span className="font-semibold text-fg">2. We size the work.</span> For refinement, a short AI scan finds the passages that need
+                attention; you start it yourself and see its most before it runs. Everything else is priced from length alone.
               </li>
               <li>
                 <span className="font-semibold text-fg">3. You approve the estimate.</span> It is the most you will pay, and it is held from your credits

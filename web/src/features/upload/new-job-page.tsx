@@ -1,16 +1,17 @@
 import { clsx } from 'clsx'
-import { ArrowRight, Check, CheckCircle2, Info } from 'lucide-react'
+import { ArrowRight, Check, CheckCircle2, Info, Loader2 } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { useNavigate } from 'react-router'
-import { Button } from '../../components/ui/button'
+import { Link, useNavigate } from 'react-router'
+import { Button, ButtonLink } from '../../components/ui/button'
 import { Checkbox, Select } from '../../components/ui/field'
 import { FileChip, FileDropzone, fileMetaLine } from '../../components/ui/file-dropzone'
 import { Alert, Badge, Card, PageHeader, Skeleton } from '../../components/ui/primitives'
 import { DataError, useData } from '../../lib/data'
-import { formatUGX } from '../../lib/format'
+import { formatUGX, formatUSDFromUGX } from '../../lib/format'
 import { AVAILABILITY_BADGE, NOT_CONFIGURED_REASON, SERVICES } from '../../lib/services'
-import type { FileMeta, FileRole, Quote, ServiceId, ServiceSelection } from '../../lib/types'
+import type { EstimateView, FileMeta, FileRole, Quote, ServiceId, ServiceSelection } from '../../lib/types'
 import { useTitle } from '../../lib/use-title'
+import { useWallet, walletChanged } from '../../lib/use-wallet'
 import { useAuth } from '../auth/auth-context'
 import { DISCLAIMER } from '../results/report'
 
@@ -23,6 +24,23 @@ interface Upload {
 
 const INITIAL: ServiceSelection = { writing: 'REFINE', intensity: 'STANDARD', formatting: 'NONE', preset: 'apa7', latex: false }
 const ACCEPT = '.docx,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf'
+
+// What the price panel shows. Refinement is priced after a paid AI estimate that the student
+// starts deliberately (feeCap is its most); everything else is priced from length at once.
+interface Pricing {
+  quote: Quote | null
+  feeCap: number | null
+  estimate: EstimateView | null
+  loading: boolean
+  error: string | null
+  needsCredits: boolean
+}
+
+const NO_PRICE: Pricing = { quote: null, feeCap: null, estimate: null, loading: false, error: null, needsCredits: false }
+
+function priceError(e: unknown): Pick<Pricing, 'error' | 'needsCredits'> {
+  return { error: e instanceof DataError ? e.message : 'We could not price this job.', needsCredits: e instanceof DataError && e.status === 402 }
+}
 
 function Step({ n, title, description, children, disabled }: { n: number; title: string; description?: string; children: ReactNode; disabled?: boolean }) {
   return (
@@ -97,7 +115,8 @@ export function NewJobPage() {
   const [source, setSource] = useState<Upload | null>(null)
   const [guide, setGuide] = useState<Upload | null>(null)
   const [selection, setSelection] = useState<ServiceSelection>(INITIAL)
-  const [quote, setQuote] = useState<{ quote: Quote | null; loading: boolean; error: string | null }>({ quote: null, loading: false, error: null })
+  const [pricing, setPricing] = useState<Pricing>(NO_PRICE)
+  const { wallet } = useWallet()
   const [ownWork, setOwnWork] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
@@ -132,16 +151,16 @@ export function NewJobPage() {
   useEffect(() => {
     if (!draftId || !meta) return
     if (needsGuide) {
-      setQuote({ quote: null, loading: false, error: null })
+      setPricing(NO_PRICE)
       return
     }
     let cancelled = false
-    setQuote({ quote: null, loading: true, error: null })
+    setPricing({ ...NO_PRICE, loading: true })
     const timer = setTimeout(() => {
       data
-        .requestQuote(draftId, selection)
-        .then((q) => !cancelled && setQuote({ quote: q, loading: false, error: null }))
-        .catch((e: unknown) => !cancelled && setQuote({ quote: null, loading: false, error: e instanceof DataError ? e.message : 'We could not price this job.' }))
+        .requestQuote(draftId, selection) // never starts a paid estimate: that takes the student's click
+        .then((r) => !cancelled && setPricing({ ...NO_PRICE, quote: r.quote, feeCap: r.estimateFeeCap, estimate: r.estimate }))
+        .catch((e: unknown) => !cancelled && setPricing({ ...NO_PRICE, ...priceError(e) }))
     }, 300)
     return () => {
       cancelled = true
@@ -149,6 +168,32 @@ export function NewJobPage() {
     }
     // guideMeta: a new guide clears the server's quote, so it must be priced again
   }, [data, draftId, meta, guideMeta, needsGuide, selection])
+
+  // While the estimate runs on the server, watch the draft until it is priced (or fails).
+  const estimateRunning = pricing.estimate?.status === 'RUNNING'
+  useEffect(() => {
+    if (!draftId || !estimateRunning) return
+    let stop = () => {}
+    stop = data.watchJob(draftId, (job) => {
+      if (!job || job.estimate?.status === 'RUNNING') return
+      stop()
+      setPricing((p) => ({ ...p, estimate: job.estimate, quote: job.estimate?.status === 'READY' ? job.quote : null }))
+      walletChanged()
+    })
+    return () => stop()
+  }, [data, draftId, estimateRunning])
+
+  const runEstimate = async () => {
+    if (!draftId) return
+    setPricing((p) => ({ ...p, loading: true, error: null, needsCredits: false }))
+    try {
+      const r = await data.requestQuote(draftId, selection, true)
+      setPricing({ ...NO_PRICE, quote: r.quote, feeCap: r.estimateFeeCap, estimate: r.estimate })
+      walletChanged()
+    } catch (e) {
+      setPricing((p) => ({ ...p, loading: false, ...priceError(e) }))
+    }
+  }
 
   const upload = async (role: FileRole, file: File) => {
     const setUpload = role === 'source' ? setSource : setGuide
@@ -182,11 +227,12 @@ export function NewJobPage() {
   }
 
   const submit = async () => {
-    if (!draftId || !quote.quote) return
+    if (!draftId || !pricing.quote) return
     setSubmitting(true)
     setSubmitError(null)
     try {
-      const jobId = await data.submitJob(draftId, quote.quote.id)
+      const jobId = await data.submitJob(draftId, pricing.quote.id)
+      walletChanged()
       navigate(`/app/jobs/${jobId}`)
     } catch (e) {
       setSubmitError(e instanceof DataError ? e.message : 'We could not start this job. Try again.')
@@ -200,7 +246,10 @@ export function NewJobPage() {
     ...(selection.writing !== 'NONE' ? [selection.writing] : []),
     ...(selection.formatting !== 'NONE' ? [selection.formatting] : []),
   ]
-  const canSubmit = !!meta && !needsGuide && !!quote.quote && ownWork && !quote.loading
+  const hold = pricing.quote ? pricing.quote.amount - pricing.quote.paid : 0
+  const shortOfCredit = !!wallet && !!pricing.quote && wallet.available < hold
+  const canSubmit = !!meta && !needsGuide && !!pricing.quote && ownWork && !pricing.loading && !shortOfCredit
+  const rate = wallet?.ugxPerUsd ?? config.ugxPerUsd
 
   return (
     <>
@@ -240,7 +289,7 @@ export function NewJobPage() {
           </Step>
 
           <Step n={2} title="Choose the work" description="Pick one writing service and, if you like, formatting." disabled={!meta}>
-            <fieldset disabled={!meta}>
+            <fieldset disabled={!meta || estimateRunning}>
               <legend className="mb-3 text-sm font-semibold text-fg">Writing</legend>
               <div className="grid gap-3 sm:grid-cols-2">
                 <OptionCard name="writing" checked={selection.writing === 'AI_CHECK'} onSelect={() => set({ writing: 'AI_CHECK' })} title={SERVICES.AI_CHECK.name} body="Report only — your document is not edited." badge={badgeFor('AI_CHECK')} disabledReason={reasonFor('AI_CHECK')} />
@@ -283,7 +332,7 @@ export function NewJobPage() {
               )}
 
             </fieldset>
-            <fieldset disabled={!meta} className="mt-7">
+            <fieldset disabled={!meta || estimateRunning} className="mt-7">
               <legend className="mb-3 text-sm font-semibold text-fg">Formatting</legend>
               <div className="grid gap-3 sm:grid-cols-3">
                 <OptionCard name="formatting" checked={selection.formatting === 'NONE'} onSelect={() => set({ formatting: 'NONE' })} title="Keep my formatting" body="Leave the layout as it is." />
@@ -344,42 +393,88 @@ export function NewJobPage() {
               <h2 className="text-base font-semibold">3 · Your quote</h2>
             </div>
             <div className="p-5">
+              {meta && wallet && (
+                <p className="mb-4 flex items-center justify-between rounded-lg bg-surface-subtle px-3 py-2 text-xs text-fg-muted">
+                  <span>Your credits{wallet.testCredits && ' (test)'}</span>
+                  <Link to="/app/credits" className="font-semibold text-fg hover:underline">
+                    {formatUGX(wallet.available)}
+                  </Link>
+                </p>
+              )}
               {!meta ? (
-                <p className="text-sm text-fg-muted">Upload your paper to see the price. It depends on length and the services you choose.</p>
+                <p className="text-sm text-fg-muted">Upload your paper to see the price. It depends on the work your paper needs.</p>
               ) : needsGuide ? (
                 <p className="text-sm text-fg-muted">Upload your formatting guide to see the price.</p>
-              ) : quote.loading ? (
+              ) : pricing.loading ? (
                 <div className="space-y-3" aria-busy="true" aria-label="Calculating quote">
                   <Skeleton className="h-4 w-full" />
                   <Skeleton className="h-4 w-3/4" />
                   <Skeleton className="h-8 w-1/2" />
                 </div>
-              ) : quote.error ? (
-                <Alert tone="warning">{quote.error}</Alert>
-              ) : quote.quote ? (
+              ) : pricing.error ? (
+                <Alert
+                  tone="warning"
+                  action={
+                    pricing.needsCredits ? (
+                      <ButtonLink to="/app/credits" size="sm" variant="secondary">
+                        Your credits
+                      </ButtonLink>
+                    ) : undefined
+                  }
+                >
+                  {pricing.error}
+                </Alert>
+              ) : estimateRunning && pricing.estimate ? (
+                <div className="rounded-xl bg-brand-50 p-4 text-sm" aria-live="polite">
+                  <p className="flex items-center gap-2 font-semibold text-brand-900">
+                    <Loader2 className="size-4 animate-spin" aria-hidden /> Sizing your paper&hellip;
+                  </p>
+                  <p className="mt-1.5 leading-relaxed text-brand-800">
+                    PaperAid&rsquo;s AI is reading your paper and drafting its plan. This takes a minute or two. Up to {formatUGX(pricing.estimate.feeCap)} is
+                    held; you pay only what the scan actually costs.
+                  </p>
+                </div>
+              ) : pricing.quote ? (
                 <>
                   <dl className="space-y-2 text-sm">
-                    {quote.quote.lines.map((l) => (
+                    {pricing.quote.lines.map((l) => (
                       <div key={l.label} className="flex justify-between gap-4">
                         <dt className="text-fg-muted">{l.label}</dt>
-                        <dd className="font-medium">{formatUGX(l.amount)}</dd>
+                        <dd className="font-medium whitespace-nowrap">{formatUGX(l.amount)}</dd>
                       </div>
                     ))}
                   </dl>
                   <div className="mt-4 flex items-baseline justify-between border-t border-line pt-4">
-                    <span className="text-sm font-semibold">Total</span>
-                    <span className={clsx('text-2xl font-bold tracking-tight', !config.paymentsEnabled && 'text-fg-subtle line-through decoration-2')}>
-                      {formatUGX(quote.quote.amount)}
+                    <span className="text-sm font-semibold">Most you&rsquo;ll pay</span>
+                    <span className="text-right">
+                      <span className="block text-2xl font-bold tracking-tight">{formatUGX(pricing.quote.amount)}</span>
+                      <span className="text-xs text-fg-subtle">{formatUSDFromUGX(pricing.quote.amount, rate)}</span>
                     </span>
                   </div>
-                  {!config.paymentsEnabled && (
-                    <p className="mt-2 flex items-baseline justify-between rounded-lg bg-brand-50 px-3 py-2 text-sm font-semibold text-brand-800">
-                      Beta price <span className="text-lg">{formatUGX(0)}</span>
+                  {pricing.quote.paid > 0 && (
+                    <p className="mt-2 flex justify-between text-sm text-fg-muted">
+                      <span>Already paid (estimate)</span> <span>{formatUGX(pricing.quote.paid)}</span>
                     </p>
                   )}
-                  <p className="mt-2 text-xs text-fg-subtle">
-                    Based on {meta.wordCount.toLocaleString('en')} words. Valid for 30 minutes.
+                  <p className="mt-1 flex justify-between text-sm font-semibold">
+                    <span>Held from your credits now</span> <span>{formatUGX(hold)}</span>
                   </p>
+                  <p className="mt-2 text-xs leading-relaxed text-fg-subtle">
+                    You&rsquo;re charged for the work actually done, never more than this, and the rest returns to your balance. Valid for 30 minutes.
+                  </p>
+                  {shortOfCredit && wallet && (
+                    <Alert
+                      tone="warning"
+                      className="mt-3"
+                      action={
+                        <ButtonLink to="/app/credits" size="sm" variant="secondary">
+                          Your credits
+                        </ButtonLink>
+                      }
+                    >
+                      This needs {formatUGX(hold)} of credit and your balance is {formatUGX(wallet.available)}.
+                    </Alert>
+                  )}
 
                   <div className="mt-5 border-t border-line pt-4">
                     <p className="text-xs font-semibold tracking-wide text-fg-subtle uppercase">You&rsquo;ll receive</p>
@@ -392,6 +487,37 @@ export function NewJobPage() {
                     </ul>
                   </div>
                 </>
+              ) : pricing.estimate?.status === 'FAILED' ? (
+                <Alert
+                  tone="warning"
+                  title="The estimate didn't finish"
+                  action={
+                    <Button size="sm" variant="secondary" onClick={runEstimate}>
+                      Try again
+                    </Button>
+                  }
+                >
+                  {pricing.estimate.message} It was not charged.
+                </Alert>
+              ) : pricing.feeCap !== null ? (
+                <div>
+                  <p className="text-sm font-semibold">First, a short AI estimate</p>
+                  <p className="mt-1.5 text-sm leading-relaxed text-fg-muted">
+                    Refinement is priced from the work your paper actually needs. PaperAid&rsquo;s AI scans it and drafts a plan; the scan costs at most{' '}
+                    <strong className="text-fg">{formatUGX(pricing.feeCap)}</strong> and counts toward your job if you go ahead.
+                  </p>
+                  <Button className="mt-4 w-full" onClick={runEstimate} disabled={!!wallet && wallet.available < pricing.feeCap}>
+                    Get my estimate &middot; up to {formatUGX(pricing.feeCap)}
+                  </Button>
+                  {wallet && wallet.available < pricing.feeCap && (
+                    <p className="mt-2 text-xs text-amber-800">
+                      Your balance is {formatUGX(wallet.available)}.{' '}
+                      <Link to="/app/credits" className="font-semibold underline">
+                        See your credits
+                      </Link>
+                    </p>
+                  )}
+                </div>
               ) : null}
 
               {selection.writing !== 'NONE' && meta && (
@@ -404,7 +530,7 @@ export function NewJobPage() {
                 className="mt-5"
                 checked={ownWork}
                 onChange={(e) => setOwnWork(e.target.checked)}
-                disabled={!quote.quote}
+                disabled={!pricing.quote}
                 label="This is my own work, and I will check my institution's rules on AI-assisted editing."
               />
               {submitError && (
@@ -413,7 +539,7 @@ export function NewJobPage() {
                 </Alert>
               )}
               <Button size="lg" className="mt-5 w-full" disabled={!canSubmit} loading={submitting} onClick={submit}>
-                {config.paymentsEnabled ? 'Continue to payment' : 'Start job — free in beta'} <ArrowRight className="size-4" aria-hidden />
+                {pricing.quote ? `Start job · hold ${formatUGX(hold)}` : 'Start job'} <ArrowRight className="size-4" aria-hidden />
               </Button>
             </div>
           </Card>

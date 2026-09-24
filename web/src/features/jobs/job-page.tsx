@@ -73,7 +73,7 @@ function JobBody({ job }: { job: Job }) {
       >
         <p>{job.failure?.userMessage}</p>
         <p className="mt-2">
-          {job.paymentStatus === 'BETA_BYPASS' ? 'Beta jobs are free, so nothing was charged.' : 'You have not been charged for this job.'}{' '}
+          Nothing was charged: your credits, including any estimate, went back to your balance.{' '}
           {job.failure?.retryable && 'We may restart it for you — it will appear here if we do.'}
         </p>
       </Alert>
@@ -84,7 +84,7 @@ function JobBody({ job }: { job: Job }) {
         <CircleSlash className="size-6 shrink-0 text-fg-subtle" aria-hidden />
         <div>
           <p className="font-semibold">This job was cancelled before it started.</p>
-          <p className="text-sm text-fg-muted">Nothing was processed or charged.</p>
+          <p className="text-sm text-fg-muted">Nothing was processed, and any credits held for it went back to your balance.</p>
         </div>
       </Card>
     )
@@ -275,11 +275,11 @@ function JobDetails({ job }: { job: Job }) {
             </div>
           ))}
           <div className="flex justify-between gap-4 border-t border-line pt-2 font-semibold">
-            <dt>Total</dt>
+            <dt>Most it could cost</dt>
             <dd>{formatUGX(job.quote.amount)}</dd>
           </div>
         </dl>
-        {job.paymentStatus === 'BETA_BYPASS' && <p className="mt-2 text-xs font-medium text-brand-700">Free during beta — you were not charged.</p>}
+        <BillingNote job={job} />
       </Card>
       <Card className="p-5">
         <h2 className="text-sm font-semibold">Details</h2>
@@ -348,4 +348,21 @@ function JobSkeleton() {
       </div>
     </div>
   )
+}
+
+/** Where this job's credits stand: held while it runs, then what was charged and what came back. */
+function BillingNote({ job }: { job: Job }) {
+  const b = job.billing
+  const paid = b.feePaid + b.charged
+  if (b.state === 'HELD')
+    return <p className="mt-3 rounded-lg bg-surface-subtle p-2.5 text-xs text-fg-muted">{formatUGX(b.held)} is held while your job runs. You&rsquo;re charged only for the work done; the rest comes back.</p>
+  if (b.state === 'SETTLED')
+    return (
+      <p className="mt-3 rounded-lg bg-brand-50 p-2.5 text-xs font-medium text-brand-800">
+        Charged {formatUGX(paid)}{b.feePaid > 0 && ` (including the ${formatUGX(b.feePaid)} estimate)`}. {job.quote.amount - paid > 0 && `${formatUGX(job.quote.amount - paid)} less than the most it could cost.`}
+      </p>
+    )
+  if (b.state === 'RELEASED' || b.refunded > 0)
+    return <p className="mt-3 rounded-lg bg-surface-subtle p-2.5 text-xs text-fg-muted">Nothing was charged for this job{b.refunded > 0 && `, and the ${formatUGX(b.refunded)} estimate was refunded`}.</p>
+  return null
 }

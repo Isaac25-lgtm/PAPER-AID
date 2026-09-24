@@ -1,7 +1,8 @@
 import pytest
 
-from app.ai.costs import ensure_within_budget, job_budget
+from app.ai.costs import ensure_within_budget
 from app.analysis import signals
+from app.core.config import Settings
 from app.core.errors import Conflict, PermanentStageError
 from app.documents import protect
 from app.documents.docx_io import read_docx
@@ -9,7 +10,8 @@ from app.formatting.apply import apply_formatting
 from app.formatting.presets import PRESETS
 from app.jobs import state
 from app.jobs.models import Job, JobFailure, JobStatus, ServiceSelection, Stage, utcnow
-from app.pricing.quote import quote_lines
+from app.pricing import credits
+from app.pricing.quote import Passage, format_ugx, price, round_up, to_ugx
 from tests import fake_writer as rules
 from tests.conftest import fixture_bytes, manifest
 
@@ -66,12 +68,47 @@ def test_formulaic_text_scores_higher_than_plain_text():
     assert formulaic.algorithm_version == "signals-v1"
 
 
-def test_quotes_are_deterministic_and_ordered():
+PRICING = Settings(openai_api_key="sk-test", anthropic_api_key="sk-test")
+
+
+def test_price_is_ai_cost_times_the_multiplier_in_ugx():
+    # $1 of AI spend at 2x and UGX 4,000 per dollar is UGX 8,000; always rounded up to the next 100
+    assert to_ugx(1.0, PRICING) == 8000
+    assert to_ugx(0.00001, PRICING) == 100 and round_up(0) == 0
+
+
+def test_apa_harvard_is_the_one_fixed_price():
+    assert format_ugx(PRICING, 300) == 2000  # the minimum
+    assert format_ugx(PRICING, 30_000) == 10_000  # UGX 100 per 300 words
+    assert price(PRICING, ServiceSelection(formatting="FORMAT"), 30_000).fixed_ugx == 10_000
+
+
+def test_quotes_are_ceilings_that_grow_with_the_work():
+    short = price(PRICING, ServiceSelection(writing="AI_CHECK"), 1_000).ai_ugx
+    long = price(PRICING, ServiceSelection(writing="AI_CHECK"), 20_000).ai_ugx
+    assert 0 < short < long and short % 100 == 0
+    few = [Passage(chars=600, words=100, rewrite=True)] * 3
+    many = [Passage(chars=600, words=100, rewrite=True)] * 30
     refine = ServiceSelection(writing="REFINE")
-    assert quote_lines(refine, 4312)[0].amount == 7500
-    assert quote_lines(ServiceSelection(writing="AI_CHECK"), 300)[0].amount == 2000
-    assert quote_lines(ServiceSelection(writing="REDRAFT"), 4312)[0].amount > quote_lines(refine, 4312)[0].amount
-    assert all(line.amount % 500 == 0 for line in quote_lines(ServiceSelection(writing="REFINE", formatting="FORMAT"), 12345))
+    assert price(PRICING, refine, 5_000, passages=few).ai_ugx < price(PRICING, refine, 5_000, passages=many).ai_ugx
+    left_alone = [Passage(chars=600, words=100, rewrite=False)] * 3
+    assert price(PRICING, refine, 5_000, passages=left_alone).ai_ugx < price(PRICING, refine, 5_000, passages=few).ai_ugx
+    paid = price(PRICING, refine, 5_000, passages=few, fee_paid=700)
+    assert paid.lines[0].amount == 700 and "already paid" in paid.lines[0].label
+
+
+def test_the_ledger_never_goes_negative_and_settles_exactly():
+    from app.jobs.models import Wallet
+
+    w = credits.top_up(Wallet(uid="u", email="u@x.com"), 10_000, "Test credits")
+    credits.hold(w, 8_000, "job_a", "hold")
+    with pytest.raises(credits.InsufficientCredits):
+        credits.hold(w, 8_000, "job_b", "second tab")  # only 2,000 left available
+    credits.settle(w, held=8_000, charge=3_100, job_id="job_a", note="charge")
+    assert (w.available, w.held) == (6_900, 0)
+    assert [e.kind for e in w.entries] == ["TOP_UP", "HOLD", "CHARGE", "RELEASE"]
+    with pytest.raises(ValueError):
+        credits.settle(w, held=100, charge=200, job_id="job_a", note="more than held")
 
 
 def _job(status: JobStatus) -> Job:
@@ -93,9 +130,7 @@ def test_state_machine_rejects_illegal_transitions():
             assert state.can_transition(current, target) == (target in targets)
 
 
-def test_budget_guard_and_budget():
-    assert job_budget(7500, 3700, 0.35, 0.4, 5.0) == pytest.approx(0.7094, rel=1e-3)
-    assert job_budget(100_000_000, 3700, 0.35, 0.4, 5.0) == 5.0
+def test_budget_guard():
     ensure_within_budget(0.1, 0.1, 0.5)
     with pytest.raises(PermanentStageError) as err:
         ensure_within_budget(0.45, 0.1, 0.5)

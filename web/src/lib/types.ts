@@ -16,7 +16,7 @@ export type JobStatus =
   | 'CANCELLED'
 
 export type Stage = 'EXTRACTING' | 'ANALYSING' | 'PLANNING' | 'REFINING' | 'REDRAFTING' | 'FORMATTING' | 'AUDITING' | 'EXPORTING'
-export type PaymentStatus = 'NOT_REQUIRED' | 'BETA_BYPASS' | 'PENDING' | 'PAID' | 'FAILED' | 'REFUNDED'
+export type PaymentStatus = 'NOT_REQUIRED' | 'PENDING' | 'PAID' | 'FAILED' | 'REFUNDED'
 export type FileRole = 'source' | 'guideline'
 export type Intensity = 'LIGHT' | 'STANDARD'
 export type Band = 'LOW' | 'MODERATE' | 'HIGH'
@@ -44,13 +44,66 @@ export interface QuoteLine {
   amount: number
 }
 
+/** `amount` is the most the job can cost, everything included; `paid` is the part already charged (the AI estimate). */
 export interface Quote {
   id: string
   currency: 'UGX'
   lines: QuoteLine[]
   amount: number
+  paid: number
   pricingVersion: string
   expiresAt: string
+}
+
+/** The paid AI scan that sizes a refinement before it is priced. */
+export interface EstimateView {
+  status: 'RUNNING' | 'READY' | 'FAILED'
+  feeCap: number
+  fee: number
+  message: string | null
+}
+
+export interface QuoteResponse {
+  quote: Quote | null
+  estimate: EstimateView | null
+  /** Refinement: the most the estimate can cost, shown before the student starts it. */
+  estimateFeeCap: number | null
+}
+
+export interface Billing {
+  state: 'NONE' | 'HELD' | 'SETTLED' | 'RELEASED'
+  feePaid: number
+  held: number
+  charged: number
+  refunded: number
+}
+
+export interface LedgerEntry {
+  id: string
+  at: string
+  kind: 'TOP_UP' | 'HOLD' | 'CHARGE' | 'RELEASE' | 'REFUND'
+  amount: number
+  jobId: string | null
+  note: string
+  availableAfter: number
+  heldAfter: number
+}
+
+export interface Wallet {
+  currency: 'UGX'
+  available: number
+  held: number
+  entries: LedgerEntry[]
+  ugxPerUsd: number
+  /** Local mode: credits exist only for testing and are not money. */
+  testCredits: boolean
+}
+
+export interface WalletSummary {
+  email: string
+  available: number
+  held: number
+  updatedAt: string
 }
 
 export type ReasonCode =
@@ -136,6 +189,8 @@ export interface Job {
   source: FileMeta
   guideline: FileMeta | null
   quote: Quote
+  estimate: EstimateView | null
+  billing: Billing
   outcome: 'FULL' | 'PARTIAL' | null
   warnings: string[]
   analysis: AnalysisResult | null
@@ -191,7 +246,8 @@ export interface AdminSummary {
 export interface PublicConfig {
   paymentsEnabled: boolean
   availability: Record<ServiceId, Availability>
-  indicativeFrom: Record<ServiceId, number>
+  minTopUpUgx: number
+  ugxPerUsd: number
   retentionDays: number
   presets: { id: string; label: string; available: boolean }[]
 }

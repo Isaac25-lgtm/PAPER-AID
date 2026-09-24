@@ -49,6 +49,20 @@ try {
   await page.waitForURL(/\/app\/new/)
   step('sign-in returns to the new-job page')
 
+  // Payments aren't live: an admin adds test credits, as the owner will while testing.
+  const chip = page.getByRole('link', { name: /^Credits: UGX / })
+  await chip.waitFor()
+  const startBalance = Number((await chip.getAttribute('aria-label')).replace(/[^0-9]/g, ''))
+  await page.goto(`${base}/admin/credits`)
+  await page.getByLabel('Student email').fill('demo@paperaid.app')
+  await page.getByLabel('Amount (UGX)').fill('500000')
+  await page.getByRole('button', { name: 'Add credits' }).click()
+  const expected = (startBalance + 500000).toLocaleString('en')
+  await page.getByText(`Their balance is now UGX ${expected}`).waitFor()
+  await page.getByRole('link', { name: `Credits: UGX ${expected}` }).waitFor()
+  step('admin added test credits; the header balance updated')
+  await page.goto(`${base}/app/new`)
+
   // A bad file is rejected with the server's message.
   expect({ status: 422, path: /^\/api\/jobs\/job_\w+\/files\/source$/ })
   await upload('macro_renamed.docx', 'coursework.docx')
@@ -61,7 +75,10 @@ try {
   await page.getByText('Readable text found').waitFor({ timeout: 20000 })
   await page.getByText('Academic formatting').first().click()
   await page.getByRole('combobox', { name: 'Formatting style' }).selectOption('harvard')
-  await page.locator('aside dl').getByText('Academic formatting').waitFor()
+  await page.getByText('First, a short AI estimate').waitFor()
+  await shot('1a-estimate-offer')
+  await page.getByRole('button', { name: /Get my estimate/ }).click() // the paid scan only runs on the student's click
+  await page.locator('aside dl').getByText('Academic formatting').waitFor({ timeout: 60000 })
   const quoteText = await page.locator('aside dl').innerText()
   await shot('1-quote')
   step(`quote: ${quoteText.replace(/\n/g, ' ')}`)
@@ -110,7 +127,7 @@ try {
   before = jobCount()
   await page.goto(`${base}/app/new`)
   await upload('simple_essay.docx', 'essay.docx')
-  await page.locator('aside dl').getByText('Check + Refine').waitFor({ timeout: 20000 })
+  await page.getByText('First, a short AI estimate').waitFor({ timeout: 20000 })
   await page.getByRole('button', { name: 'Remove essay.docx' }).click()
   await upload('text_based.pdf', 'essay.pdf')
   await page.locator('aside dl').getByText('AI Check').waitFor({ timeout: 20000 })
@@ -125,11 +142,12 @@ try {
   await page.locator('label', { hasText: 'University templates' }).click()
   await page.getByText('Upload your formatting guide to see the price').waitFor()
   await upload('guideline_university.docx', 'Old guide.docx')
-  await page.locator('aside dl').getByText('University template formatting').waitFor({ timeout: 20000 })
+  await page.getByText('First, a short AI estimate').waitFor({ timeout: 20000 })
   await page.getByRole('button', { name: 'Remove Old guide.docx' }).click() // removed on the server too
   await page.getByText('Upload your formatting guide to see the price').waitFor()
   await upload('guideline_university.docx', 'Department guide.docx')
-  await page.locator('aside dl').getByText('University template formatting').waitFor({ timeout: 20000 })
+  await page.getByRole('button', { name: /Get my estimate/ }).click()
+  await page.locator('aside dl').getByText('University template formatting').waitFor({ timeout: 60000 })
   await page.getByLabel(/This is my own work/).check()
   await page.getByRole('button', { name: /Start job/ }).click()
   await page.waitForURL(/\/app\/jobs\/job_/)
@@ -142,6 +160,14 @@ try {
   await page.locator('details summary').first().click()
   await page.getByText('Why:').first().waitFor()
   step('university template job applies the guide with sources; changes say why')
+
+  // Credits: every job settled, nothing left held, and the history explains each movement.
+  await page.goto(`${base}/app/credits`)
+  await page.getByText('Credits added').first().waitFor()
+  await page.getByText(/Held · Held for your job/).first().waitFor()
+  if (await page.getByText('held for work in progress').count()) throw new Error('credits still held after every job finished')
+  await shot('8-credits')
+  step('credits page shows the balance and the history of holds and settlements')
 
   // Dashboard and history show the job; admin console shows it with its stages.
   await page.goto(`${base}/app`)

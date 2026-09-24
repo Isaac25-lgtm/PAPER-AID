@@ -53,11 +53,15 @@ class Settings(BaseSettings):
     repair_attempts: int = 2
     max_failed_share: float = 0.3
 
-    # Cost control
-    ugx_per_usd: float = 3700
-    job_budget_share: float = 0.6  # the plan/critique/final-plan/review loop makes ~7 model calls per job
-    job_budget_cap_usd: float = 6.0
-    job_budget_floor_usd: float = 1.50
+    # Credits and pricing (owner decisions, 2026-09-24; see docs/decisions.md "Prepaid credits").
+    # A job costs its actual AI spend × price_multiplier, converted at ugx_per_usd and never more
+    # than its quote; quotes add quote_safety_margin on top of the projected AI spend.
+    price_multiplier: float = 2.0
+    ugx_per_usd: float = 4000  # market was ~3,907 on 2026-09-23; rounded up as a buffer. Review monthly.
+    quote_safety_margin: float = 0.2
+    format_ugx_per_300_words: int = 100  # APA/Harvard formatting uses no AI
+    format_min_ugx: int = 2000
+    min_top_up_ugx: int = 5000
 
     # Google Cloud (production only)
     gcp_project: str | None = None

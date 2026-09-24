@@ -8,9 +8,11 @@ import type {
   JobStatus,
   Page,
   PublicConfig,
-  Quote,
+  QuoteResponse,
   ServiceId,
   ServiceSelection,
+  Wallet,
+  WalletSummary,
 } from './types'
 
 export interface JobQuery {
@@ -39,7 +41,9 @@ export interface DataSource {
   uploadFile(draftId: string, role: FileRole, file: File, onProgress: (pct: number) => void): Promise<FileMeta>
   /** Detaches the formatting guide on the server and clears any quote that priced it. */
   removeGuideline(draftId: string): Promise<void>
-  requestQuote(draftId: string, selection: ServiceSelection): Promise<Quote>
+  /** A price, or for refinement the estimate that runs first (watch the draft until it is READY). */
+  requestQuote(draftId: string, selection: ServiceSelection, startEstimate?: boolean): Promise<QuoteResponse>
+  getWallet(): Promise<Wallet>
   submitJob(draftId: string, quoteId: string): Promise<string>
   cancelJob(jobId: string): Promise<void>
   deleteJob(jobId: string): Promise<void>
@@ -52,6 +56,8 @@ export interface DataSource {
     retryJob(jobId: string): Promise<void>
     cancelJob(jobId: string): Promise<void>
     setProcessing(enabled: boolean): Promise<void>
+    listWallets(search: string): Promise<WalletSummary[]>
+    grantCredits(email: string, amount: number, note: string): Promise<WalletSummary>
   }
 }
 

@@ -38,7 +38,23 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(orchestration, "provider_for", lambda ref, settings: (models, ref.split(":")[-1]))
     for c in _app_client(tmp_path, monkeypatch):
         c.models = models
+        for email in TEST_ACCOUNTS:
+            grant(email, 1_000_000)
         yield c
+
+
+TEST_ACCOUNTS = ("student@example.com", "other@example.com", "demo@paperaid.app")
+
+
+def grant(email: str, amount: int) -> None:
+    """Test credits straight into a wallet (the admin endpoint is tested separately)."""
+    import hashlib
+
+    from app.pricing import credits
+    from app.runtime import get_runtime
+
+    uid = "u_" + hashlib.sha256(email.encode()).hexdigest()[:20]
+    get_runtime().store.update_wallet(uid, email, lambda w: credits.top_up(w, amount, "Test credits"))
 
 
 def _app_client(tmp_path, monkeypatch):

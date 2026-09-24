@@ -1,6 +1,9 @@
-"""Job metadata storage. `LocalJobStore` (JSON files) runs everything on one machine;
+"""Job and wallet storage. `LocalJobStore` (JSON files) runs everything on one machine;
 `FirestoreJobStore` is the production implementation. Both give the same guarantees the job
-engine relies on: atomic read-modify-write per job, and owner-scoped listing."""
+engine relies on: atomic read-modify-write per job, a job and its owner's wallet changed in one
+transaction (so credits can never be held twice or lost between them), and owner-scoped listing."""
+
+from __future__ import annotations  # the stores define a `list` method, which shadows the builtin in annotations
 
 import json
 import threading
@@ -10,9 +13,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
-from app.jobs.models import Job, JobStatus
+from app.jobs.models import Job, JobStatus, Wallet
 
 Mutator = Callable[[Job], Job | None]
+WalletMutator = Callable[[Wallet], Wallet | None]
+PairMutator = Callable[[Job, Wallet], tuple[Job, Wallet] | None]
 
 
 class JobStore(Protocol):
@@ -27,6 +32,11 @@ class JobStore(Protocol):
     def hit(self, key: str, window_sec: int) -> int: ...
     def get_flag(self, name: str, default: bool) -> bool: ...
     def set_flag(self, name: str, value: bool) -> None: ...
+    def get_wallet(self, uid: str) -> Wallet | None: ...
+    def update_wallet(self, uid: str, email: str, mutate: WalletMutator) -> Wallet | None: ...
+    def update_job_and_wallet(self, job_id: str, mutate: PairMutator) -> tuple[Job, Wallet] | None: ...
+    def find_wallets(self, email_contains: str | None, limit: int) -> list[Wallet]: ...
+    def delete_wallet(self, uid: str) -> None: ...
 
 
 def _dump(job: Job) -> str:
@@ -38,6 +48,8 @@ class LocalJobStore:
         self._dir = root / "jobs"
         self._dir.mkdir(parents=True, exist_ok=True)
         self._flags_path = root / "flags.json"
+        self._wallets = root / "wallets"
+        self._wallets.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._hits: dict[str, list[float]] = {}
 
@@ -115,6 +127,55 @@ class LocalJobStore:
             flags[name] = value
             self._flags_path.write_text(json.dumps(flags))
 
+    # wallets: one file each, replaced atomically; every change runs under the same lock as jobs
+    def _wallet_path(self, uid: str) -> Path:
+        if not uid.replace("_", "").replace("-", "").isalnum():
+            raise ValueError("invalid uid")
+        return self._wallets / f"{uid}.json"
+
+    def _write_wallet(self, wallet: Wallet) -> None:
+        self._wallets.mkdir(parents=True, exist_ok=True)
+        tmp = self._wallet_path(wallet.uid).with_suffix(".tmp")
+        tmp.write_text(wallet.model_dump_json(by_alias=True), encoding="utf-8")
+        tmp.replace(self._wallet_path(wallet.uid))
+
+    def get_wallet(self, uid: str) -> Wallet | None:
+        path = self._wallet_path(uid)
+        with self._lock:
+            return Wallet.model_validate_json(path.read_text(encoding="utf-8")) if path.exists() else None
+
+    def update_wallet(self, uid: str, email: str, mutate: WalletMutator) -> Wallet | None:
+        with self._lock:
+            wallet = self.get_wallet(uid) or Wallet(uid=uid, email=email)
+            result = mutate(wallet)
+            if result is not None:
+                self._write_wallet(result)
+            return result
+
+    def update_job_and_wallet(self, job_id: str, mutate: PairMutator) -> tuple[Job, Wallet] | None:
+        with self._lock:
+            job = self.get(job_id)
+            if job is None:
+                return None
+            wallet = self.get_wallet(job.owner_uid) or Wallet(uid=job.owner_uid, email=job.owner_email)
+            result = mutate(job, wallet)
+            if result is not None:
+                # wallet first: if the job write then failed, a restart reconciles from the job record
+                self._write_wallet(result[1])
+                self._write(result[0])
+            return result
+
+    def find_wallets(self, email_contains: str | None, limit: int) -> list[Wallet]:
+        with self._lock:
+            wallets = [Wallet.model_validate_json(p.read_text(encoding="utf-8")) for p in self._wallets.glob("*.json")]
+        term = (email_contains or "").strip().lower()
+        matches = [w for w in wallets if term in w.email.lower()]
+        return sorted(matches, key=lambda w: w.updated_at, reverse=True)[:limit]
+
+    def delete_wallet(self, uid: str) -> None:
+        with self._lock:
+            self._wallet_path(uid).unlink(missing_ok=True)
+
 
 class FirestoreJobStore:
     """Production store: jobs/{jobId} documents, transactions for every update."""
@@ -125,6 +186,7 @@ class FirestoreJobStore:
         self._fs = firestore
         self._db = firestore.Client(project=project)
         self._jobs = self._db.collection("jobs")
+        self._wallets = self._db.collection("wallets")
 
     def create(self, job: Job) -> None:
         self._jobs.document(job.id).create(json.loads(_dump(job)))
@@ -185,3 +247,50 @@ class FirestoreJobStore:
 
     def set_flag(self, name: str, value: bool) -> None:
         self._db.collection("config").document("runtime").set({name: value}, merge=True)
+
+    def get_wallet(self, uid: str) -> Wallet | None:
+        snap = self._wallets.document(uid).get()
+        return Wallet.model_validate(snap.to_dict()) if snap.exists else None
+
+    def update_wallet(self, uid: str, email: str, mutate: WalletMutator) -> Wallet | None:
+        ref = self._wallets.document(uid)
+
+        @self._fs.transactional
+        def run(transaction) -> Wallet | None:
+            snap = ref.get(transaction=transaction)
+            wallet = Wallet.model_validate(snap.to_dict()) if snap.exists else Wallet(uid=uid, email=email)
+            result = mutate(wallet)
+            if result is not None:
+                transaction.set(ref, json.loads(result.model_dump_json(by_alias=True)))
+            return result
+
+        return run(self._db.transaction())
+
+    def update_job_and_wallet(self, job_id: str, mutate: PairMutator) -> tuple[Job, Wallet] | None:
+        job_ref = self._jobs.document(job_id)
+
+        @self._fs.transactional
+        def run(transaction) -> tuple[Job, Wallet] | None:
+            job_snap = job_ref.get(transaction=transaction)
+            if not job_snap.exists:
+                return None
+            job = Job.model_validate(job_snap.to_dict())
+            wallet_ref = self._wallets.document(job.owner_uid)
+            wallet_snap = wallet_ref.get(transaction=transaction)  # every read before any write
+            wallet = Wallet.model_validate(wallet_snap.to_dict()) if wallet_snap.exists else Wallet(uid=job.owner_uid, email=job.owner_email)
+            result = mutate(job, wallet)
+            if result is not None:
+                transaction.set(job_ref, json.loads(_dump(result[0])))
+                transaction.set(wallet_ref, json.loads(result[1].model_dump_json(by_alias=True)))
+            return result
+
+        return run(self._db.transaction())
+
+    def find_wallets(self, email_contains: str | None, limit: int) -> list[Wallet]:
+        # Firestore has no substring search; exact email match, or the most recently active wallets.
+        term = (email_contains or "").strip().lower()
+        query = self._wallets.where(filter=self._fs.FieldFilter("email", "==", term)) if term else self._wallets.order_by("updatedAt", direction=self._fs.Query.DESCENDING)
+        return [Wallet.model_validate(d.to_dict()) for d in query.limit(limit).stream()]
+
+    def delete_wallet(self, uid: str) -> None:
+        self._wallets.document(uid).delete()

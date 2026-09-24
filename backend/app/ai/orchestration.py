@@ -268,8 +268,10 @@ class AIRunner:
         budget: float,
         cache: ResponseCache | None = None,
         heartbeat: Callable[[], None] | None = None,
+        phase: Literal["estimate", "job"] = "job",
     ):
         self.settings = settings
+        self._phase = phase
         self._record = record
         self._spent = spent
         self._budget = budget
@@ -305,6 +307,7 @@ class AIRunner:
         self._record(
             ModelCall(
                 stage=step.stage,
+                phase=self._phase,
                 provider=result.provider,
                 model=result.model,
                 prompt_version=step.prompt,
@@ -365,13 +368,22 @@ class AIRunner:
 
     # --- 2–4. plan: lead drafts, writer critiques, lead finalises -----------------------
 
-    def negotiate_plan(self, targets: list[Target], outline: list[str]) -> Negotiation:
-        known = {t.id for t in targets}
-        base = [{"id": t.id, "section": t.section, "text": t.masked, "findings": t.findings, "_words": t.masked} for t in targets]
+    @staticmethod
+    def _plan_base(targets: list[Target]) -> list[dict[str, Any]]:
+        return [{"id": t.id, "section": t.section, "text": t.masked, "findings": t.findings, "_words": t.masked} for t in targets]
 
+    def draft_plan(self, targets: list[Target], outline: list[str]) -> dict[str, PlanItem]:
+        """Step 2 alone: the lead's draft plan. The refinement estimate runs exactly this call, so
+        the job that follows replays it from the cache instead of paying for it again."""
+        known = {t.id for t in targets}
         draft: dict[str, PlanItem] = {}
-        for answer in self._batched("plan", base, lambda b: {"outline": outline, "passages": b}, _PLAN, _Plan):
+        for answer in self._batched("plan", self._plan_base(targets), lambda b: {"outline": outline, "passages": b}, _PLAN, _Plan):
             draft.update({p.id: p for p in answer.blocks if p.id in known})
+        return draft
+
+    def negotiate_plan(self, targets: list[Target], outline: list[str]) -> Negotiation:
+        base = self._plan_base(targets)
+        draft = self.draft_plan(targets, outline)
 
         # The whole plan is critiqued, "leave" decisions included: the writer may argue a passage
         # the lead left alone does need work. A passage the lead omitted has no plan and is left.

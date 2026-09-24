@@ -6,7 +6,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from app.core.auth import current_user, require_admin
 from app.core.errors import AppError, Forbidden
 from app.jobs import service
-from app.jobs.models import AdminJob, AdminSummary, FileMeta, JobView, Page, Quote, ServiceSelection
+from app.jobs.models import AdminJob, AdminSummary, FileMeta, JobView, Page, QuoteResponse, ServiceSelection, WalletSummary, WalletView
 from app.jobs.pipeline import run_step
 from app.jobs.service import User
 from app.runtime import Runtime, get_runtime
@@ -65,9 +65,20 @@ def remove_guideline(job_id: str, user: User = Depends(current_user), rt: Runtim
     service.remove_guideline(rt, user, job_id)
 
 
-@api.post("/jobs/{job_id}/quote", response_model=Quote)
-def quote(job_id: str, selection: ServiceSelection = Body(..., embed=True), user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> Quote:
-    return service.request_quote(rt, user, job_id, selection)
+@api.post("/jobs/{job_id}/quote", response_model=QuoteResponse)
+def quote(
+    job_id: str,
+    selection: ServiceSelection = Body(..., embed=True),
+    start_estimate: bool = Body(False, embed=True, alias="startEstimate"),
+    user: User = Depends(current_user),
+    rt: Runtime = Depends(get_runtime),
+) -> QuoteResponse:
+    return service.request_quote(rt, user, job_id, selection, start_estimate)
+
+
+@api.get("/wallet", response_model=WalletView)
+def wallet(user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> WalletView:
+    return service.my_wallet(rt, user)
 
 
 @api.post("/jobs/{job_id}/submit", response_model=JobView)
@@ -152,6 +163,22 @@ def admin_retry(job_id: str, admin: User = Depends(require_admin), rt: Runtime =
 def admin_cancel(job_id: str, admin: User = Depends(require_admin), rt: Runtime = Depends(get_runtime)) -> AdminJob:
     service.cancel(rt, admin, job_id, actor=admin.email)
     return service.admin_get(rt, job_id)
+
+
+@api.get("/admin/wallets", response_model=list[WalletSummary])
+def admin_wallets(search: str | None = None, _: User = Depends(require_admin), rt: Runtime = Depends(get_runtime)) -> list[WalletSummary]:
+    return service.admin_wallets(rt, search)
+
+
+@api.post("/admin/credits", response_model=WalletSummary)
+def admin_credits(
+    email: str = Body(..., embed=True),
+    amount: int = Body(..., embed=True),
+    note: str = Body("", embed=True),
+    admin: User = Depends(require_admin),
+    rt: Runtime = Depends(get_runtime),
+) -> WalletSummary:
+    return service.admin_grant(rt, admin, email, amount, note)
 
 
 @api.post("/admin/processing")

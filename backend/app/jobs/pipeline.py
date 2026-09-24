@@ -12,9 +12,10 @@ being saved; the job's spend ceiling bounds even that."""
 import hashlib
 import json
 import logging
+import secrets
 from datetime import timedelta
 from pathlib import PurePosixPath
-from typing import Any
+from typing import Any, Literal
 
 from app.ai.orchestration import NOT_RETURNED, AIRunner, PlanItem, Revision, Target
 from app.analysis import signals
@@ -31,6 +32,8 @@ from app.formatting.presets import PRESETS
 from app.jobs import state
 from app.jobs.models import (
     AnalysisResult,
+    Billing,
+    BoundQuote,
     ChangedBlock,
     Finding,
     FormattingResult,
@@ -42,9 +45,13 @@ from app.jobs.models import (
     RefinementResult,
     Stage,
     StoredOutput,
+    Wallet,
     utcnow,
 )
 from app.jobs.service import DOCX_TYPE, processing_enabled, task_name
+from app.pricing import credits
+from app.pricing.billing import refund_job, settle_completed
+from app.pricing.quote import PRICING_VERSION, Passage, price, to_ugx
 from app.reports.builder import change_report, writing_report
 from app.runtime import Runtime
 
@@ -55,6 +62,8 @@ LEASE = timedelta(minutes=25)
 # and the 30-minute task deadline, however many batches a long paper needs.
 STAGE_WORK_LIMIT = timedelta(minutes=20)
 GENERIC_FAILURE = "Something went wrong while processing your paper. Our team has been notified."
+ESTIMATE_FAILURE = "We couldn't estimate this paper right now. Your credits were returned; please try again shortly."
+REFINE_STAGES = (Stage.PLANNING, Stage.REFINING, Stage.AUDITING)
 
 
 class StageContinues(Exception):  # noqa: N818 - a signal, not an error
@@ -62,9 +71,13 @@ class StageContinues(Exception):  # noqa: N818 - a signal, not an error
 
 
 class StageContext:
-    def __init__(self, rt: Runtime, job: Job):
+    """One delivery's view of a job. `phase` is "estimate" for the paid scan that sizes a
+    refinement before it is quoted, and "job" once the student has accepted the quote."""
+
+    def __init__(self, rt: Runtime, job: Job, phase: Literal["estimate", "job"] = "job"):
         self.rt = rt
         self.job = job
+        self.phase = phase
         self.prefix = job.storage_prefix()
         self.started = utcnow()
         self._paid_calls = 0
@@ -77,8 +90,14 @@ class StageContext:
         if self._paid_calls and now - self.started > STAGE_WORK_LIMIT:
             raise StageContinues()
         stage = self.job.stage
+        run_id = self.job.estimate.id if self.phase == "estimate" and self.job.estimate else None
 
         def renew(j: Job) -> Job | None:
+            if self.phase == "estimate":
+                if j.status != JobStatus.DRAFT or j.estimate is None or j.estimate.id != run_id or j.estimate.status != "RUNNING":
+                    return None
+                j.estimate.lease_until = now + LEASE
+                return j
             if j.status != JobStatus.PROCESSING or j.stage != stage:
                 return None
             j.lease_until = now + LEASE
@@ -118,15 +137,26 @@ class StageContext:
             def add(j: Job) -> Job:
                 j.model_calls = (j.model_calls + [call])[-200:]
                 j.cost_usd = round(j.cost_usd + call.cost_usd, 6)
+                if call.phase == "estimate":
+                    j.estimate_cost_usd = round(j.estimate_cost_usd + call.cost_usd, 6)
+                elif call.stage in REFINE_STAGES:
+                    j.refine_cost_usd = round(j.refine_cost_usd + call.cost_usd, 6)
                 return j
 
             self.update(add)
 
+        estimate = self.job.estimate if self.phase == "estimate" else None
+
         def spent() -> float:
             current = self.rt.store.get(self.job.id)
-            return current.cost_usd if current else 0.0
+            if current is None:
+                return 0.0
+            if estimate is not None:
+                return current.estimate_cost_usd - estimate.cost_base_usd
+            return current.cost_usd - current.estimate_cost_usd
 
-        return AIRunner(self.rt.settings, record, spent, self.job.budget_usd, cache=_ResponseCache(self), heartbeat=self.heartbeat)
+        budget = estimate.budget_usd if estimate is not None else self.job.budget_usd
+        return AIRunner(self.rt.settings, record, spent, budget, cache=_ResponseCache(self), heartbeat=self.heartbeat, phase=self.phase)
 
 
 class _ResponseCache:
@@ -147,33 +177,55 @@ class _ResponseCache:
 
 
 def stage_extracting(ctx: StageContext) -> None:
+    quote = ctx.job.quote
+    assert quote is not None
+    model = _extract(ctx, quote.source_sha256, quote.guideline_sha256, quote.selection.formatting)
+    if model.warnings:
+        ctx.update(lambda j: _add_warnings(j, model.warnings))
+
+
+def _extract(ctx: StageContext, source_sha: str, guide_sha: str | None, formatting: str) -> DocumentModel:
+    """Re-validate the exact files that were priced and save the document (and guide) models."""
     job, settings = ctx.job, ctx.rt.settings
-    assert job.source is not None and job.quote is not None
+    assert job.source is not None
     data = ctx.rt.files.get(job.source.path)
-    if hashlib.sha256(data).hexdigest() != job.quote.source_sha256:
+    if hashlib.sha256(data).hexdigest() != source_sha:
         raise PermanentStageError("SOURCE_CHANGED", "Your file changed after it was priced. Please start a new job.")
     try:  # the worker repeats every security check; it never trusts the upload step alone
         model = inspect_upload(data, job.source.name, settings.max_upload_bytes, settings.max_words, settings.max_pdf_pages)
     except InvalidDocument as exc:
         raise PermanentStageError(exc.code, exc.message) from exc
     ctx.put_json("document.json", model.model_dump())
-    if job.selection.formatting == "TEMPLATE_FORMAT":
+    if formatting == "TEMPLATE_FORMAT":
         if job.guideline is None:
             raise PermanentStageError("NO_GUIDELINE", "This job needs your university's formatting guide. Please start a new job and upload it.")
         guide_bytes = ctx.rt.files.get(job.guideline.path)
-        if hashlib.sha256(guide_bytes).hexdigest() != job.quote.guideline_sha256:
+        if hashlib.sha256(guide_bytes).hexdigest() != guide_sha:
             raise PermanentStageError("SOURCE_CHANGED", "Your guide changed after it was priced. Please start a new job.")
         try:
             guide = inspect_upload(guide_bytes, job.guideline.name, settings.max_upload_bytes, MAX_GUIDE_WORDS, settings.max_pdf_pages, min_words=20)
         except InvalidDocument as exc:
             raise PermanentStageError(exc.code, f"Your formatting guide couldn't be used: {exc.message}") from exc
         ctx.put_json("guide.json", {"text": "\n".join(b.text for b in guide.blocks)})
-    if model.warnings:
-        ctx.update(lambda j: _add_warnings(j, model.warnings))
+    return model
 
 
 def stage_analysing(ctx: StageContext) -> None:
-    model = ctx.document()
+    result, coverage_warning = _analyse(ctx, ctx.document())
+
+    def save(j: Job) -> Job:
+        j.analysis = result
+        if coverage_warning:
+            j.outcome = "PARTIAL"
+            _add_warnings(j, [coverage_warning])
+        return j
+
+    ctx.update(save)
+
+
+def _analyse(ctx: StageContext, model: DocumentModel) -> tuple[AnalysisResult, str | None]:
+    """PaperAid's signals plus the lead's judgement; saves analysis.json. The estimate runs this
+    too (without showing the result), so the job replays the lead's answer from the cache."""
     runner = ctx.ai()
     result, block_signals = signals.analyse(model, method=_method(ctx, "analysis"))
     model_results = runner.analyse([(s.block.id, s.block.masked or s.block.text) for s in block_signals], model.outline())
@@ -210,15 +262,131 @@ def stage_analysing(ctx: StageContext) -> None:
         excluded = model.word_count - sum(s.block.words for s in block_signals)
         result = signals.aggregate(block_signals, excluded, result.method, scores)
     ctx.put_json("analysis.json", {"result": result.model_dump(), "scores": {s.block.id: s.score for s in block_signals}})
+    return result, coverage_warning
 
-    def save(j: Job) -> Job:
-        j.analysis = result
-        if coverage_warning:
-            j.outcome = "PARTIAL"
-            _add_warnings(j, [coverage_warning])
+
+# --- the refinement estimate ---------------------------------------------------------------
+
+
+def run_estimate(ctx: StageContext) -> tuple[list[Passage], int]:
+    """The paid scan that sizes a refinement: extraction, the lead's analysis and its draft plan,
+    exactly the first calls the job itself will make (and then replay from the cache). Nothing is
+    shown to the student except the resulting quote."""
+    run = ctx.job.estimate
+    assert run is not None
+    model = _extract(ctx, run.source_sha256, run.guideline_sha256, run.selection.formatting)
+    _analyse(ctx, model)
+    targets = _select_targets(ctx, model)
+    draft = ctx.ai().draft_plan(targets, model.outline()) if targets else {}
+    passages = [
+        Passage(chars=len(t.masked), words=len(t.masked.split()), rewrite=draft[t.id].action == "rewrite", instruction_chars=len(draft[t.id].instruction) + len(draft[t.id].preserve))
+        for t in targets
+        if t.id in draft
+    ]
+    guide_words = len(ctx.get_json("guide.json")["text"].split()) if run.selection.formatting == "TEMPLATE_FORMAT" else 0
+    return passages, guide_words
+
+
+def _run_estimate_task(rt: Runtime, job_id: str) -> None:
+    now = utcnow()
+
+    def claim(j: Job) -> Job | None:
+        if j.status != JobStatus.DRAFT or j.estimate is None or j.estimate.status != "RUNNING":
+            return None
+        if j.estimate.lease_until and j.estimate.lease_until > now:
+            return None
+        j.estimate.lease_until = now + LEASE
         return j
 
-    ctx.update(save)
+    job = rt.store.update(job_id, claim)
+    if job is None or job.estimate is None:
+        return
+    run_id = job.estimate.id
+    ctx = StageContext(rt, job, phase="estimate")
+    try:
+        passages, guide_words = run_estimate(ctx)
+    except StageContinues:
+
+        def release(j: Job) -> Job | None:
+            if j.estimate is None or j.estimate.id != run_id or j.estimate.status != "RUNNING":
+                return None
+            j.estimate.lease_until = None
+            return j
+
+        released = rt.store.update(job_id, release)
+        if released is not None:  # named by progress (paid calls so far), so every hand-off is a distinct task
+            rt.queue.enqueue(job_id, f"{job_id}-e{run_id}-c{len(released.model_calls)}")
+        return
+    except StageError as exc:
+        _estimate_failed(rt, job_id, run_id, exc.code, exc.user_message, exc.detail, exc.retryable)
+        return
+    except Exception as exc:  # unexpected: classify as retryable so a transient bug can recover
+        logger.exception("estimate crashed")
+        _estimate_failed(rt, job_id, run_id, "INTERNAL", ESTIMATE_FAILURE, f"{type(exc).__name__}: {exc}", True)
+        return
+    _finish_estimate(rt, job_id, run_id, passages, guide_words)
+
+
+def _finish_estimate(rt: Runtime, job_id: str, run_id: str, passages: list[Passage], guide_words: int) -> None:
+    settings = rt.settings
+    now = utcnow()
+
+    def finish(j: Job, w: Wallet) -> tuple[Job, Wallet] | None:
+        run = j.estimate
+        if j.status != JobStatus.DRAFT or run is None or run.id != run_id or run.status != "RUNNING" or j.source is None:
+            return None
+        fee = min(run.fee_cap, to_ugx(j.estimate_cost_usd - run.cost_base_usd, settings))
+        priced = price(settings, run.selection, j.source.word_count, guide_words, passages, fee_paid=fee)
+        credits.settle(w, held=run.fee_cap, charge=fee, job_id=j.id, note="AI estimate")
+        run.status, run.fee, run.lease_until = "READY", fee, None
+        j.billing = Billing(fee_paid=fee)
+        j.quote = BoundQuote(
+            id=f"quote_{secrets.token_hex(6)}",
+            lines=priced.lines,
+            amount=sum(line.amount for line in priced.lines),
+            paid=fee,
+            pricing_version=PRICING_VERSION,
+            expires_at=now + timedelta(minutes=settings.quote_ttl_minutes),
+            selection=run.selection,
+            source_sha256=run.source_sha256,
+            guideline_sha256=run.guideline_sha256,
+            word_count=j.source.word_count,
+            fixed_ugx=priced.fixed_ugx,
+            ugx_per_usd=settings.ugx_per_usd,
+            multiplier=settings.price_multiplier,
+        )
+        j.selection = run.selection
+        state.transition(j, JobStatus.QUOTED, f"Estimate ready (UGX {fee:,} charged)")
+        return j, w
+
+    rt.store.update_job_and_wallet(job_id, finish)
+
+
+def _estimate_failed(rt: Runtime, job_id: str, run_id: str, code: str, message: str, detail: str, retryable: bool) -> None:
+    settings = rt.settings
+    retry_again = False
+
+    def fail(j: Job, w: Wallet) -> tuple[Job, Wallet] | None:
+        nonlocal retry_again
+        run = j.estimate
+        if run is None or run.id != run_id or run.status != "RUNNING":
+            return None
+        run.lease_until = None
+        if retryable and run.attempts + 1 < settings.stage_max_attempts:
+            run.attempts += 1
+            retry_again = True
+            return j, w
+        credits.settle(w, held=run.fee_cap, charge=0, job_id=j.id, note="AI estimate could not run, so it was not charged")
+        run.status, run.message = "FAILED", message
+        j.events.append(JobEvent(label=f"Estimate failed: {code}"))
+        j.failure_detail = f"estimate {detail}"[:500]
+        return j, w
+
+    result = rt.store.update_job_and_wallet(job_id, fail)
+    log(logger, logging.WARNING, "estimate failed", code=code, retryable=retryable, willRetry=retry_again)
+    if result and retry_again and result[0].estimate:
+        attempts = result[0].estimate.attempts
+        rt.queue.enqueue(job_id, f"{job_id}-e{run_id}-a{attempts}", delay_sec=min(300, 10 * 2**attempts))
 
 
 def _select_targets(ctx: StageContext, model: DocumentModel) -> list[Target]:
@@ -493,10 +661,14 @@ def run_step(rt: Runtime, job_id: str) -> None:
 
 def _run_step(rt: Runtime, job_id: str) -> None:
     now = utcnow()
-    if not processing_enabled(rt):  # emergency pause: leave the job queued, look again in a minute
-        current = rt.store.get(job_id)
-        if current and current.status in (JobStatus.QUEUED, JobStatus.PROCESSING):
+    current = rt.store.get(job_id)
+    estimating = bool(current and current.status == JobStatus.DRAFT and current.estimate and current.estimate.status == "RUNNING")
+    if not processing_enabled(rt):  # emergency pause: leave the work waiting, look again in a minute
+        if current and (estimating or current.status in (JobStatus.QUEUED, JobStatus.PROCESSING)):
             rt.queue.enqueue(job_id, task_name(current, f"-p{int(now.timestamp()) // 60}"), delay_sec=60)
+        return
+    if estimating:
+        _run_estimate_task(rt, job_id)
         return
 
     def claim(j: Job) -> Job | None:
@@ -533,7 +705,7 @@ def _run_step(rt: Runtime, job_id: str) -> None:
         _handle_failure(rt, job_id, stage, "INTERNAL", GENERIC_FAILURE, f"{type(exc).__name__}: {exc}", True)
         return
 
-    def complete(j: Job) -> Job:
+    def complete(j: Job, w: Wallet) -> tuple[Job, Wallet]:
         if stage not in j.completed_stages:
             j.completed_stages.append(stage)
         j.attempts = 0
@@ -541,10 +713,12 @@ def _run_step(rt: Runtime, job_id: str) -> None:
         j.stage = next((s for s in j.pipeline if s not in j.completed_stages), None)
         if j.stage is None:
             state.transition(j, JobStatus.COMPLETED, "Completed with warnings" if j.outcome == "PARTIAL" else "Completed")
-        return j
+            settle_completed(j, w)
+        return j, w
 
-    job = rt.store.update(job_id, complete)
-    assert job is not None
+    result = rt.store.update_job_and_wallet(job_id, complete)
+    assert result is not None
+    job = result[0]
     log(logger, logging.INFO, "stage complete", stage=stage.value, durationMs=int((utcnow() - started).total_seconds() * 1000))
     if job.status == JobStatus.PROCESSING:
         rt.queue.enqueue(job_id, task_name(job))
@@ -566,32 +740,37 @@ def _continue_later(rt: Runtime, job_id: str, stage: Stage) -> None:
 
 
 def _finish(rt: Runtime, job_id: str) -> None:
-    def done(j: Job) -> Job | None:
+    def done(j: Job, w: Wallet) -> tuple[Job, Wallet] | None:
         if j.status != JobStatus.PROCESSING:
             return None
         j.lease_until = None
-        return state.transition(j, JobStatus.COMPLETED, "Completed")
+        state.transition(j, JobStatus.COMPLETED, "Completed")
+        settle_completed(j, w)
+        return j, w
 
-    rt.store.update(job_id, done)
+    rt.store.update_job_and_wallet(job_id, done)
 
 
 def _handle_failure(rt: Runtime, job_id: str, stage: Stage, code: str, message: str, detail: str, retryable: bool) -> None:
     settings = rt.settings
     retry_again = False
 
-    def fail(j: Job) -> Job:
+    def fail(j: Job, w: Wallet) -> tuple[Job, Wallet]:
         nonlocal retry_again
         j.lease_until = None
         if retryable and j.attempts + 1 < settings.stage_max_attempts:
             j.attempts += 1
             j.events.append(JobEvent(label=f"Retrying {stage.value.lower()} after {code}"))
             retry_again = True
-            return j
+            return j, w
         j.failure = JobFailure(code=code, user_message=message, retryable=retryable)
         j.failure_detail = f"stage={stage.value} {detail}"[:500]
-        return state.transition(j, JobStatus.FAILED, f"Failed: {code}")
+        state.transition(j, JobStatus.FAILED, f"Failed: {code}")
+        refund_job(j, w, "Job failed, so nothing was charged")
+        return j, w
 
-    job = rt.store.update(job_id, fail)
+    result = rt.store.update_job_and_wallet(job_id, fail)
+    job = result[0] if result else None
     log(logger, logging.WARNING, "stage failed", stage=stage.value, code=code, retryable=retryable, willRetry=retry_again)
     if job and retry_again:
         delay = min(300, 10 * 2**job.attempts)

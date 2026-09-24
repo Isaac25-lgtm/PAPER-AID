@@ -67,12 +67,14 @@ export const router = createBrowserRouter([
               { path: '/app/new', lazy: () => import('../features/upload/new-job-page').then((m) => ({ Component: m.NewJobPage })) },
               { path: '/app/jobs/:jobId', lazy: () => import('../features/jobs/job-page').then((m) => ({ Component: m.JobPage })) },
               { path: '/app/history', lazy: () => lists().then((m) => ({ Component: m.HistoryPage })) },
+              { path: '/app/credits', lazy: () => import('../features/credits/credits-page').then((m) => ({ Component: m.CreditsPage })) },
               { path: '/app/settings', lazy: () => import('../features/account/settings-page').then((m) => ({ Component: m.SettingsPage })) },
               {
                 element: <RequireAdmin />,
                 children: [
                   { path: '/admin', lazy: () => admin().then((m) => ({ Component: m.AdminOverviewPage })) },
                   { path: '/admin/jobs/:jobId', lazy: () => admin().then((m) => ({ Component: m.AdminJobPage })) },
+                  { path: '/admin/credits', lazy: () => admin().then((m) => ({ Component: m.AdminCreditsPage })) },
                 ],
               },
             ],

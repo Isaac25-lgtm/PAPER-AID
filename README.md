@@ -122,6 +122,10 @@ The web app needs no configuration locally. To use Firebase Authentication, fill
 
 Until a Firebase project is connected, the sign-in page offers a clearly labelled **local test sign-in** that works only on your computer: any email with an 8+ character password. Emails listed in `ADMIN_EMAILS` open the admin console at `/admin`, which shows every job with its timeline, model costs and failures, plus retry, cancel and a pause switch for all processing.
 
+### Credits
+
+Every job is paid from prepaid credits: a UGX balance, priced at the job's actual AI cost × 2 and never more than its quote. Until mobile-money top-ups are connected, an admin adds credits at **`/admin/credits`** (the student must have signed in once). Locally these are marked as test credits. See "Prepaid credits" in [`docs/decisions.md`](docs/decisions.md) for the full rules.
+
 ## Architecture
 
 ```mermaid
@@ -197,7 +201,7 @@ The automated tests never call a paid provider: scripted stand-ins for both mode
 - [x] Two-model algorithm for refinement and University templates
 - [x] Locked citations and numbers, wording fingerprint, honest partial results
 - [x] Admin console with costs, retries and a pause switch
-- [ ] **Prepaid credits:** students top up in UGX (dollar equivalent shown); each job is priced from its actual AI cost, with a hold on acceptance and settlement on completion
+- [x] **Prepaid credits:** a UGX balance (dollar equivalent shown); each job is priced from its actual AI cost × 2, held on acceptance and settled on completion; refinement is sized by a paid AI estimate first
 - [ ] Mobile-money payments through an aggregator
 - [ ] Firebase sign-in (Google and email) and production deployment
 - [ ] Deep redraft and LaTeX conversion

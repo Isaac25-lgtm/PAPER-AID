@@ -1,10 +1,12 @@
 import * as Menu from '@radix-ui/react-dropdown-menu'
 import { clsx } from 'clsx'
-import { History, LayoutDashboard, LogOut, Menu as MenuIcon, Plus, Settings, ShieldCheck } from 'lucide-react'
+import { History, LayoutDashboard, LogOut, Menu as MenuIcon, Plus, Settings, ShieldCheck, Wallet } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router'
 import { useAuth } from '../../features/auth/auth-context'
 import { useData } from '../../lib/data'
+import { formatUGX } from '../../lib/format'
+import { useWallet } from '../../lib/use-wallet'
 import { ButtonLink } from '../ui/button'
 import { Drawer } from '../ui/overlays'
 import { Logo } from './logo'
@@ -15,12 +17,14 @@ export function AppLayout() {
   const navigate = useNavigate()
   const location = useLocation()
   const [menuOpen, setMenuOpen] = useState(false)
+  const { wallet } = useWallet()
 
   useEffect(() => setMenuOpen(false), [location.pathname])
 
   const nav = [
     { to: '/app', label: 'Dashboard', icon: LayoutDashboard, end: true },
     { to: '/app/history', label: 'History', icon: History, end: false },
+    { to: '/app/credits', label: 'Credits', icon: Wallet, end: false },
     ...(user?.isAdmin ? [{ to: '/admin', label: 'Admin', icon: ShieldCheck, end: false }] : []),
   ]
 
@@ -35,7 +39,7 @@ export function AppLayout() {
     <div className="flex min-h-dvh flex-col bg-surface-subtle">
       {!config.paymentsEnabled && (
         <div className="bg-brand-800 px-4 py-2 text-center text-xs font-medium text-brand-50">
-          PaperAid is in beta. Payments aren't live yet, so jobs run without charge while we test.
+          PaperAid is in beta. Mobile-money top-ups aren&rsquo;t live yet, so PaperAid adds credits for you while we test.
         </div>
       )}
       <header className="sticky top-0 z-40 border-b border-line bg-white">
@@ -60,6 +64,15 @@ export function AppLayout() {
             ))}
           </nav>
           <div className="ml-auto flex items-center gap-2">
+            {wallet && (
+              <Link
+                to="/app/credits"
+                className="inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-800 ring-1 ring-brand-200 hover:bg-brand-100"
+                aria-label={`Credits: ${formatUGX(wallet.available)}`}
+              >
+                <Wallet className="size-3.5" aria-hidden /> {formatUGX(wallet.available)}
+              </Link>
+            )}
             <ButtonLink to="/app/new" size="sm" className="hidden sm:inline-flex">
               <Plus className="size-4" aria-hidden />
               New job

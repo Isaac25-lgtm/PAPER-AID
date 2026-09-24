@@ -2,6 +2,9 @@ const ugx = new Intl.NumberFormat('en-UG', { maximumFractionDigits: 0 })
 
 export const formatUGX = (amount: number) => `UGX ${ugx.format(amount)}`
 
+/** The dollar equivalent shown next to UGX amounts, at the server's configured rate. */
+export const formatUSDFromUGX = (amount: number, ugxPerUsd: number) => (ugxPerUsd > 0 ? `≈ $${(amount / ugxPerUsd).toFixed(2)}` : '')
+
 export function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`

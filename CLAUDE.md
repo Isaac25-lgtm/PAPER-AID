@@ -25,7 +25,8 @@ Students upload a paper, choose a service, see a server-calculated quote, and la
 ## Domain vocabulary
 - Job `status`: DRAFT → QUOTED → (AWAITING_PAYMENT) → QUEUED → PROCESSING → COMPLETED | FAILED | CANCELLED.
 - `stage`, used only while PROCESSING: EXTRACTING, ANALYSING, PLANNING, REFINING, REDRAFTING, FORMATTING, AUDITING, EXPORTING.
-- `paymentStatus` is separate: NOT_REQUIRED, BETA_BYPASS, PENDING, PAID, FAILED, REFUNDED.
+- `paymentStatus` is separate: NOT_REQUIRED, PENDING (credits held), PAID, FAILED, REFUNDED.
+- Money is prepaid UGX **credits**, never called tokens. A job costs its actual AI spend × `price_multiplier` (2), never more than its quote; APA/Harvard formatting is the one fixed price. Rules: `app/pricing/` (`quote.py` formulas, `credits.py` ledger, `billing.py` hold/settle/refund). Credits only move inside `update_job_and_wallet` transactions.
 - A COMPLETED job with `outcome: "PARTIAL"` must show its warnings. It is never presented as a clean success.
 - The AI score is labelled "Estimated AI-likeness" and shown as a band (Low/Moderate/High) with a confidence level. No percentage is shown until the score passes validation.
 

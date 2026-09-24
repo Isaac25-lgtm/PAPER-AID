@@ -42,14 +42,10 @@ def estimate_usd(provider: str, model: str, prompt_chars: int, max_output_tokens
     return (input_tokens * inp + expected_output * out) / 1_000_000
 
 
-def job_budget(price_ugx: int, ugx_per_usd: float, share: float, floor: float, cap: float) -> float:
-    return min(cap, max(floor, price_ugx / ugx_per_usd * share))
-
-
 def ensure_within_budget(spent: float, estimate: float, budget: float) -> None:
     if spent + estimate > budget:
         raise PermanentStageError(
             "BUDGET_EXCEEDED",
-            "This job needed more processing than its quote allowed, so we stopped it safely. You have not been charged.",
+            "This job needed more processing than its quote allowed, so we stopped it safely. Your credits were returned.",
             f"spent={spent:.4f} estimate={estimate:.4f} budget={budget:.4f}",
         )

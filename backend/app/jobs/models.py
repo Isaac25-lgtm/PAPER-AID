@@ -49,7 +49,6 @@ class Stage(StrEnum):
 
 class PaymentStatus(StrEnum):
     NOT_REQUIRED = "NOT_REQUIRED"
-    BETA_BYPASS = "BETA_BYPASS"
     PENDING = "PENDING"
     PAID = "PAID"
     FAILED = "FAILED"
@@ -101,10 +100,14 @@ class QuoteLine(Camel):
 
 
 class Quote(Camel):
+    """`amount` is the most the student can pay for this job, everything included. `paid` is the
+    part already charged (the AI estimate), so accepting holds `amount - paid` from the wallet."""
+
     id: str
     currency: Literal["UGX"] = "UGX"
     lines: list[QuoteLine]
     amount: int
+    paid: int = 0
     pricing_version: str
     expires_at: datetime
 
@@ -116,6 +119,87 @@ class BoundQuote(Quote):
     source_sha256: str
     guideline_sha256: str | None = None
     word_count: int
+    fixed_ugx: int = 0  # the part not priced from AI cost (APA/Harvard formatting)
+    ugx_per_usd: float = 0.0  # frozen with the quote so a later rate change can't alter it
+    multiplier: float = 0.0
+
+
+# --- credits ---------------------------------------------------------------------------------
+
+
+class EstimateView(Camel):
+    """The paid AI scan that sizes a refinement job before it is quoted."""
+
+    status: Literal["RUNNING", "READY", "FAILED"]
+    fee_cap: int  # held while the scan runs; the most it can cost
+    fee: int = 0  # what it actually cost, charged when it finishes
+    message: str | None = None
+
+
+class EstimateRun(EstimateView):
+    id: str
+    selection: ServiceSelection
+    source_sha256: str
+    guideline_sha256: str | None = None
+    budget_usd: float
+    cost_base_usd: float = 0.0  # the job's estimate spend before this run; the run's cost is the rise from here
+    attempts: int = 0
+    lease_until: datetime | None = None
+    requested_at: datetime = Field(default_factory=utcnow)
+
+
+class Billing(Camel):
+    """Where this job's credits stand. Every amount is UGX."""
+
+    state: Literal["NONE", "HELD", "SETTLED", "RELEASED"] = "NONE"
+    fee_paid: int = 0  # the estimate charge, counted toward this job
+    held: int = 0
+    charged: int = 0  # final charge for the job itself, excluding the fee
+    refunded: int = 0
+
+
+class LedgerEntry(Camel):
+    id: str
+    at: datetime = Field(default_factory=utcnow)
+    kind: Literal["TOP_UP", "HOLD", "CHARGE", "RELEASE", "REFUND"]
+    amount: int
+    job_id: str | None = None
+    note: str
+    available_after: int
+    held_after: int
+
+
+class WalletView(Camel):
+    currency: Literal["UGX"] = "UGX"
+    available: int = 0
+    held: int = 0
+    entries: list[LedgerEntry] = []
+    ugx_per_usd: float = 0.0
+    test_credits: bool = False  # local mode: credits are for testing only and are not money
+
+
+class Wallet(Camel):
+    uid: str
+    email: str
+    available: int = 0
+    held: int = 0
+    entries: list[LedgerEntry] = []  # newest last; the most recent 300 are kept
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class QuoteResponse(Camel):
+    """A price, or (for refinement) the estimate that is sizing the work before a price exists."""
+
+    quote: Quote | None = None
+    estimate: EstimateView | None = None
+    estimate_fee_cap: int | None = None  # refinement: the most the estimate can cost, shown before it runs
+
+
+class WalletSummary(Camel):
+    email: str
+    available: int
+    held: int
+    updated_at: datetime
 
 
 class Finding(Camel):
@@ -197,6 +281,7 @@ class JobFailure(Camel):
 
 class ModelCall(Camel):
     stage: Stage
+    phase: Literal["estimate", "job"] = "job"
     provider: str
     model: str
     prompt_version: str
@@ -232,6 +317,8 @@ class JobView(Camel):
     source: FileMeta | None = None
     guideline: FileMeta | None = None
     quote: Quote | None = None
+    estimate: EstimateView | None = None
+    billing: Billing = Field(default_factory=Billing)
     outcome: Literal["FULL", "PARTIAL"] | None = None
     warnings: list[str] = []
     analysis: AnalysisResult | None = None
@@ -254,13 +341,16 @@ class Job(JobView):
     source: StoredFile | None = None  # type: ignore[assignment]  # narrower stored variant of FileMeta
     guideline: StoredFile | None = None  # type: ignore[assignment]
     quote: BoundQuote | None = None  # type: ignore[assignment]
+    estimate: EstimateRun | None = None  # type: ignore[assignment]
     outputs: list[StoredOutput] = []  # type: ignore[assignment]
     completed_stages: list[Stage] = []
     generation: int = 0
     attempts: int = 0
     lease_until: datetime | None = None
-    cost_usd: float = 0.0
-    budget_usd: float = 0.0
+    cost_usd: float = 0.0  # every model call, estimate included
+    estimate_cost_usd: float = 0.0
+    refine_cost_usd: float = 0.0  # job-phase spend on planning, refining and auditing (scaled for partial results)
+    budget_usd: float = 0.0  # provider-spend cap for the job phase: the quote's AI part / rate / multiplier
     model_calls: list[ModelCall] = []
     events: list[JobEvent] = []
     admin_actions: list[AdminAction] = []

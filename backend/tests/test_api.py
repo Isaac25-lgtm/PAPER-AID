@@ -2,7 +2,7 @@ import json
 import logging
 import time
 
-from tests.conftest import fixture_bytes
+from tests.conftest import fixture_bytes, grant
 
 STUDENT = {"Authorization": "Dev student@example.com"}
 OTHER = {"Authorization": "Dev other@example.com"}
@@ -14,8 +14,24 @@ def start_job(client, name="simple_essay.docx", selection=None, headers=STUDENT)
     job_id = client.post("/api/jobs", headers=headers).json()["id"]
     upload = client.post(f"/api/jobs/{job_id}/files/source", headers=headers, files={"file": (name, fixture_bytes(name), "application/octet-stream")})
     assert upload.status_code == 200, upload.json()
-    quote = client.post(f"/api/jobs/{job_id}/quote", headers=headers, json={"selection": selection or REFINE_FORMAT}).json()
-    return job_id, quote
+    return job_id, get_quote(client, job_id, selection or REFINE_FORMAT, headers)
+
+
+def get_quote(client, job_id, selection, headers=STUDENT, timeout=30):
+    """A quote, waiting for the refinement estimate when the selection needs one."""
+    response = client.post(f"/api/jobs/{job_id}/quote", headers=headers, json={"selection": selection, "startEstimate": True})
+    body = response.json()
+    assert response.status_code == 200, body
+    if body.get("quote"):
+        return body["quote"]
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        job = client.get(f"/api/jobs/{job_id}", headers=headers).json()
+        if job["estimate"]["status"] == "READY":
+            return job["quote"]
+        assert job["estimate"]["status"] == "RUNNING", job["estimate"]
+        time.sleep(0.2)
+    raise AssertionError("estimate did not finish")
 
 
 def wait(client, job_id, headers=STUDENT, timeout=60):
@@ -38,7 +54,7 @@ def test_full_job_produces_downloadable_outputs(client):
     job_id, quote = start_job(client)
     assert client.post(f"/api/jobs/{job_id}/submit", headers=STUDENT, json={"quoteId": quote["id"]}).status_code == 200
     job = wait(client, job_id)
-    assert job["status"] == "COMPLETED" and job["paymentStatus"] == "BETA_BYPASS"
+    assert job["status"] == "COMPLETED" and job["paymentStatus"] == "PAID" and job["billing"]["state"] == "SETTLED"
     assert {o["id"] for o in job["outputs"]} == {"paper", "writing-report", "change-report"}
     download = client.get(f"/api/jobs/{job_id}/outputs/paper", headers=STUDENT)
     assert download.status_code == 200 and download.content[:2] == b"PK"
@@ -77,7 +93,7 @@ def test_replacing_the_file_invalidates_the_quote(client):
 def test_client_cannot_choose_the_price(client):
     job_id, quote = start_job(client)
     response = client.post(f"/api/jobs/{job_id}/quote", headers=STUDENT, json={"selection": REFINE_FORMAT, "amount": 1})
-    assert response.json()["amount"] == quote["amount"] > 1
+    assert response.json()["quote"]["amount"] == quote["amount"] > 1
 
 
 def test_pdf_is_ai_check_only_and_bad_files_are_rejected(client):
@@ -105,11 +121,13 @@ def test_duplicate_delivery_after_completion_does_nothing(client):
 def test_cancel_queued_job_and_reject_cancelling_completed(client):
     from app.runtime import get_runtime
 
-    get_runtime().store.set_flag("processing_enabled", False)  # hold jobs in the queue
     job_id, quote = start_job(client)
+    get_runtime().store.set_flag("processing_enabled", False)  # hold the job in the queue
     client.post(f"/api/jobs/{job_id}/submit", headers=STUDENT, json={"quoteId": quote["id"]})
+    assert client.get("/api/wallet", headers=STUDENT).json()["held"] > 0
     cancelled = client.post(f"/api/jobs/{job_id}/cancel", headers=STUDENT).json()
-    assert cancelled["status"] == "CANCELLED"
+    assert cancelled["status"] == "CANCELLED" and cancelled["billing"]["state"] == "RELEASED"
+    assert client.get("/api/wallet", headers=STUDENT).json()["held"] == 0  # the whole hold came back
     get_runtime().store.set_flag("processing_enabled", True)
     job_id, quote = start_job(client, selection={"writing": "AI_CHECK"})
     client.post(f"/api/jobs/{job_id}/submit", headers=STUDENT, json={"quoteId": quote["id"]})
@@ -189,8 +207,8 @@ def test_upload_after_submit_is_rejected_and_leaves_the_job_intact(client):
     from app.runtime import get_runtime
 
     rt = get_runtime()
-    rt.store.set_flag("processing_enabled", False)
     job_id, quote = start_job(client)
+    rt.store.set_flag("processing_enabled", False)
     client.post(f"/api/jobs/{job_id}/submit", headers=STUDENT, json={"quoteId": quote["id"]})
     late = client.post(f"/api/jobs/{job_id}/files/source", headers=STUDENT, files={"file": ("new.docx", fixture_bytes("fake_headings.docx"), "application/octet-stream")})
     assert late.status_code == 409 and late.json()["code"] in ("ALREADY_SUBMITTED", "CONFLICT")
@@ -217,7 +235,7 @@ def test_submit_rechecks_the_file_inside_the_transaction(client, monkeypatch):
 
     rt = get_runtime()
     job_id, quote = start_job(client)
-    original_update = rt.store.update
+    original_update = rt.store.update_job_and_wallet
     injected = []
 
     def racing_update(target_id, mutate):
@@ -228,10 +246,10 @@ def test_submit_rechecks_the_file_inside_the_transaction(client, monkeypatch):
                 j.source = j.source.model_copy(update={"sha256": "0" * 64, "path": j.source.path + ".new"})
                 return j
 
-            original_update(target_id, concurrent_upload)
+            rt.store.update(target_id, concurrent_upload)
         return original_update(target_id, mutate)
 
-    monkeypatch.setattr(rt.store, "update", racing_update)
+    monkeypatch.setattr(rt.store, "update_job_and_wallet", racing_update)
     response = client.post(f"/api/jobs/{job_id}/submit", headers=STUDENT, json={"quoteId": quote["id"]})
     assert injected, "submit never reached its transaction"
     assert response.status_code == 409 and rt.store.get(job_id).status == "QUOTED"
@@ -247,6 +265,7 @@ def test_maintenance_sees_every_page(client, monkeypatch):
     ids = []
     for i in range(5):
         headers = {"Authorization": f"Dev many{i}@example.com"}
+        grant(f"many{i}@example.com", 100_000)
         job_id, quote = start_job(client, selection={"writing": "AI_CHECK"}, headers=headers)
         client.post(f"/api/jobs/{job_id}/submit", headers=headers, json={"quoteId": quote["id"]})
         ids.append(job_id)
@@ -409,7 +428,7 @@ def test_university_template_job_applies_the_rules_from_the_guide(client):
     job_id = client.post("/api/jobs", headers=STUDENT).json()["id"]
     assert _upload(client, job_id, "source", "simple_essay.docx").status_code == 200
     assert _upload(client, job_id, "guideline", "guideline_university.docx").status_code == 200
-    quote = client.post(f"/api/jobs/{job_id}/quote", headers=STUDENT, json={"selection": TEMPLATE}).json()
+    quote = get_quote(client, job_id, TEMPLATE)
     assert client.post(f"/api/jobs/{job_id}/submit", headers=STUDENT, json={"quoteId": quote["id"]}).status_code == 200
     job = wait(client, job_id)
     assert job["status"] == "COMPLETED", job
@@ -427,7 +446,7 @@ def test_replacing_the_guide_invalidates_the_quote(client):
     job_id = client.post("/api/jobs", headers=STUDENT).json()["id"]
     _upload(client, job_id, "source", "simple_essay.docx")
     _upload(client, job_id, "guideline", "guideline_university.docx")
-    quote = client.post(f"/api/jobs/{job_id}/quote", headers=STUDENT, json={"selection": TEMPLATE}).json()
+    quote = get_quote(client, job_id, TEMPLATE)
     _upload(client, job_id, "guideline", "guideline_university.docx")
     response = client.post(f"/api/jobs/{job_id}/submit", headers=STUDENT, json={"quoteId": quote["id"]})
     assert response.status_code == 409 and response.json()["code"] == "QUOTE_MISMATCH"
@@ -539,14 +558,14 @@ def test_a_quote_is_not_saved_for_files_that_changed_while_pricing(client, monke
 
     job_id = client.post("/api/jobs", headers=STUDENT).json()["id"]
     _upload(client, job_id, "source", "simple_essay.docx")
-    original = service.quote_lines
+    original = service.price
 
-    def upload_meanwhile(selection, words):
+    def upload_meanwhile(*args, **kwargs):
         _upload(client, job_id, "source", "fake_headings.docx")  # lands between reading the job and saving the quote
-        return original(selection, words)
+        return original(*args, **kwargs)
 
-    monkeypatch.setattr(service, "quote_lines", upload_meanwhile)
-    response = client.post(f"/api/jobs/{job_id}/quote", headers=STUDENT, json={"selection": REFINE_FORMAT})
+    monkeypatch.setattr(service, "price", upload_meanwhile)
+    response = client.post(f"/api/jobs/{job_id}/quote", headers=STUDENT, json={"selection": {"formatting": "FORMAT", "preset": "apa7"}})
     assert response.status_code == 409 and response.json()["code"] == "FILES_CHANGED"
     assert get_runtime().store.get(job_id).quote is None
 
@@ -573,3 +592,125 @@ def test_an_old_ai_quote_cannot_be_submitted_after_keys_are_removed(client, monk
     response = client.post(f"/api/jobs/{job_id}/submit", headers=STUDENT, json={"quoteId": quote["id"]})
     assert response.status_code == 400 and response.json()["code"] == "SERVICE_UNAVAILABLE"
     assert get_runtime().store.get(job_id).status == "QUOTED"
+
+
+# --- prepaid credits (owner decision 2026-09-24) -----------------------------------------------
+
+REAL_PRICES = {"fake:gpt-6-sol": (2.0, 10.0, 0.2), "fake:claude-opus-5-5": (4.0, 20.0, 0.2)}
+
+
+def _priced_models(client, monkeypatch, tokens=(2000, 800)):
+    """Give the stand-in models real prices and token usage, so every call costs money."""
+    from app.runtime import get_runtime
+
+    monkeypatch.setattr(get_runtime().settings, "model_prices", REAL_PRICES)
+    client.models.tokens = tokens
+
+
+def _wallet(client, headers=STUDENT):
+    return client.get("/api/wallet", headers=headers).json()
+
+
+def test_no_estimate_or_quote_without_credits(client):
+    headers = {"Authorization": "Dev broke@example.com"}
+    job_id = client.post("/api/jobs", headers=headers).json()["id"]
+    client.post(f"/api/jobs/{job_id}/files/source", headers=headers, files={"file": ("e.docx", fixture_bytes("simple_essay.docx"), "application/octet-stream")})
+    for selection in (REFINE_FORMAT, {"writing": "AI_CHECK"}, {"formatting": "FORMAT", "preset": "apa7"}):
+        response = client.post(f"/api/jobs/{job_id}/quote", headers=headers, json={"selection": selection, "startEstimate": True})
+        assert response.status_code == 402 and response.json()["code"] == "INSUFFICIENT_CREDITS"
+
+
+def test_refinement_estimate_is_charged_once_and_counts_toward_the_job(client, monkeypatch):
+    _priced_models(client, monkeypatch)
+    start = _wallet(client)["available"]
+    job_id, quote = start_job(client)
+    job = client.get(f"/api/jobs/{job_id}", headers=STUDENT).json()
+    fee = job["estimate"]["fee"]
+    assert 0 < fee <= job["estimate"]["feeCap"] and quote["paid"] == fee and quote["amount"] > fee
+    assert _wallet(client)["available"] == start - fee  # the scan's hold was settled at its real cost
+    assert any("already paid" in line["label"] for line in quote["lines"])
+
+    client.post(f"/api/jobs/{job_id}/submit", headers=STUDENT, json={"quoteId": quote["id"]})
+    job = wait(client, job_id)
+    billing = job["billing"]
+    assert job["status"] == "COMPLETED" and billing["state"] == "SETTLED" and job["paymentStatus"] == "PAID"
+    assert 0 < billing["charged"] <= quote["amount"] - fee  # never more than the quote
+    assert _wallet(client)["held"] == 0
+    assert _wallet(client)["available"] == start - fee - billing["charged"]
+    # the analysis and draft plan the estimate paid for were replayed from the cache, not re-sent
+    assert client.models.tasks.count("analyse") == 1 and client.models.tasks.count("plan") == 1
+
+
+def test_a_failed_job_returns_everything_including_the_estimate(client, monkeypatch):
+    _priced_models(client, monkeypatch)
+    start = _wallet(client)["available"]
+    job_id, quote = start_job(client)
+    client.models.refuse.add("critique")  # the writer declines once the job itself runs
+    client.post(f"/api/jobs/{job_id}/submit", headers=STUDENT, json={"quoteId": quote["id"]})
+    job = wait(client, job_id)
+    assert job["status"] == "FAILED" and job["paymentStatus"] == "REFUNDED"
+    assert job["billing"]["refunded"] == quote["paid"] > 0
+    wallet = _wallet(client)
+    assert (wallet["available"], wallet["held"]) == (start, 0)
+    assert {e["kind"] for e in wallet["entries"]} >= {"HOLD", "CHARGE", "RELEASE", "REFUND"}
+
+
+def test_a_failed_estimate_is_not_charged(client, monkeypatch):
+    _priced_models(client, monkeypatch)
+    start = _wallet(client)["available"]
+    client.models.refuse.add("plan")
+    job_id = client.post("/api/jobs", headers=STUDENT).json()["id"]
+    _upload(client, job_id, "source", "simple_essay.docx")
+    preview = client.post(f"/api/jobs/{job_id}/quote", headers=STUDENT, json={"selection": REFINE_FORMAT}).json()
+    assert preview["estimateFeeCap"] > 0 and preview["estimate"] is None  # shown first; nothing held or run yet
+    assert _wallet(client)["held"] == 0
+    body = client.post(f"/api/jobs/{job_id}/quote", headers=STUDENT, json={"selection": REFINE_FORMAT, "startEstimate": True}).json()
+    assert body["estimate"]["status"] == "RUNNING" and body["quote"] is None
+    deadline = time.time() + 20
+    while client.get(f"/api/jobs/{job_id}", headers=STUDENT).json()["estimate"]["status"] == "RUNNING" and time.time() < deadline:
+        time.sleep(0.2)
+    job = client.get(f"/api/jobs/{job_id}", headers=STUDENT).json()
+    assert job["estimate"]["status"] == "FAILED" and job["estimate"]["message"] and job["quote"] is None
+    assert (_wallet(client)["available"], _wallet(client)["held"]) == (start, 0)
+
+
+def test_submit_needs_enough_credit_for_the_whole_quote(client):
+    headers = {"Authorization": "Dev small@example.com"}
+    grant("small@example.com", 1_000)
+    job_id, quote = start_job(client, selection={"formatting": "FORMAT", "preset": "apa7"}, headers=headers)
+    assert quote["amount"] >= 2_000  # the APA/Harvard minimum
+    response = client.post(f"/api/jobs/{job_id}/submit", headers=headers, json={"quoteId": quote["id"]})
+    assert response.status_code == 402 and response.json()["code"] == "INSUFFICIENT_CREDITS"
+    job = client.get(f"/api/jobs/{job_id}", headers=headers).json()
+    assert job["status"] == "QUOTED" and _wallet(client, headers)["held"] == 0
+
+
+def test_formatting_only_is_charged_its_fixed_price(client):
+    start = _wallet(client)["available"]
+    job_id, quote = start_job(client, selection={"formatting": "FORMAT", "preset": "apa7"})
+    client.post(f"/api/jobs/{job_id}/submit", headers=STUDENT, json={"quoteId": quote["id"]})
+    job = wait(client, job_id)
+    assert job["billing"]["charged"] == quote["amount"] == 2_000
+    assert _wallet(client)["available"] == start - 2_000
+
+
+def test_only_admins_grant_credits_and_only_to_known_accounts(client):
+    client.get("/api/wallet", headers=STUDENT)
+    before = _wallet(client)["available"]
+    granted = client.post("/api/admin/credits", headers=ADMIN, json={"email": "student@example.com", "amount": 5_000, "note": ""}).json()
+    assert granted["available"] == before + 5_000
+    assert client.post("/api/admin/credits", headers=STUDENT, json={"email": "student@example.com", "amount": 5_000}).status_code == 403
+    assert client.post("/api/admin/credits", headers=ADMIN, json={"email": "nobody@example.com", "amount": 5_000}).status_code == 404
+    assert _wallet(client)["testCredits"] is True and _wallet(client)["entries"][0]["kind"] == "TOP_UP"
+
+
+def test_files_are_pinned_while_an_estimate_runs(client, monkeypatch):
+    from app.runtime import get_runtime
+
+    get_runtime().store.set_flag("processing_enabled", False)  # keep the estimate running
+    job_id = client.post("/api/jobs", headers=STUDENT).json()["id"]
+    _upload(client, job_id, "source", "simple_essay.docx")
+    client.post(f"/api/jobs/{job_id}/quote", headers=STUDENT, json={"selection": REFINE_FORMAT, "startEstimate": True})
+    assert _upload(client, job_id, "source", "fake_headings.docx").json()["code"] == "ESTIMATE_RUNNING"
+    assert client.post(f"/api/jobs/{job_id}/cancel", headers=STUDENT).json()["code"] == "ESTIMATE_RUNNING"
+    assert client.delete(f"/api/jobs/{job_id}", headers=STUDENT).json()["code"] == "ESTIMATE_RUNNING"

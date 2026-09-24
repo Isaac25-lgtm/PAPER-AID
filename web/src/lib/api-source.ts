@@ -1,7 +1,7 @@
 // DataSource backed by the PaperAid API. Identity comes from `getAuthHeader`, which the auth layer
 // supplies (a Firebase ID token in production, a local developer identity when running locally).
 import { DataError, type DataSource, type JobQuery } from './data'
-import type { AdminJob, AdminSummary, FileMeta, Job, Page, PublicConfig, Quote } from './types'
+import type { AdminJob, AdminSummary, FileMeta, Job, Page, PublicConfig, QuoteResponse, Wallet, WalletSummary } from './types'
 
 interface Options {
   config: PublicConfig
@@ -92,7 +92,10 @@ export function createApiSource({ config, getAuthHeaders }: Options): DataSource
       })
     },
 
-    requestQuote: (draftId, selection) => request<Quote>(`/api/jobs/${draftId}/quote`, { method: 'POST', body: JSON.stringify({ selection }) }),
+    requestQuote: (draftId, selection, startEstimate = false) =>
+      request<QuoteResponse>(`/api/jobs/${draftId}/quote`, { method: 'POST', body: JSON.stringify({ selection, startEstimate }) }),
+
+    getWallet: () => request<Wallet>('/api/wallet'),
 
     submitJob: async (draftId, quoteId) =>
       (await request<Job>(`/api/jobs/${draftId}/submit`, { method: 'POST', body: JSON.stringify({ quoteId }) })).id,
@@ -142,6 +145,8 @@ export function createApiSource({ config, getAuthHeaders }: Options): DataSource
       setProcessing: async (enabled) => {
         await request<{ processingEnabled: boolean }>('/api/admin/processing', { method: 'POST', body: JSON.stringify({ enabled }) })
       },
+      listWallets: (search) => request<WalletSummary[]>(`/api/admin/wallets${query({ search })}`),
+      grantCredits: (email, amount, note) => request<WalletSummary>('/api/admin/credits', { method: 'POST', body: JSON.stringify({ email, amount, note }) }),
     },
   }
 }

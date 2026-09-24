@@ -22,12 +22,17 @@ class FakeModels:
         self.overrides: dict[str, Any] = {}
         self.tasks: list[str] = []
         self.requests: list[str] = []
+        self.tokens = (0, 0)  # (input, output) reported per call; set with real prices to create costs
+        self.refuse: set[str] = set()  # tasks answered with a refusal
 
     def json(self, task: str, model: str, system: str, payload: dict[str, Any], schema: dict[str, Any], max_tokens: int) -> ModelResult:
         self.tasks.append(task)
         self.requests.append(task + json.dumps(payload, sort_keys=True))
+        usage = Usage(self.tokens[0], self.tokens[1], 0, 1)
+        if task in self.refuse:
+            return ModelResult(text="", usage=usage, provider="fake", model=model, stop="refusal")
         answer = self.overrides[task](payload) if task in self.overrides else self.default(task, payload)
-        return ModelResult(text=json.dumps(answer), usage=Usage(0, 0, 0, 1), provider="fake", model=model)
+        return ModelResult(text=json.dumps(answer), usage=usage, provider="fake", model=model)
 
     @staticmethod
     def default(task: str, payload: dict[str, Any]) -> dict[str, Any]:
