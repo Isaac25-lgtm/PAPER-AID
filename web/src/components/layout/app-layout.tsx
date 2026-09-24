@@ -35,7 +35,7 @@ export function AppLayout() {
     <div className="flex min-h-dvh flex-col bg-surface-subtle">
       {!config.paymentsEnabled && (
         <div className="bg-brand-800 px-4 py-2 text-center text-xs font-medium text-brand-50">
-          PaperAid is in beta — jobs are free while we test. You'll still see what each job would cost.
+          PaperAid is in beta. Payments aren't live yet, so jobs run without charge while we test.
         </div>
       )}
       <header className="sticky top-0 z-40 border-b border-line bg-white">

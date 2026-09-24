@@ -61,6 +61,16 @@
   }
 }
 
+/* The hero preview's "reading your paper" sweep. */
+@keyframes paperaid-scan {
+  from {
+    transform: translateY(-4rem);
+  }
+  to {
+    transform: translateY(16rem);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;

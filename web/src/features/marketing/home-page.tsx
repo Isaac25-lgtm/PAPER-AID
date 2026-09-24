@@ -1,22 +1,24 @@
-import { ArrowRight, Ban, BookLock, CreditCard, Download, FileSearch, FileUp, Lock, ShieldCheck, SlidersHorizontal, Trash2 } from 'lucide-react'
+import { ArrowRight, Ban, Download, FileUp, Lock, ScanSearch, ShieldCheck, Sparkles, Trash2, Wallet } from 'lucide-react'
 import { ButtonLink } from '../../components/ui/button'
 import { Eyebrow } from '../../components/ui/primitives'
 import { useData } from '../../lib/data'
 import { useTitle } from '../../lib/use-title'
 import { HeroPreview } from './hero-preview'
-import { FinalCta, PricingCards, ServiceGrid } from './sections'
+import { FinalCta, PricingModel, ServiceGrid } from './sections'
 
 export function HomePage() {
   useTitle('')
   const { config } = useData()
 
   const steps = [
-    { icon: FileUp, title: 'Upload your paper', body: 'A Word document or text-based PDF, plus your university guide if you have one.' },
-    { icon: SlidersHorizontal, title: 'Choose services', body: 'Check, refine, format — or combine them. You see what each one does before you choose.' },
-    config.paymentsEnabled
-      ? { icon: CreditCard, title: 'Pay with Mobile Money', body: 'Your price is calculated from the length of your paper. No subscriptions.' }
-      : { icon: FileSearch, title: 'Review your quote', body: "You'll see the exact price for your paper. During the beta, jobs are free." },
-    { icon: Download, title: 'Download', body: 'A Word file you can review, plus a report of every change and why it was made.' },
+    { icon: FileUp, title: 'Upload and choose', body: 'A Word document or text-based PDF, plus your university guide if you have one. Pick check, refine, format, or a mix.' },
+    { icon: ScanSearch, title: 'See your estimate', body: 'PaperAid sizes the work your paper needs and shows the price before anything runs. Nothing starts until you approve it.' },
+    {
+      icon: Sparkles,
+      title: 'Two AI models, checking each other',
+      body: "OpenAI's GPT-6 Sol plans the edits and reviews every change; Anthropic's Claude Opus 5.5 challenges the plan and writes. Your citations stay locked.",
+    },
+    { icon: Download, title: 'Review and download', body: 'A Word file you can review, plus a report of every change and why it was made.' },
   ]
 
   return (
@@ -48,11 +50,9 @@ export function HomePage() {
               <li className="flex items-center gap-2">
                 <ShieldCheck className="size-4 text-brand-600" aria-hidden /> Private, deleted after {config.retentionDays} days
               </li>
-              {!config.paymentsEnabled && (
-                <li className="flex items-center gap-2">
-                  <BookLock className="size-4 text-brand-600" aria-hidden /> Free during beta
-                </li>
-              )}
+              <li className="flex items-center gap-2">
+                <Wallet className="size-4 text-brand-600" aria-hidden /> Pay only for the work your paper needs
+              </li>
             </ul>
           </div>
           <HeroPreview />
@@ -85,7 +85,7 @@ export function HomePage() {
             <h2 id="how-title" className="mt-4 text-3xl font-bold sm:text-4xl">
               From draft to a better paper in four steps.
             </h2>
-            <p className="mt-3 text-fg-muted">No prompts, no chat. Hand over your paper, choose the work, and come back to a finished result.</p>
+            <p className="mt-3 text-fg-muted">No prompts, no chat. Hand over your paper, approve the estimate, and come back to a finished result.</p>
           </div>
           <ol className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {steps.map((step, i) => (
@@ -139,19 +139,19 @@ export function HomePage() {
         <div className="mx-auto max-w-6xl px-4 sm:px-6">
           <div className="grid gap-10 lg:grid-cols-[18rem_1fr]">
             <div>
-              <Eyebrow>Simple pricing</Eyebrow>
+              <Eyebrow>Fair pricing</Eyebrow>
               <h2 id="pricing-title" className="mt-4 text-3xl font-bold">
-                Pay for the paper, not a subscription.
+                Pay for the work your paper needs.
               </h2>
               <p className="mt-3 text-fg-muted">
-                Your exact price is calculated after upload, from your paper&rsquo;s length and the services you choose.
-                {!config.paymentsEnabled && ' During the beta, every job is free.'}
+                No price list and no subscription. A short, clean essay costs little; a long dissertation that needs more work costs more, and you
+                always see the estimate first.
               </p>
               <ButtonLink to="/pricing" variant="ghost" className="mt-4 -ml-4">
                 How pricing works <ArrowRight className="size-4" aria-hidden />
               </ButtonLink>
             </div>
-            <PricingCards />
+            <PricingModel />
           </div>
         </div>
       </section>

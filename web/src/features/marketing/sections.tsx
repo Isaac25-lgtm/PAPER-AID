@@ -1,12 +1,10 @@
 import { clsx } from 'clsx'
-import { ArrowRight, Check } from 'lucide-react'
+import { ArrowRight, Scale, ScanSearch, Wallet } from 'lucide-react'
 import { Link } from 'react-router'
 import { ButtonLink } from '../../components/ui/button'
 import { Badge } from '../../components/ui/primitives'
 import { useData } from '../../lib/data'
-import { formatUGX } from '../../lib/format'
 import { AVAILABILITY_BADGE, SERVICES, SERVICE_ORDER } from '../../lib/services'
-import type { ServiceId } from '../../lib/types'
 
 export function ServiceGrid() {
   const { config } = useData()
@@ -39,35 +37,47 @@ export function ServiceGrid() {
   )
 }
 
-const PRICED: { id: ServiceId; blurb: string; popular?: boolean }[] = [
-  { id: 'AI_CHECK', blurb: 'Writing-pattern report with passage-level feedback.' },
-  { id: 'REFINE', blurb: 'AI Check, then refinement of flagged passages with an accuracy audit.', popular: true },
-  { id: 'FORMAT', blurb: 'APA or Harvard layout, headings, spacing and page numbers.' },
+// How PaperAid is paid for. There is no price list: every paper is priced from the work it
+// actually needs, so the site explains the model and never shows made-up amounts.
+const PRICING_STEPS = [
+  {
+    icon: Wallet,
+    title: 'Top up credits',
+    body: 'Add credits from UGX 5,000 with mobile money, with the dollar equivalent shown. Credits never expire.',
+  },
+  {
+    icon: ScanSearch,
+    title: 'See your estimate first',
+    body: 'After upload, PaperAid sizes the work your paper needs and shows the price before anything runs.',
+  },
+  {
+    icon: Scale,
+    title: 'Pay for the work done',
+    body: 'You are charged for the work your paper actually needed, never more than your estimate. Unused credit returns to your balance.',
+  },
 ]
 
-export function PricingCards() {
+export function PricingModel() {
   const { config } = useData()
   return (
-    <div className="grid gap-4 md:grid-cols-3">
-      {PRICED.map(({ id, blurb, popular }) => (
-        <div
-          key={id}
-          className={clsx('relative flex flex-col rounded-2xl border bg-white p-6', popular ? 'border-brand-500 shadow-raised ring-1 ring-brand-500' : 'border-line shadow-card')}
-        >
-          {popular && <span className="absolute -top-3 left-6 rounded-full bg-brand-700 px-3 py-1 text-xs font-semibold text-white">Most popular</span>}
-          <h3 className="text-base font-semibold">{SERVICES[id].name}</h3>
-          <p className="mt-3 text-sm text-fg-subtle">from</p>
-          <p className="text-3xl font-bold tracking-tight text-brand-800">{formatUGX(config.indicativeFrom[id])}</p>
-          <p className="mt-3 flex-1 text-sm text-fg-muted">{blurb}</p>
-          <ul className="mt-5 space-y-2 border-t border-line pt-5">
-            {SERVICES[id].youGet.map((item) => (
-              <li key={item} className="flex gap-2 text-sm text-fg-muted">
-                <Check className="mt-0.5 size-4 shrink-0 text-brand-600" aria-hidden /> {item}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ))}
+    <div>
+      <ol className="grid gap-4 md:grid-cols-3">
+        {PRICING_STEPS.map((step, i) => (
+          <li key={step.title} className={clsx('relative rounded-2xl border bg-white p-6', i === 1 ? 'border-brand-500 shadow-raised ring-1 ring-brand-500' : 'border-line shadow-card')}>
+            <div className="flex items-center gap-3">
+              <span className="grid size-10 place-items-center rounded-xl bg-brand-50 text-brand-700">
+                <step.icon className="size-5" aria-hidden />
+              </span>
+              <span className="text-xs font-semibold tracking-wide text-fg-subtle uppercase">Step {i + 1}</span>
+            </div>
+            <h3 className="mt-4 text-base font-semibold">{step.title}</h3>
+            <p className="mt-1.5 text-sm leading-relaxed text-fg-muted">{step.body}</p>
+          </li>
+        ))}
+      </ol>
+      {!config.paymentsEnabled && (
+        <p className="mt-4 text-sm text-fg-subtle">Payments aren&rsquo;t live yet. Top-ups open when mobile-money payments launch; until then, beta jobs run without charge.</p>
+      )}
     </div>
   )
 }
@@ -85,7 +95,7 @@ export function FinalCta() {
             Upload your paper <ArrowRight className="size-4" aria-hidden />
           </ButtonLink>
           <Link to="/pricing" className="inline-flex h-12 items-center justify-center px-4 text-sm font-semibold text-white underline-offset-4 hover:underline">
-            See pricing
+            How pricing works
           </Link>
         </div>
       </div>
