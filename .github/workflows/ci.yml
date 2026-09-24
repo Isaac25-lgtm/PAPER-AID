@@ -15,7 +15,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -e ".[dev]"
+      - run: pip install -e ".[dev,cloud]"  # cloud: the production auth and task-verification paths are tested too
       - run: ruff check app tests
       - name: pytest
         # Failing tests are also printed as annotations, so they show on the commit page.
