@@ -1,0 +1,73 @@
+@import "tailwindcss";
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/source-serif-4";
+
+/* PaperAid design tokens. Every colour, radius and shadow in the UI comes from here. */
+@theme {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Source Serif 4 Variable", Georgia, "Times New Roman", serif;
+
+  --color-brand-50: #effaf3;
+  --color-brand-100: #d8f2e2;
+  --color-brand-200: #b2e4c7;
+  --color-brand-300: #7fcfa4;
+  --color-brand-400: #48b27c;
+  --color-brand-500: #22955f;
+  --color-brand-600: #147a4b;
+  --color-brand-700: #0f633e;
+  --color-brand-800: #0d4f33;
+  --color-brand-900: #0a3f29;
+  --color-brand-950: #05241a;
+
+  --color-surface: #ffffff;
+  --color-surface-subtle: #f6faf7;
+  --color-surface-muted: #ebf4ee;
+  --color-line: #e2eae5;
+  --color-line-strong: #cbd8d0;
+  --color-fg: #0f1a15;
+  --color-fg-muted: #46554d;
+  --color-fg-subtle: #6f7e76;
+
+  --radius-sm: 0.375rem;
+  --radius-md: 0.625rem;
+  --radius-lg: 0.875rem;
+  --radius-xl: 1.25rem;
+  --radius-2xl: 1.75rem;
+
+  --shadow-card: 0 1px 2px rgb(15 40 28 / 0.04), 0 1px 3px rgb(15 40 28 / 0.06);
+  --shadow-raised: 0 24px 48px -20px rgb(10 50 32 / 0.22), 0 4px 12px -2px rgb(10 50 32 / 0.08);
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-surface text-fg font-sans antialiased;
+    font-feature-settings: "cv11", "ss01";
+  }
+  h1, h2, h3, h4 {
+    @apply tracking-tight text-fg;
+    text-wrap: balance;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-brand-500);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  ::selection {
+    background: var(--color-brand-200);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

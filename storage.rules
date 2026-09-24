@@ -1,0 +1,11 @@
+rules_version = '2';
+
+// Uploads and downloads go through the PaperAid API (which validates every file and issues
+// short-lived signed download links). No browser has direct access to stored papers.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
