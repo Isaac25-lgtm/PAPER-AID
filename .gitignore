@@ -21,3 +21,4 @@ web/test-results/
 web/playwright-report/
 backend/codex_pytest_temp/
 web/hosting/
+.firebase/
