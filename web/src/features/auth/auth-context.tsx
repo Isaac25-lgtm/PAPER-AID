@@ -25,7 +25,9 @@ export const FIREBASE_ENABLED = Boolean(import.meta.env.VITE_FIREBASE_API_KEY)
 
 // --- Local mode: a developer identity the local backend accepts. Refused by production. ------
 
-const KEY = 'paperaid.local-user'
+// v2: sessions saved before the fake demo sign-in was removed are dropped, so nobody stays
+// signed in as demo@paperaid.app without choosing to.
+const KEY = 'paperaid.local-user.v2'
 
 function readLocal(): { email: string; displayName: string } | null {
   try {

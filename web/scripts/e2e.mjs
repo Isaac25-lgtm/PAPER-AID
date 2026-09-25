@@ -182,7 +182,7 @@ try {
 
   // A second user cannot open the first user's job.
   expect({ status: 404, path: /^\/api\/jobs\/job_\w+$/ })
-  await page.evaluate(() => localStorage.setItem('paperaid.local-user', JSON.stringify({ email: 'someone.else@example.com', displayName: 'Else' })))
+  await page.evaluate(() => localStorage.setItem('paperaid.local-user.v2', JSON.stringify({ email: 'someone.else@example.com', displayName: 'Else' })))
   await page.goto(jobUrl)
   await page.getByText("We couldn't find this job").waitFor()
   step("another user cannot see the job")

@@ -4,7 +4,6 @@ import { History, LayoutDashboard, LogOut, Menu as MenuIcon, Plus, Settings, Shi
 import { useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router'
 import { useAuth } from '../../features/auth/auth-context'
-import { useData } from '../../lib/data'
 import { formatUGX } from '../../lib/format'
 import { useWallet } from '../../lib/use-wallet'
 import { ButtonLink } from '../ui/button'
@@ -13,7 +12,6 @@ import { Logo } from './logo'
 
 export function AppLayout() {
   const { user, signOut } = useAuth()
-  const { config } = useData()
   const navigate = useNavigate()
   const location = useLocation()
   const [menuOpen, setMenuOpen] = useState(false)
@@ -37,11 +35,6 @@ export function AppLayout() {
 
   return (
     <div className="flex min-h-dvh flex-col bg-surface-subtle">
-      {!config.paymentsEnabled && (
-        <div className="bg-brand-800 px-4 py-2 text-center text-xs font-medium text-brand-50">
-          PaperAid is in beta. Mobile-money top-ups aren&rsquo;t live yet, so PaperAid adds credits for you while we test.
-        </div>
-      )}
       <header className="sticky top-0 z-40 border-b border-line bg-white">
         <div className="mx-auto flex h-16 max-w-6xl items-center gap-6 px-4 sm:px-6">
           <Logo to="/app" />
