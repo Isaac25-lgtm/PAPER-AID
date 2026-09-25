@@ -53,13 +53,17 @@ gcloud iam service-accounts add-iam-policy-binding paperaid-api@PROJECT.iam.gser
 gcloud projects add-iam-policy-binding PROJECT --member=serviceAccount:paperaid-api@PROJECT.iam.gserviceaccount.com --role=roles/firebaseauth.admin
 ```
 
-## 3. Secrets (only the worker can read the model keys)
+## 3. Secrets (the model keys)
+
+Both keys are required: GPT-6 Sol (OpenAI) is the lead model and Claude Opus 5.5 (Anthropic) the writer. Only the worker calls the providers; the API also mounts the keys because it reports whether the AI services are available ("Not set up" otherwise), but it never uses them.
 
 ```bash
 printf '%s' 'sk-ant-...' | gcloud secrets create anthropic-api-key --data-file=-
-printf '%s' 'sk-...'     | gcloud secrets create openai-api-key --data-file=-     # only if you use OpenAI
+printf '%s' 'sk-...'     | gcloud secrets create openai-api-key --data-file=-
 for S in anthropic-api-key openai-api-key; do
-  gcloud secrets add-iam-policy-binding $S --member=serviceAccount:paperaid-worker@PROJECT.iam.gserviceaccount.com --role=roles/secretmanager.secretAccessor
+  for SA in paperaid-worker paperaid-api; do
+    gcloud secrets add-iam-policy-binding $S --member=serviceAccount:$SA@PROJECT.iam.gserviceaccount.com --role=roles/secretmanager.secretAccessor
+  done
 done
 ```
 
@@ -80,7 +84,8 @@ IMAGE=europe-west1-docker.pkg.dev/PROJECT/paperaid/backend:$(date +%Y%m%d-%H%M)
 gcloud artifacts repositories create paperaid --repository-format=docker --location=europe-west1
 gcloud builds submit --tag $IMAGE
 
-COMMON="ENV=production,AUTH_MODE=firebase,STORE_BACKEND=firestore,STORAGE_BACKEND=gcs,QUEUE_BACKEND=cloud_tasks,REQUIRE_APP_CHECK=true,PROVIDER_MODE=real,GCP_PROJECT=PROJECT,GCS_BUCKET=PROJECT-papers,TASKS_INVOKER_EMAIL=paperaid-tasks@PROJECT.iam.gserviceaccount.com,ALLOWED_ORIGINS=[\"https://PROJECT.web.app\"]"
+# CREDITS_ENABLED=false is testing mode: no balance needed, nothing charged. Set it to true when credits go live.
+COMMON="ENV=production,AUTH_MODE=firebase,STORE_BACKEND=firestore,STORAGE_BACKEND=gcs,QUEUE_BACKEND=cloud_tasks,REQUIRE_APP_CHECK=true,CREDITS_ENABLED=false,GCP_PROJECT=PROJECT,GCS_BUCKET=PROJECT-papers,TASKS_INVOKER_EMAIL=paperaid-tasks@PROJECT.iam.gserviceaccount.com,ALLOWED_ORIGINS=[\"https://PROJECT.web.app\"]"
 
 gcloud run deploy paperaid-worker --image $IMAGE --region europe-west1 --no-allow-unauthenticated --ingress internal \
   --service-account paperaid-worker@PROJECT.iam.gserviceaccount.com --concurrency 1 --cpu 2 --memory 2Gi \
@@ -94,10 +99,10 @@ gcloud run services add-iam-policy-binding paperaid-worker --region europe-west1
 
 gcloud run deploy paperaid-api --image $IMAGE --region europe-west1 --allow-unauthenticated \
   --service-account paperaid-api@PROJECT.iam.gserviceaccount.com --concurrency 40 --memory 1Gi --timeout 120 \
-  --set-env-vars "SERVICE_ROLE=api,$COMMON,WORKER_URL=$WORKER_URL"
+  --set-env-vars "SERVICE_ROLE=api,$COMMON,WORKER_URL=$WORKER_URL"   --set-secrets ANTHROPIC_API_KEY=anthropic-api-key:latest,OPENAI_API_KEY=openai-api-key:latest
 ```
 
-The API service starts with `PROVIDER_MODE=real` but has no model keys, which is correct: only the worker calls AI providers. If a required setting is missing, the app refuses to start rather than running insecurely. That includes `SERVICE_ROLE`: each service must say whether it is `api` or `worker`. The worker also re-verifies the Google-signed identity token of `paperaid-tasks` on every call, in addition to Cloud Run IAM.
+Only the worker calls AI providers. If a required setting is missing (including either model key), the app refuses to start rather than running insecurely. That includes `SERVICE_ROLE`: each service must say whether it is `api` or `worker`. The worker also re-verifies the Google-signed identity token of `paperaid-tasks` on every call, in addition to Cloud Run IAM.
 
 Downloads need no bucket CORS setup. The API returns a 10-minute signed link, and the browser opens it directly rather than fetching it.
 
@@ -130,7 +135,7 @@ cd web && npm ci && npm run build && cd ..
 firebase deploy --only hosting,firestore:rules,firestore:indexes,storage --project PROJECT
 ```
 
-4. Make yourself an admin: `python scripts/set_admin.py you@example.com`, then sign out and in again.
+4. Make yourself an admin: sign in on the website once, run `gcloud auth application-default login`, then `python scripts/set_admin.py you@example.com`, and sign out and in again.
 
 ## 8. After every deployment
 
