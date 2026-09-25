@@ -23,6 +23,7 @@ def main() -> None:
             "MODEL_PRICES": '{"fake:gpt-6-sol":[0,0,0],"fake:claude-opus-5-5":[0,0,0]}',
             "ADMIN_EMAILS": '["demo@paperaid.app"]',
             "ENV": "local",
+            "CREDITS_ENABLED": "true",  # the browser journey covers credits, whatever the local .env says
         }
     )
     from app.ai import orchestration

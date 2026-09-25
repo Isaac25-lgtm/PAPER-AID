@@ -260,7 +260,7 @@ export function NewJobPage() {
           We sent a verification link to {user.email}. Open it, then refresh this page to start a job.
         </Alert>
       )}
-      <div className="grid items-start gap-6 lg:grid-cols-[1fr_22rem]">
+      <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
         <div className="space-y-5">
           <Step n={1} title="Your paper" description="Word (.docx) works with every service. Text-based PDFs work with AI Check.">
             {!source || source.error ? (
@@ -290,7 +290,7 @@ export function NewJobPage() {
           </Step>
 
           <Step n={2} title="Choose the work" description="Pick one writing service and, if you like, formatting." disabled={!meta}>
-            <fieldset disabled={!meta || estimateRunning}>
+            <fieldset disabled={!meta || estimateRunning} className="min-w-0">
               <legend className="mb-3 text-sm font-semibold text-fg">Writing</legend>
               <div className="grid gap-3 sm:grid-cols-2">
                 <OptionCard name="writing" checked={selection.writing === 'AI_CHECK'} onSelect={() => set({ writing: 'AI_CHECK' })} title={SERVICES.AI_CHECK.name} body="Report only — your document is not edited." badge={badgeFor('AI_CHECK')} disabledReason={reasonFor('AI_CHECK')} />
@@ -333,7 +333,7 @@ export function NewJobPage() {
               )}
 
             </fieldset>
-            <fieldset disabled={!meta || estimateRunning} className="mt-7">
+            <fieldset disabled={!meta || estimateRunning} className="mt-7 min-w-0">
               <legend className="mb-3 text-sm font-semibold text-fg">Formatting</legend>
               <div className="grid gap-3 sm:grid-cols-3">
                 <OptionCard name="formatting" checked={selection.formatting === 'NONE'} onSelect={() => set({ formatting: 'NONE' })} title="Keep my formatting" body="Leave the layout as it is." />

@@ -230,15 +230,14 @@ def _analyse(ctx: StageContext, model: DocumentModel) -> tuple[AnalysisResult, s
     result, block_signals = signals.analyse(model, method=_method(ctx, "analysis"))
     model_results = runner.analyse([(s.block.id, s.block.masked or s.block.text) for s in block_signals], model.outline())
     submitted, covered = len(block_signals), len(model_results)
-    lead = ctx.rt.settings.lead_model.split(":")[-1]
     coverage_warning = None
     if covered < submitted:
         coverage_warning = (
-            f"{lead} could assess only {covered} of {submitted} passages; the rest were scored on PaperAid's writing-pattern signals alone."
+            f"PaperAid's AI could assess only {covered} of {submitted} passages; the rest were scored on writing-pattern signals alone."
             if covered
-            else f"{lead} could not assess this paper, so every passage was scored on PaperAid's writing-pattern signals alone."
+            else "PaperAid's AI could not assess this paper, so every passage was scored on writing-pattern signals alone."
         )
-        method = f"PaperAid writing-pattern signals + analysis by {lead} ({covered} of {submitted} passages)" if covered else "PaperAid writing-pattern signals only"
+        method = f"PaperAid writing-pattern signals and AI analysis ({covered} of {submitted} passages)" if covered else "PaperAid writing-pattern signals only"
         result = result.model_copy(update={"method": method})
     if model_results:
         scores = {bid: {"low": 0.1, "moderate": 0.45, "high": 0.85}.get(r.riskBand, 0.3) for bid, r in model_results.items()}
@@ -791,10 +790,10 @@ def _add_warnings(j: Job, warnings: list[str]) -> Job:
 
 
 def _method(ctx: StageContext, kind: str) -> str:
-    settings = ctx.rt.settings
-    lead, writer = settings.lead_model.split(":")[-1], settings.writer_model.split(":")[-1]
+    """How the work was done, as students see it. Model names stay internal (owner decision
+    2026-09-25); admins see the exact models and costs on each job."""
     if kind == "analysis":
-        return f"PaperAid writing-pattern signals + analysis by {lead}"
+        return "PaperAid writing-pattern signals and AI analysis"
     if kind == "formatting":
-        return f"Rules drafted and reviewed by {lead}, critiqued and fixed by {writer}, applied by PaperAid's formatter"
-    return f"Plan drafted and finalised by {lead}, critiqued by {writer}; rewritten by {writer}; reviewed by {lead}"
+        return "Rules read from your guide and checked by PaperAid's AI, applied by PaperAid's formatter"
+    return "Planned, rewritten and independently reviewed by PaperAid's AI"

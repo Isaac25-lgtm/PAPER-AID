@@ -97,7 +97,7 @@ export function DashboardPage() {
             Recent jobs
           </h2>
           {jobs.length > 0 && (
-            <Link to="/app/history" className="text-sm font-semibold text-brand-700 hover:underline">
+            <Link to="/app/history" className="-mr-2 inline-flex min-h-10 items-center px-2 text-sm font-semibold text-brand-700 hover:underline">
               View all
             </Link>
           )}

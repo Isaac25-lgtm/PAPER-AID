@@ -241,7 +241,7 @@ export function AdminJobPage() {
 
   return (
     <>
-      <Link to="/admin" className="mb-4 inline-flex items-center gap-1.5 text-sm font-medium text-fg-muted hover:text-fg">
+      <Link to="/admin" className="mb-2 -ml-1 inline-flex min-h-10 items-center gap-1.5 px-1 text-sm font-medium text-fg-muted hover:text-fg">
         <ArrowLeft className="size-4" aria-hidden /> Operations
       </Link>
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -438,7 +438,7 @@ export function AdminCreditsPage() {
 
   return (
     <>
-      <Link to="/admin" className="mb-4 inline-flex items-center gap-1.5 text-sm font-medium text-fg-muted hover:text-fg">
+      <Link to="/admin" className="mb-2 -ml-1 inline-flex min-h-10 items-center gap-1.5 px-1 text-sm font-medium text-fg-muted hover:text-fg">
         <ArrowLeft className="size-4" aria-hidden /> Operations
       </Link>
       <PageHeader title="Credits" description="Add credits to a student's balance: test credits while payments are not live, refunds or goodwill later." />

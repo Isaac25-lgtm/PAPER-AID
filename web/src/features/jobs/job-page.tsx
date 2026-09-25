@@ -29,7 +29,7 @@ export function JobPage() {
 
   return (
     <>
-      <Link to="/app/history" className="mb-4 inline-flex items-center gap-1.5 text-sm font-medium text-fg-muted hover:text-fg">
+      <Link to="/app/history" className="mb-2 -ml-1 inline-flex min-h-10 items-center gap-1.5 px-1 text-sm font-medium text-fg-muted hover:text-fg">
         <ArrowLeft className="size-4" aria-hidden /> All jobs
       </Link>
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -295,7 +295,7 @@ function JobDetails({ job }: { job: Job }) {
             <dd className="flex items-center gap-2 font-mono text-xs">
               {job.id}
               <button
-                className="rounded p-1 text-fg-subtle hover:bg-surface-muted hover:text-fg"
+                className="-my-2 grid size-10 place-items-center rounded text-fg-subtle hover:bg-surface-muted hover:text-fg"
                 aria-label="Copy job ID"
                 onClick={() => {
                   navigator.clipboard?.writeText(job.id).then(() => setCopied(true), () => undefined)

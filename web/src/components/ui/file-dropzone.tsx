@@ -81,7 +81,7 @@ export function FileChip({ name, meta, progress, onRemove }: { name: string; met
         )}
       </div>
       {onRemove && (
-        <button type="button" onClick={onRemove} className="rounded-md p-1.5 text-fg-subtle hover:bg-surface-muted hover:text-fg" aria-label={`Remove ${name}`}>
+        <button type="button" onClick={onRemove} className="-mr-1 grid size-10 shrink-0 place-items-center rounded-md text-fg-subtle hover:bg-surface-muted hover:text-fg" aria-label={`Remove ${name}`}>
           <X className="size-4" />
         </button>
       )}

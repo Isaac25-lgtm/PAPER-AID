@@ -107,7 +107,7 @@ export function FindingsList({ findings }: { findings: Finding[] }) {
             onClick={() => setFilter(key)}
             aria-pressed={filter === key}
             className={clsx(
-              'rounded-full px-3 py-1.5 text-xs font-medium ring-1 transition-colors ring-inset',
+              'min-h-10 rounded-full px-3.5 text-xs font-medium ring-1 transition-colors ring-inset sm:min-h-8',
               filter === key ? 'bg-brand-700 text-white ring-brand-700' : 'bg-white text-fg-muted ring-line-strong hover:ring-brand-300',
             )}
           >

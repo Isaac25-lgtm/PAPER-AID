@@ -15,8 +15,8 @@ export function HomePage() {
     { icon: ScanSearch, title: 'See your estimate', body: 'PaperAid sizes the work your paper needs and shows the price before anything runs. Nothing starts until you approve it.' },
     {
       icon: Sparkles,
-      title: 'Two AI models, checking each other',
-      body: "OpenAI's GPT-6 Sol plans the edits and reviews every change; Anthropic's Claude Opus 5.5 challenges the plan and writes. Your citations stay locked.",
+      title: 'We do the work',
+      body: 'PaperAid refines the passages that need it and applies your formatting. Your citations, quotes and numbers stay locked.',
     },
     { icon: Download, title: 'Review and download', body: 'A Word file you can review, plus a report of every change and why it was made.' },
   ]
