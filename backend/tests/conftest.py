@@ -59,6 +59,7 @@ def grant(email: str, amount: int) -> None:
 
 def _app_client(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CREDITS_ENABLED", "true")  # tests never inherit the owner's local testing mode
     monkeypatch.setenv("QUOTES_PER_HOUR", "500")
     monkeypatch.setenv("SUBMITS_PER_HOUR", "500")
     from app.core.config import get_settings

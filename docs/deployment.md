@@ -131,8 +131,8 @@ done
 3. Deploy the website and the rules:
 
 ```bash
-cd web && npm ci && npm run build && cd ..
-firebase deploy --only hosting,firestore:rules,firestore:indexes,storage --project PROJECT
+cd web && npm ci && npx vite build --mode production --outDir hosting --emptyOutDir && cd ..   # firebase.json serves web/hosting
+firebase deploy --only hosting,firestore:rules,firestore:indexes --project PROJECT   # files go through the API, so no Storage rules are deployed
 ```
 
 4. Make yourself an admin: sign in on the website once, run `gcloud auth application-default login`, then `python scripts/set_admin.py you@example.com`, and sign out and in again.

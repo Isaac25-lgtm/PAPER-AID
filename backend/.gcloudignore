@@ -1,0 +1,13 @@
+.venv/
+.data/
+.data_e2e/
+.data_test/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+tests/
+codex_*/
+.env
+.env.*
+!.env.example
+*.egg-info/

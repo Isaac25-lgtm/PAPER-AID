@@ -145,6 +145,18 @@ function FirebaseAuthProvider({ children }: { children: ReactNode }) {
         if (!fbUser) {
           setUser(null)
         } else {
+          if (!fbUser.emailVerified) {
+            // The saved sign-in doesn't know about a verification link clicked since; re-check, and
+            // if it is verified now, fetch a fresh token (this callback runs again with it).
+            const verifiedNow = await fbUser.reload().then(
+              () => fbUser.emailVerified,
+              () => false, // offline or throttled: stay unverified until the next check
+            )
+            if (verifiedNow) {
+              await fbUser.getIdToken(true)
+              return
+            }
+          }
           const token = await fbUser.getIdTokenResult()
           setUser({
             uid: fbUser.uid,

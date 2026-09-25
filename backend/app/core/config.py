@@ -87,8 +87,8 @@ class Settings(BaseSettings):
             problems.append("REQUIRE_APP_CHECK must be true")
         if not (self.gcp_project and self.gcs_bucket and self.worker_url and self.tasks_invoker_email):
             problems.append("GCP_PROJECT, GCS_BUCKET, WORKER_URL and TASKS_INVOKER_EMAIL are required")
-        if not self.ai_configured:
-            problems.append("OPENAI_API_KEY and ANTHROPIC_API_KEY are required")
+        # Missing AI keys are not unsafe: the AI services show as "Not set up" and cannot run
+        # (owner decision 2026-09-25: go live with formatting first, add the keys later).
         if problems:
             raise ValueError("Unsafe production configuration: " + "; ".join(problems))
         return self

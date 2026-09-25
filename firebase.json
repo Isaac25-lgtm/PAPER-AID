@@ -1,6 +1,6 @@
 {
   "hosting": {
-    "public": "web/dist",
+    "public": "web/hosting",
     "ignore": ["firebase.json", "**/.*"],
     "rewrites": [
       { "source": "/api/**", "run": { "serviceId": "paperaid-api", "region": "europe-west1" } },
