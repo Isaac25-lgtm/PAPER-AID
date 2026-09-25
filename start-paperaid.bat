@@ -17,6 +17,10 @@ if not exist "web\node_modules" (
 )
 if not exist "backend\.env" copy "backend\.env.example" "backend\.env" >nul
 
+rem The backend reads its AI keys from backend\.env. Clear any keys inherited from Windows settings
+rem (another tool may have set an older one), or they would take priority over the .env file.
+set "ANTHROPIC_API_KEY="
+set "OPENAI_API_KEY="
 start "PaperAid backend (port 8000)" /D "%~dp0backend" cmd /k .venv\Scripts\python -m uvicorn app.main:app --port 8000
 start "PaperAid website (port 5000)" /D "%~dp0web" cmd /k npm run dev
 echo Starting... PaperAid will open in your browser.
