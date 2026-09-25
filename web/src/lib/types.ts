@@ -246,6 +246,8 @@ export interface AdminSummary {
 export interface PublicConfig {
   paymentsEnabled: boolean
   availability: Record<ServiceId, Availability>
+  /** Off = testing mode: nothing needs a balance and nothing is charged; prices are still shown. */
+  creditsEnabled: boolean
   minTopUpUgx: number
   ugxPerUsd: number
   retentionDays: number

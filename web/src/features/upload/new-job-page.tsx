@@ -247,7 +247,8 @@ export function NewJobPage() {
     ...(selection.formatting !== 'NONE' ? [selection.formatting] : []),
   ]
   const hold = pricing.quote ? pricing.quote.amount - pricing.quote.paid : 0
-  const shortOfCredit = !!wallet && !!pricing.quote && wallet.available < hold
+  const charging = config.creditsEnabled
+  const shortOfCredit = charging && !!wallet && !!pricing.quote && wallet.available < hold
   const canSubmit = !!meta && !needsGuide && !!pricing.quote && ownWork && !pricing.loading && !shortOfCredit
   const rate = wallet?.ugxPerUsd ?? config.ugxPerUsd
 
@@ -393,7 +394,7 @@ export function NewJobPage() {
               <h2 className="text-base font-semibold">3 · Your quote</h2>
             </div>
             <div className="p-5">
-              {meta && wallet && (
+              {charging && meta && wallet && (
                 <p className="mb-4 flex items-center justify-between rounded-lg bg-surface-subtle px-3 py-2 text-xs text-fg-muted">
                   <span>Your credits{wallet.testCredits && ' (test)'}</span>
                   <Link to="/app/credits" className="font-semibold text-fg hover:underline">
@@ -430,8 +431,8 @@ export function NewJobPage() {
                     <Loader2 className="size-4 animate-spin" aria-hidden /> Sizing your paper&hellip;
                   </p>
                   <p className="mt-1.5 leading-relaxed text-brand-800">
-                    PaperAid&rsquo;s AI is reading your paper and drafting its plan. This takes a minute or two. Up to {formatUGX(pricing.estimate.feeCap)} is
-                    held; you pay only what the scan actually costs.
+                    PaperAid&rsquo;s AI is reading your paper and drafting its plan. This takes a minute or two.
+                    {charging && ` Up to ${formatUGX(pricing.estimate.feeCap)} is held; you pay only what the scan actually costs.`}
                   </p>
                 </div>
               ) : pricing.quote ? (
@@ -445,7 +446,7 @@ export function NewJobPage() {
                     ))}
                   </dl>
                   <div className="mt-4 flex items-baseline justify-between border-t border-line pt-4">
-                    <span className="text-sm font-semibold">Most you&rsquo;ll pay</span>
+                    <span className="text-sm font-semibold">{charging ? 'Most you’ll pay' : 'Most it would cost'}</span>
                     <span className="text-right">
                       <span className="block text-2xl font-bold tracking-tight">{formatUGX(pricing.quote.amount)}</span>
                       <span className="text-xs text-fg-subtle">{formatUSDFromUGX(pricing.quote.amount, rate)}</span>
@@ -456,12 +457,18 @@ export function NewJobPage() {
                       <span>Already paid (estimate)</span> <span>{formatUGX(pricing.quote.paid)}</span>
                     </p>
                   )}
-                  <p className="mt-1 flex justify-between text-sm font-semibold">
-                    <span>Held from your credits now</span> <span>{formatUGX(hold)}</span>
-                  </p>
-                  <p className="mt-2 text-xs leading-relaxed text-fg-subtle">
-                    You&rsquo;re charged for the work actually done, never more than this, and the rest returns to your balance. Valid for 30 minutes.
-                  </p>
+                  {charging ? (
+                    <>
+                      <p className="mt-1 flex justify-between text-sm font-semibold">
+                        <span>Held from your credits now</span> <span>{formatUGX(hold)}</span>
+                      </p>
+                      <p className="mt-2 text-xs leading-relaxed text-fg-subtle">
+                        You&rsquo;re charged for the work actually done, never more than this, and the rest returns to your balance. Valid for 30 minutes.
+                      </p>
+                    </>
+                  ) : (
+                    <p className="mt-2 rounded-lg bg-brand-50 px-3 py-2 text-sm font-semibold text-brand-800">Not charged while PaperAid is in testing.</p>
+                  )}
                   {shortOfCredit && wallet && (
                     <Alert
                       tone="warning"
@@ -503,13 +510,19 @@ export function NewJobPage() {
                 <div>
                   <p className="text-sm font-semibold">First, a short AI estimate</p>
                   <p className="mt-1.5 text-sm leading-relaxed text-fg-muted">
-                    Refinement is priced from the work your paper actually needs. PaperAid&rsquo;s AI scans it and drafts a plan; the scan costs at most{' '}
-                    <strong className="text-fg">{formatUGX(pricing.feeCap)}</strong> and counts toward your job if you go ahead.
+                    Refinement is priced from the work your paper actually needs. PaperAid&rsquo;s AI scans it and drafts a plan
+                    {charging ? (
+                      <>
+                        ; the scan costs at most <strong className="text-fg">{formatUGX(pricing.feeCap)}</strong> and counts toward your job if you go ahead.
+                      </>
+                    ) : (
+                      '. It takes a minute or two and is not charged while PaperAid is in testing.'
+                    )}
                   </p>
-                  <Button className="mt-4 w-full" onClick={runEstimate} disabled={!!wallet && wallet.available < pricing.feeCap}>
-                    Get my estimate &middot; up to {formatUGX(pricing.feeCap)}
+                  <Button className="mt-4 w-full" onClick={runEstimate} disabled={charging && !!wallet && wallet.available < pricing.feeCap}>
+                    {charging ? <>Get my estimate &middot; up to {formatUGX(pricing.feeCap)}</> : 'Get my estimate'}
                   </Button>
-                  {wallet && wallet.available < pricing.feeCap && (
+                  {charging && wallet && wallet.available < pricing.feeCap && (
                     <p className="mt-2 text-xs text-amber-800">
                       Your balance is {formatUGX(wallet.available)}.{' '}
                       <Link to="/app/credits" className="font-semibold underline">
@@ -539,7 +552,7 @@ export function NewJobPage() {
                 </Alert>
               )}
               <Button size="lg" className="mt-5 w-full" disabled={!canSubmit} loading={submitting} onClick={submit}>
-                {pricing.quote ? `Start job · hold ${formatUGX(hold)}` : 'Start job'} <ArrowRight className="size-4" aria-hidden />
+                {pricing.quote && charging ? `Start job · hold ${formatUGX(hold)}` : 'Start job'} <ArrowRight className="size-4" aria-hidden />
               </Button>
             </div>
           </Card>

@@ -362,6 +362,8 @@ function BillingNote({ job }: { job: Job }) {
         Charged {formatUGX(paid)}{b.feePaid > 0 && ` (including the ${formatUGX(b.feePaid)} estimate)`}. {job.quote.amount - paid > 0 && `${formatUGX(job.quote.amount - paid)} less than the most it could cost.`}
       </p>
     )
+  if (b.state === 'NONE' && job.paymentStatus === 'NOT_REQUIRED')
+    return <p className="mt-3 rounded-lg bg-brand-50 p-2.5 text-xs font-medium text-brand-800">Not charged: PaperAid is in testing.</p>
   if (b.state === 'RELEASED' || b.refunded > 0)
     return <p className="mt-3 rounded-lg bg-surface-subtle p-2.5 text-xs text-fg-muted">Nothing was charged for this job{b.refunded > 0 && `, and the ${formatUGX(b.refunded)} estimate was refunded`}.</p>
   return null

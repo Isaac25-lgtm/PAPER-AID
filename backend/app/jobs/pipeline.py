@@ -335,9 +335,10 @@ def _finish_estimate(rt: Runtime, job_id: str, run_id: str, passages: list[Passa
         run = j.estimate
         if j.status != JobStatus.DRAFT or run is None or run.id != run_id or run.status != "RUNNING" or j.source is None:
             return None
-        fee = min(run.fee_cap, to_ugx(j.estimate_cost_usd - run.cost_base_usd, settings))
+        fee = min(run.fee_cap, to_ugx(j.estimate_cost_usd - run.cost_base_usd, settings)) if run.held else 0
         priced = price(settings, run.selection, j.source.word_count, guide_words, passages, fee_paid=fee)
-        credits.settle(w, held=run.fee_cap, charge=fee, job_id=j.id, note="AI estimate")
+        if run.held:
+            credits.settle(w, held=run.fee_cap, charge=fee, job_id=j.id, note="AI estimate")
         run.status, run.fee, run.lease_until = "READY", fee, None
         j.billing = Billing(fee_paid=fee)
         j.quote = BoundQuote(
@@ -376,7 +377,8 @@ def _estimate_failed(rt: Runtime, job_id: str, run_id: str, code: str, message: 
             run.attempts += 1
             retry_again = True
             return j, w
-        credits.settle(w, held=run.fee_cap, charge=0, job_id=j.id, note="AI estimate could not run, so it was not charged")
+        if run.held:
+            credits.settle(w, held=run.fee_cap, charge=0, job_id=j.id, note="AI estimate could not run, so it was not charged")
         run.status, run.message = "FAILED", message
         j.events.append(JobEvent(label=f"Estimate failed: {code}"))
         j.failure_detail = f"estimate {detail}"[:500]

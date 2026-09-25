@@ -56,6 +56,9 @@ class Settings(BaseSettings):
     # Credits and pricing (owner decisions, 2026-09-24; see docs/decisions.md "Prepaid credits").
     # A job costs its actual AI spend × price_multiplier, converted at ugx_per_usd and never more
     # than its quote; quotes add quote_safety_margin on top of the projected AI spend.
+    # Off = testing mode (owner decision 2026-09-25): no balance needed, nothing held or charged;
+    # prices are still calculated and shown as "not charged while testing".
+    credits_enabled: bool = True
     price_multiplier: float = 2.0
     ugx_per_usd: float = 4000  # market was ~3,907 on 2026-09-23; rounded up as a buffer. Review monthly.
     quote_safety_margin: float = 0.2

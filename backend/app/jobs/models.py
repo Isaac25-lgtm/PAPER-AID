@@ -143,6 +143,7 @@ class EstimateRun(EstimateView):
     guideline_sha256: str | None = None
     budget_usd: float
     cost_base_usd: float = 0.0  # the job's estimate spend before this run; the run's cost is the rise from here
+    held: bool = True  # False in testing mode: nothing was held, so nothing is charged
     attempts: int = 0
     lease_until: datetime | None = None
     requested_at: datetime = Field(default_factory=utcnow)

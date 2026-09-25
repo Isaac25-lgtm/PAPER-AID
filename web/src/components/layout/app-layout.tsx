@@ -4,6 +4,7 @@ import { History, LayoutDashboard, LogOut, Menu as MenuIcon, Plus, Settings, Shi
 import { useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router'
 import { useAuth } from '../../features/auth/auth-context'
+import { useData } from '../../lib/data'
 import { formatUGX } from '../../lib/format'
 import { useWallet } from '../../lib/use-wallet'
 import { ButtonLink } from '../ui/button'
@@ -15,6 +16,7 @@ export function AppLayout() {
   const navigate = useNavigate()
   const location = useLocation()
   const [menuOpen, setMenuOpen] = useState(false)
+  const { config } = useData()
   const { wallet } = useWallet()
 
   useEffect(() => setMenuOpen(false), [location.pathname])
@@ -22,7 +24,7 @@ export function AppLayout() {
   const nav = [
     { to: '/app', label: 'Dashboard', icon: LayoutDashboard, end: true },
     { to: '/app/history', label: 'History', icon: History, end: false },
-    { to: '/app/credits', label: 'Credits', icon: Wallet, end: false },
+    ...(config.creditsEnabled ? [{ to: '/app/credits', label: 'Credits', icon: Wallet, end: false }] : []),
     ...(user?.isAdmin ? [{ to: '/admin', label: 'Admin', icon: ShieldCheck, end: false }] : []),
   ]
 
@@ -57,7 +59,7 @@ export function AppLayout() {
             ))}
           </nav>
           <div className="ml-auto flex items-center gap-2">
-            {wallet && (
+            {config.creditsEnabled && wallet && (
               <Link
                 to="/app/credits"
                 className="inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-800 ring-1 ring-brand-200 hover:bg-brand-100"

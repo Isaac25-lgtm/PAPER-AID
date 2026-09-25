@@ -29,6 +29,7 @@ from app.jobs.models import (
     JobStatus,
     JobView,
     Page,
+    PaymentStatus,
     Quote,
     QuoteResponse,
     ServiceSelection,
@@ -76,6 +77,7 @@ def public_config(rt: Runtime) -> dict:
     return {
         "paymentsEnabled": rt.settings.payments_enabled,
         "availability": availability(rt.settings),
+        "creditsEnabled": rt.settings.credits_enabled,
         "minTopUpUgx": rt.settings.min_top_up_ugx,
         "ugxPerUsd": rt.settings.ugx_per_usd,
         "retentionDays": rt.settings.retention_days,
@@ -286,7 +288,7 @@ def request_quote(rt: Runtime, user: User, job_id: str, selection: ServiceSelect
         if not start_estimate:
             return QuoteResponse(estimate_fee_cap=_estimate_fee_cap(rt, job, selection), estimate=job.estimate)
         return _start_estimate(rt, user, job, selection, guideline_sha)
-    if available <= 0:
+    if available <= 0 and rt.settings.credits_enabled:
         raise credits.InsufficientCredits(rt.settings.min_top_up_ugx, available)
     _rate_limit(rt, user, "quote", rt.settings.quotes_per_hour)
     settings = rt.settings
@@ -347,7 +349,9 @@ def _start_estimate(rt: Runtime, user: User, job: Job, selection: ServiceSelecti
             return None
         if guideline_sha is not None and (j.guideline is None or j.guideline.sha256 != guideline_sha):
             return None
-        credits.hold(w, fee_cap, j.id, "AI estimate (the most it can cost)")
+        if settings.credits_enabled:
+            credits.hold(w, fee_cap, j.id, "AI estimate (the most it can cost)")
+        run.held = settings.credits_enabled
         run.cost_base_usd = j.estimate_cost_usd
         j.estimate = run
         j.selection = selection
@@ -398,8 +402,12 @@ def submit(rt: Runtime, user: User, job_id: str, quote_id: str) -> JobView:
         j.pipeline = pipeline_for(q.selection)
         # The provider-spend cap keeps the margin: the quote's AI part at its frozen rate and multiplier.
         j.budget_usd = max(0, q.amount - q.paid - q.fixed_ugx) / q.ugx_per_usd / q.multiplier if q.ugx_per_usd and q.multiplier else 0.0
-        held = hold_for_job(j, w)  # raises InsufficientCredits, which aborts the whole transaction
-        state.transition(j, JobStatus.QUEUED, f"Queued (UGX {held:,} held)")
+        if settings.credits_enabled:
+            held = hold_for_job(j, w)  # raises InsufficientCredits, which aborts the whole transaction
+            state.transition(j, JobStatus.QUEUED, f"Queued (UGX {held:,} held)")
+        else:
+            j.payment_status = PaymentStatus.NOT_REQUIRED
+            state.transition(j, JobStatus.QUEUED, "Queued (testing: not charged)")
         return j, w
 
     result = rt.store.update_job_and_wallet(job.id, accept)
@@ -596,7 +604,8 @@ def admin_retry(rt: Runtime, admin: User, job_id: str) -> AdminJob:
     def retry(j: Job, w: Wallet) -> tuple[Job, Wallet] | None:
         if j.status != JobStatus.FAILED:
             return None
-        hold_for_job(j, w)  # the failure returned everything, so the retry needs its own hold
+        if j.billing.state != "NONE":  # a charged job's failure returned everything, so the retry needs its own hold
+            hold_for_job(j, w)
         j.generation += 1
         j.attempts = 0
         j.failure = None

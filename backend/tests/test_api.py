@@ -714,3 +714,20 @@ def test_files_are_pinned_while_an_estimate_runs(client, monkeypatch):
     assert _upload(client, job_id, "source", "fake_headings.docx").json()["code"] == "ESTIMATE_RUNNING"
     assert client.post(f"/api/jobs/{job_id}/cancel", headers=STUDENT).json()["code"] == "ESTIMATE_RUNNING"
     assert client.delete(f"/api/jobs/{job_id}", headers=STUDENT).json()["code"] == "ESTIMATE_RUNNING"
+
+
+def test_testing_mode_runs_every_service_without_credits(client, monkeypatch):
+    """Owner decision 2026-09-25: with credits switched off, nothing needs a balance and nothing is charged."""
+    from app.runtime import get_runtime
+
+    monkeypatch.setattr(get_runtime().settings, "credits_enabled", False)
+    _priced_models(client, monkeypatch)
+    headers = {"Authorization": "Dev colleague@example.com"}  # no credits at all
+    assert client.get("/api/config").json()["creditsEnabled"] is False
+    job_id, quote = start_job(client, headers=headers)
+    assert quote["amount"] > 0 and quote["paid"] == 0  # the price is still shown
+    client.post(f"/api/jobs/{job_id}/submit", headers=headers, json={"quoteId": quote["id"]})
+    job = wait(client, job_id, headers=headers)
+    assert job["status"] == "COMPLETED" and job["paymentStatus"] == "NOT_REQUIRED" and job["billing"]["state"] == "NONE"
+    wallet = _wallet(client, headers)
+    assert (wallet["available"], wallet["held"], wallet["entries"]) == (0, 0, [])
