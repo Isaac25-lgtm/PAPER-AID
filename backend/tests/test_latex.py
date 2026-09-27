@@ -13,8 +13,6 @@ from app.latex.package import compile_pdf, package
 from app.pricing.quote import latex_ugx
 from tests.conftest import fixture_bytes
 
-HAS_TEX = shutil.which("pdflatex") is not None
-
 
 def _docx(*paragraphs: str) -> bytes:
     doc = Document()
@@ -23,6 +21,17 @@ def _docx(*paragraphs: str) -> bytes:
     out = io.BytesIO()
     doc.save(out)
     return out.getvalue()
+
+
+def _tex_runs() -> bool:
+    """Compile tests need an engine that actually starts (a sandbox can block MiKTeX)."""
+    if shutil.which("pdflatex") is None:
+        return False
+    pdf, _ = compile_pdf(convert(_docx("Probe.")))
+    return pdf is not None
+
+
+HAS_TEX = _tex_runs()
 
 
 def test_the_students_text_can_never_become_latex_commands():
@@ -117,3 +126,62 @@ def test_images_become_figure_files_and_compile():
     if HAS_TEX:
         pdf, problem = compile_pdf(result)
         assert pdf is not None, problem
+
+
+def _linked_docx(target: str) -> bytes:
+    from docx.opc.constants import RELATIONSHIP_TYPE
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    doc = Document()
+    p = doc.add_paragraph("See ")
+    rid = p.part.relate_to(target, RELATIONSHIP_TYPE.HYPERLINK, is_external=True)
+    link = OxmlElement("w:hyperlink")
+    link.set(qn("r:id"), rid)
+    run = OxmlElement("w:r")
+    text = OxmlElement("w:t")
+    text.text = "the link"
+    run.append(text)
+    link.append(run)
+    p._p.append(link)
+    out = io.BytesIO()
+    doc.save(out)
+    return out.getvalue()
+
+
+HOSTILE = r"https://x.org/}{a}\typeout{PWNED}\iffalse"
+
+
+def _body(target: str) -> str:
+    return convert(_linked_docx(target)).tex.split(r"\begin{document}")[1]
+
+
+def test_a_hostile_link_target_can_never_become_latex_commands():
+    r"""Codex audit 2026-09-27 #1: a crafted target closed \href's braces and injected \typeout."""
+    body = _body(HOSTILE)
+    assert r"\typeout" not in body and "}{a}" not in body
+    assert r"\href{https://x.org/\%7D\%7Ba\%7D\%5Ctypeout\%7BPWNED\%7D\%5Ciffalse}{the link}" in body
+    for target in ("javascript:alert(1)", "file:///etc/passwd", r"\input{x}"):
+        assert r"\href" not in _body(target)  # other schemes stay plain text
+    assert r"\href{https://example.org/a?q=1&x=2\#top}{the link}" in _body("https://example.org/a?q=1&x=2#top")
+
+
+@pytest.mark.skipif(not HAS_TEX, reason="no working LaTeX engine")
+def test_hostile_and_ordinary_links_compile():
+    for target in (HOSTILE, "https://example.org/a?q=1&x=2#top", "mailto:someone@example.org"):
+        pdf, problem = compile_pdf(convert(_linked_docx(target)))
+        assert pdf is not None, (target, problem)
+
+
+def test_anything_left_out_makes_the_latex_job_partial():
+    """Codex audit #14: an omitted item with a successful compile was reported as a full success."""
+    from lxml import etree
+
+    w = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+    doc = Document()
+    p = doc.add_paragraph("A chart: ")
+    etree.SubElement(etree.SubElement(p._p, w + "r"), w + "object")
+    out = io.BytesIO()
+    doc.save(out)
+    result = convert(out.getvalue())
+    assert result.omitted == 1 and "left out" in result.warnings[0]

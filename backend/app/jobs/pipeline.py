@@ -839,7 +839,7 @@ def stage_converting(ctx: StageContext) -> None:
 
     def save(j: Job) -> Job:
         j.latex = summary
-        if not compiled or result.equations_converted < result.equations:
+        if not compiled or result.omitted:  # anything left out of main.tex makes it a partial result
             j.outcome = "PARTIAL"
         return _add_warnings(j, warnings)
 

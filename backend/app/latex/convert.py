@@ -14,6 +14,7 @@ escaped, so the student's words can never become LaTeX commands.
 import io
 import re
 from dataclasses import dataclass, field
+from urllib.parse import quote, urlsplit
 
 from docx import Document
 from docx.text.paragraph import Paragraph
@@ -83,6 +84,22 @@ class Result:
     equations: int = 0
     equations_converted: int = 0
     figures: int = 0
+    omitted: int = 0  # items left out of main.tex (each has a warning): the result is partial
+
+
+LINK_SCHEMES = ("http", "https", "mailto")
+# Characters a URL may keep inside \href: everything else (braces, backslashes, spaces, ^, ~, |…)
+# is percent-encoded, so a link target can never close the argument or start a TeX command.
+URL_SAFE = "/:?&=@+,;!*'()-._%#"
+
+
+def safe_url(url: str) -> str | None:
+    r"""A link target that is safe inside \href{…}, or None when it should stay plain text."""
+    target = url.strip()
+    if urlsplit(target).scheme.lower() not in LINK_SCHEMES:
+        return None
+    encoded = quote(target, safe=URL_SAFE)
+    return encoded.replace("%", r"\%").replace("#", r"\#")
 
 
 def escape(text: str) -> str:
@@ -227,6 +244,7 @@ class _Converter:
             elif tag == W + "drawing":
                 pieces.append(self._image(child))
             elif tag in (W + "object", W + "pict"):
+                self.result.omitted += 1
                 self.result.warnings.append("An embedded object (an old-style picture or OLE object) was left out; add it to the LaTeX by hand.")
                 pieces.append("% embedded object not converted\n")
         text = "".join(pieces)
@@ -267,7 +285,8 @@ class _Converter:
                 if rid and rid in self.doc.part.rels and self.doc.part.rels[rid].is_external:
                     target = self.doc.part.rels[rid].target_ref
                 text = self._inline(child)
-                pieces.append(r"\href{%s}{%s}" % (target.replace("%", r"\%").replace("#", r"\#"), text) if target else text)
+                url = safe_url(target) if target else None
+                pieces.append(r"\href{%s}{%s}" % (url, text) if url else text)
             elif tag in (W + "ins", W + "smartTag", W + "customXml", W + "fldSimple"):
                 if tag == W + "ins":
                     self._tracked = True
@@ -291,6 +310,7 @@ class _Converter:
             body = _omml(math).strip()
         except Unsupported as exc:
             n = self.result.equations
+            self.result.omitted += 1
             self.result.warnings.append(f"Equation {n} uses a structure the converter does not handle ({exc}); it is marked with a comment in main.tex. Retype it in LaTeX.")
             return f"\n% Equation {n} was not converted automatically: retype it here.\n"
         self.result.equations_converted += 1
@@ -311,6 +331,7 @@ class _Converter:
         part = self.doc.part.rels[rid].target_part
         ext = part.partname.split(".")[-1].lower()
         if ext not in IMAGE_TYPES:
+            self.result.omitted += 1
             self.result.warnings.append(f"An image in {ext.upper()} format was left out (LaTeX cannot use it directly); convert it to PNG and add it by hand.")
             return f"\n% image ({ext}) not converted\n"
         self.result.figures += 1
