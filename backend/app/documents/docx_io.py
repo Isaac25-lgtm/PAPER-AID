@@ -136,6 +136,15 @@ def _is_goback(el) -> bool:
     return el.get(W + "name") == "_GoBack"  # Word's own last-edit marker: zero length, no meaning
 
 
+def has_ranges(segments: list[Segment]) -> bool:
+    """True when the paragraph holds a bookmark, comment or permission range marker (other than
+    Word's _GoBack). Deep Redraft keeps such paragraphs out of its groups: restructuring could not
+    keep each range around exactly the same text (Codex audit #8, second round)."""
+    return any(
+        s.kind == "marker" and (el.tag in _OPENERS or el.tag in _CLOSERS) and not _is_goback(el) for s in segments for el in s.elements
+    )
+
+
 def range_inside_text(segments: list[Segment]) -> bool:
     """True when a bookmark, comment or permission range starts or ends in the middle of the
     paragraph's text. Such a paragraph is never rewritten: the rebuilt text could not keep the
@@ -257,7 +266,7 @@ def read_docx(data: bytes) -> DocumentModel:
         text = "".join(s.text for s in segments if s.kind != "marker").strip()
         if not text:
             page_break = any(br.get(W + "type") == "page" for br in p.iter(W + "br"))
-            if in_table or page_break or any(next(p.iter(tag), None) is not None for tag in _BARRIER_CONTENT):
+            if in_table or page_break or has_ranges(segments) or any(next(p.iter(tag), None) is not None for tag in _BARRIER_CONTENT):
                 barriers.append(block_id)
             continue
         kind, level, detected = _classify(paragraph, text, in_table, in_references)
@@ -282,6 +291,7 @@ def read_docx(data: bytes) -> DocumentModel:
                 detected_heading=detected,
                 locked=[s.text for s in segments if s.kind == "opaque"] if editable else [],
                 section_break=p.find(W + "pPr") is not None and p.find(W + "pPr").find(W + "sectPr") is not None,
+                ranges=has_ranges(segments),
             )
         )
     warnings = []

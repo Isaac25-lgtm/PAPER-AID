@@ -475,6 +475,7 @@ class Job(JobView):
     failure_detail: str | None = None
     files_deleted: bool = False
     deleting: bool = False  # set atomically before deletion: no new work may start on the job
+    retiring: bool = False  # claimed by retention cleanup: its files are being deleted, nothing new may start
 
     def view(self) -> JobView:
         return JobView.model_validate(self.model_dump())

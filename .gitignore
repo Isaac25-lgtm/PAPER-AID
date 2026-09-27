@@ -24,3 +24,8 @@ web/hosting/
 .firebase/
 session-history/
 web/out/
+
+# Scratch folders left by external audits
+backend/.audit_tmp_*/
+codex_verify_*/
+backend/codex_verify_*/

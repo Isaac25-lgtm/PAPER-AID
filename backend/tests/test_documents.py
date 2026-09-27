@@ -174,18 +174,35 @@ def test_a_bookmark_inside_the_text_keeps_its_paragraph_untouched():
     assert [b.editable for b in model.blocks if b.kind == "paragraph"] == [False]
 
 
-def test_a_bookmark_around_a_whole_paragraph_still_surrounds_its_text_after_a_redraft():
+def _bookmarked_words(data: bytes) -> list[str]:
+    """The words a document's bookmark actually encloses, read from the Word XML in order."""
     import io
 
     from docx import Document
 
+    w = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+    inside, words = False, []
+    for el in Document(io.BytesIO(data)).element.body.iter():
+        if el.tag == w + "bookmarkStart" and el.get(w + "name") == "claim":
+            inside = True
+        elif el.tag == w + "bookmarkEnd" and inside:
+            inside = False
+        elif el.tag == w + "t" and inside:
+            words += (el.text or "").split()
+    return words
+
+
+def test_a_redraft_never_changes_which_words_a_bookmark_encloses():
+    """Codex audit #8, second round: a bookmark around one paragraph was widened to the whole group."""
     from app.documents import groups
     from app.documents.docx_io import apply_group_rewrites, read_docx
 
-    data = _doc_with(lambda d: (d.add_heading("Intro", 1), _bookmark(d, "", LONG, ""), d.add_paragraph(LONG.replace("This", "That"))))
+    other = LONG.replace("This", "That")
+    data = _doc_with(lambda d: (d.add_heading("Intro", 1), _bookmark(d, "", LONG, ""), d.add_paragraph(other), d.add_paragraph(other + " Again.")))
     model = read_docx(data)
-    group = groups.groups(model)[0]
+    found = groups.groups(model)
+    assert found and all("b00002" not in g.block_ids for g in found)  # the bookmarked paragraph is never grouped
+    group = found[0]
     reordered = groups.SEPARATOR.join(group.paragraphs(group.masked)[::-1])
-    out = Document(io.BytesIO(apply_group_rewrites(data, [(group.block_ids, groups.to_docx(group, reordered), group.xmap)])))
-    body = [el.tag.split("}")[1] for p in out.paragraphs[1:] for el in p._p if not el.tag.endswith("pPr")]
-    assert body[0] == "bookmarkStart" and body[-1] == "bookmarkEnd" and "r" in body[1:-1]
+    out = apply_group_rewrites(data, [(group.block_ids, groups.to_docx(group, reordered), group.xmap)])
+    assert _bookmarked_words(out) == _bookmarked_words(data) == LONG.split()

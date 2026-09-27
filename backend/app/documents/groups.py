@@ -45,7 +45,7 @@ class Group:
 
 
 def _groupable(block: Block) -> bool:
-    return block.kind == "paragraph" and block.editable and block.masked is not None and not block.section_break
+    return block.kind == "paragraph" and block.editable and block.masked is not None and not block.section_break and not block.ranges
 
 
 def _build(n: int, section: str, blocks: list[Block]) -> Group:

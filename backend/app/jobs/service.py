@@ -166,9 +166,6 @@ ACCOUNT_CLOSING = "This account is being deleted, so nothing new can be started.
 def create_draft(rt: Runtime, user: User) -> JobView:
     if not user.verified:
         raise Forbidden("Verify your email address before starting a job. Check your inbox for the link.", code="EMAIL_NOT_VERIFIED")
-    wallet = rt.store.get_wallet(user.uid)
-    if wallet is not None and wallet.closing:
-        raise Conflict(ACCOUNT_CLOSING, code="ACCOUNT_CLOSING")
     _rate_limit(rt, user, "draft", rt.settings.quotes_per_hour)
     now = utcnow()
     job = Job(
@@ -180,7 +177,8 @@ def create_draft(rt: Runtime, user: User) -> JobView:
         expires_at=now + timedelta(days=rt.settings.retention_days),
         events=[JobEvent(at=now, label="Draft created")],
     )
-    rt.store.create(job)
+    if not rt.store.create_if_open(job):  # the account check and the write are one atomic step
+        raise Conflict(ACCOUNT_CLOSING, code="ACCOUNT_CLOSING")
     return job.view()
 
 
@@ -359,7 +357,7 @@ def request_quote(rt: Runtime, user: User, job_id: str, selection: ServiceSelect
 
 def _open_draft(j: Job) -> bool:
     """A draft that may still change: not submitted, not being estimated, not being deleted."""
-    return j.status in (JobStatus.DRAFT, JobStatus.QUOTED) and not _estimating(j) and not j.deleting
+    return j.status in (JobStatus.DRAFT, JobStatus.QUOTED) and not _estimating(j) and not j.deleting and not j.retiring and not j.files_deleted
 
 
 def _finished_estimate(j: Job, selection: ServiceSelection, guideline_sha: str | None) -> EstimateRun | None:
@@ -440,7 +438,7 @@ def submit(rt: Runtime, user: User, job_id: str, quote_id: str) -> JobView:
 
     def accept(j: Job, w: Wallet) -> tuple[Job, Wallet] | None:
         # Re-checked inside the transaction: a concurrent upload or submit may have changed the job.
-        if w.closing or j.status != JobStatus.QUOTED or j.deleting or j.quote is None or j.quote.id != quote_id or j.source is None or j.quote.source_sha256 != j.source.sha256:
+        if w.closing or j.status != JobStatus.QUOTED or j.deleting or j.retiring or j.files_deleted or j.quote is None or j.quote.id != quote_id or j.source is None or j.quote.source_sha256 != j.source.sha256:
             return None
         if any(availability(settings, user).get(service.value) != "available" for service in j.quote.selection.services()):
             return None
@@ -581,7 +579,10 @@ def delete_account(rt: Runtime, user: User) -> int:
        every operation that starts work or moves credits checks that flag in its own transaction,
        so nothing new can begin while the account is being deleted.
     2. Every job is claimed; if one is still working, all claims are released and nothing changes.
-    3. Jobs and files are erased, then a final sweep catches any draft created meanwhile.
+    3. Jobs and files are erased, then a final sweep catches any draft created before the claim.
+    4. The wallet becomes a closed tombstone (no email, no balance, no history) instead of being
+       removed, so a request already past its checks can never recreate an open account: a late
+       draft or credit grant finds it closed and is refused (Codex audit #2, second round).
     An interrupted deletion leaves the account closing, and asking again finishes it.
     Credit balance (proposed default, awaiting the owner's decision): while credits are on, an
     account holding credit cannot be deleted until PaperAid has refunded it."""
@@ -622,7 +623,10 @@ def delete_account(rt: Runtime, user: User) -> int:
         for job in leftover:
             _erase(rt, job)
         claimed += leftover
-    rt.store.delete_wallet(user.uid)
+    def tombstone(w: Wallet) -> Wallet:
+        return Wallet(uid=w.uid, email="", closing=True, grant_ops=w.grant_ops)
+
+    rt.store.update_wallet(user.uid, "", tombstone)
     log(logger, logging.WARNING, "account deleted", uid=user.uid, jobs=len(claimed))
     return len(claimed)
 
@@ -642,7 +646,7 @@ def _wallet_view(rt: Runtime, wallet: Wallet) -> WalletView:
 
 def my_wallet(rt: Runtime, user: User) -> WalletView:
     """The student's balance. Opening it records their email, so an admin can find them."""
-    wallet = rt.store.update_wallet(user.uid, user.email, lambda w: w if w.email else w.model_copy(update={"email": user.email}))
+    wallet = rt.store.update_wallet(user.uid, user.email, lambda w: w if w.email or w.closing else w.model_copy(update={"email": user.email}))
     assert wallet is not None
     return _wallet_view(rt, wallet)
 
@@ -760,7 +764,7 @@ def admin_retry(rt: Runtime, admin: User, job_id: str) -> AdminJob:
     settings = rt.settings
 
     def retry(j: Job, w: Wallet) -> tuple[Job, Wallet] | None:
-        if j.status != JobStatus.FAILED or j.deleting or w.closing:
+        if j.status != JobStatus.FAILED or j.deleting or j.retiring or j.files_deleted or w.closing:
             return None
         # A charged job's failure returned everything, so a retry needs its own hold, but only
         # while credits are on. A job accepted in testing mode is never charged by a retry.
@@ -818,18 +822,34 @@ def cleanup_expired(rt: Runtime) -> int:
     paid estimate stays paid: the student chose not to go ahead."""
     now = utcnow()
     jobs = every_job(rt, None, {JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED, JobStatus.DRAFT, JobStatus.QUOTED})
-    expired = [j for j in jobs if j.expires_at < now and not j.files_deleted and not _estimating(j)]
-    for job in expired:
+    cleaned = 0
+    for job in jobs:
+        if job.expires_at >= now or job.files_deleted:
+            continue
+
+        # Claim first, atomically (Codex audit #11, second round): nothing is deleted while work
+        # runs or credits are held, and once claimed no submission, upload, estimate or retry can
+        # start (each checks `retiring` in its own transaction). A claim left by an interrupted
+        # run is picked up again here.
+        def claim(j: Job) -> Job | None:
+            if j.files_deleted or j.expires_at >= now or j.status in ACTIVE or _estimating(j) or j.billing.state == "HELD" or j.deleting:
+                return None
+            j.retiring = True
+            return j
+
+        if rt.store.update(job.id, claim) is None:
+            continue
         rt.files.delete_prefix(job.storage_prefix())
 
         def strip_files(j: Job) -> Job:
             j = without_paper_text(j)
-            j.files_deleted = True
+            j.files_deleted, j.retiring = True, False
             j.events.append(JobEvent(label="Files deleted under retention policy"))
             return j
 
         rt.store.update(job.id, strip_files)
-    return len(expired)
+        cleaned += 1
+    return cleaned
 
 
 def ensure_valid_upload_name(filename: str) -> None:

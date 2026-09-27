@@ -52,6 +52,9 @@ class _Store(FirestoreJobStore):
     def get_flag(self, name: str, default: bool) -> bool:
         return default
 
+    def create_if_open(self, job) -> bool:
+        return True
+
     def update_wallet(self, uid, email, mutate):
         from app.jobs.models import Wallet
 

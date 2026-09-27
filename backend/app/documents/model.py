@@ -22,6 +22,7 @@ class Block(BaseModel):
     detected_heading: bool = False  # a heading typed as bold body text rather than a Heading style
     locked: list[str] = []  # display text of each ⟦Xn⟧ segment, in order
     section_break: bool = False  # the paragraph carries a Word section break (never merged or removed)
+    ranges: bool = False  # holds a bookmark/comment/permission range marker: never part of a Deep Redraft group
 
     def readable(self, masked: str) -> str:
         """Masked text with ⟦Xn⟧ tokens replaced by what the reader sees in Word."""

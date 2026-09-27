@@ -139,3 +139,9 @@ Engineering rules that implement the audit fixes the owner asked for; they matte
 - **Records:** a job record keeps at most ~300 KB of change text (the rest is in job storage and the change report), and any record over 900 KB is refused with a clear error.
 - **Accounts and credits:** deleting an account claims it first (wallet `closing`), so no job, estimate, grant or retry can start meanwhile; every manual grant id is kept for good, so a replayed grant never adds twice.
 - **[proposed, awaiting owner decision] Account deletion with a balance:** while credits are on, an account holding credit cannot be deleted until PaperAid refunds it (in testing mode it can). The estimate-fee carry-over to a different service (above) is also still **[proposed]**.
+
+## 2026-09-27 — Codex verification, round 2 (four remaining gaps fixed)
+- **Quotations are confirmed word for word.** Only typography, case, spacing and line-end hyphenation may differ; a changed negation or figure, or fragments stitched from different parts of a page, are not confirmed. A marked omission ("…") is allowed when every part is on the page in order.
+- **A closed account stays closed.** Deletion leaves a tombstone wallet (no email, balance or history), and draft creation checks the account and writes in one atomic step, so a request already past its checks can neither leave a draft behind nor recreate an open wallet through a late credit grant.
+- **Retention claims before it deletes.** Cleanup atomically claims an expired job (refused while work runs, an estimate runs, credits are held or the job is being deleted); a claimed job accepts no submission, upload, estimate, quote or retry, and an interrupted cleanup resumes from the claim.
+- **Bookmarks, comments and permission ranges keep their exact scope.** Paragraphs holding them are never part of a Deep Redraft group (refinement keeps whole-paragraph ranges around the rewritten text).

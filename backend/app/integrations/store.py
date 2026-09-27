@@ -23,6 +23,7 @@ PairMutator = Callable[[Job, Wallet], tuple[Job, Wallet] | None]
 
 class JobStore(Protocol):
     def create(self, job: Job) -> None: ...
+    def create_if_open(self, job: Job) -> bool: ...
     def get(self, job_id: str) -> Job | None: ...
     def update(self, job_id: str, mutate: Mutator) -> Job | None: ...
     def delete(self, job_id: str) -> None: ...
@@ -93,6 +94,15 @@ class LocalJobStore:
     def create(self, job: Job) -> None:
         with self._lock:
             self._write(job)
+
+    def create_if_open(self, job: Job) -> bool:
+        """Create the job unless its owner's account is closing or closed, as one atomic step."""
+        with self._lock:
+            wallet = self.get_wallet(job.owner_uid)
+            if wallet is not None and wallet.closing:
+                return False
+            self._write(job)
+            return True
 
     def get(self, job_id: str) -> Job | None:
         path = self._path(job_id)
@@ -201,7 +211,7 @@ class LocalJobStore:
             self._recover()
             wallets = [Wallet.model_validate_json(p.read_text(encoding="utf-8")) for p in self._wallets.glob("*.json")]
         term = (email_contains or "").strip().lower()
-        matches = [w for w in wallets if term in w.email.lower()]
+        matches = [w for w in wallets if term in w.email.lower() and not w.closing]
         return sorted(matches, key=lambda w: w.updated_at, reverse=True)[:limit]
 
     def delete_wallet(self, uid: str) -> None:
@@ -222,6 +232,21 @@ class FirestoreJobStore:
 
     def create(self, job: Job) -> None:
         self._jobs.document(job.id).create(json.loads(_dump(job)))
+
+    def create_if_open(self, job: Job) -> bool:
+        """Create the job unless its owner's account is closing or closed, in one transaction: a
+        deletion that closes the account in between makes this transaction retry and refuse."""
+        wallet_ref, job_ref = self._wallets.document(job.owner_uid), self._jobs.document(job.id)
+
+        @self._fs.transactional
+        def run(transaction) -> bool:
+            snap = wallet_ref.get(transaction=transaction)
+            if snap.exists and Wallet.model_validate(snap.to_dict()).closing:
+                return False
+            transaction.create(job_ref, json.loads(_dump(job)))
+            return True
+
+        return run(self._db.transaction())
 
     def get(self, job_id: str) -> Job | None:
         snap = self._jobs.document(job_id).get()
@@ -322,7 +347,8 @@ class FirestoreJobStore:
         # Firestore has no substring search; exact email match, or the most recently active wallets.
         term = (email_contains or "").strip().lower()
         query = self._wallets.where(filter=self._fs.FieldFilter("email", "==", term)) if term else self._wallets.order_by("updatedAt", direction=self._fs.Query.DESCENDING)
-        return [Wallet.model_validate(d.to_dict()) for d in query.limit(limit).stream()]
+        found = [Wallet.model_validate(d.to_dict()) for d in query.limit(limit).stream()]
+        return [w for w in found if not w.closing]  # closed-account tombstones are never offered to admins
 
     def delete_wallet(self, uid: str) -> None:
         self._wallets.document(uid).delete()

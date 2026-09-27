@@ -351,3 +351,22 @@ def test_an_unmatched_organisation_is_only_ever_a_possible_mismatch():
     blocks = [Block(id="p", kind="paragraph", text="Uganda Bureau of Statistics (2020) reported the census."), Block(id="r", kind="reference", text="Kato, S. (2019). Costs.")]
     certainties = {i.certainty for i in paper_checks.check(DocumentModel(format="DOCX", blocks=blocks)).items if i.kind == "CITED_NOT_LISTED"}
     assert certainties == {"POSSIBLE"}
+
+
+def test_a_quotation_is_confirmed_only_word_for_word():
+    """Codex verification round 2: an 85% fuzzy match accepted "did improve" for "did not improve"."""
+    from app.analysis.research import quote_found
+
+    page = (
+        "The randomized evaluation found that the intervention did not improve household income during the study period. "
+        "This conclusion remained consistent after accounting for differences in baseline income, age, education, employment, "
+        "household size and access to financial services across the participating communities. The authors recommend further "
+        "research before drawing broader conclusions about the effectiveness of this intervention in other settings."
+    )
+    assert quote_found(page, page)
+    assert not quote_found(page.replace("did not improve", "did improve"), page)  # reversed conclusion
+    assert not quote_found("subscriptions equalled 36.8 million accounts", "subscriptions equalled 38.6 million accounts")  # changed figure
+    assert not quote_found("The randomized evaluation found that the authors recommend further research", page)  # assembled fragments
+    assert quote_found("The randomized evaluation found that ... the authors recommend further research before drawing", page)  # a marked omission
+    assert quote_found("household income during the study period", "household in-\ncome during the study period")  # PDF hyphenation
+    assert quote_found("Η πρόσβαση στο διαδίκτυο παραμένει", "κείμενο Η πρόσβαση στο διαδίκτυο παραμένει περιορισμένη")  # any script

@@ -19,7 +19,7 @@ def start_job(client, name="simple_essay.docx", selection=None, headers=STUDENT)
     return job_id, get_quote(client, job_id, selection or REFINE_FORMAT, headers)
 
 
-def get_quote(client, job_id, selection, headers=STUDENT, timeout=30):
+def get_quote(client, job_id, selection, headers=STUDENT, timeout=120):
     """A quote, waiting for the refinement estimate when the selection needs one."""
     response = client.post(f"/api/jobs/{job_id}/quote", headers=headers, json={"selection": selection, "startEstimate": True})
     body = response.json()
@@ -1560,3 +1560,99 @@ def test_a_blocked_article_is_confirmed_from_its_abstract(client):
     _, _, job = _source_check_job(client)
     source = job["research"]["claims"][0]["sources"][0]
     assert job["research"]["claims"][0]["support"] == "SUPPORTED" and source["verified"] and source["access"] == "ABSTRACT"
+
+
+# --- Codex verification round 2 (2026-09-27): interleavings that must stay safe -------------------
+
+
+def test_a_draft_paused_before_its_write_cannot_outlive_account_deletion(client, monkeypatch):
+    """Reproduction A: the draft request passes its checks, the account is deleted, then the write runs."""
+    from app.runtime import get_runtime
+
+    rt = get_runtime()
+    monkeypatch.setattr(rt.settings, "credits_enabled", False)
+    headers = {"Authorization": "Dev latedraft@example.com"}
+    client.get("/api/wallet", headers=headers)
+    original = type(rt.store).create_if_open
+    deleted = []
+
+    def delete_first(store, job):
+        if not deleted:
+            deleted.append(client.delete("/api/me", headers=headers).status_code)
+        return original(store, job)
+
+    monkeypatch.setattr(type(rt.store), "create_if_open", delete_first)
+    response = client.post("/api/jobs", headers=headers)
+    assert deleted == [204] and response.status_code == 409 and response.json()["code"] == "ACCOUNT_CLOSING"
+    uid = "u_" + __import__("hashlib").sha256(b"latedraft@example.com").hexdigest()[:20]
+    assert rt.store.list(uid, None, None, None, 10)[0] == []
+
+
+def test_a_grant_whose_wallet_was_already_found_cannot_reopen_a_deleted_account(client, monkeypatch):
+    """Reproduction B: the grant selected the wallet, the account was deleted, then the grant ran."""
+    from app.runtime import get_runtime
+
+    rt = get_runtime()
+    headers = {"Authorization": "Dev lategrant@example.com"}
+    client.get("/api/wallet", headers=headers)  # an open, empty wallet the admin can find
+    original = type(rt.store).update_wallet
+    state = {"deleting": False, "done": False}
+
+    def delete_before_the_grant(store, uid, email, mutate):
+        if not state["done"] and not state["deleting"] and email == "lategrant@example.com":
+            state["deleting"] = True
+            assert client.delete("/api/me", headers=headers).status_code == 204
+            state["done"] = True
+        return original(store, uid, email, mutate)
+
+    monkeypatch.setattr(type(rt.store), "update_wallet", delete_before_the_grant)
+    body = {"email": "lategrant@example.com", "amount": 1000, "note": "", "opId": "op-late-grant-1"}
+    response = client.post("/api/admin/credits", headers=ADMIN, json=body)
+    assert state["done"] and response.status_code == 409 and response.json()["code"] == "ACCOUNT_CLOSING"
+    uid = "u_" + __import__("hashlib").sha256(b"lategrant@example.com").hexdigest()[:20]
+    wallet = rt.store.get_wallet(uid)
+    assert wallet is not None and wallet.closing and wallet.available == 0 and wallet.email == ""
+
+
+def test_a_submission_racing_retention_cleanup_never_loses_its_files(client, monkeypatch):
+    """#11 round 2: cleanup selected an expired quote, the student submitted, then files were deleted."""
+    from datetime import timedelta
+
+    from app.jobs import service
+    from app.jobs.models import JobStatus, utcnow
+    from app.runtime import get_runtime
+
+    rt = get_runtime()
+    rt.store.set_flag("processing_enabled", False)
+    job_id, quote = start_job(client, selection={"formatting": "FORMAT", "preset": "apa7"})
+    rt.store.update(job_id, lambda j: j.model_copy(update={"expires_at": utcnow() - timedelta(minutes=1)}))  # quote still valid
+    original = type(rt.files).delete_prefix
+    submitted = []
+
+    def submit_first(files, prefix):
+        if not submitted:
+            submitted.append(client.post(f"/api/jobs/{job_id}/submit", headers=STUDENT, json={"quoteId": quote["id"]}))
+        return original(files, prefix)
+
+    monkeypatch.setattr(type(rt.files), "delete_prefix", submit_first)
+    service.cleanup_expired(rt)
+    job = rt.store.get(job_id)
+    assert submitted[0].status_code == 409  # the claim came first
+    assert job.status == JobStatus.QUOTED and job.billing.state != "HELD" and job.files_deleted
+
+
+def test_a_submission_that_wins_the_race_keeps_its_files(client, monkeypatch):
+    from datetime import timedelta
+
+    from app.jobs import service
+    from app.jobs.models import JobStatus, utcnow
+    from app.runtime import get_runtime
+
+    rt = get_runtime()
+    rt.store.set_flag("processing_enabled", False)
+    job_id, quote = start_job(client, selection={"formatting": "FORMAT", "preset": "apa7"})
+    rt.store.update(job_id, lambda j: j.model_copy(update={"expires_at": utcnow() - timedelta(minutes=1)}))
+    assert client.post(f"/api/jobs/{job_id}/submit", headers=STUDENT, json={"quoteId": quote["id"]}).status_code == 200
+    service.cleanup_expired(rt)
+    job = rt.store.get(job_id)
+    assert job.status == JobStatus.QUEUED and not job.files_deleted and rt.files.exists(job.source.path)

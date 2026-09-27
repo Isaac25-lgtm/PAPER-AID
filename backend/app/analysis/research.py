@@ -84,23 +84,33 @@ def safe_to_search(claim: str, query: str, own: set[str], names: set[str]) -> bo
     return query_safe(query, own, names)
 
 
+ELLIPSIS = re.compile(r"\s*(?:\.\s?\.\s?\.|…|\[\s*(?:\.\.\.|…)\s*\])\s*")
+
+
 def _norm_words(text: str) -> list[str]:
-    text = text.replace("’", "'").replace("‘", "'").replace("“", '"').replace("”", '"').replace("–", "-").replace("—", "-")
-    return re.findall(r"[a-z0-9%]+", text.lower())
+    """Words for comparison: case-folded, in any script, with typography and line-end hyphenation
+    undone. Every word and number is kept, so "not", "did" and figures always count."""
+    text = re.sub(r"(\w)-\s*\n\s*(\w)", r"\1\2", text)  # a word hyphenated across a PDF line is one word
+    return re.findall(r"\w+|%", text.casefold())
 
 
 def quote_found(passage: str, page: str) -> bool:
-    """The quotation appears on the page: every word in order for short quotations, otherwise at
-    least 85% of its five-word sequences (allowing for line breaks, hyphenation and markup)."""
-    quote_words, page_words = _norm_words(passage), _norm_words(page)
-    if len(quote_words) < 4:
+    """The quotation appears on the page as one contiguous passage, word for word (Codex audit #4,
+    second round: a fuzzy match accepted "did improve" for "did not improve"). Only typography,
+    case, spacing and line-end hyphenation may differ. A quotation shortened with an ellipsis must
+    have every part, each at least four words, on the page in the same order. Anything less is
+    not a confirmed quotation."""
+    parts = [_norm_words(p) for p in ELLIPSIS.split(passage) if p.strip()]
+    if not parts or any(len(p) < 4 for p in parts):
         return False  # too short to confirm anything
-    if len(quote_words) < 8:
-        joined, target = " " + " ".join(page_words) + " ", " " + " ".join(quote_words) + " "
-        return target in joined
-    grams = {tuple(page_words[i : i + 5]) for i in range(len(page_words) - 4)}
-    quoted = [tuple(quote_words[i : i + 5]) for i in range(len(quote_words) - 4)]
-    return sum(1 for g in quoted if g in grams) / len(quoted) >= 0.85
+    page_text = " " + " ".join(_norm_words(page)) + " "
+    position = 0
+    for part in parts:
+        found = page_text.find(" " + " ".join(part) + " ", position)
+        if found < 0:
+            return False
+        position = found + 1
+    return True
 
 
 def verbatim(claim: str, text: str) -> bool:
