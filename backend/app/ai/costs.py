@@ -24,9 +24,30 @@ def price_for(provider: str, model: str, overrides: Prices | None = None) -> tup
     return price
 
 
-def cost_usd(provider: str, model: str, input_tokens: int, output_tokens: int, cached_tokens: int, overrides: Prices | None = None) -> float:
+# Writing input to the prompt cache costs 1.25x the input price on both providers
+# (Anthropic 5-minute cache writes; OpenAI GPT-6 Sol lists $2.50 against $2 input).
+CACHE_WRITE_MULTIPLIER = 1.25
+
+
+def cost_usd(
+    provider: str, model: str, input_tokens: int, output_tokens: int, cached_tokens: int, overrides: Prices | None = None, cache_write_tokens: int = 0
+) -> float:
     inp, out, cached = price_for(provider, model, overrides)
-    return (input_tokens * inp + output_tokens * out + cached_tokens * cached) / 1_000_000
+    return (input_tokens * inp + cache_write_tokens * inp * CACHE_WRITE_MULTIPLIER + output_tokens * out + cached_tokens * cached) / 1_000_000
+
+
+MIN_OUTPUT_TOKENS = 2000  # below this a structured answer can't be useful: stop instead of calling
+
+
+def affordable_output_tokens(provider: str, model: str, prompt_chars: int, max_output_tokens: int, remaining_usd: float, overrides: Prices | None = None) -> int:
+    """The most output a call may produce so that even its worst case stays within the remaining
+    budget: the whole prompt billed as a cache write (the dearest input), plus every output token.
+    This makes the job's provider-spend cap a hard ceiling, not an estimate."""
+    inp, out, _ = price_for(provider, model, overrides)
+    if out <= 0:
+        return max_output_tokens
+    worst_input_usd = (prompt_chars / 3.0) * inp * CACHE_WRITE_MULTIPLIER / 1_000_000  # 3 chars/token: generous
+    return max(0, min(max_output_tokens, int((remaining_usd - worst_input_usd) * 1_000_000 / out)))
 
 
 THINKING_ALLOWANCE_TOKENS = 3000

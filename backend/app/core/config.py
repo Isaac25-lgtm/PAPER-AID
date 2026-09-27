@@ -51,7 +51,10 @@ class Settings(BaseSettings):
     quote_ttl_minutes: int = 30
     stage_max_attempts: int = 4
     repair_attempts: int = 2
-    max_failed_share: float = 0.3
+
+    # Invited testers (owner decision 2026-09-25): while set, only these emails (and admins) may use
+    # the AI services, so a public link can't spend the AI budget. Empty = open to every user.
+    tester_emails: list[str] = []
 
     # Credits and pricing (owner decisions, 2026-09-24; see docs/decisions.md "Prepaid credits").
     # A job costs its actual AI spend × price_multiplier, converted at ugx_per_usd and never more

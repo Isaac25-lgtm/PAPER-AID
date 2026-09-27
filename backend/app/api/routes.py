@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Body, Depends, File, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 
-from app.core.auth import current_user, require_admin
+from app.core.auth import current_user, optional_user, require_admin
 from app.core.errors import AppError, Forbidden
 from app.jobs import service
 from app.jobs.models import AdminJob, AdminSummary, FileMeta, JobView, Page, QuoteResponse, ServiceSelection, WalletSummary, WalletView
@@ -27,8 +27,8 @@ def ready(rt: Runtime = Depends(get_runtime)) -> dict:
 
 
 @api.get("/config")
-def config(rt: Runtime = Depends(get_runtime)) -> dict:
-    return service.public_config(rt)
+def config(rt: Runtime = Depends(get_runtime), user: User | None = Depends(optional_user)) -> dict:
+    return service.public_config(rt, user)
 
 
 @api.get("/me")

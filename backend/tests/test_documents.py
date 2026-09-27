@@ -101,3 +101,15 @@ def test_protect_round_trip_and_checks():
     assert protect.check_rewrite(masked, masked.replace("62", "65"))
     assert protect.check_rewrite(masked, re.sub(r"⟦P1⟧", "", masked))
     assert protect.check_rewrite(masked, masked + " (Kato, 2020)")
+
+
+def test_rewrites_that_insert_editorial_notes_are_rejected():
+    """Live finding 2026-09-25: the writer model left "[student to clarify: …]" inside a paper."""
+    from app.documents.protect import check_rewrite
+
+    original = "Households associated limited access in 208 cases."
+    assert check_rewrite(original, "Households associated [student to clarify: associated with what?] limited access in 208 cases.")
+    assert check_rewrite(original, "Households associated (to clarify: with what?) limited access in 208 cases.")
+    assert check_rewrite(original, "Households linked limited access to 208 cases. TODO: add source")
+    assert check_rewrite(original, "To clarify the point, households linked limited access to 208 cases.") == []
+    assert check_rewrite("A quote [sic] here in 2 cases.", "Here, a quote [sic] in 2 cases.") == []  # brackets already present are fine

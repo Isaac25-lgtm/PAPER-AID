@@ -37,6 +37,20 @@ describe('watchJob', () => {
     expect(fetch).toHaveBeenCalledTimes(1)
   })
 
+  it('reports a refused request (App Check or signed out) with the server message and stops', async () => {
+    const message = 'This request could not be verified. Refresh the page and try again.'
+    const fetch = vi.fn(() => reply(401, { code: 'APP_CHECK_FAILED', message }))
+    vi.stubGlobal('fetch', fetch)
+    const blocked: string[] = []
+    const seen: (Job | null)[] = []
+    createApiSource({ config, getAuthHeaders: async () => ({}) }).watchJob('job_abc', (j) => seen.push(j), (m) => blocked.push(m))
+
+    await vi.advanceTimersByTimeAsync(POLL_MS * 10)
+    expect(blocked).toEqual([message])
+    expect(seen).toEqual([]) // never reported as missing
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
   it('stops polling once the job is finished or the page unsubscribes', async () => {
     const fetch = vi.fn(() => reply(200, job('PROCESSING')))
     vi.stubGlobal('fetch', fetch)

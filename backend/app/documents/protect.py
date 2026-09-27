@@ -63,4 +63,15 @@ def check_rewrite(original_masked: str, revised_masked: str) -> list[str]:
         problems.append("a new citation appeared outside the locked citations")
     if not revised_masked.strip():
         problems.append("the rewrite is empty")
+    if _notes(revised_masked) > _notes(original_masked):
+        problems.append("an editorial note or placeholder was inserted into the student's text")
     return problems
+
+
+# Brackets and note-like phrases a writer model might leave for the student ("[student to clarify:
+# …]", "[citation needed]", "TODO"). Finished prose never gains these, so any increase is rejected.
+_NOTE = re.compile(r"[\[\]]|\b(?:TODO|TBD|citation needed|insert (?:source|reference|citation))\b|\bclarify:", re.IGNORECASE)
+
+
+def _notes(text: str) -> int:
+    return len(_NOTE.findall(TOKEN.sub(" ", text)))

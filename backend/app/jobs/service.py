@@ -51,17 +51,28 @@ BUILT = ("AI_CHECK", "REFINE", "FORMAT", "TEMPLATE_FORMAT")
 NEEDS_AI = ("AI_CHECK", "REFINE", "TEMPLATE_FORMAT")
 
 
-def availability(settings: Settings) -> dict[str, str]:
-    """"soon" = not built yet; "not_configured" = built, but the AI keys are not set."""
+def availability(settings: Settings, user: "User | None" = None) -> dict[str, str]:
+    """"soon" = not built yet; "not_configured" = built, but the AI keys are not set;
+    "invite_only" = testing is limited to invited testers and this user isn't one."""
     result = {}
     for service in ("AI_CHECK", "REFINE", "FORMAT", "TEMPLATE_FORMAT", "REDRAFT", "LATEX"):
         if service not in BUILT:
             result[service] = "soon"
         elif service in NEEDS_AI and not settings.ai_configured:
             result[service] = "not_configured"
+        elif service in NEEDS_AI and not may_use_ai(settings, user):
+            result[service] = "invite_only"
         else:
             result[service] = "available"
     return result
+
+
+def may_use_ai(settings: Settings, user: "User | None") -> bool:
+    if not settings.tester_emails:
+        return True
+    if user is None:
+        return False
+    return user.is_admin or user.email.lower() in {e.strip().lower() for e in settings.tester_emails}
 DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 
@@ -73,10 +84,10 @@ class User:
     verified: bool = True
 
 
-def public_config(rt: Runtime) -> dict:
+def public_config(rt: Runtime, user: "User | None" = None) -> dict:
     return {
         "paymentsEnabled": rt.settings.payments_enabled,
-        "availability": availability(rt.settings),
+        "availability": availability(rt.settings, user),
         "creditsEnabled": rt.settings.credits_enabled,
         "minTopUpUgx": rt.settings.min_top_up_ugx,
         "ugxPerUsd": rt.settings.ugx_per_usd,
@@ -258,7 +269,7 @@ def request_quote(rt: Runtime, user: User, job_id: str, selection: ServiceSelect
     services = selection.services()
     if not services:
         raise AppError("Choose at least one service.", code="NO_SERVICE")
-    offered = availability(rt.settings)
+    offered = availability(rt.settings, user)
     if any(offered.get(s.value) != "available" for s in services):
         raise AppError("That service is not available right now.", code="SERVICE_UNAVAILABLE")
     if job.source.format == "PDF" and any(s.value != "AI_CHECK" for s in services):
@@ -379,7 +390,7 @@ def submit(rt: Runtime, user: User, job_id: str, quote_id: str) -> JobView:
         raise Conflict("Your quote expired. Request a new one.", code="QUOTE_EXPIRED")
     if job.source is None or job.quote.source_sha256 != job.source.sha256:
         raise Conflict("Your file changed after it was priced. Request a new quote.", code="QUOTE_MISMATCH")
-    if any(availability(rt.settings).get(service.value) != "available" for service in job.quote.selection.services()):
+    if any(availability(rt.settings, user).get(service.value) != "available" for service in job.quote.selection.services()):
         raise AppError("That service is not available right now.", code="SERVICE_UNAVAILABLE")
     if rt.store.count_active(user.uid) >= rt.settings.max_active_jobs_per_user:
         raise LimitExceeded(
@@ -393,7 +404,7 @@ def submit(rt: Runtime, user: User, job_id: str, quote_id: str) -> JobView:
         # Re-checked inside the transaction: a concurrent upload or submit may have changed the job.
         if j.status != JobStatus.QUOTED or j.quote is None or j.quote.id != quote_id or j.source is None or j.quote.source_sha256 != j.source.sha256:
             return None
-        if any(availability(settings).get(service.value) != "available" for service in j.quote.selection.services()):
+        if any(availability(settings, user).get(service.value) != "available" for service in j.quote.selection.services()):
             return None
         if j.quote.guideline_sha256 is not None and (j.guideline is None or j.guideline.sha256 != j.quote.guideline_sha256):
             return None
@@ -548,10 +559,26 @@ def _require(rt: Runtime, job_id: str) -> Job:
     return job
 
 
+def without_paper_text[T: JobView](job: T) -> T:
+    """A copy with every passage of the student's paper removed: finding excerpts and explanations,
+    and before/after text of changes. Counts, bands and rules remain. Used for admin views (support
+    never sees papers) and for jobs past retention (the paper must not outlive its files)."""
+    update: dict = {}
+    for field in ("analysis", "analysis_after"):
+        result = getattr(job, field)
+        if result is not None:
+            findings = [f.model_copy(update={"excerpt": "", "explanation": "", "suggestion": ""}) for f in result.findings]
+            update[field] = result.model_copy(update={"findings": findings})
+    if job.refinement is not None:
+        changes = [c.model_copy(update={"before": "", "after": ""}) for c in job.refinement.changes]
+        update["refinement"] = job.refinement.model_copy(update={"changes": changes})
+    return job.model_copy(update=update)
+
+
 def _admin_view(job: Job) -> AdminJob:
     duration = int((job.completed_at - job.created_at).total_seconds()) if job.completed_at else None
     return AdminJob(
-        job=job.view(),
+        job=without_paper_text(job.view()),
         owner_email=job.owner_email,
         cost_usd=round(job.cost_usd, 6),
         duration_sec=duration,
@@ -657,6 +684,7 @@ def cleanup_expired(rt: Runtime) -> int:
         rt.files.delete_prefix(job.storage_prefix())
 
         def strip_files(j: Job) -> Job:
+            j = without_paper_text(j)
             j.files_deleted = True
             j.events.append(JobEvent(label="Files deleted under retention policy"))
             return j

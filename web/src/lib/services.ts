@@ -11,8 +11,9 @@ interface ServiceInfo {
   untouched: string[]
 }
 
-export const AVAILABILITY_BADGE: Record<Exclude<Availability, 'available'>, string> = { soon: 'Coming soon', not_configured: 'Not set up' }
+export const AVAILABILITY_BADGE: Record<Exclude<Availability, 'available'>, string> = { soon: 'Coming soon', not_configured: 'Not set up', invite_only: 'Invite only' }
 export const NOT_CONFIGURED_REASON = "Unavailable: this server's AI service has not been set up yet."
+export const INVITE_ONLY_REASON = 'Open to invited testers while PaperAid is in testing. Academic formatting is open to everyone.'
 
 // Display copy only. Availability and prices come from the server's public config.
 export const SERVICES: Record<ServiceId, ServiceInfo> = {

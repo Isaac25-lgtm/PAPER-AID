@@ -2,8 +2,9 @@
 // generated from its Pydantic models; until then this file mirrors that plan.
 
 export type ServiceId = 'AI_CHECK' | 'REFINE' | 'FORMAT' | 'TEMPLATE_FORMAT' | 'REDRAFT' | 'LATEX'
-/** soon = not built yet; not_configured = built, but the server's AI keys are not set. */
-export type Availability = 'available' | 'soon' | 'not_configured'
+/** soon = not built yet; not_configured = the server's AI keys are not set; invite_only = testing is
+ *  limited to invited testers and this visitor isn't one (or isn't signed in). */
+export type Availability = 'available' | 'soon' | 'not_configured' | 'invite_only'
 
 export type JobStatus =
   | 'DRAFT'

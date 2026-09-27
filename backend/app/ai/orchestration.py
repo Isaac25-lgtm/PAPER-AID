@@ -37,7 +37,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, StrictBool, ValidationError
 
 from app.ai import costs
 from app.ai.providers import UNAVAILABLE, ModelResult, parse, provider_for
@@ -159,15 +159,17 @@ class _Critique(BaseModel):
     overall: str = ""
 
 
-class _ReviewResult(BaseModel):
+class _ReviewItem(BaseModel):
+    model_config = {"populate_by_name": True}
+
     id: str
-    passed: bool
-    issues: list[str]
+    passed: StrictBool = Field(alias="pass")
+    issues: list[Literal["MEANING_DRIFT", "NUMBER_CHANGED", "CITATION_LOST", "INVENTED_CLAIM", "BROKEN_TRANSITION", "VOICE_SHIFT", "INSTRUCTION_NOT_FOLLOWED"]]
     note: str
 
 
 class _Review(BaseModel):
-    results: list[dict[str, Any]]
+    results: list[_ReviewItem]
 
 
 class _Margins(BaseModel):
@@ -300,9 +302,14 @@ class AIRunner:
         self._heartbeat()
         provider, model = provider_for(model_ref, self.settings)
         prices = self.settings.model_prices
-        estimate = costs.estimate_usd(provider.name, model, len(system) + len(json.dumps(payload)), step.max_tokens, prices)
-        costs.ensure_within_budget(self._spent(), estimate, self._budget)
-        result: ModelResult = provider.json(task, model, system, payload, schema, step.max_tokens)
+        prompt_chars = len(system) + len(json.dumps(payload))
+        spent = self._spent()
+        costs.ensure_within_budget(spent, costs.estimate_usd(provider.name, model, prompt_chars, step.max_tokens, prices), self._budget)
+        # Hard ceiling: never allow more output than the remaining budget can pay for in the worst case.
+        max_tokens = costs.affordable_output_tokens(provider.name, model, prompt_chars, step.max_tokens, self._budget - spent, prices)
+        if max_tokens < min(costs.MIN_OUTPUT_TOKENS, step.max_tokens):
+            costs.ensure_within_budget(spent, float("inf"), self._budget)  # raises BUDGET_EXCEEDED
+        result: ModelResult = provider.json(task, model, system, payload, schema, max_tokens)
         u = result.usage
         self._record(
             ModelCall(
@@ -314,8 +321,9 @@ class AIRunner:
                 input_tokens=u.input_tokens,
                 output_tokens=u.output_tokens,
                 cached_tokens=u.cached_tokens,
+                cache_write_tokens=u.cache_write_tokens,
                 latency_ms=u.latency_ms,
-                cost_usd=costs.cost_usd(result.provider, result.model, u.input_tokens, u.output_tokens, u.cached_tokens, prices),
+                cost_usd=costs.cost_usd(result.provider, result.model, u.input_tokens, u.output_tokens, u.cached_tokens, prices, u.cache_write_tokens),
             )
         )
         if result.stop == "refusal":
@@ -437,10 +445,10 @@ class AIRunner:
         verdicts: dict[str, list[str]] = {}
         ids = {r.id for r in changed}
         for answer in self._batched("review", items, lambda b: {"pairs": b}, _REVIEW, _Review):
-            for raw in answer.results:
-                result = _ReviewResult(id=str(raw.get("id")), passed=bool(raw.get("pass")), issues=list(raw.get("issues") or []), note=str(raw.get("note") or ""))
+            for result in answer.results:
                 if result.id in ids:
-                    verdicts[result.id] = [] if result.passed else (result.issues or ["MEANING_DRIFT"]) + ([f"NOTE: {result.note}"] if result.note else [])
+                    issues: list[str] = list(result.issues) or ["MEANING_DRIFT"]
+                    verdicts[result.id] = [] if result.passed else issues + ([f"NOTE: {result.note}"] if result.note else [])
         for r in changed:  # a passage the reviewer skipped (or that could not fit) is not a pass
             verdicts.setdefault(r.id, ["NOT_REVIEWED"])
         return verdicts

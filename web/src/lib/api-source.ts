@@ -11,8 +11,22 @@ interface Options {
 const TERMINAL = new Set(['COMPLETED', 'FAILED', 'CANCELLED'])
 export const POLL_MS = 2000
 
-export async function fetchPublicConfig(): Promise<PublicConfig> {
-  const res = await fetch('/api/config')
+/** Parses a response body that should be JSON; an HTML error page (a proxy's 413 or 502) is null. */
+function parseJson<T>(text: string): T | null {
+  try {
+    return JSON.parse(text || 'null') as T
+  } catch (e) {
+    if (e instanceof SyntaxError) return null
+    throw e
+  }
+}
+
+const UPLOAD_TIMEOUT_MS = 5 * 60_000
+
+/** Public settings. Sent with the visitor's credentials when signed in, because which services a
+ *  visitor may use can depend on who they are (invited testers). */
+export async function fetchPublicConfig(headers: Record<string, string> = {}): Promise<PublicConfig> {
+  const res = await fetch('/api/config', { headers })
   if (!res.ok) throw new DataError('PaperAid is unavailable right now. Please try again shortly.')
   return (await res.json()) as PublicConfig
 }
@@ -44,7 +58,7 @@ export function createApiSource({ config, getAuthHeaders }: Options): DataSource
     listJobs: (q: JobQuery) =>
       request<Page<Job>>(`/api/jobs${query({ status: q.status, service: q.service, cursor: q.cursor, limit: q.limit })}`),
 
-    watchJob(jobId, onChange) {
+    watchJob(jobId, onChange, onBlocked) {
       let stopped = false
       let failures = 0
       let timer: ReturnType<typeof setTimeout>
@@ -58,6 +72,7 @@ export function createApiSource({ config, getAuthHeaders }: Options): DataSource
         } catch (err) {
           if (stopped) return
           if (err instanceof DataError && err.status === 404) return onChange(null) // truly missing, or not yours
+          if (err instanceof DataError && (err.status === 401 || err.status === 403)) return onBlocked?.(err.message) // retrying won't help
           failures += 1 // a blip (network, restart, 5xx): keep the last known state and try again
           timer = setTimeout(tick, Math.min(POLL_MS * 2 ** failures, 15_000))
         }
@@ -78,13 +93,22 @@ export function createApiSource({ config, getAuthHeaders }: Options): DataSource
         xhr.open('POST', `/api/jobs/${draftId}/files/${role}`)
         for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v)
         xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(Math.round((e.loaded / e.total) * 95))
+        xhr.timeout = UPLOAD_TIMEOUT_MS
         xhr.onerror = () => reject(new DataError('The upload failed. Check your connection and try again.'))
+        xhr.ontimeout = () => reject(new DataError('The upload took too long. Check your connection and try again.'))
+        xhr.onabort = () => reject(new DataError('The upload was interrupted. Try again.'))
         xhr.onload = () => {
-          const body = JSON.parse(xhr.responseText || 'null') as (FileMeta & { message?: string }) | null
+          const body = parseJson<FileMeta & { message?: string }>(xhr.responseText)
           if (xhr.status >= 200 && xhr.status < 300 && body) {
             onProgress(100)
             resolve(body)
-          } else reject(new DataError(body?.message ?? 'The upload failed. Try again.'))
+          } else
+            reject(
+              new DataError(
+                body?.message ?? (xhr.status === 413 ? 'This file is too large to upload.' : 'The upload failed. Try again in a moment.'),
+                xhr.status,
+              ),
+            )
         }
         const form = new FormData()
         form.append('file', file)

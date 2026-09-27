@@ -17,8 +17,16 @@ const appCheck = env.VITE_APPCHECK_SITE_KEY
   ? initializeAppCheck(app, { provider: new ReCaptchaEnterpriseProvider(env.VITE_APPCHECK_SITE_KEY), isTokenAutoRefreshEnabled: true })
   : null
 
+/** The App Check token for the next request, or null when none could be obtained (for example when
+ *  reCAPTCHA is throttling this browser). The request then goes out without one and the server
+ *  answers with its clear "could not be verified, refresh the page" message instead of the browser
+ *  reporting a connection failure. */
 export async function appCheckToken(): Promise<string | null> {
-  return appCheck ? (await getToken(appCheck)).token : null
+  if (!appCheck) return null
+  return getToken(appCheck).then(
+    (result) => result.token,
+    () => null,
+  )
 }
 
 export {

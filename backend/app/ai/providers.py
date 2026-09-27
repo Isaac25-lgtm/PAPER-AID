@@ -17,10 +17,11 @@ AI_NOT_CONFIGURED = "AI not configured. This job could not run."
 
 @dataclass
 class Usage:
-    input_tokens: int  # uncached input
+    input_tokens: int  # uncached input, excluding cache writes
     output_tokens: int
-    cached_tokens: int
+    cached_tokens: int  # cache reads
     latency_ms: int
+    cache_write_tokens: int = 0  # input written to the prompt cache (billed at 1.25x input)
 
 
 @dataclass
@@ -87,9 +88,10 @@ class AnthropicProvider:
             text=text,
             stop=response.stop_reason if response.stop_reason in ("max_tokens", "refusal") else "end_turn",
             usage=Usage(
-                input_tokens=usage.input_tokens + (usage.cache_creation_input_tokens or 0),
+                input_tokens=usage.input_tokens,
                 output_tokens=usage.output_tokens,
                 cached_tokens=usage.cache_read_input_tokens or 0,
+                cache_write_tokens=usage.cache_creation_input_tokens or 0,
                 latency_ms=int((time.monotonic() - started) * 1000),
             ),
             provider=self.name,
@@ -128,7 +130,9 @@ class OpenAIProvider:
                 raise RetryableStageError("PROVIDER_UNAVAILABLE", UNAVAILABLE, f"openai {exc.status_code}") from exc
             raise PermanentStageError("PROVIDER_REJECTED", "We couldn't process this document.", f"openai {exc.status_code}") from exc
         usage = response.usage
-        cached = getattr(getattr(usage, "input_tokens_details", None), "cached_tokens", 0) or 0
+        details = getattr(usage, "input_tokens_details", None)
+        cached = getattr(details, "cached_tokens", 0) or 0
+        written = getattr(details, "cache_write_tokens", 0) or 0  # input_tokens includes both
         incomplete = getattr(getattr(response, "incomplete_details", None), "reason", None)
         # A structured-output refusal arrives as a "refusal" content part, not as text: it must end
         # the job's AI step, not be parsed as empty JSON and retried (and paid for) again.
@@ -139,9 +143,10 @@ class OpenAIProvider:
             text=response.output_text,
             stop="max_tokens" if incomplete == "max_output_tokens" else "refusal" if refused else "end_turn",
             usage=Usage(
-                input_tokens=(usage.input_tokens if usage else 0) - cached,
+                input_tokens=(usage.input_tokens if usage else 0) - cached - written,
                 output_tokens=usage.output_tokens if usage else 0,
                 cached_tokens=cached,
+                cache_write_tokens=written,
                 latency_ms=int((time.monotonic() - started) * 1000),
             ),
             provider=self.name,

@@ -11,4 +11,4 @@ Fail a rewrite ("pass": false) if it does any of the following:
 - VOICE_SHIFT: changes register or perspective in a way the student would not recognise as theirs.
 - INSTRUCTION_NOT_FOLLOWED: ignores or contradicts the agreed instruction.
 
-Style differences alone are not failures. Return every passage by id with "pass", the issue codes, and a "note" (under 30 words) that tells the writing editor exactly what to fix when it fails.
+Style differences alone are not failures. Finished prose may never contain notes, flags, questions or placeholders for the student, so never fail a rewrite for not adding them, even if the instruction asked for one; judge only the parts of the instruction that can be carried out in prose. Return every passage by id with "pass", the issue codes, and a "note" (under 30 words) that tells the writing editor exactly what to fix when it fails.

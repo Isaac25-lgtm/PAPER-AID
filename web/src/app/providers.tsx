@@ -16,21 +16,25 @@ function Splash({ children }: { children: ReactNode }) {
 }
 
 function DataProvider({ children }: { children: ReactNode }) {
-  const { getAuthHeaders, ready } = useAuth()
+  const { getAuthHeaders, ready, user } = useAuth()
+  const uid = user?.uid
   const [config, setConfig] = useState<PublicConfig | null>(null)
   const [failed, setFailed] = useState(false)
   const [attempt, setAttempt] = useState(0)
 
+  // Fetched again whenever the signed-in user changes: availability can depend on who they are.
   useEffect(() => {
+    if (!ready) return
     let cancelled = false
     setFailed(false)
-    fetchPublicConfig()
+    getAuthHeaders()
+      .then((headers) => fetchPublicConfig(uid ? headers : {}))
       .then((c) => !cancelled && setConfig(c))
       .catch(() => !cancelled && setFailed(true))
     return () => {
       cancelled = true
     }
-  }, [attempt])
+  }, [attempt, ready, uid, getAuthHeaders])
 
   const source = useMemo(() => (config ? createApiSource({ config, getAuthHeaders }) : null), [config, getAuthHeaders])
 

@@ -478,3 +478,79 @@ def test_every_paid_call_renews_the_lease_first(monkeypatch):
     runner = AIRunner(real_settings(), lambda c: None, lambda: 0.0, 5.0, heartbeat=lambda: beats.append(len(scripted.calls)))
     runner.refine([Target("b1", "S", "Text.")], [])
     assert beats == [0]  # called before the provider, once per paid call
+
+
+def test_review_verdicts_are_parsed_strictly(monkeypatch):
+    """A string "false" must never count as a pass (it did with bool())."""
+    scripted = ScriptedProvider({"review": [{"results": [{"id": "b1", "pass": "false", "issues": [], "note": ""}]}]})
+    runner, _ = runner_with(monkeypatch, scripted)
+    with pytest.raises(RetryableStageError):
+        runner.review([Revision("b1", "Original text.", "Rewritten text.", [])], {})
+
+
+# --- spend accuracy and the hard ceiling (Codex audit findings 2 and 5) --------------------------
+
+
+def test_cache_writes_are_priced_at_their_own_rate():
+    from app.ai import costs
+
+    # 1,000 cache-write tokens: Claude Opus 5.5 $4/M x 1.25, GPT-6 Sol $2/M x 1.25
+    assert costs.cost_usd("anthropic", "claude-opus-5-5", 0, 0, 0, cache_write_tokens=1000) == pytest.approx(0.005)
+    assert costs.cost_usd("openai", "gpt-6-sol", 0, 0, 0, cache_write_tokens=1000) == pytest.approx(0.0025)
+
+
+def test_adapters_report_cache_writes_separately(monkeypatch):
+    anthropic = AnthropicProvider(real_settings())
+    response = anthropic_response({"blocks": []})
+    response.usage = SimpleNamespace(input_tokens=200, output_tokens=50, cache_read_input_tokens=300, cache_creation_input_tokens=1000)
+    monkeypatch.setattr(anthropic._client.messages, "create", lambda **_: response)
+    u = anthropic.json("refine", "claude-opus-5-5", "s", {}, {"type": "object"}, 100).usage
+    assert (u.input_tokens, u.cache_write_tokens, u.cached_tokens) == (200, 1000, 300)
+
+    openai = OpenAIProvider(real_settings())
+    reply = SimpleNamespace(
+        incomplete_details=None,
+        output_text="{}",
+        output=[],
+        usage=SimpleNamespace(input_tokens=1500, output_tokens=50, input_tokens_details=SimpleNamespace(cached_tokens=300, cache_write_tokens=1000)),
+    )
+    monkeypatch.setattr(openai._client.responses, "create", lambda **_: reply)
+    u = openai.json("review", "gpt-6-sol", "s", {}, {"type": "object"}, 100).usage
+    assert (u.input_tokens, u.cache_write_tokens, u.cached_tokens) == (200, 1000, 300)
+
+
+def test_the_spend_cap_is_a_hard_ceiling(monkeypatch):
+    """Codex's case: a small job with a $0.05 cap must not be allowed a response that costs $0.12."""
+    sent = {}
+
+    class Recording(ScriptedProvider):
+        name = "openai"  # priced at GPT-6 Sol's real rates
+
+        def json(self, task, model, system, payload, schema, max_tokens):
+            sent["max_tokens"] = max_tokens
+            result = super().json(task, model, system, payload, schema, max_tokens)
+            result.model = "gpt-6-sol"
+            return result
+
+    scripted = Recording({"analyse": [{"blocks": []}]})
+    monkeypatch.setattr(orchestration, "provider_for", lambda ref, settings: (scripted, "gpt-6-sol"))
+    settings = real_settings()
+    runner = AIRunner(settings, lambda c: None, lambda: 0.0, 0.05)
+    runner.analyse([("b1", "A short paragraph of about twenty words that needs a quick look from the lead model before pricing.")], [])
+    from app.ai import costs
+
+    worst = costs.cost_usd("openai", "gpt-6-sol", 0, sent["max_tokens"], 0)
+    assert sent["max_tokens"] < 12000 and worst < 0.05  # output was limited to what the budget can pay
+
+
+def test_a_call_the_budget_cannot_afford_is_never_made(monkeypatch):
+    class PricedScripted(ScriptedProvider):
+        name = "openai"
+
+    scripted = PricedScripted({"analyse": [{"blocks": []}]})
+    monkeypatch.setattr(orchestration, "provider_for", lambda ref, settings: (scripted, "gpt-6-sol"))
+    calls = []
+    runner = AIRunner(real_settings(), calls.append, lambda: 0.0, 0.0005)
+    with pytest.raises(PermanentStageError) as err:
+        runner.analyse([("b1", "Text " * 50)], [])
+    assert err.value.code == "BUDGET_EXCEEDED" and calls == [] and scripted.calls == []

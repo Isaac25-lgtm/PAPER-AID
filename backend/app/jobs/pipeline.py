@@ -467,6 +467,8 @@ def stage_auditing(ctx: StageContext) -> None:
     runner = ctx.ai()
     missing = [r for r in revisions if NOT_RETURNED in r.problems]
     changed = [r for r in revisions if r.revised != r.original]
+    # The writer returned the passage untouched: it found no safe improvement. Reported as kept.
+    unchanged = [r for r in revisions if r.revised == r.original and NOT_RETURNED not in r.problems]
 
     verdicts = runner.review(changed, instructions) if changed else {}
     failed = {r.id: (r.problems or verdicts.get(r.id, [])) for r in changed if r.problems or verdicts.get(r.id)}
@@ -487,7 +489,7 @@ def stage_auditing(ctx: StageContext) -> None:
         failed = {r.id: (r.problems or second.get(r.id, [])) for r in repaired if r.problems or second.get(r.id) or r.revised == r.original}
 
     accepted = [r for r in changed if r.id not in failed]
-    kept = [r for r in changed if r.id in failed] + missing
+    kept = [r for r in changed if r.id in failed] + missing + unchanged
     for r in kept:
         issues = failed.get(r.id, [])
         notes[r.id] = "Kept your original: " + (
@@ -495,15 +497,10 @@ def stage_auditing(ctx: StageContext) -> None:
             if issues
             else "we could not produce a safe improvement for this passage."
         )
-    attempted = len(changed) + len(missing)
-    if attempted >= 3 and len(kept) / attempted > settings.max_failed_share:
-        raise PermanentStageError(
-            "QUALITY_CHECK_FAILED",
-            "Our accuracy check could not verify enough of the changes, so we stopped rather than give you an altered paper. You have not been charged.",
-            f"kept={len(kept)} attempted={attempted}",
-        )
+    # Owner decision 2026-09-27: verified rewrites are always delivered; passages that could not be
+    # verified keep the student's wording and the job is PARTIAL. It never fails for that reason.
 
-    shown = changed + missing
+    shown = changed + missing + unchanged
     kept_ids = {r.id for r in kept}
     originals = {r.id: protect.mask(blocks[r.id].masked or "")[1] for r in shown}
     source = ctx.rt.files.get(ctx.job.source.path)  # type: ignore[union-attr]
@@ -535,8 +532,10 @@ def stage_auditing(ctx: StageContext) -> None:
         method=_method(ctx, "refinement"),
     )
     warnings = []
-    if kept:
-        warnings.append(f"{len(kept)} passage(s) kept their original wording because we couldn't produce a rewrite we could verify kept every figure, citation and meaning.")
+    if kept and accepted:
+        warnings.append(f"{len(kept)} of {len(shown)} passages kept their original wording because we couldn't produce a rewrite we could verify kept every figure, citation and meaning.")
+    elif kept:
+        warnings.append(f"None of the {len(shown)} flagged passages could be improved in a way we could verify, so your wording is unchanged. You are charged only for the analysis.")
     if not shown:
         warnings.append("No passages needed refinement under the selected intensity, so your wording is unchanged.")
 

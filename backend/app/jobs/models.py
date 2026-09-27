@@ -289,6 +289,7 @@ class ModelCall(Camel):
     input_tokens: int
     output_tokens: int
     cached_tokens: int
+    cache_write_tokens: int = 0
     latency_ms: int
     cost_usd: float
     at: datetime = Field(default_factory=utcnow)

@@ -36,7 +36,9 @@ export class DataError extends Error {
 export interface DataSource {
   config: PublicConfig
   listJobs(query: JobQuery): Promise<Page<Job>>
-  watchJob(jobId: string, onChange: (job: Job | null) => void): () => void
+  /** Polls a job. `onBlocked` receives the server's message when the request is refused (signed out,
+   *  or App Check could not verify the browser); polling then stops until the page is refreshed. */
+  watchJob(jobId: string, onChange: (job: Job | null) => void, onBlocked?: (message: string) => void): () => void
   createDraft(): Promise<string>
   uploadFile(draftId: string, role: FileRole, file: File, onProgress: (pct: number) => void): Promise<FileMeta>
   /** Detaches the formatting guide on the server and clears any quote that priced it. */

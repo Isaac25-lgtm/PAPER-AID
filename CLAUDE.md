@@ -19,6 +19,7 @@ Students upload a paper, choose a service, see a server-calculated quote, and la
 - Never log paper text, prompts containing paper text, secrets or signed URLs.
 - Hide unfinished services through config. Never ship a control that only partly works.
 - No placeholders in the product: no stand-in AI, fake results, invented prices or fake sign-in. What can't really work yet is shown as unavailable. Test stand-ins live only in `backend/tests/`.
+- The roadmap for the intelligence layer is `PaperAid_Revised_AI_Algorithm_Claude_Context_and_Research_Architecture.md`, as amended by "Revised AI algorithm adopted" in `docs/decisions.md` (the amendments win).
 - The AI flow is fixed (see "The permanent algorithm" in `docs/decisions.md`): the lead model (GPT-6 Sol) analyses, plans, finalises and reviews; the writer (Claude Opus 5.5) critiques, rewrites and fixes; there are at most 2 fix rounds. University templates run the same loop over formatting rules. The step-to-role map is `STEPS` in `app/ai/orchestration.py`. Don't add a step or swap roles without an owner decision.
 - Keep the app runnable after every change: `cd web && npm run dev` must keep working.
 

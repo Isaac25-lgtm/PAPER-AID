@@ -3,10 +3,11 @@ import { Check, Flag, Lock } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { LogoMark } from '../../components/layout/logo'
 
-// A live product preview: PaperAid scans a paragraph, raises suggestions, and a ghost cursor
-// accepts them while the rewrite types itself in. Built from real components rather than a
-// video so it stays crisp at every size. It only ever rewrites phrasing and flags the vague
-// claim for the student to source, exactly as the product does; it never invents facts.
+// A live product preview: PaperAid scans a paragraph, raises findings, then works through them
+// itself while each rewrite types in; the student reviews the changes and the report afterwards.
+// Built from real components rather than a video so it stays crisp at every size. It only ever
+// rewrites phrasing and leaves the vague claim for the student to source (it goes in the report,
+// never into the paper), exactly as the product does; it never invents facts.
 
 interface Suggestion {
   title: string
@@ -27,7 +28,7 @@ const SUGGESTIONS: Suggestion[] = [
     mark: 'bg-amber-100',
     open: 'bg-amber-50 ring-amber-300',
     proposal: 'Social media is now part of students’ daily routine.',
-    action: 'Accept',
+    action: 'Rewrite',
   },
   {
     title: 'Formulaic transition',
@@ -36,7 +37,7 @@ const SUGGESTIONS: Suggestion[] = [
     mark: 'bg-violet-100',
     open: 'bg-violet-50 ring-violet-300',
     proposal: 'The same apps also pull attention away from study',
-    action: 'Accept',
+    action: 'Rewrite',
   },
   {
     title: 'Vague claim',
@@ -45,7 +46,7 @@ const SUGGESTIONS: Suggestion[] = [
     mark: 'bg-sky-100',
     open: 'bg-sky-50 ring-sky-300',
     note: 'PaperAid never invents sources. This one is yours to add.',
-    action: 'Got it',
+    action: 'Add to report',
   },
   { title: 'Heading levels', body: 'Two headings typed as bold text.', dot: 'bg-brand-500', mark: '', open: '' },
 ]
@@ -310,7 +311,7 @@ export function HeroPreview() {
                         <span className={clsx('size-2 rounded-full', s.dot)} />
                       )}
                       {s.title}
-                      {isDone && <span className="ml-auto text-[10px] font-medium text-fg-subtle">{i === 2 ? 'Flagged' : 'Fixed'}</span>}
+                      {isDone && <span className="ml-auto text-[10px] font-medium text-fg-subtle">{i === 2 ? 'In report' : 'Rewritten'}</span>}
                     </p>
                     <p className="mt-0.5 pl-3.5 text-[11px] text-fg-muted">{s.body}</p>
                     {isOpen && (
@@ -375,7 +376,7 @@ export function HeroPreview() {
             <path d="M4 2.5 19.5 11l-6.8 1.9L9.4 19.6Z" fill="#12261c" stroke="#fff" strokeWidth="1.6" strokeLinejoin="round" />
           </svg>
           <span className="absolute top-4 left-4 rounded-full bg-brand-700 px-1.5 py-0.5 text-[9px] font-semibold whitespace-nowrap text-white shadow-card">
-            You
+            PaperAid
           </span>
         </div>
       </div>

@@ -16,10 +16,24 @@ const isTerminal = (j: Job) => j.status === 'COMPLETED' || j.status === 'FAILED'
 
 export function JobPage() {
   const { jobId = '' } = useParams()
-  const { job, loading } = useJob(jobId)
+  const { job, loading, blocked } = useJob(jobId)
   useTitle(job?.source.name ?? 'Job')
 
   if (loading) return <JobSkeleton />
+  if (blocked)
+    return (
+      <Alert
+        tone="warning"
+        title="We couldn't load this job"
+        action={
+          <Button size="sm" variant="secondary" onClick={() => window.location.reload()}>
+            Refresh the page
+          </Button>
+        }
+      >
+        {blocked}
+      </Alert>
+    )
   if (!job)
     return (
       <EmptyState icon={<FileSearch className="size-5" />} title="We couldn't find this job" action={<ButtonLink to="/app">Back to dashboard</ButtonLink>}>

@@ -731,3 +731,88 @@ def test_testing_mode_runs_every_service_without_credits(client, monkeypatch):
     assert job["status"] == "COMPLETED" and job["paymentStatus"] == "NOT_REQUIRED" and job["billing"]["state"] == "NONE"
     wallet = _wallet(client, headers)
     assert (wallet["available"], wallet["held"], wallet["entries"]) == (0, 0, [])
+
+
+def test_ai_services_are_invite_only_while_a_tester_list_is_set(client, monkeypatch):
+    """Owner decision 2026-09-25: a public link must not spend the AI budget during testing."""
+    from app.runtime import get_runtime
+
+    monkeypatch.setattr(get_runtime().settings, "tester_emails", ["student@example.com"])
+    outsider = {"Authorization": "Dev stranger@example.com"}
+    grant("stranger@example.com", 100_000)
+    assert client.get("/api/config").json()["availability"]["REFINE"] == "invite_only"  # anonymous visitor
+    assert client.get("/api/config", headers=outsider).json()["availability"]["AI_CHECK"] == "invite_only"
+    tester_view = client.get("/api/config", headers=STUDENT).json()["availability"]
+    assert tester_view["REFINE"] == "available" and tester_view["FORMAT"] == "available"
+    assert client.get("/api/config", headers=ADMIN).json()["availability"]["REFINE"] == "available"
+    assert client.get("/api/config", headers={"Authorization": "Dev not-an-email"}).status_code == 200  # bad credential = anonymous
+    job_id = client.post("/api/jobs", headers=outsider).json()["id"]
+    _upload_as = client.post(f"/api/jobs/{job_id}/files/source", headers=outsider, files={"file": ("e.docx", fixture_bytes("simple_essay.docx"), "application/octet-stream")})
+    assert _upload_as.status_code == 200
+    refused = client.post(f"/api/jobs/{job_id}/quote", headers=outsider, json={"selection": {"writing": "AI_CHECK"}})
+    assert refused.status_code == 400 and refused.json()["code"] == "SERVICE_UNAVAILABLE"
+    allowed = client.post(f"/api/jobs/{job_id}/quote", headers=outsider, json={"selection": {"formatting": "FORMAT", "preset": "apa7"}})
+    assert allowed.status_code == 200  # formatting uses no AI, so it stays open to everyone
+
+
+# --- partial results (owner decision 2026-09-27) ------------------------------------------------
+
+
+def _review_failing(ids_to_fail):
+    def review(payload):
+        return {"results": [{"id": p["id"], "pass": p["id"] not in ids_to_fail, "issues": [] if p["id"] not in ids_to_fail else ["MEANING_DRIFT"], "note": ""} for p in payload["pairs"]]}
+
+    return review
+
+
+def test_verified_rewrites_are_delivered_when_others_fail(client):
+    seen = []
+
+    def review(payload):
+        ids = [p["id"] for p in payload["pairs"]]
+        seen.append(ids)
+        return _review_failing(set(ids[: max(1, len(ids) // 2)]))(payload)  # reject half, every round
+
+    client.models.overrides["review"] = review
+    _, job = _submit(client, REFINE_FORMAT)
+    r = job["refinement"]
+    assert job["status"] == "COMPLETED" and job["outcome"] == "PARTIAL"
+    assert r["refinedBlocks"] >= 1 and r["keptOriginal"] >= 1  # good work kept, doubtful work reverted
+    assert any("kept their original wording" in w for w in job["warnings"])
+
+
+def test_nothing_verified_still_completes_with_the_original_wording(client):
+    client.models.overrides["review"] = lambda payload: _review_failing({p["id"] for p in payload["pairs"]})(payload)
+    _, job = _submit(client, REFINE_FORMAT)
+    assert job["status"] == "COMPLETED" and job["outcome"] == "PARTIAL"
+    assert job["refinement"]["refinedBlocks"] == 0
+    assert any("None of the" in w for w in job["warnings"])
+
+
+def test_unchanged_writer_responses_count_as_kept(client):
+    client.models.overrides["refine"] = lambda payload: {"blocks": [{"id": b["id"], "text": b["text"]} for b in payload["blocks"]]}
+    _, job = _submit(client, REFINE_FORMAT)
+    r = job["refinement"]
+    assert r["refinedBlocks"] == 0 and r["keptOriginal"] == r["targetedBlocks"] > 0
+    assert "No passages needed refinement" not in " ".join(job["warnings"])
+
+
+def test_admins_never_receive_paper_text_and_expiry_purges_it(client):
+    """Codex audit finding 1: the privacy page promises support can't see papers."""
+    from datetime import timedelta
+
+    from app.jobs import service
+    from app.jobs.models import utcnow
+    from app.runtime import get_runtime
+
+    job_id, job = _submit(client, REFINE_FORMAT)
+    assert job["refinement"]["changes"] and job["refinement"]["changes"][0]["before"]  # the student sees their passages
+    admin = client.get(f"/api/admin/jobs/{job_id}", headers=ADMIN).json()["job"]
+    assert all(c["before"] == c["after"] == "" for c in admin["refinement"]["changes"])
+    assert all(f["excerpt"] == "" for f in admin["analysis"]["findings"])
+    rt = get_runtime()
+    rt.store.update(job_id, lambda j: j.model_copy(update={"expires_at": utcnow() - timedelta(days=1)}))
+    assert service.cleanup_expired(rt) == 1
+    expired = client.get(f"/api/jobs/{job_id}", headers=STUDENT).json()
+    assert all(c["before"] == "" for c in expired["refinement"]["changes"])
+    assert all(f["excerpt"] == "" for f in expired["analysis"]["findings"])

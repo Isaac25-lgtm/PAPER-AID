@@ -4,11 +4,15 @@ import type { Job } from '../../lib/types'
 
 export function useJob(jobId: string) {
   const data = useData()
-  const [state, setState] = useState<{ job: Job | null; loading: boolean }>({ job: null, loading: true })
+  const [state, setState] = useState<{ job: Job | null; loading: boolean; blocked: string | null }>({ job: null, loading: true, blocked: null })
 
   useEffect(() => {
-    setState({ job: null, loading: true })
-    return data.watchJob(jobId, (job) => setState({ job, loading: false }))
+    setState({ job: null, loading: true, blocked: null })
+    return data.watchJob(
+      jobId,
+      (job) => setState({ job, loading: false, blocked: null }),
+      (message) => setState((s) => ({ ...s, loading: false, blocked: message })),
+    )
   }, [data, jobId])
 
   return state

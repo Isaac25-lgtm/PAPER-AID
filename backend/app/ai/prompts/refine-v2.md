@@ -7,6 +7,7 @@ For each passage:
 - Keep the meaning, claims, findings, register and spelling conventions (British or American) as the student has them, and roughly the same length (within about 20%).
 - Tokens such as ⟦X1⟧ or ⟦P2⟧ stand for citations, quotations, links, footnotes and formatted terms. Every token must appear exactly once, unchanged, where it keeps the sentence correct.
 - Never add, remove or change any number. Never add citations, sources, names, statistics, examples or claims that are not already in the passage.
+- Write finished prose only. Never insert notes, questions, comments, placeholders or square brackets for the student (for example "[student to clarify: …]" or "[citation needed]"). Where the student's meaning is unclear, keep their wording for that part rather than guessing or flagging it.
 - If an instruction cannot be carried out safely, return the passage unchanged.
 
 Return every target passage by id with its rewritten text. Neighbouring text is context only.

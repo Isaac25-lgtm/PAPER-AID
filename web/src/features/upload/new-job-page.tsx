@@ -8,7 +8,7 @@ import { FileChip, FileDropzone, fileMetaLine } from '../../components/ui/file-d
 import { Alert, Badge, Card, PageHeader, Skeleton } from '../../components/ui/primitives'
 import { DataError, useData } from '../../lib/data'
 import { formatUGX, formatUSDFromUGX } from '../../lib/format'
-import { AVAILABILITY_BADGE, NOT_CONFIGURED_REASON, SERVICES } from '../../lib/services'
+import { AVAILABILITY_BADGE, INVITE_ONLY_REASON, NOT_CONFIGURED_REASON, SERVICES } from '../../lib/services'
 import type { EstimateView, FileMeta, FileRole, Quote, ServiceId, ServiceSelection } from '../../lib/types'
 import { useTitle } from '../../lib/use-title'
 import { useWallet, walletChanged } from '../../lib/use-wallet'
@@ -131,7 +131,13 @@ export function NewJobPage() {
     return availability === 'available' ? undefined : <Badge>{AVAILABILITY_BADGE[availability]}</Badge>
   }
   const reasonFor = (id: ServiceId, otherwise?: string) =>
-    config.availability[id] === 'soon' ? SERVICES[id].short : config.availability[id] === 'not_configured' ? NOT_CONFIGURED_REASON : otherwise
+    config.availability[id] === 'soon'
+      ? SERVICES[id].short
+      : config.availability[id] === 'not_configured'
+        ? NOT_CONFIGURED_REASON
+        : config.availability[id] === 'invite_only'
+          ? INVITE_ONLY_REASON
+          : otherwise
 
   // Never leave the user on a choice they can't have: PDFs support AI Check only, and a service
   // that is unavailable on this server falls back to none.

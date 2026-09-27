@@ -55,6 +55,17 @@ def current_user(request: Request, settings: Settings = Depends(get_settings)) -
     return User(uid=claims["uid"], email=claims.get("email", ""), is_admin=claims.get("admin") is True, verified=bool(claims.get("email_verified")))
 
 
+def optional_user(request: Request, settings: Settings = Depends(get_settings)) -> User | None:
+    """The signed-in user when the request carries a valid credential, otherwise None. For public
+    endpoints that personalise their answer (such as which services this visitor may use)."""
+    if not request.headers.get("authorization"):
+        return None
+    try:
+        return current_user(request, settings)
+    except Unauthorized:
+        return None
+
+
 def require_admin(user: User = Depends(current_user)) -> User:
     if not user.is_admin:
         raise Forbidden("You do not have access to this page.")
