@@ -22,6 +22,10 @@ from app.jobs.models import BoundQuote, Engine, Passage, QuoteLine, ServiceSelec
 PRICING_VERSION = "credits-v1"
 CHARS_PER_WORD = 6.5  # prose plus JSON framing, measured on the fixture papers
 ITEM_OVERHEAD = 160  # ids, keys and instructions around each passage in a payload
+SIGNAL_CHARS = 250  # PaperAid's measurements travelling with each passage to the analysis
+BUNDLE_CHARS = 2500  # the document-level evidence bundle, sent with every analysis batch
+BRIEF_CHARS = 800  # the student's style and intervention level, sent with every planning/writing batch
+REVIEW_CONTEXT_CHARS = 1600  # neighbours, linked passages and the post-scan sent with each reviewed rewrite
 
 
 def round_up(ugx: float) -> int:
@@ -51,8 +55,14 @@ def _step_usd(settings: Settings, task: str, payload_chars: float, words: float)
 # --- projections (USD of provider spend) ------------------------------------------------------
 
 
+def _batches_for(words: float) -> int:
+    return max(1, math.ceil(words / BATCH_WORDS))
+
+
 def analysis_usd(settings: Settings, words: int) -> float:
-    return _step_usd(settings, "analyse", words * CHARS_PER_WORD + ITEM_OVERHEAD * max(1, words // 120), words)
+    passages = max(1, words // 120)
+    payload = words * CHARS_PER_WORD + (ITEM_OVERHEAD + SIGNAL_CHARS) * passages + BUNDLE_CHARS * _batches_for(words)
+    return _step_usd(settings, "analyse", payload, words)
 
 
 def estimate_scan_usd(settings: Settings, words: int, intensity: str) -> float:
@@ -60,7 +70,7 @@ def estimate_scan_usd(settings: Settings, words: int, intensity: str) -> float:
     its draft plan for the share of the paper that intensity allows."""
     share = 0.25 if intensity == "LIGHT" else 0.5
     planned_words = max(150, share * words)
-    plan = _step_usd(settings, "plan", planned_words * CHARS_PER_WORD * 1.4, planned_words)
+    plan = _step_usd(settings, "plan", planned_words * CHARS_PER_WORD * 1.4 + BRIEF_CHARS * _batches_for(planned_words), planned_words)
     return analysis_usd(settings, words) + plan
 
 
@@ -74,14 +84,17 @@ def refinement_usd(settings: Settings, passages: list[Passage]) -> float:
     rewrites = [p for p in passages if p.rewrite]
     rw_chars = sum(p.chars for p in rewrites)
     rw_words = sum(p.words for p in rewrites)
-    usd = _step_usd(settings, "critique", all_chars, all_words)
-    usd += _step_usd(settings, "finalise", all_chars + 250 * len(passages), all_words)
+    brief = BRIEF_CHARS * _batches_for(all_words)
+    usd = _step_usd(settings, "critique", all_chars + brief, all_words)
+    usd += _step_usd(settings, "finalise", all_chars + 250 * len(passages) + brief, all_words)
     if rewrites:
         n = len(rewrites)
-        usd += _step_usd(settings, "refine", rw_chars + n * (800 + 200 + ITEM_OVERHEAD), rw_words)
-        usd += _step_usd(settings, "review", 2 * rw_chars + n * (200 + ITEM_OVERHEAD), 2 * rw_words)
-        usd += _step_usd(settings, "repair", 2 * rw_chars + n * (400 + ITEM_OVERHEAD), rw_words)
-        usd += _step_usd(settings, "review", 2 * rw_chars + n * (200 + ITEM_OVERHEAD), 2 * rw_words)
+        review_words = 2 * rw_words + n * REVIEW_CONTEXT_CHARS / CHARS_PER_WORD  # context counts toward batch size
+        review_chars = 2 * rw_chars + n * (200 + ITEM_OVERHEAD + REVIEW_CONTEXT_CHARS) + BRIEF_CHARS * _batches_for(review_words)
+        usd += _step_usd(settings, "refine", rw_chars + n * (800 + 200 + ITEM_OVERHEAD) + BRIEF_CHARS * _batches_for(rw_words), rw_words)
+        usd += _step_usd(settings, "review", review_chars, review_words)
+        usd += _step_usd(settings, "repair", 2 * rw_chars + n * (400 + ITEM_OVERHEAD) + BRIEF_CHARS * _batches_for(rw_words), rw_words)
+        usd += _step_usd(settings, "review", review_chars, review_words)
     return usd
 
 

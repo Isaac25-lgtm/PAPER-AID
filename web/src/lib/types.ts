@@ -32,9 +32,12 @@ export interface FileMeta {
   headingCount: number
 }
 
+export type WritingStyle = 'PRESERVE_VOICE' | 'STANDARD_ACADEMIC' | 'CONCISE_ACADEMIC' | 'TECHNICAL'
+
 export interface ServiceSelection {
   writing: 'NONE' | 'AI_CHECK' | 'REFINE' | 'REDRAFT'
   intensity: Intensity
+  style: WritingStyle
   formatting: 'NONE' | 'FORMAT' | 'TEMPLATE_FORMAT'
   preset: string
   latex: boolean
@@ -116,6 +119,8 @@ export type ReasonCode =
   | 'FORMULAIC_TRANSITIONS'
   | 'OVER_HEDGING'
   | 'UNSUPPORTED_SUMMARY'
+  | 'REPETITION'
+  | 'STYLE_SHIFT'
 
 export interface Finding {
   id: string
@@ -198,6 +203,7 @@ export interface Job {
   warnings: string[]
   analysis: AnalysisResult | null
   analysisAfter: AnalysisResult | null
+  paperChecks: PaperChecks | null
   refinement: RefinementResult | null
   formatting: FormattingResult | null
   outputs: OutputFile[]
@@ -206,6 +212,22 @@ export interface Job {
   queuedAt: string | null
   completedAt: string | null
   expiresAt: string
+}
+
+/** A citation/reference or consistency result; `certainty` says how sure PaperAid is. */
+export interface PaperCheck {
+  kind: 'CITED_NOT_LISTED' | 'LISTED_NOT_CITED' | 'UNREADABLE_CITATION' | 'UNREADABLE_REFERENCE' | 'NO_REFERENCE_LIST' | 'SPELLING_MIXED'
+  certainty: 'CONFIRMED' | 'POSSIBLE' | 'UNDETERMINED'
+  item: string
+  detail: string
+}
+
+export interface PaperChecks {
+  citationsFound: number
+  referencesFound: number
+  style: 'AUTHOR_DATE' | 'NUMERIC' | 'UNKNOWN'
+  items: PaperCheck[]
+  method: string
 }
 
 export interface Page<T> {

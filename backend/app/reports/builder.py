@@ -6,7 +6,7 @@ from datetime import datetime
 from docx import Document
 from docx.shared import Pt, RGBColor
 
-from app.jobs.models import AnalysisResult, RefinementResult
+from app.jobs.models import AnalysisResult, PaperChecks, RefinementResult
 
 GREEN = RGBColor(0x0F, 0x63, 0x3E)
 MUTED = RGBColor(0x46, 0x55, 0x4D)
@@ -22,7 +22,18 @@ REASON_LABELS = {
     "FORMULAIC_TRANSITIONS": "Formulaic transition",
     "OVER_HEDGING": "Over-hedging",
     "UNSUPPORTED_SUMMARY": "Unsupported summary",
+    "REPETITION": "Repeated phrasing",
+    "STYLE_SHIFT": "Style shift",
 }
+CHECK_TITLES = {
+    "CITED_NOT_LISTED": "Cited but not in your reference list",
+    "LISTED_NOT_CITED": "In your reference list but not cited",
+    "UNREADABLE_CITATION": "Citation not checked",
+    "UNREADABLE_REFERENCE": "Reference not checked",
+    "NO_REFERENCE_LIST": "No reference list found",
+    "SPELLING_MIXED": "Mixed spelling conventions",
+}
+CERTAINTY = {"CONFIRMED": "confirmed", "POSSIBLE": "possible", "UNDETERMINED": "couldn't check"}
 
 
 def _document(title: str, paper_name: str, when: datetime):
@@ -52,7 +63,7 @@ def _save(doc) -> bytes:
     return out.getvalue()
 
 
-def writing_report(paper_name: str, when: datetime, analysis: AnalysisResult, after: AnalysisResult | None) -> bytes:
+def writing_report(paper_name: str, when: datetime, analysis: AnalysisResult, after: AnalysisResult | None, checks: PaperChecks | None = None) -> bytes:
     doc = _document("Writing report", paper_name, when)
     doc.add_heading("Estimated AI-likeness", level=2)
     summary = doc.add_paragraph()
@@ -82,6 +93,20 @@ def writing_report(paper_name: str, when: datetime, analysis: AnalysisResult, af
         tip = doc.add_paragraph()
         tip.add_run("Suggestion: ").bold = True
         tip.add_run(finding.suggestion)
+
+    if checks is not None:
+        doc.add_heading("Citations and consistency", level=2)
+        doc.add_paragraph(f"{checks.citations_found} citations and {checks.references_found} references read. These checks are separate from AI-likeness.")
+        _note(doc, "PaperAid never changes your citations. \"Couldn't check\" means PaperAid makes no claim either way.")
+        if not checks.items:
+            doc.add_paragraph("Every citation PaperAid read matches your reference list.")
+        for item in checks.items:
+            heading = doc.add_paragraph()
+            heading.add_run(CHECK_TITLES.get(item.kind, item.kind)).bold = True
+            heading.add_run(f"  ·  {CERTAINTY.get(item.certainty, item.certainty)}").font.color.rgb = MUTED
+            if item.item:
+                doc.add_paragraph(item.item).runs[0].italic = True
+            doc.add_paragraph(item.detail)
     return _save(doc)
 
 

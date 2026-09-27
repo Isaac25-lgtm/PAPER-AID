@@ -8,7 +8,7 @@ import { FileChip, FileDropzone, fileMetaLine } from '../../components/ui/file-d
 import { Alert, Badge, Card, PageHeader, Skeleton } from '../../components/ui/primitives'
 import { DataError, useData } from '../../lib/data'
 import { formatUGX, formatUSDFromUGX } from '../../lib/format'
-import { AVAILABILITY_BADGE, INVITE_ONLY_REASON, NOT_CONFIGURED_REASON, SERVICES } from '../../lib/services'
+import { AVAILABILITY_BADGE, INVITE_ONLY_REASON, NOT_CONFIGURED_REASON, SERVICES, STYLE_OPTIONS } from '../../lib/services'
 import type { EstimateView, FileMeta, FileRole, Quote, ServiceId, ServiceSelection } from '../../lib/types'
 import { useTitle } from '../../lib/use-title'
 import { useWallet, walletChanged } from '../../lib/use-wallet'
@@ -22,7 +22,7 @@ interface Upload {
   error: string | null
 }
 
-const INITIAL: ServiceSelection = { writing: 'REFINE', intensity: 'STANDARD', formatting: 'NONE', preset: 'apa7', latex: false }
+const INITIAL: ServiceSelection = { writing: 'REFINE', intensity: 'STANDARD', style: 'PRESERVE_VOICE', formatting: 'NONE', preset: 'apa7', latex: false }
 const ACCEPT = '.docx,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf'
 
 // What the price panel shows. Refinement is priced after a paid AI estimate that the student
@@ -381,6 +381,13 @@ export function NewJobPage() {
                     ))}
                   </div>
                   <p className="mt-3 text-xs text-fg-muted">Refining more of the paper costs more because each passage is rewritten and independently checked.</p>
+                  <p className="mt-5 text-sm font-semibold">Writing style</p>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    {STYLE_OPTIONS.map((s) => (
+                      <OptionCard key={s.id} name="style" checked={selection.style === s.id} onSelect={() => set({ style: s.id })} title={s.title} body={s.body} />
+                    ))}
+                  </div>
+                  <p className="mt-3 text-xs text-fg-muted">No style adds facts, sources or detail, or makes a claim stronger than you made it.</p>
                 </div>
               )}
 

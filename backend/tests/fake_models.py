@@ -24,6 +24,7 @@ class FakeModels:
         self.requests: list[str] = []
         self.tokens = (0, 0)  # (input, output) reported per call; set with real prices to create costs
         self.refuse: set[str] = set()  # tasks answered with a refusal
+        self.truncate: set[str] = set()  # tasks whose answers are always cut off by the output limit
 
     def json(self, task: str, model: str, system: str, payload: dict[str, Any], schema: dict[str, Any], max_tokens: int) -> ModelResult:
         self.tasks.append(task)
@@ -31,13 +32,24 @@ class FakeModels:
         usage = Usage(self.tokens[0], self.tokens[1], 0, 1)
         if task in self.refuse:
             return ModelResult(text="", usage=usage, provider="fake", model=model, stop="refusal")
+        if task in self.truncate:
+            return ModelResult(text="{", usage=usage, provider="fake", model=model, stop="max_tokens")
         answer = self.overrides[task](payload) if task in self.overrides else self.default(task, payload)
         return ModelResult(text=json.dumps(answer), usage=usage, provider="fake", model=model)
 
     @staticmethod
     def default(task: str, payload: dict[str, Any]) -> dict[str, Any]:
-        if task == "analyse":
-            return {"blocks": [{"id": b["id"], "riskBand": "low", "reasons": [], "explanation": "", "suggestion": "", "excerpt": ""} for b in payload["blocks"]]}
+        if task == "analyse":  # confirms every PaperAid signal; returns only passages that have one
+            return {
+                "blocks": [
+                    {
+                        "id": b["id"], "riskBand": "low", "reasons": [], "explanation": "", "suggestion": "", "excerpt": "",
+                        "confirmed": [s["rule"] for s in b["signals"]], "rejected": [], "preserve": False, "risk": "",
+                    }
+                    for b in payload["blocks"]
+                    if b["signals"]
+                ]
+            }
         if task == "plan":
             return {"blocks": [{"id": p["id"], "action": "rewrite", "instruction": INSTRUCTION, "preserve": "the student's claims"} for p in payload["passages"]]}
         if task == "critique":
@@ -47,7 +59,7 @@ class FakeModels:
         if task == "refine":
             return {"blocks": [{"id": b["id"], "text": fake_writer.rewrite(b["text"])} for b in payload["blocks"]]}
         if task == "review":
-            return {"results": [{"id": p["id"], "pass": True, "issues": [], "note": ""} for p in payload["pairs"]]}
+            return {"results": [{"id": p["id"], "grade": "PASS", "issues": [], "note": "", "riskBand": "low"} for p in payload["pairs"]]}
         if task == "repair":
             return {"blocks": [{"id": b["id"], "text": b["original"]} for b in payload["blocks"]]}
         if task == "spec_plan":

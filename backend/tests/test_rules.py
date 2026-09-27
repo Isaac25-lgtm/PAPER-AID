@@ -65,7 +65,7 @@ def test_formulaic_text_scores_higher_than_plain_text():
     formulaic, _ = signals.analyse(read_docx(fixture_bytes("simple_essay.docx")))
     order = ["LOW", "MODERATE", "HIGH"]
     assert order.index(formulaic.band) >= order.index(plain.band)
-    assert formulaic.algorithm_version == "signals-v1"
+    assert formulaic.algorithm_version == "signals-v2"
 
 
 PRICING = Settings(openai_api_key="sk-test", anthropic_api_key="sk-test")
@@ -135,3 +135,114 @@ def test_budget_guard():
     with pytest.raises(PermanentStageError) as err:
         ensure_within_budget(0.45, 0.1, 0.5)
     assert err.value.code == "BUDGET_EXCEEDED"
+
+
+# --- signals-v2 (owner decision 2026-09-27: signals guide review, they are not the target) --------
+
+
+def test_every_rule_is_well_formed_and_no_section_is_exempt():
+    from typing import get_args
+
+    from app.analysis.rules import RULES, SECTION_FACTOR
+    from app.jobs.models import ReasonCode
+
+    assert all(rule.reason in get_args(ReasonCode) for rule in RULES.values())
+    assert all(rule.explanation and rule.suggestion for rule in RULES.values() if rule.finding)
+    assert min(f for factors in SECTION_FACTOR.values() for f in factors.values()) >= 0.5  # interpretation, never exemption
+
+
+def _paragraph(section, text):
+    from app.documents.model import Block
+
+    return Block(id="b1", kind="paragraph", section=section, text=text, masked=text, editable=True)
+
+
+UNIFORM = " ".join(f"The participants in group {n} completed the same survey form on the same day." for n in "ABCDEFG")
+
+
+def test_section_type_changes_how_a_signal_counts_but_never_hides_it():
+    intro = signals.block_signals(_paragraph("1. Introduction", UNIFORM))
+    methods = signals.block_signals(_paragraph("3. Methodology", UNIFORM))
+    assert {h.rule for h in intro.hits} == {h.rule for h in methods.hits} and intro.hits
+    assert 0 < methods.score < intro.score
+
+
+def test_an_em_dash_or_a_transition_word_alone_is_not_a_finding():
+    text = "However, the results were mixed — some schools improved while others did not. " "We interviewed 12 teachers in Gulu in March 2024 (Okello, 2021)."
+    assert signals.block_signals(_paragraph("Results", text)).findings == []
+
+
+def test_repeated_phrasing_is_measured_across_paragraphs_but_the_paper_topic_is_not():
+    from app.documents.model import Block, DocumentModel
+
+    template = "it is important to note that the programme had clear effects on local learners"
+    blocks = [Block(id="h1", kind="heading", level=1, text="Mobile money use among traders", section="")]
+    for i in range(4):
+        text = f"In district {i}, {template}. Mobile money use among traders rose in district {i} as the survey showed for every market we visited there."
+        blocks.append(Block(id=f"p{i}", kind="paragraph", section="Mobile money use among traders", text=text, masked=text, editable=True))
+    found = signals.scan(DocumentModel(format="DOCX", blocks=blocks))
+    repeated = [b.block.id for b in found.blocks if any(h.rule == "NGRAM_REPEATED" for h in b.hits)]
+    assert repeated == ["p1", "p2", "p3"]  # the first use is not flagged
+    note = next(d.note for d in found.document if d.rule == "NGRAM_REPEATED")
+    assert "clear effects on local learners" in note and "mobile money use among traders" not in note
+
+
+def test_post_scan_reports_signals_before_and_after_and_new_repetition():
+    before = "Furthermore, it is important to note that costs rose. Moreover, fees rose. Additionally, rents rose."
+    after = "Costs rose, and so did fees and rents across the whole of the region."
+    elsewhere = signals.phrases("Prices went up across the whole of the region in every month.")
+    result = signals.post_scan(before, after, "Results", elsewhere)
+    assert "TRANS_STACKED" in result["signalsBefore"] and result["signalsAfter"] == []
+    assert "across the whole of the" in " ".join(result["newRepeatedPhrasing"])
+
+
+def test_paper_checks_separate_confirmed_possible_and_undetermined():
+    from app.analysis import paper_checks
+    from app.documents.model import Block, DocumentModel
+
+    paragraphs = ["Costs shaped habits (Okello, 2021; Nansubuga & Mugisha, 2019). Kato (2018) disagreed, as did (Byaruhanga, 2017)."]
+    references = ["Okello, J. (2021). Data costs.", "Nansubuga, R., & Mugisha, P. (2019). Title.", "Kato, S. (2019). Another.", "Ssemwogerere, A. (2015). Never cited.", "Pamphlet with no author or date"]
+    blocks = [Block(id=f"p{i}", kind="paragraph", text=t) for i, t in enumerate(paragraphs)] + [Block(id=f"r{i}", kind="reference", text=t) for i, t in enumerate(references)]
+    items = {(i.kind, i.certainty, i.item) for i in paper_checks.check(DocumentModel(format="DOCX", blocks=blocks)).items}
+    assert ("CITED_NOT_LISTED", "CONFIRMED", "(Byaruhanga, 2017)") in items
+    assert ("CITED_NOT_LISTED", "POSSIBLE", "Kato (2018)") in items  # the list has Kato (2019): a different year
+    assert ("LISTED_NOT_CITED", "CONFIRMED", "Ssemwogerere, A. (2015). Never cited.") in items
+    assert ("UNREADABLE_REFERENCE", "UNDETERMINED", "Pamphlet with no author or date") in items
+    assert not any(i[2].startswith("(Okello") or i[2].startswith("(Nansubuga") for i in items)
+
+
+def test_paper_checks_make_no_claim_without_a_reference_list():
+    from app.analysis import paper_checks
+
+    result = paper_checks.check(read_docx(fixture_bytes("citations_in_text.docx")))
+    assert [(i.kind, i.certainty) for i in result.items] == [("NO_REFERENCE_LIST", "UNDETERMINED")]
+
+
+def test_every_style_forbids_new_facts_and_stronger_claims():
+    from typing import get_args
+
+    from app.ai.styles import writing_brief
+    from app.jobs.models import WritingStyle
+
+    for style in get_args(WritingStyle):
+        brief = writing_brief(style, "LIGHT")
+        assert "no new facts" in brief["style"] and "stronger" in brief["style"] and brief["intervention"].startswith("Light")
+
+
+def test_the_scan_is_identical_across_processes():
+    """The estimate and the job must send the lead identical requests (so the job replays the
+    estimate's paid answers from the cache); Python's per-process hash seed must not leak in."""
+    import os
+    import subprocess
+    import sys
+
+    code = (
+        "import json;from app.analysis import signals;from app.documents.docx_io import read_docx;from tests.conftest import fixture_bytes;"
+        "s=signals.scan(read_docx(fixture_bytes('dissertation_long.docx')));"
+        "print(json.dumps([s.evidence(),[b.evidence() for b in s.blocks],[f.model_dump() for b in s.blocks for f in b.findings]],sort_keys=True))"
+    )
+    outputs = {
+        subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True, env={**os.environ, "PYTHONHASHSEED": seed}).stdout
+        for seed in ("1", "2", "3")
+    }
+    assert len(outputs) == 1

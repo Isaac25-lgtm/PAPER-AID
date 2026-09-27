@@ -16,8 +16,9 @@ from datetime import timedelta
 from pathlib import PurePosixPath
 from typing import Any, Literal
 
-from app.ai.orchestration import NOT_RETURNED, AIRunner, PlanItem, Revision, Target, current_engine
-from app.analysis import signals
+from app.ai.orchestration import NOT_RETURNED, AIRunner, PlanItem, ReviewOutcome, Revision, Target, current_engine
+from app.ai.styles import writing_brief
+from app.analysis import paper_checks, signals
 from app.core.errors import InvalidDocument, PermanentStageError, StageError
 from app.core.logging import job_id as job_id_var
 from app.core.logging import log
@@ -212,10 +213,13 @@ def _extract(ctx: StageContext, source_sha: str, guide_sha: str | None, formatti
 
 
 def stage_analysing(ctx: StageContext) -> None:
-    result, coverage_warning = _analyse(ctx, ctx.document())
+    model = ctx.document()
+    result, coverage_warning = _analyse(ctx, model)
+    checks = paper_checks.check(model)  # the paper's integrity, reported apart from AI-likeness
 
     def save(j: Job) -> Job:
         j.analysis = result
+        j.paper_checks = checks
         if coverage_warning:
             j.outcome = "PARTIAL"
             _add_warnings(j, [coverage_warning])
@@ -225,12 +229,20 @@ def stage_analysing(ctx: StageContext) -> None:
 
 
 def _analyse(ctx: StageContext, model: DocumentModel) -> tuple[AnalysisResult, str | None]:
-    """PaperAid's signals plus the lead's judgement; saves analysis.json. The estimate runs this
-    too (without showing the result), so the job replays the lead's answer from the cache."""
+    """Stages 2–4 of the revised algorithm: PaperAid measures writing signals, then the lead
+    confirms or rejects each one in context, adds what the rules missed and marks passages that
+    must not be rewritten. Saves analysis.json. The estimate runs this too (without showing the
+    result), so the job replays the lead's answer from the cache."""
     runner = ctx.ai()
-    result, block_signals = signals.analyse(model, method=_method(ctx, "analysis"))
-    model_results = runner.analyse([(s.block.id, s.block.masked or s.block.text) for s in block_signals], model.outline())
-    submitted, covered = len(block_signals), len(model_results)
+    found = signals.scan(model)
+    block_signals = found.blocks
+    passages = [
+        {"id": s.block.id, "section": s.block.section or "Body", "sectionType": s.kind, "text": s.block.masked or s.block.text, "signals": s.evidence()}
+        for s in block_signals
+    ]
+    model_results, seen = runner.analyse(passages, model.outline(), found.evidence())
+    result = signals.aggregate(block_signals, found.excluded_words, _method(ctx, "analysis"))
+    submitted, covered = len(block_signals), len(seen)
     coverage_warning = None
     if covered < submitted:
         coverage_warning = (
@@ -240,29 +252,57 @@ def _analyse(ctx: StageContext, model: DocumentModel) -> tuple[AnalysisResult, s
         )
         method = f"PaperAid writing-pattern signals and AI analysis ({covered} of {submitted} passages)" if covered else "PaperAid writing-pattern signals only"
         result = result.model_copy(update={"method": method})
-    if model_results:
-        scores = {bid: {"low": 0.1, "moderate": 0.45, "high": 0.85}.get(r.riskBand, 0.3) for bid, r in model_results.items()}
+    rejected: dict[str, list[str]] = {}
+    scores: dict[str, float] = {}
+    if seen:
+        # A passage the lead saw but did not return has no problem in its view.
+        scores = {bid: signals.MODEL_SCORE["low"] for bid in seen}
         for s in block_signals:
             item = model_results.get(s.block.id)
-            if item and item.reasons and not s.findings:
+            if item is None:
+                continue
+            scores[s.block.id] = signals.MODEL_SCORE[item.riskBand]
+            dropped = {h.rule for h in s.hits} & set(item.rejected)
+            if dropped:  # false positives in context: they no longer count or show
+                rejected[s.block.id] = sorted(dropped)
+                s.hits = [h for h in s.hits if h.rule not in dropped]
+                s.rescore()
+            if s.findings:
+                s.findings[0].explanation, s.findings[0].suggestion = item.explanation or s.findings[0].explanation, item.suggestion or s.findings[0].suggestion
+            covered_reasons = {f.reason for f in s.findings}
+            extra = [r for r in item.reasons if r not in covered_reasons]
+            if extra:  # what the rules missed
                 s.findings.append(
                     Finding(
                         id=f"{s.block.id}-m",
                         block_id=s.block.id,
                         section=s.block.section or "Body",
-                        reason=item.reasons[0],  # type: ignore[arg-type]
+                        reason=extra[0],
                         severity="major" if item.riskBand == "high" else "moderate",
                         excerpt=item.excerpt[:280],
                         explanation=item.explanation,
                         suggestion=item.suggestion,
                     )
                 )
-            elif item and s.findings:
-                s.findings[0].explanation, s.findings[0].suggestion = item.explanation, item.suggestion
-        excluded = model.word_count - sum(s.block.words for s in block_signals)
-        result = signals.aggregate(block_signals, excluded, result.method, scores)
-    ctx.put_json("analysis.json", {"result": result.model_dump(), "scores": {s.block.id: s.score for s in block_signals}})
+        result = signals.aggregate(block_signals, found.excluded_words, result.method, scores)
+    ctx.put_json(
+        "analysis.json",
+        {
+            "result": result.model_dump(),
+            "scores": {s.block.id: s.score for s in block_signals},
+            "modelScores": scores,
+            "rejected": rejected,
+            "hits": {s.block.id: s.evidence() for s in block_signals if s.hits},
+            "preserve": sorted(bid for bid, r in model_results.items() if r.preserve),
+            "risks": {bid: r.risk for bid, r in model_results.items() if r.risk},
+            "document": found.evidence(),
+        },
+    )
     return result, coverage_warning
+
+
+def _brief(ctx: StageContext) -> dict[str, str]:
+    return writing_brief(ctx.job.selection.style, ctx.job.selection.intensity)
 
 
 # --- the refinement estimate ---------------------------------------------------------------
@@ -277,7 +317,7 @@ def run_estimate(ctx: StageContext) -> tuple[list[Passage], int]:
     model = _extract(ctx, run.source_sha256, run.guideline_sha256, run.selection.formatting)
     _analyse(ctx, model)
     targets = _select_targets(ctx, model)
-    draft = ctx.ai().draft_plan(targets, model.outline()) if targets else {}
+    draft = ctx.ai().draft_plan(targets, model.outline(), _brief(ctx)) if targets else {}
     passages = [
         Passage(chars=len(t.masked), words=len(t.masked.split()), rewrite=draft[t.id].action == "rewrite", instruction_chars=len(draft[t.id].instruction) + len(draft[t.id].preserve))
         for t in targets
@@ -390,13 +430,23 @@ def _select_targets(ctx: StageContext, model: DocumentModel) -> list[Target]:
     saved = ctx.get_json("analysis.json")
     result = AnalysisResult.model_validate(saved["result"])
     scores: dict[str, float] = saved["scores"]
+    model_scores: dict[str, float] = saved.get("modelScores", {})
+    preserve = set(saved.get("preserve", []))  # the lead judged these must not be rewritten
+    risks: dict[str, str] = saved.get("risks", {})
+    hits: dict[str, list[dict]] = saved.get("hits", {})
     flagged = {f.block_id for f in result.findings}
     findings: dict[str, list[str]] = {}
     for f in result.findings:
         findings.setdefault(f.block_id, []).append(f"{f.reason}: {f.explanation}")
+    for bid, measured in hits.items():  # the measurements behind the confirmed findings
+        findings.setdefault(bid, []).extend(f"PaperAid measured {h['measures']}: {h['value']} (threshold {h['threshold']})" for h in measured)
     prose = [b for b in model.blocks if b.kind in ("paragraph", "list_item")]
     by_position = {b.id: i for i, b in enumerate(prose)}
-    candidates = sorted((b for b in prose if b.editable and b.id in flagged), key=lambda b: -scores.get(b.id, 0))
+
+    def priority(b) -> float:
+        return -(0.5 * scores.get(b.id, 0) + 0.5 * model_scores.get(b.id, scores.get(b.id, 0)))
+
+    candidates = sorted((b for b in prose if b.editable and b.id in flagged and b.id not in preserve), key=priority)
     share = 0.25 if ctx.job.selection.intensity == "LIGHT" else 0.5
     cap = max(150, share * result.analysed_words)
     targets, used = [], 0
@@ -413,6 +463,7 @@ def _select_targets(ctx: StageContext, model: DocumentModel) -> list[Target]:
                 before=prose[i - 1].text[-400:] if i > 0 else "",
                 after=prose[i + 1].text[:400] if i + 1 < len(prose) else "",
                 findings=findings.get(block.id, []),
+                risk=risks.get(block.id, ""),
             )
         )
         used += block.words
@@ -422,7 +473,7 @@ def _select_targets(ctx: StageContext, model: DocumentModel) -> list[Target]:
 def stage_planning(ctx: StageContext) -> None:
     model = ctx.document()
     targets = _select_targets(ctx, model)
-    plan = ctx.ai().negotiate_plan(targets, model.outline()) if targets else None
+    plan = ctx.ai().negotiate_plan(targets, model.outline(), _brief(ctx)) if targets else None
     ctx.put_json(
         "plan.json",
         {
@@ -450,7 +501,7 @@ def _planned_targets(ctx: StageContext) -> list[Target]:
 def stage_refining(ctx: StageContext) -> None:
     model = ctx.document()
     targets = _planned_targets(ctx)
-    revisions = ctx.ai().refine(targets, model.outline()) if targets else []
+    revisions = ctx.ai().refine(targets, model.outline(), _brief(ctx)) if targets else []
     ctx.put_json("revisions.json", [r.__dict__ for r in revisions])
 
 
@@ -459,33 +510,45 @@ def stage_auditing(ctx: StageContext) -> None:
     model = ctx.document()
     blocks = model.by_id()
     revisions = [Revision(**r) for r in ctx.get_json("revisions.json")]
-    instructions = {t.id: t.instruction for t in _planned_targets(ctx)}
+    targets = {t.id: t for t in _planned_targets(ctx)}
+    instructions = {tid: t.instruction for tid, t in targets.items()}
+    brief = _brief(ctx)
     runner = ctx.ai()
     missing = [r for r in revisions if NOT_RETURNED in r.problems]
     changed = [r for r in revisions if r.revised != r.original]
     # The writer returned the passage untouched: it found no safe improvement. Reported as kept.
     unchanged = [r for r in revisions if r.revised == r.original and NOT_RETURNED not in r.problems]
 
-    verdicts = runner.review(changed, instructions) if changed else {}
-    failed = {r.id: (r.problems or verdicts.get(r.id, [])) for r in changed if r.problems or verdicts.get(r.id)}
+    # Stage 8–9: code has already rechecked every rewrite (check_rewrite); the lead now reviews
+    # each one with PaperAid's post-scan, its neighbours and the passages linked to it.
+    review = runner.review(changed, instructions, brief, _review_context(model, targets, changed)) if changed else ReviewOutcome()
+    failed = {r.id: (r.problems or review.issues.get(r.id, [])) for r in changed if r.problems or review.issues.get(r.id)}
+    reviewer_notes, risk = dict(review.warnings), dict(review.risk)
     notes: dict[str, str] = {}
     for _ in range(settings.repair_attempts):
         if not failed:
             break
         try:
-            repaired = runner.repair([(r, failed[r.id]) for r in changed if r.id in failed], instructions)
+            repaired = runner.repair([(r, failed[r.id]) for r in changed if r.id in failed], instructions, brief)
             clean = [r for r in repaired if r.revised != r.original and not r.problems]
-            second = runner.review(clean, instructions) if clean else {}
+            # A repair is reviewed again, with the same context: fixing one problem must not create another.
+            second = runner.review(clean, instructions, brief, _review_context(model, targets, clean)) if clean else ReviewOutcome()
         except PermanentStageError as exc:
             if exc.code != "BUDGET_EXCEEDED":
                 raise
             break  # out of budget for repairs: the failed passages simply keep their original wording
         by_id = {r.id: r for r in repaired}
         changed = [by_id.get(r.id, r) for r in changed]
-        failed = {r.id: (r.problems or second.get(r.id, [])) for r in repaired if r.problems or second.get(r.id) or r.revised == r.original}
+        reviewer_notes.update(second.warnings)
+        risk.update(second.risk)
+        failed = {r.id: (r.problems or second.issues.get(r.id, [])) for r in repaired if r.problems or second.issues.get(r.id) or r.revised == r.original}
 
     accepted = [r for r in changed if r.id not in failed]
     kept = [r for r in changed if r.id in failed] + missing + unchanged
+    for r in accepted:
+        if r.id in reviewer_notes:
+            notes[r.id] = f"Reviewer note: {reviewer_notes[r.id]}"
+    ctx.put_json("review.json", {"risk": {r.id: risk[r.id] for r in accepted if r.id in risk}})
     for r in kept:
         issues = failed.get(r.id, [])
         notes[r.id] = "Kept your original: " + (
@@ -534,6 +597,9 @@ def stage_auditing(ctx: StageContext) -> None:
         warnings.append(f"None of the {len(shown)} flagged passages could be improved in a way we could verify, so your wording is unchanged. You are charged only for the analysis.")
     if not shown:
         warnings.append("No passages needed refinement under the selected intensity, so your wording is unchanged.")
+    noted = sum(1 for r in accepted if r.id in reviewer_notes)
+    if noted:
+        warnings.append(f"{noted} refined passage{'s have' if noted > 1 else ' has'} a reviewer note in the change report: worth a look before you submit.")
 
     def save(j: Job) -> Job:
         j.refinement = refinement
@@ -619,8 +685,10 @@ def stage_exporting(ctx: StageContext) -> None:
     after = None
     if job.analysis:
         if job.refinement and job.refinement.refined_blocks:
-            after, _ = signals.analyse(read_docx(ctx.get_bytes("refined.docx")), method=job.analysis.method)
-        output("writing-report", "Writing report (Word)", "writing report", writing_report(job.source.name if job.source else "", utcnow(), job.analysis, after))
+            after = _analysis_after(ctx, job.analysis.method)
+        output(
+            "writing-report", "Writing report (Word)", "writing report", writing_report(job.source.name if job.source else "", utcnow(), job.analysis, after, job.paper_checks)
+        )
     if job.refinement:
         output("change-report", "Change report (Word)", "changes", change_report(job.source.name if job.source else "", utcnow(), job.refinement))
 
@@ -631,6 +699,52 @@ def stage_exporting(ctx: StageContext) -> None:
         return j
 
     ctx.update(save)
+
+
+def _analysis_after(ctx: StageContext, method: str) -> AnalysisResult:
+    """The after-refinement band, by the same method as the before band: PaperAid's signals on the
+    refined paper, blended with the lead's judgement: its original judgement for untouched
+    passages (their rejected false positives stay rejected) and its review of each rewrite."""
+    saved = ctx.get_json("analysis.json")
+    refined_ids = {c.block_id for c in (ctx.job.refinement.changes if ctx.job.refinement else []) if not c.kept}
+    review_risk: dict[str, str] = ctx.get_json("review.json")["risk"] if ctx.has("review.json") else {}
+    rejected: dict[str, list[str]] = saved.get("rejected", {})
+    found = signals.scan(read_docx(ctx.get_bytes("refined.docx")))
+    for s in found.blocks:
+        if s.block.id not in refined_ids and s.block.id in rejected:
+            s.hits = [h for h in s.hits if h.rule not in rejected[s.block.id]]
+            s.rescore()
+    scores = {bid: v for bid, v in saved.get("modelScores", {}).items() if bid not in refined_ids}
+    scores.update({bid: signals.MODEL_SCORE[band] for bid, band in review_risk.items() if bid in refined_ids})
+    return signals.aggregate(found.blocks, found.excluded_words, method, scores)
+
+
+def _review_context(model: DocumentModel, targets: dict[str, Target], revisions: list[Revision]) -> dict[str, dict[str, Any]]:
+    """For each rewrite: its neighbours, up to two passages elsewhere that share its key terms
+    (objectives, methods, results or conclusions it relates to), and PaperAid's post-scan."""
+    blocks = model.by_id()
+    prose = [b for b in model.blocks if b.kind in ("paragraph", "list_item")]
+    phrases = {b.id: signals.phrases(b.masked or b.text) for b in prose}
+    linkable = ("introduction", "methods", "results", "discussion", "conclusion", "abstract")
+    context: dict[str, dict[str, Any]] = {}
+    for r in revisions:
+        block, target = blocks[r.id], targets.get(r.id)
+        keys = {w for w in signals.words_of(r.original) if len(w) >= 7 and w not in signals.STOPWORDS}
+        scored = []
+        for b in prose:
+            if b.id == r.id or b.section == block.section or signals.section_type(b.section) not in linkable:
+                continue
+            overlap = len(keys & set(signals.words_of(b.text)))
+            if overlap >= 2:
+                scored.append((overlap, b))
+        linked = [{"section": b.section, "text": b.text[:500]} for _, b in sorted(scored, key=lambda item: -item[0])[:2]]
+        elsewhere = set().union(*(p for bid, p in phrases.items() if bid != r.id))
+        context[r.id] = {
+            "context": {"before": target.before if target else "", "after": target.after if target else ""},
+            "linked": linked,
+            "postScan": signals.post_scan(r.original, r.revised, block.section, elsewhere),
+        }
+    return context
 
 
 STAGES = {

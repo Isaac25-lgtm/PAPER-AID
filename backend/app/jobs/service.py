@@ -630,8 +630,9 @@ def _require(rt: Runtime, job_id: str) -> Job:
 
 def without_paper_text[T: JobView](job: T) -> T:
     """A copy with every passage of the student's paper removed: finding excerpts and explanations,
-    and before/after text of changes. Counts, bands and rules remain. Used for admin views (support
-    never sees papers) and for jobs past retention (the paper must not outlive its files)."""
+    before/after text of changes and reviewer notes, and the citations quoted by paper checks.
+    Counts, bands and rules remain. Used for admin views (support never sees papers) and for jobs
+    past retention (the paper must not outlive its files)."""
     update: dict = {}
     for field in ("analysis", "analysis_after"):
         result = getattr(job, field)
@@ -639,8 +640,11 @@ def without_paper_text[T: JobView](job: T) -> T:
             findings = [f.model_copy(update={"excerpt": "", "explanation": "", "suggestion": ""}) for f in result.findings]
             update[field] = result.model_copy(update={"findings": findings})
     if job.refinement is not None:
-        changes = [c.model_copy(update={"before": "", "after": ""}) for c in job.refinement.changes]
+        changes = [c.model_copy(update={"before": "", "after": "", "note": None}) for c in job.refinement.changes]
         update["refinement"] = job.refinement.model_copy(update={"changes": changes})
+    if job.paper_checks is not None:  # citations and references quote the paper
+        items = [i.model_copy(update={"item": "", "detail": ""}) for i in job.paper_checks.items]
+        update["paper_checks"] = job.paper_checks.model_copy(update={"items": items})
     return job.model_copy(update=update)
 
 

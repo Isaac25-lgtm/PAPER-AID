@@ -4,13 +4,17 @@ Two fixed roles (models are configuration; the roles and their order are not):
   lead   (GPT-6 Sol)       analyses, drafts the plan, finalises it, reviews the result
   writer (Claude Opus 5.5) critiques the draft plan, writes the result, fixes what the review raises
 
-Refinement:
-  1. lead analyses the paper and flags passages that read as AI-generated        (ANALYSING)
-  2. lead drafts a refinement plan for the flagged passages                        (PLANNING)
+Refinement (the revised algorithm, adopted 2026-09-27):
+  1. code measures writing signals; lead confirms or rejects each in context,
+     finds what the rules missed and marks passages to preserve                    (ANALYSING)
+  2. lead drafts a refinement plan in the student's chosen style                    (PLANNING)
   3. writer critiques the draft plan, passage by passage                          (PLANNING)
   4. lead weighs the critique and writes the final plan                           (PLANNING)
   5. writer rewrites the passages following the final plan                        (REFINING)
-  6. lead reviews the rewrite once; writer fixes anything raised (bounded rounds) (AUDITING)
+  6. code rechecks every rewrite (locked items, numbers, notes) and re-measures
+     its signals; lead reviews each rewrite with that post-scan and the passages
+     linked to it, grading PASS / PASS_WITH_WARNINGS / REPAIR; writer fixes what
+     is raised and the lead reviews the fix again (bounded rounds)                  (AUDITING)
 
 University template formatting follows the same loop, with the formatting rules as the thing
 being planned: lead drafts rules from the guide → writer critiques → lead finalises → code
@@ -64,13 +68,13 @@ class Step:
 
 # The algorithm, in one place: which role performs each step.
 STEPS: dict[str, Step] = {
-    "analyse": Step("lead", Stage.ANALYSING, "analyse-v1", 12000),
-    "plan": Step("lead", Stage.PLANNING, "plan-v1", 12000),
-    "critique": Step("writer", Stage.PLANNING, "critique-v1", 8000),
-    "finalise": Step("lead", Stage.PLANNING, "finalise-v1", 12000),
-    "refine": Step("writer", Stage.REFINING, "refine-v2", 16000),
-    "review": Step("lead", Stage.AUDITING, "review-v1", 8000),
-    "repair": Step("writer", Stage.AUDITING, "repair-v2", 16000),
+    "analyse": Step("lead", Stage.ANALYSING, "analyse-v2", 12000),
+    "plan": Step("lead", Stage.PLANNING, "plan-v2", 12000),
+    "critique": Step("writer", Stage.PLANNING, "critique-v2", 8000),
+    "finalise": Step("lead", Stage.PLANNING, "finalise-v2", 12000),
+    "refine": Step("writer", Stage.REFINING, "refine-v3", 16000),
+    "review": Step("lead", Stage.AUDITING, "review-v2", 8000),
+    "repair": Step("writer", Stage.AUDITING, "repair-v3", 16000),
     "spec_plan": Step("lead", Stage.FORMATTING, "spec-plan-v1", 8000),
     "spec_critique": Step("writer", Stage.FORMATTING, "spec-critique-v1", 6000),
     "spec_finalise": Step("lead", Stage.FORMATTING, "spec-finalise-v1", 8000),
@@ -85,7 +89,9 @@ def current_engine(settings: Settings) -> Engine:
     return Engine(lead_model=settings.lead_model, writer_model=settings.writer_model, prompts={task: step.prompt for task, step in STEPS.items()})
 
 
-REASONS = ["GENERIC_PHRASING", "UNIFORM_STRUCTURE", "LOW_SPECIFICITY", "FORMULAIC_TRANSITIONS", "OVER_HEDGING", "UNSUPPORTED_SUMMARY"]
+REASONS = ["GENERIC_PHRASING", "UNIFORM_STRUCTURE", "LOW_SPECIFICITY", "FORMULAIC_TRANSITIONS", "OVER_HEDGING", "UNSUPPORTED_SUMMARY", "REPETITION", "STYLE_SHIFT"]
+GRADES = ["PASS", "PASS_WITH_WARNINGS", "REPAIR"]
+BANDS = ["low", "moderate", "high"]
 REVIEW_ISSUES = ["MEANING_DRIFT", "NUMBER_CHANGED", "CITATION_LOST", "INVENTED_CLAIM", "BROKEN_TRANSITION", "VOICE_SHIFT", "INSTRUCTION_NOT_FOLLOWED"]
 
 
@@ -105,11 +111,15 @@ _ANALYSIS = _obj(
             _obj(
                 {
                     "id": _STR,
-                    "riskBand": {"type": "string", "enum": ["low", "moderate", "high"]},
+                    "riskBand": {"type": "string", "enum": BANDS},
                     "reasons": _list_of({"type": "string", "enum": REASONS}),
                     "explanation": _STR,
                     "suggestion": _STR,
                     "excerpt": _STR,
+                    "confirmed": _list_of(_STR),
+                    "rejected": _list_of(_STR),
+                    "preserve": _BOOL,
+                    "risk": _STR,
                 }
             )
         )
@@ -117,7 +127,21 @@ _ANALYSIS = _obj(
 )
 _PLAN = _obj({"blocks": _list_of(_obj({"id": _STR, "action": {"type": "string", "enum": ["rewrite", "leave"]}, "instruction": _STR, "preserve": _STR}))})
 _CRITIQUE = _obj({"blocks": _list_of(_obj({"id": _STR, "agree": _BOOL, "comment": _STR})), "overall": _STR})
-_REVIEW = _obj({"results": _list_of(_obj({"id": _STR, "pass": _BOOL, "issues": _list_of({"type": "string", "enum": REVIEW_ISSUES}), "note": _STR}))})
+_REVIEW = _obj(
+    {
+        "results": _list_of(
+            _obj(
+                {
+                    "id": _STR,
+                    "grade": {"type": "string", "enum": GRADES},
+                    "issues": _list_of({"type": "string", "enum": REVIEW_ISSUES}),
+                    "note": _STR,
+                    "riskBand": {"type": "string", "enum": BANDS},
+                }
+            )
+        )
+    }
+)
 _SPEC_CRITIQUE = _obj({"items": _list_of(_obj({"field": _STR, "current": _STR, "proposed": _STR, "quote": _STR})), "overall": _STR})
 _SPEC_REVIEW = _obj({"pass": _BOOL, "problems": _list_of(_obj({"field": _STR, "problem": _STR, "fix": _STR}))})
 
@@ -133,11 +157,15 @@ class _TextBlocks(BaseModel):
 
 class _AnalysisBlock(BaseModel):
     id: str
-    riskBand: str
-    reasons: list[str]
+    riskBand: Literal["low", "moderate", "high"]
+    reasons: list[Literal["GENERIC_PHRASING", "UNIFORM_STRUCTURE", "LOW_SPECIFICITY", "FORMULAIC_TRANSITIONS", "OVER_HEDGING", "UNSUPPORTED_SUMMARY", "REPETITION", "STYLE_SHIFT"]]
     explanation: str
     suggestion: str
     excerpt: str
+    confirmed: list[str]  # PaperAid rule ids the lead stands behind
+    rejected: list[str]  # PaperAid rule ids the lead judged false positives in context
+    preserve: StrictBool  # the passage should not be rewritten
+    risk: str  # what a rewrite could get wrong here
 
 
 class _Analysis(BaseModel):
@@ -167,12 +195,11 @@ class _Critique(BaseModel):
 
 
 class _ReviewItem(BaseModel):
-    model_config = {"populate_by_name": True}
-
     id: str
-    passed: StrictBool = Field(alias="pass")
+    grade: Literal["PASS", "PASS_WITH_WARNINGS", "REPAIR"]
     issues: list[Literal["MEANING_DRIFT", "NUMBER_CHANGED", "CITATION_LOST", "INVENTED_CLAIM", "BROKEN_TRANSITION", "VOICE_SHIFT", "INSTRUCTION_NOT_FOLLOWED"]]
     note: str
+    riskBand: Literal["low", "moderate", "high"]
 
 
 class _Review(BaseModel):
@@ -245,6 +272,7 @@ class Target:
     findings: list[str] = field(default_factory=list)
     instruction: str = ""
     preserve: str = ""
+    risk: str = ""  # the lead's note on what a rewrite could get wrong
 
 
 @dataclass
@@ -253,6 +281,15 @@ class Revision:
     original: str
     revised: str
     problems: list[str]
+
+
+@dataclass
+class ReviewOutcome:
+    """The lead's grades for a set of rewrites."""
+
+    issues: dict[str, list[str]] = field(default_factory=dict)  # REPAIR or not reviewed: what to fix
+    warnings: dict[str, str] = field(default_factory=dict)  # PASS_WITH_WARNINGS: a note for the student
+    risk: dict[str, str] = field(default_factory=dict)  # how machine-like each reviewed rewrite reads now
 
 
 @dataclass
@@ -351,14 +388,20 @@ class AIRunner:
     def _batched[T: BaseModel](
         self, task: str, items: list[dict[str, Any]], wrap: Callable[[list[dict[str, Any]]], dict[str, Any]], schema: dict[str, Any], shape: type[T]
     ) -> list[T]:
-        """Run `items` in word-bounded batches; halve any batch whose answer was cut off."""
-        responses: list[T] = []
+        return [answer for _, answer in self._batched_with_items(task, items, wrap, schema, shape)]
+
+    def _batched_with_items[T: BaseModel](
+        self, task: str, items: list[dict[str, Any]], wrap: Callable[[list[dict[str, Any]]], dict[str, Any]], schema: dict[str, Any], shape: type[T]
+    ) -> list[tuple[list[dict[str, Any]], T]]:
+        """Run `items` in word-bounded batches; halve any batch whose answer was cut off. Each
+        answer comes with the items it covered."""
+        responses: list[tuple[list[dict[str, Any]], T]] = []
         pending = _batches(items)
         while pending:
             batch = pending.pop(0)
             answer = self._call(task, wrap([{k: v for k, v in i.items() if k != "_words"} for i in batch]), schema, shape)
             if answer is not None:
-                responses.append(answer)
+                responses.append((batch, answer))
             elif len(batch) > 1:
                 middle = len(batch) // 2
                 pending[:0] = [batch[:middle], batch[middle:]]
@@ -374,37 +417,42 @@ class AIRunner:
 
     # --- 1. analysis (lead) ------------------------------------------------------------
 
-    def analyse(self, blocks: list[tuple[str, str]], outline: list[str]) -> dict[str, _AnalysisBlock]:
-        """The lead's judgement per passage. Returns {block_id: result}."""
-        if not blocks:
-            return {}
-        known = {bid for bid, _ in blocks}
-        items = [{"id": bid, "text": text, "_words": text} for bid, text in blocks]
+    def analyse(self, passages: list[dict[str, Any]], outline: list[str], evidence: dict[str, Any]) -> tuple[dict[str, _AnalysisBlock], set[str]]:
+        """The lead's judgement per passage, given PaperAid's measurements (each passage carries its
+        "signals"; `evidence` is the document-level bundle). Returns ({block_id: result}, the ids
+        the lead actually saw): a seen passage it did not return has no problem in its view."""
+        if not passages:
+            return {}, set()
+        known = {p["id"] for p in passages}
+        items = [{**p, "_words": p["text"]} for p in passages]
         results: dict[str, _AnalysisBlock] = {}
-        for answer in self._batched("analyse", items, lambda b: {"outline": outline, "blocks": b}, _ANALYSIS, _Analysis):
+        seen: set[str] = set()
+        for batch, answer in self._batched_with_items("analyse", items, lambda b: {"outline": outline, "document": evidence, "blocks": b}, _ANALYSIS, _Analysis):
+            seen.update(i["id"] for i in batch)
             for item in answer.blocks:
                 if item.id in known:  # unknown IDs from a model are discarded, never trusted
                     results[item.id] = item
-        return results
+        return results, seen
 
     # --- 2–4. plan: lead drafts, writer critiques, lead finalises -----------------------
 
     @staticmethod
     def _plan_base(targets: list[Target]) -> list[dict[str, Any]]:
-        return [{"id": t.id, "section": t.section, "text": t.masked, "findings": t.findings, "_words": t.masked} for t in targets]
+        return [{"id": t.id, "section": t.section, "text": t.masked, "findings": t.findings, "risk": t.risk, "_words": t.masked} for t in targets]
 
-    def draft_plan(self, targets: list[Target], outline: list[str]) -> dict[str, PlanItem]:
+    def draft_plan(self, targets: list[Target], outline: list[str], brief: dict[str, str]) -> dict[str, PlanItem]:
         """Step 2 alone: the lead's draft plan. The refinement estimate runs exactly this call, so
-        the job that follows replays it from the cache instead of paying for it again."""
+        the job that follows replays it from the cache instead of paying for it again. `brief`
+        is the student's style and intervention level (app.ai.styles.writing_brief)."""
         known = {t.id for t in targets}
         draft: dict[str, PlanItem] = {}
-        for answer in self._batched("plan", self._plan_base(targets), lambda b: {"outline": outline, "passages": b}, _PLAN, _Plan):
+        for answer in self._batched("plan", self._plan_base(targets), lambda b: {**brief, "outline": outline, "passages": b}, _PLAN, _Plan):
             draft.update({p.id: p for p in answer.blocks if p.id in known})
         return draft
 
-    def negotiate_plan(self, targets: list[Target], outline: list[str]) -> Negotiation:
+    def negotiate_plan(self, targets: list[Target], outline: list[str], brief: dict[str, str]) -> Negotiation:
         base = self._plan_base(targets)
-        draft = self.draft_plan(targets, outline)
+        draft = self.draft_plan(targets, outline, brief)
 
         # The whole plan is critiqued, "leave" decisions included: the writer may argue a passage
         # the lead left alone does need work. A passage the lead omitted has no plan and is left.
@@ -412,7 +460,7 @@ class AIRunner:
         planned = {item["id"] for item in with_draft}
         critique: dict[str, CritiqueItem] = {}
         overall = []
-        for answer in self._batched("critique", with_draft, lambda b: {"passages": b}, _CRITIQUE, _Critique):
+        for answer in self._batched("critique", with_draft, lambda b: {**brief, "passages": b}, _CRITIQUE, _Critique):
             critique.update({c.id: c for c in answer.blocks if c.id in planned})
             overall.append(answer.overall)
 
@@ -420,7 +468,7 @@ class AIRunner:
             {**item, "critique": critique[item["id"]].model_dump(exclude={"id"}) if item["id"] in critique else None} for item in with_draft
         ]
         final: dict[str, PlanItem] = {}
-        for answer in self._batched("finalise", with_critique, lambda b: {"outline": outline, "passages": b}, _PLAN, _Plan):
+        for answer in self._batched("finalise", with_critique, lambda b: {**brief, "outline": outline, "passages": b}, _PLAN, _Plan):
             final.update({p.id: p for p in answer.blocks if p.id in planned})  # only passages the writer saw
         for item in with_draft:  # a passage the lead dropped from the final plan keeps its draft instruction
             final.setdefault(item["id"], draft[item["id"]])
@@ -428,14 +476,14 @@ class AIRunner:
 
     # --- 5. write (writer) -------------------------------------------------------------
 
-    def refine(self, targets: list[Target], outline: list[str]) -> list[Revision]:
+    def refine(self, targets: list[Target], outline: list[str], brief: dict[str, str]) -> list[Revision]:
         by_id = {t.id: t for t in targets}
         items = [
             {"id": t.id, "section": t.section, "instruction": t.instruction, "preserve": t.preserve, "before": t.before, "text": t.masked, "after": t.after, "_words": t.masked}
             for t in targets
         ]
         returned: dict[str, str] = {}
-        for answer in self._batched("refine", items, lambda b: {"outline": outline, "blocks": b}, _TEXT_BLOCKS, _TextBlocks):
+        for answer in self._batched("refine", items, lambda b: {**brief, "outline": outline, "blocks": b}, _TEXT_BLOCKS, _TextBlocks):
             returned.update({b.id: b.text for b in answer.blocks if b.id in by_id})
         revisions = []
         for t in targets:
@@ -448,31 +496,43 @@ class AIRunner:
 
     # --- 6. review (lead) and fix (writer) --------------------------------------------------
 
-    def review(self, revisions: list[Revision], instructions: dict[str, str]) -> dict[str, list[str]]:
-        """The lead's review of changed passages. Returns {block_id: issues}; empty list = pass."""
+    def review(
+        self, revisions: list[Revision], instructions: dict[str, str], brief: dict[str, str], context: dict[str, dict[str, Any]] | None = None
+    ) -> ReviewOutcome:
+        """The lead's review of changed passages, each with its neighbours, linked passages and
+        PaperAid's post-scan (`context`, by block id)."""
         changed = [r for r in revisions if r.revised != r.original and not r.problems]
-        items = [
-            {"id": r.id, "original": r.original, "revised": r.revised, "instruction": instructions.get(r.id, ""), "_words": r.original + " " + r.revised}
-            for r in changed
-        ]
-        verdicts: dict[str, list[str]] = {}
+        context = context or {}
+        items = []
+        for r in changed:
+            extra = context.get(r.id, {})
+            linked = [str(item.get("text", "")) for item in extra.get("linked", [])]
+            words = " ".join([r.original, r.revised, *(str(v) for v in extra.get("context", {}).values()), *linked])
+            items.append({"id": r.id, "original": r.original, "revised": r.revised, "instruction": instructions.get(r.id, ""), **extra, "_words": words})
+        outcome = ReviewOutcome()
         ids = {r.id for r in changed}
-        for answer in self._batched("review", items, lambda b: {"pairs": b}, _REVIEW, _Review):
+        for answer in self._batched("review", items, lambda b: {**brief, "pairs": b}, _REVIEW, _Review):
             for result in answer.results:
-                if result.id in ids:
+                if result.id not in ids:
+                    continue
+                outcome.risk[result.id] = result.riskBand
+                if result.grade == "REPAIR":
                     issues: list[str] = list(result.issues) or ["MEANING_DRIFT"]
-                    verdicts[result.id] = [] if result.passed else issues + ([f"NOTE: {result.note}"] if result.note else [])
+                    outcome.issues[result.id] = issues + ([f"NOTE: {result.note}"] if result.note else [])
+                elif result.grade == "PASS_WITH_WARNINGS" and result.note:
+                    outcome.warnings[result.id] = result.note
         for r in changed:  # a passage the reviewer skipped (or that could not fit) is not a pass
-            verdicts.setdefault(r.id, ["NOT_REVIEWED"])
-        return verdicts
+            if r.id not in outcome.risk:
+                outcome.issues[r.id] = ["NOT_REVIEWED"]
+        return outcome
 
-    def repair(self, failed: list[tuple[Revision, list[str]]], instructions: dict[str, str]) -> list[Revision]:
+    def repair(self, failed: list[tuple[Revision, list[str]]], instructions: dict[str, str], brief: dict[str, str]) -> list[Revision]:
         items = [
             {"id": r.id, "original": r.original, "rejected": r.revised, "instruction": instructions.get(r.id, ""), "objections": issues, "_words": r.original}
             for r, issues in failed
         ]
         returned: dict[str, str] = {}
-        for answer in self._batched("repair", items, lambda b: {"blocks": b}, _TEXT_BLOCKS, _TextBlocks):
+        for answer in self._batched("repair", items, lambda b: {**brief, "blocks": b}, _TEXT_BLOCKS, _TextBlocks):
             returned.update({b.id: b.text for b in answer.blocks if b.id in {r.id for r, _ in failed}})
         out = []
         for r, _ in failed:

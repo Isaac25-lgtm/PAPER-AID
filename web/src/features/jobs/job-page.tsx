@@ -7,8 +7,9 @@ import { Alert, Card, EmptyState, Skeleton } from '../../components/ui/primitive
 import { DataError, useData } from '../../lib/data'
 import { formatDate, formatDateTime, formatUGX } from '../../lib/format'
 import type { Job, Quote } from '../../lib/types'
+import { STYLE_OPTIONS } from '../../lib/services'
 import { useTitle } from '../../lib/use-title'
-import { BandChange, ChangesPanel, DownloadList, FindingsList, FormattingPanel, ScoreCard } from '../results/report'
+import { BandChange, ChangesPanel, DownloadList, FindingsList, FormattingPanel, PaperChecksPanel, ScoreCard } from '../results/report'
 import { useJob } from './hooks'
 import { jobLink, jobTitle, serviceNames, StageTimeline, StatusBadge } from './job-bits'
 
@@ -211,6 +212,7 @@ function Completed({ job }: { job: Job }) {
               <h3 className="mb-3 text-base font-semibold">{job.analysisAfter ? 'Findings in your original draft' : 'Findings'}</h3>
               <FindingsList findings={job.analysis.findings} />
             </div>
+            {job.paperChecks && <PaperChecksPanel checks={job.paperChecks} />}
           </TabsContent>
         )}
         {job.refinement && (
@@ -301,6 +303,14 @@ function JobDetails({ job }: { job: Job }) {
       <Card className="p-5">
         <h2 className="text-sm font-semibold">Details</h2>
         <dl className="mt-3 space-y-2.5 text-sm">
+          {job.selection.writing === 'REFINE' && (
+            <div>
+              <dt className="text-xs text-fg-subtle">Writing style</dt>
+              <dd>
+                {STYLE_OPTIONS.find((s) => s.id === job.selection.style)?.title} · {job.selection.intensity === 'LIGHT' ? 'light' : 'standard'} refinement
+              </dd>
+            </div>
+          )}
           {job.source && (
             <div>
               <dt className="text-xs text-fg-subtle">Paper</dt>

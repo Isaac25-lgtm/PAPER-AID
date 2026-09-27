@@ -58,13 +58,17 @@ class PaymentStatus(StrEnum):
 Band = Literal["LOW", "MODERATE", "HIGH"]
 Confidence = Literal["LOW", "MEDIUM", "HIGH"]
 ReasonCode = Literal[
-    "GENERIC_PHRASING", "UNIFORM_STRUCTURE", "LOW_SPECIFICITY", "FORMULAIC_TRANSITIONS", "OVER_HEDGING", "UNSUPPORTED_SUMMARY"
+    "GENERIC_PHRASING", "UNIFORM_STRUCTURE", "LOW_SPECIFICITY", "FORMULAIC_TRANSITIONS", "OVER_HEDGING", "UNSUPPORTED_SUMMARY", "REPETITION", "STYLE_SHIFT"
 ]
+
+
+WritingStyle = Literal["PRESERVE_VOICE", "STANDARD_ACADEMIC", "CONCISE_ACADEMIC", "TECHNICAL"]
 
 
 class ServiceSelection(Camel):
     writing: Literal["NONE", "AI_CHECK", "REFINE", "REDRAFT"] = "NONE"
     intensity: Literal["LIGHT", "STANDARD"] = "STANDARD"
+    style: WritingStyle = "PRESERVE_VOICE"  # part of the priced selection: changing it needs a new quote
     formatting: Literal["NONE", "FORMAT", "TEMPLATE_FORMAT"] = "NONE"
     preset: str = "apa7"
     latex: bool = False
@@ -251,6 +255,25 @@ class AnalysisResult(Camel):
     method: str = ""
 
 
+class PaperCheck(Camel):
+    """One citation/reference or consistency result. `certainty` says how sure PaperAid is."""
+
+    kind: Literal["CITED_NOT_LISTED", "LISTED_NOT_CITED", "UNREADABLE_CITATION", "UNREADABLE_REFERENCE", "NO_REFERENCE_LIST", "SPELLING_MIXED"]
+    certainty: Literal["CONFIRMED", "POSSIBLE", "UNDETERMINED"]
+    item: str  # the citation or reference as written in the paper
+    detail: str
+
+
+class PaperChecks(Camel):
+    """Paper-quality results, kept separate from AI-likeness (owner decision 2026-09-27)."""
+
+    citations_found: int
+    references_found: int
+    style: Literal["AUTHOR_DATE", "NUMERIC", "UNKNOWN"]
+    items: list[PaperCheck]
+    method: str = ""
+
+
 class ChangedBlock(Camel):
     block_id: str
     section: str
@@ -352,6 +375,7 @@ class JobView(Camel):
     warnings: list[str] = []
     analysis: AnalysisResult | None = None
     analysis_after: AnalysisResult | None = None
+    paper_checks: PaperChecks | None = None
     refinement: RefinementResult | None = None
     formatting: FormattingResult | None = None
     outputs: list[OutputFile] = []

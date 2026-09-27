@@ -8,8 +8,11 @@ import pytest
 from app.ai import orchestration, providers
 from app.ai.orchestration import AIRunner, Revision, Target
 from app.ai.providers import AnthropicProvider, ModelResult, OpenAIProvider, Usage, render_user_message
+from app.ai.styles import writing_brief
 from app.core.config import Settings
 from app.core.errors import PermanentStageError, RetryableStageError
+
+BRIEF = writing_brief("PRESERVE_VOICE", "STANDARD")
 
 
 def real_settings(**overrides) -> Settings:
@@ -130,7 +133,7 @@ def test_unknown_ids_are_ignored_and_rewrites_are_checked(monkeypatch):
     )
     runner, calls = runner_with(monkeypatch, scripted)
     targets = [Target("b1", "Intro", "A long ⟦P1⟧ text with 12 cases."), Target("b2", "Intro", "Kept 42.")]
-    revisions = {r.id: r for r in runner.refine(targets, [])}
+    revisions = {r.id: r for r in runner.refine(targets, [], BRIEF)}
     assert set(revisions) == {"b1", "b2"}
     assert revisions["b1"].problems == []
     assert "a number was added, removed or changed" in revisions["b2"].problems
@@ -140,29 +143,29 @@ def test_unknown_ids_are_ignored_and_rewrites_are_checked(monkeypatch):
 def test_review_failure_goes_to_the_writer_to_fix(monkeypatch):
     scripted = ScriptedProvider(
         {
-            "review": [{"results": [{"id": "b1", "pass": False, "issues": ["MEANING_DRIFT"], "note": "changed claim"}]}],
+            "review": [{"results": [{"id": "b1", "grade": "REPAIR", "issues": ["MEANING_DRIFT"], "note": "changed claim", "riskBand": "low"}]}],
             "repair": [{"blocks": [{"id": "b1", "text": "Safer text."}]}],
         }
     )
     runner, _ = runner_with(monkeypatch, scripted)
     instructions = {"b1": "Cut the filler."}
-    verdicts = runner.review([Revision("b1", "Original text.", "Risky text.", [])], instructions)
+    verdicts = runner.review([Revision("b1", "Original text.", "Risky text.", [])], instructions, BRIEF).issues
     assert verdicts == {"b1": ["MEANING_DRIFT", "NOTE: changed claim"]}
-    repaired = runner.repair([(Revision("b1", "Original text.", "Risky text.", []), verdicts["b1"])], instructions)
+    repaired = runner.repair([(Revision("b1", "Original text.", "Risky text.", []), verdicts["b1"])], instructions, BRIEF)
     assert repaired[0].revised == "Safer text."
     assert scripted.refs == [("review", "openai:gpt-6-sol"), ("repair", "anthropic:claude-opus-5-5")]
 
 
 def test_skipped_review_items_do_not_pass(monkeypatch):
     runner, _ = runner_with(monkeypatch, ScriptedProvider({"review": [{"results": []}]}))
-    assert runner.review([Revision("b1", "a", "b", [])], {}) == {"b1": ["NOT_REVIEWED"]}
+    assert runner.review([Revision("b1", "a", "b", [])], {}, BRIEF).issues == {"b1": ["NOT_REVIEWED"]}
 
 
 def test_budget_guard_stops_before_the_call(monkeypatch):
     scripted = ScriptedProvider({"refine": [{"blocks": []}]})
     runner, _ = runner_with(monkeypatch, scripted, budget=0.0001)
     with pytest.raises(PermanentStageError) as err:
-        runner.refine([Target("b1", "Intro", "Some text " * 50)], [])
+        runner.refine([Target("b1", "Intro", "Some text " * 50)], [], BRIEF)
     assert err.value.code == "BUDGET_EXCEEDED" and scripted.calls == []
 
 
@@ -174,14 +177,14 @@ def test_production_settings_fail_closed():
 def test_malformed_output_is_costed_before_it_fails(monkeypatch):
     runner, calls = runner_with(monkeypatch, ScriptedProvider({"refine": [("{broken", "end_turn")]}))
     with pytest.raises(RetryableStageError):
-        runner.refine([Target("b1", "Intro", "Some text here.")], [])
+        runner.refine([Target("b1", "Intro", "Some text here.")], [], BRIEF)
     assert len(calls) == 1 and calls[0].cost_usd > 0
 
 
 def test_refusal_is_costed_and_permanent(monkeypatch):
     runner, calls = runner_with(monkeypatch, ScriptedProvider({"refine": [("", "refusal")]}))
     with pytest.raises(PermanentStageError):
-        runner.refine([Target("b1", "Intro", "Some text here.")], [])
+        runner.refine([Target("b1", "Intro", "Some text here.")], [], BRIEF)
     assert len(calls) == 1
 
 
@@ -190,8 +193,8 @@ def test_a_retry_reuses_the_paid_response(monkeypatch):
     scripted = ScriptedProvider({"refine": [{"blocks": [{"id": "b1", "text": "Better text here."}]}]})
     runner, calls = runner_with(monkeypatch, scripted, cache=cache)
     target = [Target("b1", "Intro", "Some text here.")]
-    first = runner.refine(target, [])
-    again = runner.refine(target, [])  # e.g. the worker crashed before the stage was marked complete
+    first = runner.refine(target, [], BRIEF)
+    again = runner.refine(target, [], BRIEF)  # e.g. the worker crashed before the stage was marked complete
     assert first[0].revised == again[0].revised == "Better text here."
     assert scripted.calls == ["refine"] and len(calls) == 1
 
@@ -208,7 +211,7 @@ def test_cut_off_batches_are_split_not_retried(monkeypatch):
         }
     )
     runner, calls = runner_with(monkeypatch, scripted)
-    revisions = {r.id: r for r in runner.refine([Target("b1", "S", long), Target("b2", "S", long)], [])}
+    revisions = {r.id: r for r in runner.refine([Target("b1", "S", long), Target("b2", "S", long)], [], BRIEF)}
     assert revisions["b1"].revised == "One." and revisions["b2"].revised == revisions["b2"].original
     assert revisions["b2"].problems == [orchestration.NOT_RETURNED]  # reported as kept original, never as "no change needed"
     assert len(calls) == 3  # every attempt was costed
@@ -227,9 +230,9 @@ def test_a_schema_invalid_answer_is_not_replayed_on_retry(monkeypatch):
     runner, calls = runner_with(monkeypatch, scripted, cache=cache)
     target = [Target("b1", "Intro", "Some text here.")]
     with pytest.raises(RetryableStageError):
-        runner.refine(target, [])
+        runner.refine(target, [], BRIEF)
     assert cache.saved == {}  # the invalid answer was costed but not saved
-    assert runner.refine(target, [])[0].revised == "Fixed."  # the retry asked the model again
+    assert runner.refine(target, [], BRIEF)[0].revised == "Fixed."  # the retry asked the model again
     assert scripted.calls == ["refine", "refine"] and len(calls) == 2
 
 
@@ -238,11 +241,11 @@ def test_an_unusable_saved_answer_is_ignored(monkeypatch):
     scripted = ScriptedProvider({"refine": [{"blocks": [{"id": "b1", "text": "Fresh."}]}]})
     runner, _ = runner_with(monkeypatch, scripted, cache=cache)
     target = [Target("b1", "Intro", "Some text here.")]
-    runner.refine(target, [])
+    runner.refine(target, [], BRIEF)
     for key in cache.saved:
         cache.saved[key] = '{"not": "valid"}'  # e.g. saved by an older version
     scripted.responses["refine"].append({"blocks": [{"id": "b1", "text": "Again."}]})
-    assert runner.refine(target, [])[0].revised == "Again."
+    assert runner.refine(target, [], BRIEF)[0].revised == "Again."
 
 
 
@@ -278,7 +281,7 @@ def test_plan_is_drafted_by_lead_critiqued_by_writer_and_finalised_by_lead(monke
     )
     runner, calls = runner_with(monkeypatch, scripted)
     targets = [Target("b1", "Intro", "It is important to note that A. B."), Target("b2", "Intro", "Plain sound text.")]
-    plan = runner.negotiate_plan(targets, ["Intro"])
+    plan = runner.negotiate_plan(targets, ["Intro"], BRIEF)
     assert [task for task, _ in scripted.refs] == ["plan", "critique", "finalise"]
     assert [ref for _, ref in scripted.refs] == ["openai:gpt-6-sol", "anthropic:claude-opus-5-5", "openai:gpt-6-sol"]
     assert plan.final["b1"].instruction.endswith("merge the two short sentences.")
@@ -302,7 +305,7 @@ def test_leave_decisions_are_critiqued_and_finalised_too(monkeypatch):
         }
     )
     runner, _ = runner_with(monkeypatch, scripted)
-    plan = runner.negotiate_plan([Target("b1", "S", "It is important to note that A.")], [])
+    plan = runner.negotiate_plan([Target("b1", "S", "It is important to note that A.")], [], BRIEF)
     assert sent == {"plan": ["b1"], "critique": ["b1"], "finalise": ["b1"]}
     assert plan.final["b1"].action == "rewrite"  # the writer's objection changed the lead's mind
 
@@ -316,7 +319,7 @@ def test_the_final_plan_cannot_add_a_passage_the_writer_never_saw(monkeypatch):
         }
     )
     runner, _ = runner_with(monkeypatch, scripted)
-    plan = runner.negotiate_plan([Target("b1", "S", "One."), Target("b2", "S", "Two.")], [])
+    plan = runner.negotiate_plan([Target("b1", "S", "One."), Target("b2", "S", "Two.")], [], BRIEF)
     assert set(plan.final) == {"b1"}
 
 
@@ -329,7 +332,7 @@ def test_a_passage_missing_from_the_final_plan_keeps_its_draft_instruction(monke
         }
     )
     runner, _ = runner_with(monkeypatch, scripted)
-    assert runner.negotiate_plan([Target("b1", "S", "Text.")], []).final["b1"].instruction == "Draft."
+    assert runner.negotiate_plan([Target("b1", "S", "Text.")], [], BRIEF).final["b1"].instruction == "Draft."
 
 
 def test_the_writer_receives_the_agreed_instruction(monkeypatch):
@@ -342,7 +345,7 @@ def test_the_writer_receives_the_agreed_instruction(monkeypatch):
 
     scripted = Capturing({"refine": [{"blocks": [{"id": "b1", "text": "Done."}]}]})
     runner, _ = runner_with(monkeypatch, scripted)
-    runner.refine([Target("b1", "S", "Text.", instruction="Cut the filler.", preserve="the claim")], [])
+    runner.refine([Target("b1", "S", "Text.", instruction="Cut the filler.", preserve="the claim")], [], BRIEF)
     assert seen["instruction"] == "Cut the filler." and seen["preserve"] == "the claim"
     assert scripted.refs == [("refine", "anthropic:claude-opus-5-5")]
 
@@ -476,16 +479,20 @@ def test_every_paid_call_renews_the_lease_first(monkeypatch):
     scripted = ScriptedProvider({"refine": [{"blocks": [{"id": "b1", "text": "Done."}]}]})
     monkeypatch.setattr(orchestration, "provider_for", lambda ref, settings: (scripted, "m"))
     runner = AIRunner(real_settings(), lambda c: None, lambda: 0.0, 5.0, heartbeat=lambda: beats.append(len(scripted.calls)))
-    runner.refine([Target("b1", "S", "Text.")], [])
+    runner.refine([Target("b1", "S", "Text.")], [], BRIEF)
     assert beats == [0]  # called before the provider, once per paid call
 
 
 def test_review_verdicts_are_parsed_strictly(monkeypatch):
-    """A string "false" must never count as a pass (it did with bool())."""
-    scripted = ScriptedProvider({"review": [{"results": [{"id": "b1", "pass": "false", "issues": [], "note": ""}]}]})
-    runner, _ = runner_with(monkeypatch, scripted)
-    with pytest.raises(RetryableStageError):
-        runner.review([Revision("b1", "Original text.", "Rewritten text.", [])], {})
+    """A grade outside PASS / PASS_WITH_WARNINGS / REPAIR (or a missing band) is a malformed answer, never a pass."""
+    for bad in ({"grade": "false"}, {"grade": "PASS", "riskBand": "none"}, {"pass": True}):
+        answer = {"id": "b1", "grade": "PASS", "issues": [], "note": "", "riskBand": "low", **bad}
+        if "pass" in bad:  # the old answer format
+            del answer["grade"]
+        scripted = ScriptedProvider({"review": [{"results": [answer]}]})
+        runner, _ = runner_with(monkeypatch, scripted)
+        with pytest.raises(RetryableStageError):
+            runner.review([Revision("b1", "Original text.", "Rewritten text.", [])], {}, BRIEF)
 
 
 # --- spend accuracy and the hard ceiling (Codex audit findings 2 and 5) --------------------------
@@ -536,7 +543,7 @@ def test_the_spend_cap_is_a_hard_ceiling(monkeypatch):
     monkeypatch.setattr(orchestration, "provider_for", lambda ref, settings: (scripted, "gpt-6-sol"))
     settings = real_settings()
     runner = AIRunner(settings, lambda c: None, lambda: 0.0, 0.05)
-    runner.analyse([("b1", "A short paragraph of about twenty words that needs a quick look from the lead model before pricing.")], [])
+    runner.analyse([{"id": "b1", "text": "A short paragraph of about twenty words that needs a quick look from the lead model before pricing.", "signals": []}], [], {})
     from app.ai import costs
 
     worst = costs.cost_usd("openai", "gpt-6-sol", 0, sent["max_tokens"], 0)
@@ -552,5 +559,5 @@ def test_a_call_the_budget_cannot_afford_is_never_made(monkeypatch):
     calls = []
     runner = AIRunner(real_settings(), calls.append, lambda: 0.0, 0.0005)
     with pytest.raises(PermanentStageError) as err:
-        runner.analyse([("b1", "Text " * 50)], [])
+        runner.analyse([{"id": "b1", "text": "Text " * 50, "signals": []}], [], {})
     assert err.value.code == "BUDGET_EXCEEDED" and calls == [] and scripted.calls == []

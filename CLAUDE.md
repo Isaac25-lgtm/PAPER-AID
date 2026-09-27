@@ -21,6 +21,8 @@ Students upload a paper, choose a service, see a server-calculated quote, and la
 - No placeholders in the product: no stand-in AI, fake results, invented prices or fake sign-in. What can't really work yet is shown as unavailable. Test stand-ins live only in `backend/tests/`.
 - The roadmap for the intelligence layer is `PaperAid_Revised_AI_Algorithm_Claude_Context_and_Research_Architecture.md`, as amended by "Revised AI algorithm adopted" in `docs/decisions.md` (the amendments win).
 - The AI flow is fixed (see "The permanent algorithm" in `docs/decisions.md`): the lead model (GPT-6 Sol) analyses, plans, finalises and reviews; the writer (Claude Opus 5.5) critiques, rewrites and fixes; there are at most 2 fix rounds. University templates run the same loop over formatting rules. The step-to-role map is `STEPS` in `app/ai/orchestration.py`. Don't add a step or swap roles without an owner decision.
+- Code measures, models judge: writing signals are versioned rules in `app/analysis/rules.py` (signals-v2); Sol confirms or rejects each in context and nothing is rewritten only because a threshold was crossed. Citation checks (`app/analysis/paper_checks.py`) are separate from AI-likeness and say CONFIRMED, POSSIBLE or UNDETERMINED. Everything sent to a model must be deterministic, so the job replays the estimate's paid answers.
+- Released prompts never change (`app/ai/prompts/released.json`, enforced by a test): add the next version and point `STEPS` at it. Each job runs with the engine it was priced with.
 - Keep the app runnable after every change: `cd web && npm run dev` must keep working.
 
 ## Domain vocabulary

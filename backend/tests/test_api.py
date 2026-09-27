@@ -459,7 +459,10 @@ def test_replacing_the_guide_invalidates_the_quote(client):
 def _analyse_all(payload):
     return {
         "blocks": [
-            {"id": b["id"], "riskBand": "moderate", "reasons": ["GENERIC_PHRASING"], "explanation": "Reads generically.", "suggestion": "Be specific.", "excerpt": b["text"][:60]}
+            {
+                "id": b["id"], "riskBand": "moderate", "reasons": ["GENERIC_PHRASING"], "explanation": "Reads generically.", "suggestion": "Be specific.",
+                "excerpt": b["text"][:60], "confirmed": [s["rule"] for s in b["signals"]], "rejected": [], "preserve": False, "risk": "",
+            }
             for b in payload["blocks"]
         ]
     }
@@ -490,8 +493,15 @@ def test_a_passage_the_writer_never_returned_is_kept_and_reported(real_client):
     assert any("kept their original wording" in w for w in job["warnings"])
 
 
+def test_a_lead_that_found_nothing_is_not_a_missing_analysis(real_client):
+    real_client.models.overrides["analyse"] = lambda payload: {"blocks": []}  # saw every passage, no problems
+    _, job = _submit(real_client, {"writing": "AI_CHECK"})
+    assert job["status"] == "COMPLETED" and job["outcome"] == "FULL"
+    assert not any("could not assess" in w for w in job["warnings"])
+
+
 def test_missing_lead_analysis_is_disclosed(real_client):
-    real_client.models.overrides["analyse"] = lambda payload: {"blocks": []}  # e.g. every answer cut off
+    real_client.models.truncate.add("analyse")  # every answer cut off, even one passage at a time
     _, job = _submit(real_client, {"writing": "AI_CHECK"})
     assert job["status"] == "COMPLETED" and job["outcome"] == "PARTIAL"
     assert job["analysis"]["method"] == "PaperAid writing-pattern signals only"
@@ -760,7 +770,12 @@ def test_ai_services_are_invite_only_while_a_tester_list_is_set(client, monkeypa
 
 def _review_failing(ids_to_fail):
     def review(payload):
-        return {"results": [{"id": p["id"], "pass": p["id"] not in ids_to_fail, "issues": [] if p["id"] not in ids_to_fail else ["MEANING_DRIFT"], "note": ""} for p in payload["pairs"]]}
+        return {
+            "results": [
+                {"id": p["id"], "grade": "REPAIR" if p["id"] in ids_to_fail else "PASS", "issues": ["MEANING_DRIFT"] if p["id"] in ids_to_fail else [], "note": "", "riskBand": "low"}
+                for p in payload["pairs"]
+            ]
+        }
 
     return review
 
@@ -1013,3 +1028,93 @@ def test_unfinished_drafts_are_listed_for_resuming(client):
     assert [d["id"] for d in drafts] == [job_id] and drafts[0]["quote"]["id"] == quote["id"]
     assert job_id not in [j["id"] for j in client.get("/api/jobs", headers=STUDENT).json()["items"]]
     assert client.get("/api/jobs?status=DRAFT", headers=OTHER).json()["items"] == []
+
+
+# --- phase 3: the revised analysis and refinement algorithm (owner decision 2026-09-27) ----------
+
+
+def _judge_all(judgement):
+    """A lead analysis that returns every passage, with `judgement(passage)` as its answer fields."""
+
+    def analyse(payload):
+        base = {"riskBand": "low", "reasons": [], "explanation": "", "suggestion": "", "excerpt": "", "confirmed": [], "rejected": [], "preserve": False, "risk": ""}
+        return {"blocks": [{**base, "id": b["id"], **judgement(b)} for b in payload["blocks"]]}
+
+    return analyse
+
+
+def test_the_lead_can_reject_every_signal_as_a_false_positive(real_client):
+    real_client.models.overrides["analyse"] = _judge_all(lambda b: {"rejected": [s["rule"] for s in b["signals"]]})
+    _, job = _submit(real_client, {"writing": "AI_CHECK"})
+    assert job["analysis"]["findings"] == [] and job["analysis"]["band"] == "LOW"
+
+
+def test_signals_reach_the_lead_as_an_evidence_bundle(real_client):
+    _, job = _submit(real_client, {"writing": "AI_CHECK"})
+    sent = json.loads(next(r for r in real_client.models.requests if r.startswith("analyse"))[len("analyse") :])
+    assert sent["document"]["rulesetVersion"] == "signals-v2" and sent["document"]["sections"]
+    assert any(b["signals"] for b in sent["blocks"]) and all("sectionType" in b for b in sent["blocks"])
+    assert job["analysis"]["algorithmVersion"] == "signals-v2"
+
+
+def test_passages_the_lead_marks_to_preserve_are_never_rewritten(real_client):
+    real_client.models.overrides["analyse"] = _judge_all(lambda b: {"riskBand": "high", "reasons": ["GENERIC_PHRASING"], "confirmed": [s["rule"] for s in b["signals"]], "preserve": True})
+    _, job = _submit(real_client, REFINE_FORMAT)
+    assert job["status"] == "COMPLETED" and job["refinement"]["refinedBlocks"] == 0
+    assert "plan" not in real_client.models.tasks and "refine" not in real_client.models.tasks
+
+
+def test_the_chosen_style_reaches_every_planning_and_writing_step(real_client):
+    real_client.models.overrides["analyse"] = _analyse_all
+    _, job = _submit(real_client, {**REFINE_FORMAT, "style": "CONCISE_ACADEMIC"})
+    assert job["selection"]["style"] == "CONCISE_ACADEMIC"
+    for task in ("plan", "critique", "finalise", "refine", "review"):
+        sent = next(r for r in real_client.models.requests if r.startswith(task + "{"))
+        assert "Concise academic" in sent, task
+
+
+def test_a_different_style_needs_its_own_quote(client):
+    job_id, quote = start_job(client)
+    other = get_quote(client, job_id, {**REFINE_FORMAT, "style": "TECHNICAL"})
+    assert other["id"] != quote["id"]
+    client.post(f"/api/jobs/{job_id}/submit", headers=STUDENT, json={"quoteId": other["id"]})
+    assert wait(client, job_id)["selection"]["style"] == "TECHNICAL"
+
+
+def test_the_reviewer_sees_the_post_scan_and_linked_passages_and_its_warnings_reach_the_student(real_client):
+    models = real_client.models
+    models.overrides["analyse"] = _analyse_all
+
+    def review(payload):
+        return {"results": [{"id": p["id"], "grade": "PASS_WITH_WARNINGS", "issues": [], "note": "Still rests on a general claim only you can support.", "riskBand": "low"} for p in payload["pairs"]]}
+
+    models.overrides["review"] = review
+    _, job = _submit(real_client, REFINE_FORMAT, name="dissertation_long.docx")
+    sent = json.loads(next(r for r in models.requests if r.startswith("review"))[len("review") :])
+    pair = sent["pairs"][0]
+    assert {"signalsBefore", "signalsAfter", "newRepeatedPhrasing"} <= set(pair["postScan"]) and "before" in pair["context"]
+    assert any(p["linked"] for p in sent["pairs"])  # passages elsewhere that share key terms
+    assert any("reviewer note" in w for w in job["warnings"])  # delivered, but never as an unqualified success
+    delivered = [c for c in job["refinement"]["changes"] if not c["kept"]]
+    assert delivered and all(c["note"].startswith("Reviewer note:") for c in delivered)
+
+
+def test_the_after_band_uses_the_reviewers_judgement_of_each_rewrite(real_client):
+    models = real_client.models
+    models.overrides["analyse"] = _analyse_all
+    order = ["LOW", "MODERATE", "HIGH"]
+    bands = []
+    for risk in ("low", "high"):
+        models.overrides["review"] = lambda payload, risk=risk: {"results": [{"id": p["id"], "grade": "PASS", "issues": [], "note": "", "riskBand": risk} for p in payload["pairs"]]}
+        _, job = _submit(real_client, REFINE_FORMAT)
+        bands.append(order.index(job["analysisAfter"]["band"]))
+    assert bands[1] > bands[0]
+
+
+def test_paper_checks_are_reported_and_hidden_from_admins(client):
+    job_id, quote = start_job(client, name="citations_in_text.docx", selection={"writing": "AI_CHECK"})
+    client.post(f"/api/jobs/{job_id}/submit", headers=STUDENT, json={"quoteId": quote["id"]})
+    job = wait(client, job_id)
+    assert job["paperChecks"]["citationsFound"] >= 3 and job["paperChecks"]["items"][0]["kind"] == "NO_REFERENCE_LIST"
+    admin = client.get(f"/api/admin/jobs/{job_id}", headers=ADMIN).json()["job"]
+    assert all(i["item"] == "" and i["detail"] == "" for i in admin["paperChecks"]["items"])

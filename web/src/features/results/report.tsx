@@ -6,7 +6,7 @@ import { Button } from '../../components/ui/button'
 import { Badge, Card } from '../../components/ui/primitives'
 import { formatBytes, formatDate, formatNumber } from '../../lib/format'
 import { REASON_LABELS } from '../../lib/services'
-import type { AnalysisResult, Band, ChangedBlock, Finding, FormattingResult, OutputFile, ReasonCode, RefinementResult } from '../../lib/types'
+import type { AnalysisResult, Band, ChangedBlock, Finding, FormattingResult, OutputFile, PaperCheck, PaperChecks, ReasonCode, RefinementResult } from '../../lib/types'
 
 const BANDS: { id: Band; label: string; active: string }[] = [
   { id: 'LOW', label: 'Low', active: 'bg-brand-100 text-brand-800 ring-1 ring-inset ring-brand-300' },
@@ -237,6 +237,52 @@ export function FormattingPanel({ formatting }: { formatting: FormattingResult }
         </div>
       )}
       {formatting.method && <p className="text-xs text-fg-subtle">Method: {formatting.method}</p>}
+    </div>
+  )
+}
+
+const CERTAINTY: Record<PaperCheck['certainty'], { label: string; tone: 'danger' | 'warning' | 'neutral' }> = {
+  CONFIRMED: { label: 'Confirmed', tone: 'danger' },
+  POSSIBLE: { label: 'Possible', tone: 'warning' },
+  UNDETERMINED: { label: "Couldn't check", tone: 'neutral' },
+}
+
+const CHECK_TITLES: Record<PaperCheck['kind'], string> = {
+  CITED_NOT_LISTED: 'Cited but not in your reference list',
+  LISTED_NOT_CITED: 'In your reference list but not cited',
+  UNREADABLE_CITATION: 'Citation not checked',
+  UNREADABLE_REFERENCE: 'Reference not checked',
+  NO_REFERENCE_LIST: 'No reference list found',
+  SPELLING_MIXED: 'Mixed spelling conventions',
+}
+
+/** Citation and consistency checks: about the paper's integrity, not AI-likeness. */
+export function PaperChecksPanel({ checks }: { checks: PaperChecks }) {
+  return (
+    <div>
+      <h3 className="text-base font-semibold">Citations and consistency</h3>
+      <p className="mt-1 text-xs text-fg-muted">
+        {checks.citationsFound} citations and {checks.referencesFound} references read. These checks are separate from AI-likeness. PaperAid never changes
+        your citations; &ldquo;Couldn&rsquo;t check&rdquo; means we make no claim either way.
+      </p>
+      {checks.items.length === 0 ? (
+        <p className="mt-3 flex items-center gap-2 rounded-lg bg-brand-50 p-3 text-sm text-brand-800">
+          <Check className="size-4 shrink-0" aria-hidden /> Every citation we read matches your reference list.
+        </p>
+      ) : (
+        <ul className="mt-3 space-y-2">
+          {checks.items.map((c, i) => (
+            <li key={`${c.kind}-${i}`} className="rounded-xl border border-line bg-white p-3.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm font-semibold">{CHECK_TITLES[c.kind]}</span>
+                <Badge tone={CERTAINTY[c.certainty].tone}>{CERTAINTY[c.certainty].label}</Badge>
+              </div>
+              {c.item && <p className="mt-1.5 font-serif text-sm break-words text-fg-muted">{c.item}</p>}
+              <p className="mt-1 text-sm text-fg">{c.detail}</p>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 }

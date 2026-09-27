@@ -75,6 +75,7 @@ try {
   await page.getByText('Readable text found').waitFor({ timeout: 20000 })
   await page.getByText('Academic formatting').first().click()
   await page.getByRole('combobox', { name: 'Formatting style' }).selectOption('harvard')
+  await page.getByText('Concise academic').click() // the writing style is part of what is priced
   await page.getByText('First, a short AI estimate').waitFor()
   await shot('1a-estimate-offer')
   await page.getByRole('button', { name: /Get my estimate/ }).click() // the paid scan only runs on the student's click
@@ -102,12 +103,14 @@ try {
   await page.getByRole('tab', { name: 'Overview' }).waitFor({ timeout: 120000 })
   await shot('3-overview')
   step('job completed')
+  await page.getByText('Concise academic · standard refinement').waitFor()
   for (const tab of ['Writing report', 'Changes', 'Formatting']) {
     await page.getByRole('tab', { name: tab }).click()
     await page.waitForTimeout(300)
     await shot(`4-${tab.toLowerCase().replace(' ', '-')}`)
+    if (tab === 'Writing report') await page.getByRole('heading', { name: 'Citations and consistency' }).waitFor()
   }
-  step('result tabs render')
+  step('result tabs render, with the chosen style and the citation checks')
 
   // Real download of the refined + formatted Word file.
   await page.getByRole('tab', { name: 'Overview' }).click()

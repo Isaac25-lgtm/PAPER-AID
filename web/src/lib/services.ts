@@ -1,6 +1,6 @@
 import type { LucideIcon } from 'lucide-react'
 import { Braces, FileCheck2, GraduationCap, PenLine, Search, Shuffle } from 'lucide-react'
-import type { Availability, JobStatus, ReasonCode, ServiceId, Stage } from './types'
+import type { Availability, JobStatus, ReasonCode, ServiceId, Stage, WritingStyle } from './types'
 
 interface ServiceInfo {
   name: string
@@ -98,4 +98,13 @@ export const REASON_LABELS: Record<ReasonCode, string> = {
   FORMULAIC_TRANSITIONS: 'Formulaic transition',
   OVER_HEDGING: 'Over-hedging',
   UNSUPPORTED_SUMMARY: 'Unsupported summary',
+  REPETITION: 'Repeated phrasing',
+  STYLE_SHIFT: 'Style shift',
 }
+
+export const STYLE_OPTIONS: { id: WritingStyle; title: string; body: string }[] = [
+  { id: 'PRESERVE_VOICE', title: 'Preserve my voice', body: 'Keeps your own words and sentence habits wherever they work.' },
+  { id: 'STANDARD_ACADEMIC', title: 'Standard academic', body: 'Clear, formal academic English.' },
+  { id: 'CONCISE_ACADEMIC', title: 'Concise academic', body: 'Formal and tight: cuts filler, never content.' },
+  { id: 'TECHNICAL', title: 'Technical/scientific', body: 'Precise terms for science, engineering and health papers.' },
+]
