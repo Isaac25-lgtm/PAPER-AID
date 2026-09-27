@@ -1,12 +1,12 @@
 import { clsx } from 'clsx'
-import { ArrowRight, Check, ChevronDown, Download, FileText, Info, Lightbulb, Lock, ShieldCheck } from 'lucide-react'
+import { ArrowRight, Check, ChevronDown, Download, ExternalLink, FileText, Info, Lightbulb, Lock, ShieldCheck } from 'lucide-react'
 import { useState } from 'react'
 import { DataError, useData } from '../../lib/data'
 import { Button } from '../../components/ui/button'
 import { Badge, Card } from '../../components/ui/primitives'
 import { formatBytes, formatDate, formatNumber } from '../../lib/format'
 import { REASON_LABELS } from '../../lib/services'
-import type { AnalysisResult, Band, ChangedBlock, Finding, FormattingResult, OutputFile, PaperCheck, PaperChecks, ReasonCode, RefinementResult } from '../../lib/types'
+import type { AnalysisResult, Band, ChangedBlock, CheckedClaim, Finding, FormattingResult, OutputFile, PaperCheck, PaperChecks, ReasonCode, RefinementResult, ResearchResult, Source } from '../../lib/types'
 
 const BANDS: { id: Band; label: string; active: string }[] = [
   { id: 'LOW', label: 'Low', active: 'bg-brand-100 text-brand-800 ring-1 ring-inset ring-brand-300' },
@@ -283,6 +283,76 @@ export function PaperChecksPanel({ checks }: { checks: PaperChecks }) {
           ))}
         </ul>
       )}
+    </div>
+  )
+}
+
+const SUPPORT: Record<CheckedClaim['support'], { label: string; tone: 'brand' | 'warning' | 'danger' | 'neutral' }> = {
+  SUPPORTED: { label: 'Supported', tone: 'brand' },
+  PARTLY_SUPPORTED: { label: 'Partly supported', tone: 'warning' },
+  CONTRADICTED: { label: 'Contradicted', tone: 'danger' },
+  NOT_FOUND: { label: 'Not found in this search', tone: 'neutral' },
+  UNCERTAIN: { label: 'Uncertain', tone: 'warning' },
+}
+
+const ACCESS: Record<Source['access'], string> = { FULL_TEXT: 'full text read', ABSTRACT: 'abstract only', SNIPPET: 'search snippet only' }
+
+function SourceItem({ source }: { source: Source }) {
+  return (
+    <li className="rounded-lg bg-surface-subtle p-3 text-sm">
+      <a href={source.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-start gap-1 font-medium break-words text-brand-800 hover:underline">
+        {source.title || source.url}
+        <ExternalLink className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+      </a>
+      <p className="mt-0.5 text-xs text-fg-subtle">
+        {[source.publisher, source.published, ACCESS[source.access]].filter(Boolean).join(' · ')}
+        {source.scope && ` · covers ${source.scope}`}
+      </p>
+      {source.passage && <blockquote className="mt-2 border-l-2 border-line-strong pl-3 font-serif text-fg-muted italic">&ldquo;{source.passage}&rdquo;</blockquote>}
+    </li>
+  )
+}
+
+/** Claims checked against live sources. The paper itself is never changed by this. */
+export function SourceCheckPanel({ research }: { research: ResearchResult }) {
+  return (
+    <div className="space-y-4">
+      <p className="flex gap-2 rounded-lg bg-surface-subtle p-3 text-xs leading-relaxed text-fg-muted">
+        <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+        We searched the web on {formatDate(research.retrievedOn)} for the key factual claims in your paper, and a second AI checked each source against the claim.
+        &ldquo;Not found&rdquo; means this limited search found nothing, not that no evidence exists. Read every source yourself before you cite it.
+      </p>
+      {research.checked < research.candidates && (
+        <p className="text-xs text-amber-800">
+          {research.checked} of {research.candidates} claims were checked within this job&rsquo;s price.
+        </p>
+      )}
+      {research.claims.length === 0 && <p className="rounded-lg bg-surface-subtle p-4 text-sm text-fg-muted">We found no public factual claims to check in this paper.</p>}
+      <ul className="space-y-3">
+        {research.claims.map((c) => (
+          <li key={c.id} className="rounded-xl border border-line bg-white p-4 shadow-card">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge tone={SUPPORT[c.support].tone}>{SUPPORT[c.support].label}</Badge>
+              <span className="text-xs text-fg-subtle">
+                {c.section} · {c.cited ? 'cited in your paper' : 'not cited in your paper'}
+              </span>
+            </div>
+            <blockquote className="mt-2.5 font-serif text-[0.95rem] leading-relaxed text-fg">&ldquo;{c.claim}&rdquo;</blockquote>
+            {c.note && <p className="mt-2 text-sm text-fg-muted">{c.note}</p>}
+            {c.sources.length > 0 && (
+              <ul className="mt-3 space-y-2">
+                {c.sources.map((s) => (
+                  <SourceItem key={s.url} source={s} />
+                ))}
+              </ul>
+            )}
+            {!c.cited && c.sources.length > 0 && (c.support === 'SUPPORTED' || c.support === 'PARTLY_SUPPORTED') && (
+              <p className="mt-2 text-xs text-brand-800">Your paper doesn&rsquo;t cite a source for this claim. After reading it, you may want to cite one of these.</p>
+            )}
+          </li>
+        ))}
+      </ul>
+      {research.method && <p className="text-xs text-fg-subtle">Method: {research.method}</p>}
     </div>
   )
 }

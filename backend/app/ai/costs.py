@@ -29,11 +29,34 @@ def price_for(provider: str, model: str, overrides: Prices | None = None) -> tup
 CACHE_WRITE_MULTIPLIER = 1.25
 
 
+# Web search: a fee per search, plus the pages it reads, which arrive as ordinary input tokens in
+# the provider's usage. OpenAI: $10 per 1,000 searches (pricing page checked 2026-09-27). Only the
+# lead searches (the writer checks what it found), so only the lead's provider needs a fee here.
+SEARCH_FEE_USD: dict[str, float] = {"openai": 0.01}
+# The most input one search can add at "medium" search context (two searches measured 13–17k
+# tokens in total on 2026-09-27); used for the hard ceiling before a search call is made.
+SEARCH_INPUT_TOKENS_WORST = 12_000
+
+
+def search_fee_usd(provider: str, searches: int) -> float:
+    if searches and provider not in SEARCH_FEE_USD:
+        raise PermanentStageError("SEARCH_PRICE_NOT_CONFIGURED", "AI pricing is not configured for web search.", f"provider={provider}")
+    return searches * SEARCH_FEE_USD.get(provider, 0.0)
+
+
 def cost_usd(
-    provider: str, model: str, input_tokens: int, output_tokens: int, cached_tokens: int, overrides: Prices | None = None, cache_write_tokens: int = 0
+    provider: str,
+    model: str,
+    input_tokens: int,
+    output_tokens: int,
+    cached_tokens: int,
+    overrides: Prices | None = None,
+    cache_write_tokens: int = 0,
+    search_calls: int = 0,
 ) -> float:
     inp, out, cached = price_for(provider, model, overrides)
-    return (input_tokens * inp + cache_write_tokens * inp * CACHE_WRITE_MULTIPLIER + output_tokens * out + cached_tokens * cached) / 1_000_000
+    tokens = (input_tokens * inp + cache_write_tokens * inp * CACHE_WRITE_MULTIPLIER + output_tokens * out + cached_tokens * cached) / 1_000_000
+    return tokens + search_fee_usd(provider, search_calls)
 
 
 MIN_OUTPUT_TOKENS = 2000  # below this a structured answer can't be useful: stop instead of calling

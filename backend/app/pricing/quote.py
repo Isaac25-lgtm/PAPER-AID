@@ -16,6 +16,7 @@ from datetime import timedelta
 
 from app.ai import costs
 from app.ai.orchestration import BATCH_WORDS, PROMPTS, STEPS
+from app.analysis import research
 from app.core.config import Settings
 from app.jobs.models import BoundQuote, Engine, Passage, QuoteLine, ServiceSelection, utcnow
 
@@ -98,6 +99,21 @@ def refinement_usd(settings: Settings, passages: list[Passage]) -> float:
     return usd
 
 
+def source_check_usd(settings: Settings, words: int) -> float:
+    """The source check at its worst: finding the claims, every allowed search for every claim
+    (each search's fee plus the pages it reads), and the writer's check of the evidence."""
+    claims = research.claims_for(words, settings.research_max_claims)
+    if not claims:
+        return 0.0
+    usd = _step_usd(settings, "claims", words * CHARS_PER_WORD + ITEM_OVERHEAD * max(1, words // 120), words)
+    provider, _, model = settings.lead_model.partition(":")
+    searches = settings.research_max_searches
+    per_claim = costs.estimate_usd(provider, model, 1500 + costs.SEARCH_INPUT_TOKENS_WORST * 4 * searches, STEPS["research"].max_tokens, settings.model_prices)
+    usd += claims * (per_claim + costs.search_fee_usd(provider, searches))
+    usd += _step_usd(settings, "verify", claims * 3200, claims * 450)
+    return usd
+
+
 def template_usd(settings: Settings, guide_words: int) -> float:
     """University template rules: draft, critique and final rules, then every review and fix
     round allowed (the worst case)."""
@@ -150,6 +166,10 @@ def price(
         light = selection.intensity == "LIGHT"
         amount = with_margin(refinement_usd(settings, passages or []), settings)
         lines.append(QuoteLine(label=f"Check + Refine, {'light' if light else 'standard'} (up to)", amount=amount))
+        ai += amount
+    if selection.source_check:
+        amount = with_margin(source_check_usd(settings, words), settings)
+        lines.append(QuoteLine(label="Source check with live search (up to)", amount=amount))
         ai += amount
     fixed = 0
     if selection.formatting == "FORMAT":

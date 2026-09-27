@@ -26,12 +26,13 @@ def main() -> None:
             "CREDITS_ENABLED": "true",  # the browser journey covers credits, whatever the local .env says
         }
     )
-    from app.ai import orchestration
+    from app.ai import costs, orchestration
     from app.main import create_app
     from tests.fake_models import FakeModels
 
     models = FakeModels()
     orchestration.provider_for = lambda ref, settings: (models, ref.split(":")[-1])
+    costs.SEARCH_FEE_USD["fake"] = 0.01
     uvicorn.run(create_app(), host="127.0.0.1", port=8000)
 
 

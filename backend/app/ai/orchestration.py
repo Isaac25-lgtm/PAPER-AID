@@ -16,6 +16,13 @@ Refinement (the revised algorithm, adopted 2026-09-27):
      linked to it, grading PASS / PASS_WITH_WARNINGS / REPAIR; writer fixes what
      is raised and the lead reviews the fix again (bounded rounds)                  (AUDITING)
 
+Source check (optional, with AI Check or Refine):
+  a. lead picks the paper's important factual claims and a safe search query for each (RESEARCHING)
+  b. code drops any claim built on the paper's own results and any unsafe query
+  c. lead searches the live web for each claim; code keeps only sources the search opened
+  d. writer checks, without searching, whether each quoted passage supports its claim
+     (population, place, period); disagreement makes the claim UNCERTAIN              (RESEARCHING)
+
 University template formatting follows the same loop, with the formatting rules as the thing
 being planned: lead drafts rules from the guide → writer critiques → lead finalises → code
 applies them to the paper (wording can never change) → lead reviews the applied rules → writer
@@ -45,6 +52,7 @@ from pydantic import BaseModel, Field, StrictBool, ValidationError
 
 from app.ai import costs
 from app.ai.providers import UNAVAILABLE, ModelResult, parse, provider_for
+from app.analysis import research
 from app.core.config import Settings
 from app.core.errors import PermanentStageError, RetryableStageError
 from app.documents import protect
@@ -75,6 +83,9 @@ STEPS: dict[str, Step] = {
     "refine": Step("writer", Stage.REFINING, "refine-v3", 16000),
     "review": Step("lead", Stage.AUDITING, "review-v2", 8000),
     "repair": Step("writer", Stage.AUDITING, "repair-v3", 16000),
+    "claims": Step("lead", Stage.RESEARCHING, "claims-v1", 6000),
+    "research": Step("lead", Stage.RESEARCHING, "research-v1", 4000),
+    "verify": Step("writer", Stage.RESEARCHING, "verify-v1", 6000),
     "spec_plan": Step("lead", Stage.FORMATTING, "spec-plan-v1", 8000),
     "spec_critique": Step("writer", Stage.FORMATTING, "spec-critique-v1", 6000),
     "spec_finalise": Step("lead", Stage.FORMATTING, "spec-finalise-v1", 8000),
@@ -142,6 +153,35 @@ _REVIEW = _obj(
         )
     }
 )
+SUPPORT = ["SUPPORTED", "PARTLY_SUPPORTED", "CONTRADICTED", "NOT_FOUND"]
+_CLAIMS = _obj(
+    {
+        "claims": _list_of(
+            _obj({"id": _STR, "claim": _STR, "cited": _BOOL, "query": _STR, "importance": {"type": "string", "enum": ["high", "medium", "low"]}})
+        )
+    }
+)
+_RESEARCH = _obj(
+    {
+        "support": {"type": "string", "enum": SUPPORT},
+        "note": _STR,
+        "sources": _list_of(
+            _obj(
+                {
+                    "url": _STR,
+                    "title": _STR,
+                    "publisher": _STR,
+                    "published": _STR,
+                    "access": {"type": "string", "enum": ["FULL_TEXT", "ABSTRACT", "SNIPPET"]},
+                    "passage": _STR,
+                    "scope": _STR,
+                    "supports": {"type": "string", "enum": SUPPORT},
+                }
+            )
+        ),
+    }
+)
+_VERIFY = _obj({"results": _list_of(_obj({"id": _STR, "support": {"type": "string", "enum": SUPPORT}, "note": _STR}))})
 _SPEC_CRITIQUE = _obj({"items": _list_of(_obj({"field": _STR, "current": _STR, "proposed": _STR, "quote": _STR})), "overall": _STR})
 _SPEC_REVIEW = _obj({"pass": _BOOL, "problems": _list_of(_obj({"field": _STR, "problem": _STR, "fix": _STR}))})
 
@@ -204,6 +244,48 @@ class _ReviewItem(BaseModel):
 
 class _Review(BaseModel):
     results: list[_ReviewItem]
+
+
+SupportAnswer = Literal["SUPPORTED", "PARTLY_SUPPORTED", "CONTRADICTED", "NOT_FOUND"]
+
+
+class ClaimCandidate(BaseModel):
+    id: str  # the passage it comes from
+    claim: str
+    cited: StrictBool
+    query: str
+    importance: Literal["high", "medium", "low"]
+
+
+class _Claims(BaseModel):
+    claims: list[ClaimCandidate]
+
+
+class FoundSource(BaseModel):
+    url: str
+    title: str
+    publisher: str
+    published: str
+    access: Literal["FULL_TEXT", "ABSTRACT", "SNIPPET"]
+    passage: str
+    scope: str
+    supports: SupportAnswer
+
+
+class ResearchAnswer(BaseModel):
+    support: SupportAnswer
+    note: str
+    sources: list[FoundSource]
+
+
+class VerifyItem(BaseModel):
+    id: str
+    support: SupportAnswer
+    note: str
+
+
+class _Verify(BaseModel):
+    results: list[VerifyItem]
 
 
 class _Margins(BaseModel):
@@ -334,9 +416,19 @@ class AIRunner:
     def _prompt_for(self, task: str) -> str:
         return self._engine.prompts.get(task, STEPS[task].prompt)  # a step added after pricing uses its current prompt
 
-    def _call[T: BaseModel](self, task: str, payload: dict[str, Any], schema: dict[str, Any], shape: type[T]) -> T | None:
+    def _call[T: BaseModel](
+        self,
+        task: str,
+        payload: dict[str, Any],
+        schema: dict[str, Any],
+        shape: type[T],
+        max_searches: int = 0,
+        accept: Callable[[T, list[str]], T] | None = None,
+    ) -> T | None:
         """Returns the schema-validated answer, or None when the response was cut off. Only answers
-        that passed validation are cached, so a retry never replays a bad response."""
+        that passed validation are cached, so a retry never replays a bad response. With
+        `max_searches`, the model may search the web that many times; `accept` then sees the
+        answer with the URLs the searches opened and returns what may be kept (and cached)."""
         step = STEPS[task]
         model_ref = self.model_for(task)
         prompt = self._prompt_for(task)
@@ -353,13 +445,20 @@ class AIRunner:
         provider, model = provider_for(model_ref, self.settings)
         prices = self.settings.model_prices
         prompt_chars = len(system) + len(json.dumps(payload))
+        fee = 0.0
+        if max_searches:  # the pages the searches read arrive as input, and each search has a fee
+            prompt_chars += costs.SEARCH_INPUT_TOKENS_WORST * 3 * max_searches
+            fee = costs.search_fee_usd(provider.name, max_searches)
         spent = self._spent()
-        costs.ensure_within_budget(spent, costs.estimate_usd(provider.name, model, prompt_chars, step.max_tokens, prices), self._budget)
+        costs.ensure_within_budget(spent, costs.estimate_usd(provider.name, model, prompt_chars, step.max_tokens, prices) + fee, self._budget)
         # Hard ceiling: never allow more output than the remaining budget can pay for in the worst case.
-        max_tokens = costs.affordable_output_tokens(provider.name, model, prompt_chars, step.max_tokens, self._budget - spent, prices)
+        max_tokens = costs.affordable_output_tokens(provider.name, model, prompt_chars, step.max_tokens, self._budget - spent - fee, prices)
         if max_tokens < min(costs.MIN_OUTPUT_TOKENS, step.max_tokens):
             costs.ensure_within_budget(spent, float("inf"), self._budget)  # raises BUDGET_EXCEEDED
-        result: ModelResult = provider.json(task, model, system, payload, schema, max_tokens)
+        if max_searches:
+            result: ModelResult = provider.search_json(task, model, system, payload, schema, max_tokens, max_searches)
+        else:
+            result = provider.json(task, model, system, payload, schema, max_tokens)
         u = result.usage
         self._record(
             ModelCall(
@@ -372,8 +471,9 @@ class AIRunner:
                 output_tokens=u.output_tokens,
                 cached_tokens=u.cached_tokens,
                 cache_write_tokens=u.cache_write_tokens,
+                search_calls=u.search_calls,
                 latency_ms=u.latency_ms,
-                cost_usd=costs.cost_usd(result.provider, result.model, u.input_tokens, u.output_tokens, u.cached_tokens, prices, u.cache_write_tokens),
+                cost_usd=costs.cost_usd(result.provider, result.model, u.input_tokens, u.output_tokens, u.cached_tokens, prices, u.cache_write_tokens, u.search_calls),
             )
         )
         if result.stop == "refusal":
@@ -381,8 +481,12 @@ class AIRunner:
         if result.stop == "max_tokens":
             return None
         validated = self._validated(shape, parse(result.text, task), task)
+        text = result.text
+        if accept is not None:
+            validated = accept(validated, result.sources)
+            text = validated.model_dump_json()
         if self._cache:
-            self._cache.put(key, result.text)
+            self._cache.put(key, text)
         return validated
 
     def _batched[T: BaseModel](
@@ -539,6 +643,41 @@ class AIRunner:
             revised = returned.get(r.id, r.original)
             out.append(Revision(r.id, r.original, revised, protect.check_rewrite(r.original, revised) if revised != r.original else []))
         return out
+
+    # --- source check: lead finds and researches claims, writer checks the evidence -------------
+
+    def find_claims(self, passages: list[dict[str, Any]], outline: list[str], limit: int) -> list[ClaimCandidate]:
+        """The paper's important, publicly checkable factual claims, each with a search query.
+        Returns candidates from known passages only; code then decides which may be searched."""
+        known = {p["id"] for p in passages}
+        items = [{**p, "_words": p["text"]} for p in passages]
+        found: list[ClaimCandidate] = []
+        for answer in self._batched("claims", items, lambda b: {"outline": outline, "limit": limit, "passages": b}, _CLAIMS, _Claims):
+            found.extend(c for c in answer.claims if c.id in known)
+        return found
+
+    def research_claim(self, claim: str, query: str, cited: bool, max_searches: int) -> ResearchAnswer | None:
+        """Live web research for one claim. Only the claim and a checked query are sent, never
+        the paper. Sources the searches did not open are removed; without any left, the claim is
+        NOT_FOUND. Returns None when the answer was cut off."""
+
+        def accept(answer: ResearchAnswer, opened: list[str]) -> ResearchAnswer:
+            kept = [s for s in answer.sources if research.opened(s.url, opened)][:3]
+            if not kept and answer.support != "NOT_FOUND":
+                return ResearchAnswer(support="NOT_FOUND", note="No source that the search actually opened could be confirmed for this claim.", sources=[])
+            return answer.model_copy(update={"sources": kept})
+
+        return self._call("research", {"claim": claim, "query": query, "citedInPaper": cited}, _RESEARCH, ResearchAnswer, max_searches=max_searches, accept=accept)
+
+    def verify_claims(self, items: list[dict[str, Any]]) -> dict[str, VerifyItem]:
+        """The writer's independent check, without searching: does each quoted passage support
+        its claim for the same population, place and period?"""
+        known = {i["id"] for i in items}
+        batch = [{**i, "_words": i["claim"] + " " + i.get("context", "") + " " + " ".join(s.get("passage", "") for s in i.get("sources", []))} for i in items]
+        results: dict[str, VerifyItem] = {}
+        for answer in self._batched("verify", batch, lambda b: {"claims": b}, _VERIFY, _Verify):
+            results.update({r.id: r for r in answer.results if r.id in known})
+        return results
 
     # --- template formatting: the same loop over formatting rules --------------------------
 

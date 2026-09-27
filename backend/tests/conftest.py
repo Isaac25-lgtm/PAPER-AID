@@ -27,7 +27,7 @@ def manifest() -> list[dict]:
 def client(tmp_path, monkeypatch):
     """A fresh app on an isolated data directory with the local queue. Both AI roles are answered
     by tests.fake_models (dummy keys, no network); `client.models` lets a test script any step."""
-    from app.ai import orchestration
+    from app.ai import costs, orchestration
     from tests.fake_models import FakeModels
 
     models = FakeModels()
@@ -36,6 +36,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("MODEL_PRICES", '{"fake:gpt-6-sol":[0,0,0],"fake:claude-opus-5-5":[0,0,0]}')
     monkeypatch.setenv("ADMIN_EMAILS", '["demo@paperaid.app"]')
     monkeypatch.setattr(orchestration, "provider_for", lambda ref, settings: (models, ref.split(":")[-1]))
+    monkeypatch.setitem(costs.SEARCH_FEE_USD, "fake", 0.01)  # the stand-in "searches" like the real lead
     for c in _app_client(tmp_path, monkeypatch):
         c.models = models
         for email in TEST_ACCOUNTS:

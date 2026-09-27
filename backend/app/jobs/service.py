@@ -47,15 +47,15 @@ from app.runtime import Runtime
 
 logger = logging.getLogger("paperaid.jobs")
 
-BUILT = ("AI_CHECK", "REFINE", "FORMAT", "TEMPLATE_FORMAT")
-NEEDS_AI = ("AI_CHECK", "REFINE", "TEMPLATE_FORMAT")
+BUILT = ("AI_CHECK", "REFINE", "FORMAT", "TEMPLATE_FORMAT", "SOURCE_CHECK")
+NEEDS_AI = ("AI_CHECK", "REFINE", "TEMPLATE_FORMAT", "SOURCE_CHECK")
 
 
 def availability(settings: Settings, user: "User | None" = None) -> dict[str, str]:
     """"soon" = not built yet; "not_configured" = built, but the AI keys are not set;
     "invite_only" = testing is limited to invited testers and this user isn't one."""
     result = {}
-    for service in ("AI_CHECK", "REFINE", "FORMAT", "TEMPLATE_FORMAT", "REDRAFT", "LATEX"):
+    for service in ("AI_CHECK", "REFINE", "FORMAT", "TEMPLATE_FORMAT", "REDRAFT", "LATEX", "SOURCE_CHECK"):
         if service not in BUILT:
             result[service] = "soon"
         elif service in NEEDS_AI and not settings.ai_configured:
@@ -100,6 +100,8 @@ def pipeline_for(selection: ServiceSelection) -> list[Stage]:
     stages = [Stage.EXTRACTING]
     if selection.writing != "NONE":
         stages.append(Stage.ANALYSING)
+    if selection.source_check:
+        stages.append(Stage.RESEARCHING)
     if selection.writing == "REFINE":
         stages += [Stage.PLANNING, Stage.REFINING, Stage.AUDITING]
     if selection.formatting != "NONE":
@@ -272,8 +274,10 @@ def request_quote(rt: Runtime, user: User, job_id: str, selection: ServiceSelect
     offered = availability(rt.settings, user)
     if any(offered.get(s.value) != "available" for s in services):
         raise AppError("That service is not available right now.", code="SERVICE_UNAVAILABLE")
-    if job.source.format == "PDF" and any(s.value != "AI_CHECK" for s in services):
-        raise AppError("PDF files can use AI Check only. Upload the Word file to refine or format it.", code="PDF_AI_CHECK_ONLY")
+    if selection.source_check and selection.writing not in ("AI_CHECK", "REFINE"):
+        raise AppError("Source check comes with AI Check or Check + Refine.", code="SOURCE_CHECK_NEEDS_CHECK")
+    if job.source.format == "PDF" and any(s.value not in ("AI_CHECK", "SOURCE_CHECK") for s in services):
+        raise AppError("PDF files can use AI Check (and Source check) only. Upload the Word file to refine or format it.", code="PDF_AI_CHECK_ONLY")
     if selection.formatting == "TEMPLATE_FORMAT" and job.guideline is None:
         raise AppError("Upload your university's formatting guide to use University templates.", code="NO_GUIDELINE")
     guideline_sha = job.guideline.sha256 if selection.formatting == "TEMPLATE_FORMAT" and job.guideline else None
@@ -642,6 +646,9 @@ def without_paper_text[T: JobView](job: T) -> T:
     if job.refinement is not None:
         changes = [c.model_copy(update={"before": "", "after": "", "note": None}) for c in job.refinement.changes]
         update["refinement"] = job.refinement.model_copy(update={"changes": changes})
+    if job.research is not None:  # the claims are the paper's words; the public sources stay
+        claims = [c.model_copy(update={"claim": "", "note": ""}) for c in job.research.claims]
+        update["research"] = job.research.model_copy(update={"claims": claims})
     if job.paper_checks is not None:  # citations and references quote the paper
         items = [i.model_copy(update={"item": "", "detail": ""}) for i in job.paper_checks.items]
         update["paper_checks"] = job.paper_checks.model_copy(update={"items": items})

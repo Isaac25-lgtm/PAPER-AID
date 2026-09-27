@@ -4,7 +4,7 @@ the job queue owns retry policy, so retries never nest into storms."""
 
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from app.core.config import Settings
@@ -22,6 +22,7 @@ class Usage:
     cached_tokens: int  # cache reads
     latency_ms: int
     cache_write_tokens: int = 0  # input written to the prompt cache (billed at 1.25x input)
+    search_calls: int = 0  # web searches made (billed per search)
 
 
 @dataclass
@@ -33,12 +34,17 @@ class ModelResult:
     provider: str
     model: str
     stop: str = "end_turn"  # "end_turn" | "max_tokens" | "refusal"
+    sources: list[str] = field(default_factory=list)  # every URL a web search actually opened
 
 
 class Provider(Protocol):
     name: str
 
     def json(self, task: str, model: str, system: str, payload: dict[str, Any], schema: dict[str, Any], max_tokens: int) -> ModelResult: ...
+
+    def search_json(
+        self, task: str, model: str, system: str, payload: dict[str, Any], schema: dict[str, Any], max_tokens: int, max_searches: int
+    ) -> ModelResult: ...
 
 
 def render_user_message(payload: dict[str, Any]) -> str:
@@ -98,6 +104,13 @@ class AnthropicProvider:
             model=model,
         )
 
+    def search_json(
+        self, task: str, model: str, system: str, payload: dict[str, Any], schema: dict[str, Any], max_tokens: int, max_searches: int
+    ) -> ModelResult:
+        # Research runs on the lead (GPT-6 Sol); Claude checks the evidence without searching,
+        # so both providers never repeat the same research (revised algorithm, section 26).
+        raise PermanentStageError("SEARCH_NOT_SUPPORTED", MISCONFIGURED, "web search runs on the OpenAI lead only")
+
 
 class OpenAIProvider:
     name = "openai"
@@ -129,6 +142,50 @@ class OpenAIProvider:
             if exc.status_code >= 500:
                 raise RetryableStageError("PROVIDER_UNAVAILABLE", UNAVAILABLE, f"openai {exc.status_code}") from exc
             raise PermanentStageError("PROVIDER_REJECTED", "We couldn't process this document.", f"openai {exc.status_code}") from exc
+        return self._result(response, model, started)
+
+    def search_json(
+        self, task: str, model: str, system: str, payload: dict[str, Any], schema: dict[str, Any], max_tokens: int, max_searches: int
+    ) -> ModelResult:
+        """A structured answer with live web search: at most `max_searches` searches, and the
+        list of every page the searches opened, so the caller can reject any other URL."""
+        sdk = self._sdk
+        started = time.monotonic()
+        try:
+            response = self._client.responses.create(
+                model=model,
+                instructions=system,
+                input=render_user_message(payload),
+                tools=[{"type": "web_search", "search_context_size": "medium"}],
+                max_tool_calls=max_searches,
+                include=["web_search_call.action.sources"],
+                max_output_tokens=max_tokens,
+                text={"format": {"type": "json_schema", "name": f"paperaid_{task}", "schema": schema, "strict": True}},
+            )
+        except (sdk.RateLimitError, sdk.APITimeoutError, sdk.APIConnectionError, sdk.InternalServerError) as exc:
+            raise RetryableStageError("PROVIDER_UNAVAILABLE", UNAVAILABLE, f"openai {type(exc).__name__}") from exc
+        except sdk.AuthenticationError as exc:
+            raise PermanentStageError("PROVIDER_CONFIG", MISCONFIGURED, "openai authentication failed") from exc
+        except sdk.APIStatusError as exc:
+            if exc.status_code >= 500:
+                raise RetryableStageError("PROVIDER_UNAVAILABLE", UNAVAILABLE, f"openai {exc.status_code}") from exc
+            raise PermanentStageError("PROVIDER_REJECTED", "We couldn't process this document.", f"openai {exc.status_code}") from exc
+        result = self._result(response, model, started)
+        searches = [item for item in (getattr(response, "output", None) or []) if getattr(item, "type", None) == "web_search_call"]
+        result.usage.search_calls = len(searches)
+        opened = [getattr(src, "url", None) for item in searches for src in (getattr(getattr(item, "action", None), "sources", None) or [])]
+        cited = [
+            getattr(a, "url", None)
+            for item in (getattr(response, "output", None) or [])
+            if getattr(item, "type", None) == "message"
+            for part in (getattr(item, "content", None) or [])
+            for a in (getattr(part, "annotations", None) or [])
+            if getattr(a, "type", None) == "url_citation"
+        ]
+        result.sources = [u for u in dict.fromkeys(opened + cited) if u]
+        return result
+
+    def _result(self, response: Any, model: str, started: float) -> ModelResult:
         usage = response.usage
         details = getattr(usage, "input_tokens_details", None)
         cached = getattr(details, "cached_tokens", 0) or 0

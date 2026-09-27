@@ -12,6 +12,7 @@ from app.ai.providers import ModelResult, Usage
 from app.formatting.guideline import read_guide
 from tests import fake_writer
 
+SOURCE_URL = "https://stats.example.org/report-2022"
 INSTRUCTION = "Cut filler and stock phrases, replace stacked transitions and vary sentence structure; keep every claim, number and citation."
 
 
@@ -25,6 +26,7 @@ class FakeModels:
         self.tokens = (0, 0)  # (input, output) reported per call; set with real prices to create costs
         self.refuse: set[str] = set()  # tasks answered with a refusal
         self.truncate: set[str] = set()  # tasks whose answers are always cut off by the output limit
+        self.opened: list[str] = [SOURCE_URL]  # the pages a fake web search "opened"
 
     def json(self, task: str, model: str, system: str, payload: dict[str, Any], schema: dict[str, Any], max_tokens: int) -> ModelResult:
         self.tasks.append(task)
@@ -36,6 +38,14 @@ class FakeModels:
             return ModelResult(text="{", usage=usage, provider="fake", model=model, stop="max_tokens")
         answer = self.overrides[task](payload) if task in self.overrides else self.default(task, payload)
         return ModelResult(text=json.dumps(answer), usage=usage, provider="fake", model=model)
+
+    def search_json(
+        self, task: str, model: str, system: str, payload: dict[str, Any], schema: dict[str, Any], max_tokens: int, max_searches: int
+    ) -> ModelResult:
+        result = self.json(task, model, system, payload, schema, max_tokens)
+        result.usage.search_calls = min(1, max_searches)
+        result.sources = list(self.opened)
+        return result
 
     @staticmethod
     def default(task: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -62,6 +72,21 @@ class FakeModels:
             return {"results": [{"id": p["id"], "grade": "PASS", "issues": [], "note": "", "riskBand": "low"} for p in payload["pairs"]]}
         if task == "repair":
             return {"blocks": [{"id": b["id"], "text": b["original"]} for b in payload["blocks"]]}
+        if task == "claims":  # the first sentence of the first passages that mention a year
+            found = []
+            for p in payload["passages"]:
+                sentence = p["text"].split(". ")[0].strip()
+                if any(str(y) in sentence for y in range(1990, 2030)) and len(found) < payload["limit"]:
+                    found.append({"id": p["id"], "claim": sentence, "cited": "(" in sentence, "query": "mobile money accounts Uganda", "importance": "high"})
+            return {"claims": found}
+        if task == "research":
+            source = {
+                "url": SOURCE_URL, "title": "Annual report", "publisher": "Statistics office", "published": "2022", "access": "FULL_TEXT",
+                "passage": "The report gives the figure for 2022.", "scope": "Uganda, 2022", "supports": "SUPPORTED",
+            }
+            return {"support": "SUPPORTED", "note": "The report states the same figure.", "sources": [source]}
+        if task == "verify":
+            return {"results": [{"id": c["id"], "support": "SUPPORTED", "note": "The passage matches."} for c in payload["claims"]]}
         if task == "spec_plan":
             return read_guide(payload["guide"])
         if task == "spec_critique":

@@ -9,7 +9,7 @@ import { formatDate, formatDateTime, formatUGX } from '../../lib/format'
 import type { Job, Quote } from '../../lib/types'
 import { STYLE_OPTIONS } from '../../lib/services'
 import { useTitle } from '../../lib/use-title'
-import { BandChange, ChangesPanel, DownloadList, FindingsList, FormattingPanel, PaperChecksPanel, ScoreCard } from '../results/report'
+import { BandChange, ChangesPanel, DownloadList, FindingsList, FormattingPanel, PaperChecksPanel, ScoreCard, SourceCheckPanel } from '../results/report'
 import { useJob } from './hooks'
 import { jobLink, jobTitle, serviceNames, StageTimeline, StatusBadge } from './job-bits'
 
@@ -176,6 +176,7 @@ function Completed({ job }: { job: Job }) {
   const tabs = [
     { id: 'overview', label: 'Overview', show: true },
     { id: 'report', label: 'Writing report', show: !!job.analysis },
+    { id: 'sources', label: 'Source check', show: !!job.research },
     { id: 'changes', label: 'Changes', show: !!job.refinement },
     { id: 'formatting', label: 'Formatting', show: !!job.formatting },
   ].filter((t) => t.show)
@@ -213,6 +214,11 @@ function Completed({ job }: { job: Job }) {
               <FindingsList findings={job.analysis.findings} />
             </div>
             {job.paperChecks && <PaperChecksPanel checks={job.paperChecks} />}
+          </TabsContent>
+        )}
+        {job.research && (
+          <TabsContent value="sources">
+            <SourceCheckPanel research={job.research} />
           </TabsContent>
         )}
         {job.refinement && (

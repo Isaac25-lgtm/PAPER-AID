@@ -246,3 +246,61 @@ def test_the_scan_is_identical_across_processes():
         for seed in ("1", "2", "3")
     }
     assert len(outputs) == 1
+
+
+# --- source check: code-enforced research rules (phase 4) -------------------------------------
+
+
+def _research_doc():
+    from app.documents.model import Block, DocumentModel
+
+    return DocumentModel(
+        format="DOCX",
+        blocks=[
+            Block(id="t", kind="title", text="Mobile Money in Lira"),
+            Block(id="a", kind="paragraph", text="Achola Grace, Reg. No. 2020/HD06/1234"),
+            Block(id="h1", kind="heading", level=1, text="1. Introduction", section="1. Introduction"),
+            Block(id="p1", kind="paragraph", section="1. Introduction", text="By 2022, Uganda had more than 30 million mobile money accounts."),
+            Block(id="h2", kind="heading", level=1, text="4. Results", section="4. Results"),
+            Block(id="p2", kind="paragraph", section="4. Results", text="Of the 214 vendors, 187 (87%) had an active account."),
+        ],
+    )
+
+
+def test_no_search_can_carry_the_papers_own_results_contact_details_or_front_matter_names():
+    from app.analysis import research
+
+    model = _research_doc()
+    own, names = research.own_numbers(model), research.front_matter_names(model)
+    assert research.safe_to_search("By 2022, Uganda had more than 30 million accounts.", "Uganda mobile money accounts 2022", own, names)
+    assert not research.safe_to_search("187 vendors had an account.", "vendors mobile money 187", own, names)  # own finding
+    assert not research.safe_to_search("A claim.", "Achola mobile money thesis", own, names)  # the student's name
+    assert not research.safe_to_search("A claim.", "contact achola@example.com", own, names)
+    assert not research.safe_to_search("A claim.", "x" * 200, own, names)  # an overlong query is not "minimal"
+
+
+def test_only_urls_the_search_opened_are_accepted():
+    from app.analysis import research
+
+    opened = ["https://www.ucc.co.ug/report/?utm_source=openai", "https://fred.stlouisfed.org/data/UGA"]
+    assert research.opened("https://WWW.UCC.co.ug/report", opened)
+    assert research.opened("https://fred.stlouisfed.org/data/UGA/#top", opened)
+    assert not research.opened("https://invented.example.org/report", opened)
+
+
+def test_disagreeing_checks_make_a_claim_uncertain_never_stronger():
+    from app.analysis.research import combine
+
+    assert combine("SUPPORTED", "SUPPORTED") == "SUPPORTED"
+    assert combine("SUPPORTED", "PARTLY_SUPPORTED") == combine("PARTLY_SUPPORTED", "SUPPORTED") == "PARTLY_SUPPORTED"
+    assert combine("SUPPORTED", "CONTRADICTED") == combine("CONTRADICTED", "PARTLY_SUPPORTED") == "UNCERTAIN"
+    assert combine("SUPPORTED", None) == "UNCERTAIN"  # a search alone never confirms a claim
+    assert combine("NOT_FOUND", "SUPPORTED") == "NOT_FOUND"
+
+
+def test_claims_are_quoted_from_the_paper_and_scale_with_length():
+    from app.analysis.research import claims_for, verbatim
+
+    assert verbatim("Uganda had more than 30 million", "By 2022, Uganda had  more than 30 million accounts.")
+    assert not verbatim("Uganda had over 30 million", "By 2022, Uganda had more than 30 million accounts.")
+    assert (claims_for(300, 10), claims_for(2000, 10), claims_for(20000, 10)) == (3, 8, 10)

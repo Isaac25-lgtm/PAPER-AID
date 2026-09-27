@@ -6,7 +6,7 @@ from datetime import datetime
 from docx import Document
 from docx.shared import Pt, RGBColor
 
-from app.jobs.models import AnalysisResult, PaperChecks, RefinementResult
+from app.jobs.models import AnalysisResult, PaperChecks, RefinementResult, ResearchResult
 
 GREEN = RGBColor(0x0F, 0x63, 0x3E)
 MUTED = RGBColor(0x46, 0x55, 0x4D)
@@ -34,6 +34,14 @@ CHECK_TITLES = {
     "SPELLING_MIXED": "Mixed spelling conventions",
 }
 CERTAINTY = {"CONFIRMED": "confirmed", "POSSIBLE": "possible", "UNDETERMINED": "couldn't check"}
+SUPPORT = {
+    "SUPPORTED": "Supported",
+    "PARTLY_SUPPORTED": "Partly supported",
+    "CONTRADICTED": "Contradicted",
+    "NOT_FOUND": "Not found in this search",
+    "UNCERTAIN": "Uncertain",
+}
+ACCESS = {"FULL_TEXT": "full text read", "ABSTRACT": "abstract only", "SNIPPET": "search snippet only"}
 
 
 def _document(title: str, paper_name: str, when: datetime):
@@ -63,7 +71,9 @@ def _save(doc) -> bytes:
     return out.getvalue()
 
 
-def writing_report(paper_name: str, when: datetime, analysis: AnalysisResult, after: AnalysisResult | None, checks: PaperChecks | None = None) -> bytes:
+def writing_report(
+    paper_name: str, when: datetime, analysis: AnalysisResult, after: AnalysisResult | None, checks: PaperChecks | None = None, research: ResearchResult | None = None
+) -> bytes:
     doc = _document("Writing report", paper_name, when)
     doc.add_heading("Estimated AI-likeness", level=2)
     summary = doc.add_paragraph()
@@ -107,6 +117,28 @@ def writing_report(paper_name: str, when: datetime, analysis: AnalysisResult, af
             if item.item:
                 doc.add_paragraph(item.item).runs[0].italic = True
             doc.add_paragraph(item.detail)
+
+    if research is not None:
+        doc.add_heading("Source check", level=2)
+        doc.add_paragraph(
+            f"The key factual claims in your paper were checked against live web sources on {research.retrieved_on}, and a second AI "
+            f"checked each source against its claim. {research.checked} of {research.candidates} claims were checked."
+        )
+        _note(doc, "\"Not found\" means this limited search found nothing, not that no evidence exists. Read every source before you cite it.")
+        for claim in research.claims:
+            heading = doc.add_paragraph()
+            heading.add_run(SUPPORT.get(claim.support, claim.support)).bold = True
+            heading.add_run(f"  ·  {claim.section} · {'cited in your paper' if claim.cited else 'not cited in your paper'}").font.color.rgb = MUTED
+            doc.add_paragraph(claim.claim).runs[0].italic = True
+            if claim.note:
+                doc.add_paragraph(claim.note)
+            for source in claim.sources:
+                line = doc.add_paragraph(style="List Bullet" if "List Bullet" in [s.name for s in doc.styles] else None)
+                line.add_run(source.title or source.url).bold = True
+                meta = " · ".join(x for x in (source.publisher, source.published, ACCESS.get(source.access, "")) if x)
+                line.add_run(f" ({meta}). {source.url}")
+                if source.passage:
+                    line.add_run(f" “{source.passage}”").italic = True
     return _save(doc)
 
 

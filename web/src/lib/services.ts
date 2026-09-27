@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { Braces, FileCheck2, GraduationCap, PenLine, Search, Shuffle } from 'lucide-react'
+import { BookCheck, Braces, FileCheck2, GraduationCap, PenLine, Search, Shuffle } from 'lucide-react'
 import type { Availability, JobStatus, ReasonCode, ServiceId, Stage, WritingStyle } from './types'
 
 interface ServiceInfo {
@@ -57,6 +57,14 @@ export const SERVICES: Record<ServiceId, ServiceInfo> = {
     youGet: ['Redrafted Word file', 'Section-by-section change summary', 'Independent accuracy audit'],
     untouched: ['Your sources, data and findings'],
   },
+  SOURCE_CHECK: {
+    name: 'Source check',
+    short: 'Your key factual claims checked against live sources, each source checked again by a second AI.',
+    icon: BookCheck,
+    accepts: 'Added to AI Check or Check + Refine (DOCX or PDF)',
+    youGet: ['Each claim marked supported, partly supported, contradicted or not found', 'The sources, with the passage quoted and the date read', 'Sources you could cite for uncited claims'],
+    untouched: ['Your paper: claims are reported, never changed'],
+  },
   LATEX: {
     name: 'LaTeX conversion',
     short: 'Convert your paper into a clean, compilable LaTeX project.',
@@ -67,11 +75,12 @@ export const SERVICES: Record<ServiceId, ServiceInfo> = {
   },
 }
 
-export const SERVICE_ORDER: ServiceId[] = ['AI_CHECK', 'REFINE', 'FORMAT', 'TEMPLATE_FORMAT', 'REDRAFT', 'LATEX']
+export const SERVICE_ORDER: ServiceId[] = ['AI_CHECK', 'REFINE', 'SOURCE_CHECK', 'FORMAT', 'TEMPLATE_FORMAT', 'REDRAFT', 'LATEX']
 
 export const STAGE_LABELS: Record<Stage, string> = {
   EXTRACTING: 'Reading your document',
   ANALYSING: 'Reviewing writing patterns',
+  RESEARCHING: 'Checking claims against live sources',
   PLANNING: 'Agreeing the refinement plan',
   REFINING: 'Refining flagged passages',
   REDRAFTING: 'Redrafting sections',

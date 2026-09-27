@@ -1118,3 +1118,126 @@ def test_paper_checks_are_reported_and_hidden_from_admins(client):
     assert job["paperChecks"]["citationsFound"] >= 3 and job["paperChecks"]["items"][0]["kind"] == "NO_REFERENCE_LIST"
     admin = client.get(f"/api/admin/jobs/{job_id}", headers=ADMIN).json()["job"]
     assert all(i["item"] == "" and i["detail"] == "" for i in admin["paperChecks"]["items"])
+
+
+# --- phase 4: source check with live search (owner decision 2026-09-27) ---------------------------
+
+SOURCE_CHECK = {"writing": "AI_CHECK", "sourceCheck": True}
+
+
+def _claims_paper() -> bytes:
+    import io
+
+    from docx import Document
+
+    d = Document()
+    d.add_heading("Mobile Money and Savings in Lira", 0)
+    d.add_paragraph("Achola Grace, Reg. No. 2020/HD06/1234")
+    d.add_heading("1. Introduction", 1)
+    d.add_paragraph(
+        "By 2022, Uganda had more than 30 million registered mobile money accounts (Bank of Uganda, 2022). Traders in secondary cities "
+        "use these accounts every day, yet few studies ask whether market vendors keep balances on them for longer than a week."
+    )
+    d.add_paragraph(
+        "In 2016, researchers in Kenya estimated that access to mobile money lifted about two percent of households out of poverty. "
+        "The same work found larger effects for households headed by women, which makes the question relevant to Lira's markets."
+    )
+    d.add_heading("4. Results", 1)
+    d.add_paragraph(
+        "In 2024, of the 214 vendors we surveyed, 187 had an active mobile money account and only 41 kept money on it for more than a month. "
+        "Women were more likely than men to keep a balance, and most balances were below the amount needed to restock."
+    )
+    out = io.BytesIO()
+    d.save(out)
+    return out.getvalue()
+
+
+def _source_check_job(client, selection=SOURCE_CHECK, headers=STUDENT):
+    job_id = client.post("/api/jobs", headers=headers).json()["id"]
+    client.post(f"/api/jobs/{job_id}/files/source", headers=headers, files={"file": ("claims.docx", _claims_paper(), "application/octet-stream")})
+    quote = get_quote(client, job_id, selection, headers)
+    assert client.post(f"/api/jobs/{job_id}/submit", headers=headers, json={"quoteId": quote["id"]}).status_code == 200
+    return job_id, quote, wait(client, job_id, headers)
+
+
+def test_source_check_is_priced_and_checks_public_claims_with_real_sources(client):
+    job_id, quote, job = _source_check_job(client)
+    assert any(line["label"].startswith("Source check") for line in quote["lines"])
+    research = job["research"]
+    assert job["status"] == "COMPLETED" and research["checked"] == research["candidates"] >= 1
+    claim = research["claims"][0]
+    assert claim["support"] == "SUPPORTED" and claim["sources"][0]["url"] == "https://stats.example.org/report-2022"
+    assert claim["sources"][0]["access"] == "FULL_TEXT" and research["retrievedOn"]
+    calls = client.get(f"/api/admin/jobs/{job_id}", headers=ADMIN).json()["modelCalls"]
+    assert any(c["searchCalls"] for c in calls if c["promptVersion"] == "research-v1")
+
+
+def test_the_search_never_receives_the_paper_or_its_own_results(client):
+    _, _, job = _source_check_job(client)
+    researched = [json.loads(r[len("research") :]) for r in client.models.requests if r.startswith("research{")]
+    assert researched and all(set(p) == {"claim", "query", "citedInPaper"} for p in researched)
+    assert not any("214" in p["claim"] or "187" in p["claim"] or "Achola" in p["query"] for p in researched)
+    assert all(c["section"] != "4. Results" for c in job["research"]["claims"])
+
+
+def test_a_source_the_search_did_not_open_is_never_shown(client):
+    client.models.opened = ["https://somewhere-else.example.org/"]  # the answer's URL was not among the pages opened
+    _, _, job = _source_check_job(client)
+    assert all(c["support"] == "NOT_FOUND" and c["sources"] == [] for c in job["research"]["claims"])
+
+
+def test_when_the_second_check_disagrees_the_claim_is_uncertain(client):
+    client.models.overrides["verify"] = lambda p: {"results": [{"id": c["id"], "support": "CONTRADICTED", "note": "Different year."} for c in p["claims"]]}
+    _, _, job = _source_check_job(client)
+    claim = job["research"]["claims"][0]
+    assert claim["support"] == "UNCERTAIN" and "Second check: Different year." in claim["note"]
+
+
+def test_contradicted_claims_are_flagged_but_the_paper_is_not_changed(client):
+    client.models.overrides["verify"] = lambda p: {"results": [{"id": c["id"], "support": "CONTRADICTED", "note": "Incompatible."} for c in p["claims"]]}
+
+    def research(payload):
+        answer = client.models.default("research", payload)
+        answer["support"] = "CONTRADICTED"
+        answer["sources"][0]["supports"] = "CONTRADICTED"
+        return answer
+
+    client.models.overrides["research"] = research
+    _, _, job = _source_check_job(client, {**REFINE_FORMAT, "sourceCheck": True})
+    assert any("contradicted" in w for w in job["warnings"])
+    assert all(c["support"] == "CONTRADICTED" for c in job["research"]["claims"])
+
+
+def test_research_that_runs_out_of_budget_is_a_partial_result(client, monkeypatch):
+    from app.ai import costs
+
+    _priced_models(client, monkeypatch)
+    job_id = client.post("/api/jobs", headers=STUDENT).json()["id"]
+    client.post(f"/api/jobs/{job_id}/files/source", headers=STUDENT, files={"file": ("claims.docx", _claims_paper(), "application/octet-stream")})
+    quote = get_quote(client, job_id, SOURCE_CHECK)
+    monkeypatch.setattr(costs, "SEARCH_INPUT_TOKENS_WORST", 10**9)  # after pricing: every search now looks unaffordable
+    client.post(f"/api/jobs/{job_id}/submit", headers=STUDENT, json={"quoteId": quote["id"]})
+    job = wait(client, job_id)
+    assert job["status"] == "COMPLETED" and job["outcome"] == "PARTIAL"
+    assert job["research"]["checked"] == 0 and any("could not be checked" in w for w in job["warnings"])
+
+
+def test_source_check_rules_and_privacy(client):
+    job_id = client.post("/api/jobs", headers=STUDENT).json()["id"]
+    client.post(f"/api/jobs/{job_id}/files/source", headers=STUDENT, files={"file": ("c.docx", _claims_paper(), "application/octet-stream")})
+    alone = client.post(f"/api/jobs/{job_id}/quote", headers=STUDENT, json={"selection": {"formatting": "FORMAT", "preset": "apa7", "sourceCheck": True}})
+    assert alone.status_code == 400 and alone.json()["code"] == "SOURCE_CHECK_NEEDS_CHECK"
+    job_id, _, job = _source_check_job(client)
+    admin = client.get(f"/api/admin/jobs/{job_id}", headers=ADMIN).json()["job"]
+    assert all(c["claim"] == "" and c["note"] == "" for c in admin["research"]["claims"])
+
+
+def test_the_word_report_carries_the_source_check(client):
+    import io
+
+    from docx import Document
+
+    job_id, _, _ = _source_check_job(client)
+    report = client.get(f"/api/jobs/{job_id}/outputs/writing-report", headers=STUDENT)
+    text = "\n".join(p.text for p in Document(io.BytesIO(report.content)).paragraphs)
+    assert "Source check" in text and "https://stats.example.org/report-2022" in text and "not that no evidence exists" in text

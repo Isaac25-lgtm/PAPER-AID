@@ -51,6 +51,8 @@ class Settings(BaseSettings):
     quote_ttl_minutes: int = 30
     stage_max_attempts: int = 4
     repair_attempts: int = 2
+    research_max_claims: int = 10  # source check: most claims checked in one paper
+    research_max_searches: int = 2  # source check: most web searches per claim
 
     # Invited testers (owner decision 2026-09-25): while set, only these emails (and admins) may use
     # the AI services, so a public link can't spend the AI budget. Empty = open to every user.

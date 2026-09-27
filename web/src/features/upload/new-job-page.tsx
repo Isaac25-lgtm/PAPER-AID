@@ -22,7 +22,7 @@ interface Upload {
   error: string | null
 }
 
-const INITIAL: ServiceSelection = { writing: 'REFINE', intensity: 'STANDARD', style: 'PRESERVE_VOICE', formatting: 'NONE', preset: 'apa7', latex: false }
+const INITIAL: ServiceSelection = { writing: 'REFINE', intensity: 'STANDARD', style: 'PRESERVE_VOICE', sourceCheck: false, formatting: 'NONE', preset: 'apa7', latex: false }
 const ACCEPT = '.docx,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf'
 
 // What the price panel shows. Refinement is priced after a paid AI estimate that the student
@@ -184,8 +184,11 @@ export function NewJobPage() {
     }
     if (writing !== 'NONE' && !ok(writing)) writing = 'NONE'
     if (formatting !== 'NONE' && !ok(formatting)) formatting = 'NONE'
-    if (writing !== selection.writing || formatting !== selection.formatting) setSelection((s) => ({ ...s, writing, formatting }))
-  }, [config.availability, isPdf, selection.writing, selection.formatting])
+    // The source check comes with AI Check or Check + Refine only.
+    const sourceCheck = selection.sourceCheck && (writing === 'AI_CHECK' || writing === 'REFINE') && ok('SOURCE_CHECK')
+    if (writing !== selection.writing || formatting !== selection.formatting || sourceCheck !== selection.sourceCheck)
+      setSelection((s) => ({ ...s, writing, formatting, sourceCheck }))
+  }, [config.availability, isPdf, selection.writing, selection.formatting, selection.sourceCheck])
 
   useEffect(() => {
     if (!draftId || !meta) return
@@ -391,6 +394,24 @@ export function NewJobPage() {
                 </div>
               )}
 
+              {(selection.writing === 'AI_CHECK' || selection.writing === 'REFINE') && (
+                <div className="mt-4 rounded-xl border border-line p-4">
+                  <Checkbox
+                    checked={selection.sourceCheck}
+                    onChange={(e) => set({ sourceCheck: e.target.checked })}
+                    disabled={!!reasonFor('SOURCE_CHECK')}
+                    label={
+                      <>
+                        <span className="font-semibold text-fg">Check my claims against live sources</span> {badgeFor('SOURCE_CHECK')}
+                        <span className="mt-0.5 block text-xs">
+                          {reasonFor('SOURCE_CHECK') ??
+                            'We find the key factual claims in your paper, search for current sources, and a second AI checks each source. Your paper is not changed.'}
+                        </span>
+                      </>
+                    }
+                  />
+                </div>
+              )}
             </fieldset>
             <fieldset disabled={!meta || estimateRunning} className="mt-7 min-w-0">
               <legend className="mb-3 text-sm font-semibold text-fg">Formatting</legend>

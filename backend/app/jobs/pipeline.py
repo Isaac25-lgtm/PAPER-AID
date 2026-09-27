@@ -16,9 +16,9 @@ from datetime import timedelta
 from pathlib import PurePosixPath
 from typing import Any, Literal
 
-from app.ai.orchestration import NOT_RETURNED, AIRunner, PlanItem, ReviewOutcome, Revision, Target, current_engine
+from app.ai.orchestration import NOT_RETURNED, AIRunner, ClaimCandidate, PlanItem, ResearchAnswer, ReviewOutcome, Revision, Target, current_engine
 from app.ai.styles import writing_brief
-from app.analysis import paper_checks, signals
+from app.analysis import paper_checks, research, signals
 from app.core.errors import InvalidDocument, PermanentStageError, StageError
 from app.core.logging import job_id as job_id_var
 from app.core.logging import log
@@ -33,6 +33,7 @@ from app.jobs import state
 from app.jobs.models import (
     AnalysisResult,
     ChangedBlock,
+    CheckedClaim,
     Finding,
     FormattingResult,
     Job,
@@ -41,6 +42,8 @@ from app.jobs.models import (
     JobStatus,
     ModelCall,
     RefinementResult,
+    ResearchResult,
+    Source,
     Stage,
     StoredOutput,
     Wallet,
@@ -303,6 +306,98 @@ def _analyse(ctx: StageContext, model: DocumentModel) -> tuple[AnalysisResult, s
 
 def _brief(ctx: StageContext) -> dict[str, str]:
     return writing_brief(ctx.job.selection.style, ctx.job.selection.intensity)
+
+
+# --- the source check (phase 4 of the revised algorithm) --------------------------------------
+
+RESEARCH_METHOD = "Claims found by PaperAid's AI, checked against live web sources, and each source checked again by a second AI model"
+
+
+def stage_researching(ctx: StageContext) -> None:
+    """Find the paper's important public claims, research each one on the live web, and have the
+    writer check the evidence without searching. The paper itself is never changed by this."""
+    settings = ctx.rt.settings
+    model = ctx.document()
+    runner = ctx.ai()
+    blocks = model.by_id()
+    prose = signals.analysable(model)
+    passages = [{"id": b.id, "section": b.section or "Body", "sectionType": signals.section_type(b.section), "text": b.text} for b in prose]
+    limit = research.claims_for(sum(b.words for b in prose), settings.research_max_claims)
+    own, names = research.own_numbers(model), research.front_matter_names(model)
+    order = {"high": 0, "medium": 1, "low": 2}
+    position = {b.id: i for i, b in enumerate(prose)}
+    candidates = [
+        c
+        for c in (runner.find_claims(passages, model.outline(), limit) if limit else [])
+        if c.id in blocks
+        and signals.section_type(blocks[c.id].section) not in research.OWN_DATA_SECTIONS
+        and research.verbatim(c.claim, blocks[c.id].text)
+        and research.safe_to_search(c.claim, c.query, own, names)
+    ]
+    candidates = sorted(dict((c.claim.strip().lower(), c) for c in candidates).values(), key=lambda c: (order[c.importance], position[c.id]))[:limit]
+
+    found: list[tuple[str, ClaimCandidate, ResearchAnswer]] = []
+    stopped = False
+    for n, candidate in enumerate(candidates, start=1):
+        try:
+            answer = runner.research_claim(candidate.claim.strip(), candidate.query.strip(), candidate.cited, settings.research_max_searches)
+        except PermanentStageError as exc:
+            if exc.code != "BUDGET_EXCEEDED":
+                raise
+            stopped = True
+            break  # the quote's research allowance is spent: the rest are reported as not checked
+        if answer is not None:
+            found.append((f"c{n}", candidate, answer))
+
+    items = [
+        {
+            "id": cid,
+            "claim": c.claim,
+            "context": blocks[c.id].text[:900],
+            "sources": [s.model_dump(exclude={"url", "supports"}) for s in a.sources],
+        }
+        for cid, c, a in found
+        if a.sources
+    ]
+    try:
+        verdicts = runner.verify_claims(items) if items else {}
+    except PermanentStageError as exc:
+        if exc.code != "BUDGET_EXCEEDED":
+            raise
+        verdicts, stopped = {}, True
+    claims = []
+    for cid, c, a in found:
+        check = verdicts.get(cid)
+        support = research.combine(a.support, check.support if check else None) if a.sources else "NOT_FOUND"
+        note = a.note if check is None or check.support == a.support else f"{a.note} Second check: {check.note}"
+        claims.append(
+            CheckedClaim(
+                id=cid,
+                block_id=c.id,
+                section=blocks[c.id].section or "Body",
+                claim=c.claim.strip(),
+                cited=c.cited,
+                support=support,  # type: ignore[arg-type]
+                note=note.strip(),
+                sources=[Source(**s.model_dump()) for s in a.sources],
+            )
+        )
+    result = ResearchResult(claims=claims, checked=len(claims), candidates=len(candidates), retrieved_on=utcnow().date().isoformat(), method=RESEARCH_METHOD)
+    warnings = []
+    contradicted = sum(1 for c in claims if c.support == "CONTRADICTED")
+    if contradicted:
+        warnings.append(f"{contradicted} of your claims appear{'s' if contradicted == 1 else ''} to be contradicted by the sources we found. See Source check before you submit.")
+    unchecked = len(candidates) - len(claims)
+    if stopped or unchecked:
+        warnings.append(f"{unchecked} of {len(candidates)} claims could not be checked within this job's price, so they are not in the source check.")
+
+    def save(j: Job) -> Job:
+        j.research = result
+        if stopped or unchecked:
+            j.outcome = "PARTIAL"
+        return _add_warnings(j, warnings)
+
+    ctx.update(save)
 
 
 # --- the refinement estimate ---------------------------------------------------------------
@@ -687,7 +782,7 @@ def stage_exporting(ctx: StageContext) -> None:
         if job.refinement and job.refinement.refined_blocks:
             after = _analysis_after(ctx, job.analysis.method)
         output(
-            "writing-report", "Writing report (Word)", "writing report", writing_report(job.source.name if job.source else "", utcnow(), job.analysis, after, job.paper_checks)
+            "writing-report", "Writing report (Word)", "writing report", writing_report(job.source.name if job.source else "", utcnow(), job.analysis, after, job.paper_checks, job.research)
         )
     if job.refinement:
         output("change-report", "Change report (Word)", "changes", change_report(job.source.name if job.source else "", utcnow(), job.refinement))
@@ -750,6 +845,7 @@ def _review_context(model: DocumentModel, targets: dict[str, Target], revisions:
 STAGES = {
     Stage.EXTRACTING: stage_extracting,
     Stage.ANALYSING: stage_analysing,
+    Stage.RESEARCHING: stage_researching,
     Stage.PLANNING: stage_planning,
     Stage.REFINING: stage_refining,
     Stage.AUDITING: stage_auditing,

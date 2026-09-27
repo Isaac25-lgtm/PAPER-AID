@@ -23,6 +23,7 @@ class ServiceId(StrEnum):
     TEMPLATE_FORMAT = "TEMPLATE_FORMAT"
     REDRAFT = "REDRAFT"
     LATEX = "LATEX"
+    SOURCE_CHECK = "SOURCE_CHECK"
 
 
 class JobStatus(StrEnum):
@@ -39,6 +40,7 @@ class JobStatus(StrEnum):
 class Stage(StrEnum):
     EXTRACTING = "EXTRACTING"
     ANALYSING = "ANALYSING"
+    RESEARCHING = "RESEARCHING"
     PLANNING = "PLANNING"
     REFINING = "REFINING"
     REDRAFTING = "REDRAFTING"
@@ -69,6 +71,7 @@ class ServiceSelection(Camel):
     writing: Literal["NONE", "AI_CHECK", "REFINE", "REDRAFT"] = "NONE"
     intensity: Literal["LIGHT", "STANDARD"] = "STANDARD"
     style: WritingStyle = "PRESERVE_VOICE"  # part of the priced selection: changing it needs a new quote
+    source_check: bool = False  # check the paper's factual claims against live sources (AI Check or Refine)
     formatting: Literal["NONE", "FORMAT", "TEMPLATE_FORMAT"] = "NONE"
     preset: str = "apa7"
     latex: bool = False
@@ -81,6 +84,8 @@ class ServiceSelection(Camel):
             ids.append(ServiceId(self.formatting))
         if self.latex:
             ids.append(ServiceId.LATEX)
+        if self.source_check:
+            ids.append(ServiceId.SOURCE_CHECK)
         return ids
 
 
@@ -274,6 +279,44 @@ class PaperChecks(Camel):
     method: str = ""
 
 
+SupportLevel = Literal["SUPPORTED", "PARTLY_SUPPORTED", "CONTRADICTED", "NOT_FOUND", "UNCERTAIN"]
+
+
+class Source(Camel):
+    """Where evidence for a claim was read. The URL is always one the search actually opened."""
+
+    url: str
+    title: str
+    publisher: str = ""
+    published: str = ""  # as the source states it (year, or a fuller date)
+    access: Literal["FULL_TEXT", "ABSTRACT", "SNIPPET"]  # how much of the source was read
+    passage: str  # the words in the source that bear on the claim, quoted
+    scope: str = ""  # population, place and period the source covers
+    supports: Literal["SUPPORTED", "PARTLY_SUPPORTED", "CONTRADICTED", "NOT_FOUND"]
+
+
+class CheckedClaim(Camel):
+    """One important factual claim from the paper, checked against live sources and then by a
+    second model. The paper itself is never changed because of it (owner decision 2026-09-27)."""
+
+    id: str
+    block_id: str
+    section: str
+    claim: str  # as the paper states it
+    cited: bool  # the paper already cites a source for it
+    support: SupportLevel
+    note: str  # why, including any mismatch of population, place or period
+    sources: list[Source] = []
+
+
+class ResearchResult(Camel):
+    claims: list[CheckedClaim]
+    checked: int
+    candidates: int  # important claims found; more than `checked` when the budget ran out
+    retrieved_on: str  # the date the sources were read
+    method: str = ""
+
+
 class ChangedBlock(Camel):
     block_id: str
     section: str
@@ -340,6 +383,7 @@ class ModelCall(Camel):
     output_tokens: int
     cached_tokens: int
     cache_write_tokens: int = 0
+    search_calls: int = 0  # web searches made during the call (billed per search)
     latency_ms: int
     cost_usd: float
     at: datetime = Field(default_factory=utcnow)
@@ -376,6 +420,7 @@ class JobView(Camel):
     analysis: AnalysisResult | None = None
     analysis_after: AnalysisResult | None = None
     paper_checks: PaperChecks | None = None
+    research: ResearchResult | None = None
     refinement: RefinementResult | None = None
     formatting: FormattingResult | None = None
     outputs: list[OutputFile] = []

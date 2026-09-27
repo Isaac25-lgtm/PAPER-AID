@@ -256,8 +256,8 @@ def test_every_step_is_performed_by_its_fixed_role():
     from app.ai.orchestration import STEPS
 
     runner = AIRunner(real_settings(), lambda c: None, lambda: 0.0, 5.0)
-    lead = {"analyse", "plan", "finalise", "review", "spec_plan", "spec_finalise", "spec_review"}
-    writer = {"critique", "refine", "repair", "spec_critique", "spec_fix"}
+    lead = {"analyse", "plan", "finalise", "review", "claims", "research", "spec_plan", "spec_finalise", "spec_review"}
+    writer = {"critique", "refine", "repair", "verify", "spec_critique", "spec_fix"}  # verify: checks the lead's evidence, never searches
     assert set(STEPS) == lead | writer
     assert all(runner.model_for(t) == "openai:gpt-6-sol" for t in lead)
     assert all(runner.model_for(t) == "anthropic:claude-opus-5-5" for t in writer)

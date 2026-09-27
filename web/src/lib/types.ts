@@ -1,7 +1,7 @@
 // Domain contracts shared by every screen. When the backend exists these are
 // generated from its Pydantic models; until then this file mirrors that plan.
 
-export type ServiceId = 'AI_CHECK' | 'REFINE' | 'FORMAT' | 'TEMPLATE_FORMAT' | 'REDRAFT' | 'LATEX'
+export type ServiceId = 'AI_CHECK' | 'REFINE' | 'FORMAT' | 'TEMPLATE_FORMAT' | 'REDRAFT' | 'LATEX' | 'SOURCE_CHECK'
 /** soon = not built yet; not_configured = the server's AI keys are not set; invite_only = testing is
  *  limited to invited testers and this visitor isn't one (or isn't signed in). */
 export type Availability = 'available' | 'soon' | 'not_configured' | 'invite_only'
@@ -16,7 +16,7 @@ export type JobStatus =
   | 'FAILED'
   | 'CANCELLED'
 
-export type Stage = 'EXTRACTING' | 'ANALYSING' | 'PLANNING' | 'REFINING' | 'REDRAFTING' | 'FORMATTING' | 'AUDITING' | 'EXPORTING'
+export type Stage = 'EXTRACTING' | 'ANALYSING' | 'RESEARCHING' | 'PLANNING' | 'REFINING' | 'REDRAFTING' | 'FORMATTING' | 'AUDITING' | 'EXPORTING'
 export type PaymentStatus = 'NOT_REQUIRED' | 'PENDING' | 'PAID' | 'FAILED' | 'REFUNDED'
 export type FileRole = 'source' | 'guideline'
 export type Intensity = 'LIGHT' | 'STANDARD'
@@ -38,6 +38,7 @@ export interface ServiceSelection {
   writing: 'NONE' | 'AI_CHECK' | 'REFINE' | 'REDRAFT'
   intensity: Intensity
   style: WritingStyle
+  sourceCheck: boolean
   formatting: 'NONE' | 'FORMAT' | 'TEMPLATE_FORMAT'
   preset: string
   latex: boolean
@@ -204,6 +205,7 @@ export interface Job {
   analysis: AnalysisResult | null
   analysisAfter: AnalysisResult | null
   paperChecks: PaperChecks | null
+  research: ResearchResult | null
   refinement: RefinementResult | null
   formatting: FormattingResult | null
   outputs: OutputFile[]
@@ -212,6 +214,38 @@ export interface Job {
   queuedAt: string | null
   completedAt: string | null
   expiresAt: string
+}
+
+export type SupportLevel = 'SUPPORTED' | 'PARTLY_SUPPORTED' | 'CONTRADICTED' | 'NOT_FOUND' | 'UNCERTAIN'
+
+export interface Source {
+  url: string
+  title: string
+  publisher: string
+  published: string
+  access: 'FULL_TEXT' | 'ABSTRACT' | 'SNIPPET'
+  passage: string
+  scope: string
+  supports: Exclude<SupportLevel, 'UNCERTAIN'>
+}
+
+export interface CheckedClaim {
+  id: string
+  blockId: string
+  section: string
+  claim: string
+  cited: boolean
+  support: SupportLevel
+  note: string
+  sources: Source[]
+}
+
+export interface ResearchResult {
+  claims: CheckedClaim[]
+  checked: number
+  candidates: number
+  retrievedOn: string
+  method: string
 }
 
 /** A citation/reference or consistency result; `certainty` says how sure PaperAid is. */
@@ -245,6 +279,7 @@ export interface ModelCall {
   outputTokens: number
   cachedTokens: number
   cacheWriteTokens: number
+  searchCalls: number
   latencyMs: number
   costUsd: number
 }

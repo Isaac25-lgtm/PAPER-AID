@@ -76,6 +76,7 @@ try {
   await page.getByText('Academic formatting').first().click()
   await page.getByRole('combobox', { name: 'Formatting style' }).selectOption('harvard')
   await page.getByText('Concise academic').click() // the writing style is part of what is priced
+  await page.getByText('Check my claims against live sources').click()
   await page.getByText('First, a short AI estimate').waitFor()
   await shot('1a-estimate-offer')
   await page.getByRole('button', { name: /Get my estimate/ }).click() // the paid scan only runs on the student's click
@@ -104,11 +105,12 @@ try {
   await shot('3-overview')
   step('job completed')
   await page.getByText('Concise academic · standard refinement').waitFor()
-  for (const tab of ['Writing report', 'Changes', 'Formatting']) {
+  for (const tab of ['Writing report', 'Source check', 'Changes', 'Formatting']) {
     await page.getByRole('tab', { name: tab }).click()
     await page.waitForTimeout(300)
     await shot(`4-${tab.toLowerCase().replace(' ', '-')}`)
     if (tab === 'Writing report') await page.getByRole('heading', { name: 'Citations and consistency' }).waitFor()
+    if (tab === 'Source check') await page.getByText('not that no evidence exists', { exact: false }).waitFor()
   }
   step('result tabs render, with the chosen style and the citation checks')
 
