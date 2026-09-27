@@ -419,6 +419,7 @@ class AIRunner:
     ):
         self.settings = settings
         self._engine = engine or current_engine(settings)
+        self.budget_reached = False  # a batched step stopped early because the job's spend cap was reached
         self._phase = phase
         self._record = record
         self._spent = spent
@@ -441,12 +442,13 @@ class AIRunner:
         schema: dict[str, Any],
         shape: type[T],
         max_searches: int = 0,
-        accept: Callable[[T, list[str]], T] | None = None,
+        accept: Callable[[T, ModelResult], T] | None = None,
     ) -> T | None:
         """Returns the schema-validated answer, or None when the response was cut off. Only answers
         that passed validation are cached, so a retry never replays a bad response. With
         `max_searches`, the model may search the web that many times; `accept` then sees the
-        answer with the URLs the searches opened and returns what may be kept (and cached)."""
+        answer with the provider's result (URLs returned, queries sent) and returns what may be kept
+        (and cached)."""
         step = STEPS[task]
         model_ref = self.model_for(task)
         prompt = self._prompt_for(task)
@@ -465,7 +467,7 @@ class AIRunner:
         prompt_chars = len(system) + len(json.dumps(payload))
         fee = 0.0
         if max_searches:  # the pages the searches read arrive as input, and each search has a fee
-            prompt_chars += costs.SEARCH_INPUT_TOKENS_WORST * 3 * max_searches
+            prompt_chars += int(costs.SEARCH_INPUT_TOKENS_WORST * costs.CEILING_CHARS_PER_TOKEN) * max_searches
             fee = costs.search_fee_usd(provider.name, max_searches)
         spent = self._spent()
         costs.ensure_within_budget(spent, costs.estimate_usd(provider.name, model, prompt_chars, step.max_tokens, prices) + fee, self._budget)
@@ -501,27 +503,47 @@ class AIRunner:
         validated = self._validated(shape, parse(result.text, task), task)
         text = result.text
         if accept is not None:
-            validated = accept(validated, result.sources)
+            validated = accept(validated, result)
             text = validated.model_dump_json()
         if self._cache:
             self._cache.put(key, text)
         return validated
 
     def _batched[T: BaseModel](
-        self, task: str, items: list[dict[str, Any]], wrap: Callable[[list[dict[str, Any]]], dict[str, Any]], schema: dict[str, Any], shape: type[T]
+        self,
+        task: str,
+        items: list[dict[str, Any]],
+        wrap: Callable[[list[dict[str, Any]]], dict[str, Any]],
+        schema: dict[str, Any],
+        shape: type[T],
+        stop_on_budget: bool = False,
     ) -> list[T]:
-        return [answer for _, answer in self._batched_with_items(task, items, wrap, schema, shape)]
+        return [answer for _, answer in self._batched_with_items(task, items, wrap, schema, shape, stop_on_budget)]
 
     def _batched_with_items[T: BaseModel](
-        self, task: str, items: list[dict[str, Any]], wrap: Callable[[list[dict[str, Any]]], dict[str, Any]], schema: dict[str, Any], shape: type[T]
+        self,
+        task: str,
+        items: list[dict[str, Any]],
+        wrap: Callable[[list[dict[str, Any]]], dict[str, Any]],
+        schema: dict[str, Any],
+        shape: type[T],
+        stop_on_budget: bool = False,
     ) -> list[tuple[list[dict[str, Any]], T]]:
         """Run `items` in word-bounded batches; halve any batch whose answer was cut off. Each
-        answer comes with the items it covered."""
+        answer comes with the items it covered. With `stop_on_budget`, reaching the job's spend cap
+        ends the step at a batch boundary and keeps the answers so far (Codex audit #10): callers
+        treat items without an answer as not done."""
         responses: list[tuple[list[dict[str, Any]], T]] = []
         pending = _batches(items)
         while pending:
             batch = pending.pop(0)
-            answer = self._call(task, wrap([{k: v for k, v in i.items() if k != "_words"} for i in batch]), schema, shape)
+            try:
+                answer = self._call(task, wrap([{k: v for k, v in i.items() if k != "_words"} for i in batch]), schema, shape)
+            except PermanentStageError as exc:
+                if not stop_on_budget or exc.code != "BUDGET_EXCEEDED":
+                    raise
+                self.budget_reached = True
+                break
             if answer is not None:
                 responses.append((batch, answer))
             elif len(batch) > 1:
@@ -572,9 +594,12 @@ class AIRunner:
             draft.update({p.id: p for p in answer.blocks if p.id in known})
         return draft
 
-    def negotiate_plan(self, targets: list[Target], outline: list[str], brief: dict[str, str]) -> Negotiation:
+    def negotiate_plan(self, targets: list[Target], outline: list[str], brief: dict[str, str], draft: dict[str, PlanItem] | None = None) -> Negotiation:
+        """Steps 2–4. `draft` is the estimate's saved draft plan, when the job has one: it is used
+        as it is, never asked for (and paid for) again."""
         base = self._plan_base(targets)
-        draft = self.draft_plan(targets, outline, brief)
+        if draft is None:
+            draft = self.draft_plan(targets, outline, brief)
 
         # The whole plan is critiqued, "leave" decisions included: the writer may argue a passage
         # the lead left alone does need work. A passage the lead omitted has no plan and is left.
@@ -605,7 +630,7 @@ class AIRunner:
             for t in targets
         ]
         returned: dict[str, str] = {}
-        for answer in self._batched("refine", items, lambda b: {**brief, "outline": outline, "blocks": b}, _TEXT_BLOCKS, _TextBlocks):
+        for answer in self._batched("refine", items, lambda b: {**brief, "outline": outline, "blocks": b}, _TEXT_BLOCKS, _TextBlocks, stop_on_budget=True):
             returned.update({b.id: b.text for b in answer.blocks if b.id in by_id})
         revisions = []
         for t in targets:
@@ -638,7 +663,7 @@ class AIRunner:
             {"id": t.id, "section": t.section, "instruction": t.instruction, "preserve": t.preserve, "before": t.before, "after": t.after, "paragraphs": t.masked.split(SEPARATOR), "_words": t.masked}
             for t in targets
         ]
-        answers = self._batched("redraft", items, lambda b: {**brief, "outline": outline, "groups": b}, _GROUPS, _Groups)
+        answers = self._batched("redraft", items, lambda b: {**brief, "outline": outline, "groups": b}, _GROUPS, _Groups, stop_on_budget=True)
         return self._group_revisions(answers, by_id, {t.id: t.masked for t in targets})
 
     def redraft_fix(self, failed: list[tuple[Revision, list[str]]], instructions: dict[str, str], brief: dict[str, str]) -> list[Revision]:
@@ -670,7 +695,7 @@ class AIRunner:
             items.append({"id": r.id, "original": r.original, "revised": r.revised, "instruction": instructions.get(r.id, ""), **extra, "_words": words})
         outcome = ReviewOutcome()
         ids = {r.id for r in changed}
-        for answer in self._batched("review", items, lambda b: {**brief, "pairs": b}, _REVIEW, _Review):
+        for answer in self._batched("review", items, lambda b: {**brief, "pairs": b}, _REVIEW, _Review, stop_on_budget=True):
             for result in answer.results:
                 if result.id not in ids:
                     continue
@@ -711,13 +736,16 @@ class AIRunner:
             found.extend(c for c in answer.claims if c.id in known)
         return found
 
-    def research_claim(self, claim: str, query: str, cited: bool, max_searches: int) -> ResearchAnswer | None:
+    def research_claim(self, claim: str, query: str, cited: bool, max_searches: int, query_ok: Callable[[str], bool]) -> ResearchAnswer | None:
         """Live web research for one claim. Only the claim and a checked query are sent, never
-        the paper. Sources the searches did not open are removed; without any left, the claim is
+        the paper. If a query the model actually sent breaks `query_ok`, the answer is discarded.
+        Sources not among the search's results are removed; without any left, the claim is
         NOT_FOUND. Returns None when the answer was cut off."""
 
-        def accept(answer: ResearchAnswer, opened: list[str]) -> ResearchAnswer:
-            kept = [s for s in answer.sources if research.opened(s.url, opened)][:3]
+        def accept(answer: ResearchAnswer, result: ModelResult) -> ResearchAnswer:
+            if not all(query_ok(q) for q in result.queries):
+                return ResearchAnswer(support="NOT_FOUND", note="The search results were discarded because a search did not meet PaperAid's privacy rules.", sources=[])
+            kept = [s for s in answer.sources if research.opened(s.url, result.sources)][:3]
             if not kept and answer.support != "NOT_FOUND":
                 return ResearchAnswer(support="NOT_FOUND", note="No source that the search actually opened could be confirmed for this claim.", sources=[])
             return answer.model_copy(update={"sources": kept})

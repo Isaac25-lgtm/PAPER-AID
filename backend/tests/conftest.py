@@ -28,7 +28,11 @@ def client(tmp_path, monkeypatch):
     """A fresh app on an isolated data directory with the local queue. Both AI roles are answered
     by tests.fake_models (dummy keys, no network); `client.models` lets a test script any step."""
     from app.ai import costs, orchestration
+    from app.analysis import fetch
     from tests.fake_models import FakeModels
+
+    def fetch_html_text(page):
+        return None if page is None else fetch._text(page.encode(), "text/html")
 
     models = FakeModels()
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
@@ -37,6 +41,8 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("ADMIN_EMAILS", '["demo@paperaid.app"]')
     monkeypatch.setattr(orchestration, "provider_for", lambda ref, settings: (models, ref.split(":")[-1]))
     monkeypatch.setitem(costs.SEARCH_FEE_USD, "fake", 0.01)  # the stand-in "searches" like the real lead
+    monkeypatch.setattr(fetch, "page_text", lambda url: fetch_html_text(models.pages.get(url)))  # no network in tests
+    monkeypatch.setattr(fetch, "abstract_text", lambda url: models.abstracts.get(url))
     for c in _app_client(tmp_path, monkeypatch):
         c.models = models
         for email in TEST_ACCOUNTS:

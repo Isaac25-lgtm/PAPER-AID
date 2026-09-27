@@ -157,6 +157,7 @@ export interface ChangedBlock {
 
 export interface RefinementResult {
   mode: 'REFINE' | 'REDRAFT' // REDRAFT: each change is a group of paragraphs
+  trimmed: boolean // long passages are shortened here; the change report has every word
   targetedBlocks: number
   refinedBlocks: number
   keptOriginal: number
@@ -218,7 +219,7 @@ export interface Job {
   expiresAt: string
 }
 
-export type SupportLevel = 'SUPPORTED' | 'PARTLY_SUPPORTED' | 'CONTRADICTED' | 'NOT_FOUND' | 'UNCERTAIN'
+export type SupportLevel = 'SUPPORTED' | 'PARTLY_SUPPORTED' | 'CONTRADICTED' | 'NOT_FOUND' | 'UNCERTAIN' | 'UNCONFIRMED'
 
 export interface Source {
   url: string
@@ -228,7 +229,9 @@ export interface Source {
   access: 'FULL_TEXT' | 'ABSTRACT' | 'SNIPPET'
   passage: string
   scope: string
-  supports: Exclude<SupportLevel, 'UNCERTAIN'>
+  supports: Exclude<SupportLevel, 'UNCERTAIN' | 'UNCONFIRMED'>
+  verified: boolean // PaperAid found the quoted passage on the page itself, or in the article's abstract
+  readable: boolean // PaperAid could open the page or abstract (false: blocked, paywalled, unreachable)
 }
 
 export interface CheckedClaim {

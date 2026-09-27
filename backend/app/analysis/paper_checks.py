@@ -20,8 +20,17 @@ MAX_ITEMS = 40
 
 YEAR = r"(?:1[89]\d{2}|20\d{2})[a-z]?|n\.d\."
 PARENTHETICAL = re.compile(r"\(([^()]*?(?:\b(?:1[89]\d{2}|20\d{2})[a-z]?\b|n\.d\.)[^()]*)\)")
-NARRATIVE = re.compile(rf"\b([A-Z][\w'’-]+)(?:\s+(?:and|&)\s+[A-Z][\w'’-]+|\s+et\s+al\.?)?\s+\(({YEAR})(?:,[^)]*)?\)")
-CITED_PART = re.compile(rf"^(?:(?:see|e\.g\.|cf\.|as cited in)[,\s]+)*(?P<author>[A-Z][^,;()]*?)(?:,)?\s+(?P<years>(?:{YEAR})(?:\s*,\s*(?:{YEAR}))*)(?:\s*,\s*(?:p|pp)\..*)?$")
+PARTICLES = {"van", "von", "der", "den", "de", "del", "della", "da", "di", "du", "le", "la", "dos", "das", "ter", "ten", "bin", "al", "el"}
+JOINERS = {"of", "for", "on", "and", "the"}
+# Words that can open a sentence before a narrative citation ("As Kato (2018) noted").
+LEADING = {"as", "in", "the", "according", "to", "while", "however", "although", "since", "when", "both", "recently", "earlier", "later",
+           "following", "like", "unlike", "by", "from", "and", "but", "yet", "also", "thus", "indeed", "similarly", "see", "for", "work"}
+NAME_WORD = r"(?:[A-Z][\w'’-]+|" + "|".join(sorted(PARTICLES)) + ")"
+# A narrative citation: a run of name words (an organisation's full name, or a surname with its
+# particles), optionally "and"/"&" a second author or "et al.", then (year).
+NARRATIVE = re.compile(rf"\b({NAME_WORD}(?:\s+(?:{NAME_WORD}|of|for|on|and|&))*?)(?:\s+et\s+al\.?)?\s+\(({YEAR})(?:,[^)]*)?\)")
+PARTICLE_PREFIX = r"(?:(?:" + "|".join(sorted(PARTICLES)) + r")\s+)*"
+CITED_PART = re.compile(rf"^(?:(?:see|e\.g\.|cf\.|as cited in)[,\s]+)*(?P<author>{PARTICLE_PREFIX}[A-Z][^,;()]*?)(?:,)?\s+(?P<years>(?:{YEAR})(?:\s*,\s*(?:{YEAR}))*)(?:\s*,\s*(?:p|pp)\..*)?$")
 NUMERIC = re.compile(r"\[(\d+(?:\s*[,–-]\s*\d+)*)\]")
 REF_YEAR = re.compile(rf"\(({YEAR})\)|\b({YEAR})\b")
 REF_NUMBER = re.compile(r"^\s*(?:\[(\d+)\]|(\d+)\.)\s")
@@ -34,15 +43,40 @@ SPELLING_PAIRS = [
 ]
 
 
+def _words(text: str) -> list[str]:
+    return [w.replace("’", "'") for w in FIRST_NAME.findall(text)]
+
+
 def _surname(author: str) -> str:
-    match = FIRST_NAME.search(author)
-    return match.group(0).lower().replace("’", "'") if match else ""
+    """The matching key of an author: the first name word after any sentence opener, skipping
+    particles ("van der Berg" → "berg")."""
+    words = _words(author)
+    while words and words[0].lower() in LEADING and len(words) > 1:
+        words = words[1:]
+    return next((w.lower() for w in words if w.lower() not in PARTICLES and w.lower() not in JOINERS), "")
 
 
-def _citations(model: DocumentModel) -> tuple[list[tuple[str, str, str]], list[str], list[int]]:
-    """(surname, year, as written) for each author–date citation; unreadable citation-like text;
-    numbers cited in [n] style."""
-    found: list[tuple[str, str, str]] = []
+def _organisation(author: str) -> bool:
+    """Three or more capitalised name words: probably an organisation, whose many written forms
+    ("WHO", "World Health Organization") this checker cannot always match with certainty."""
+    return sum(1 for w in _words(author) if w[:1].isupper() and w.lower() not in LEADING) >= 3
+
+
+def _aliases(author: str) -> set[str]:
+    """Every key a reference can be cited by: its first name word, an acronym given in brackets,
+    and an organisation's initials ("World Health Organization" → "who")."""
+    keys = {_surname(author)}
+    keys.update(a.lower() for a in re.findall(r"\(([A-Z]{2,})\)", author))
+    if _organisation(author):
+        name = re.split(r"[.(]", author)[0]
+        keys.add("".join(w[0] for w in _words(name) if w[:1].isupper() and w.lower() not in JOINERS).lower())
+    return keys - {""}
+
+
+def _citations(model: DocumentModel) -> tuple[list[tuple[str, str, str, bool]], list[str], list[int]]:
+    """(key, year, as written, organisation-like) for each author–date citation; unreadable
+    citation-like text; numbers cited in [n] style."""
+    found: list[tuple[str, str, str, bool]] = []
     unreadable: list[str] = []
     numbers: list[int] = []
     for block in model.blocks:
@@ -53,14 +87,19 @@ def _citations(model: DocumentModel) -> tuple[list[tuple[str, str, str]], list[s
             for part in match.group(1).split(";"):
                 part = part.strip()
                 cited = CITED_PART.match(part)
-                if cited:
+                if re.match(r"(?i)(?:ibid|op\.? cit|loc\.? cit)", part):
+                    unreadable.append(f"({part})")
+                elif cited:
+                    author = cited.group("author")
                     for year in re.split(r"\s*,\s*", cited.group("years")):
-                        found.append((_surname(cited.group("author")), year, f"({part})"))
+                        found.append((_surname(author), year, f"({part})", _organisation(author)))
                 elif re.search(r"et al|&|\band\b", part):
                     unreadable.append(f"({part})")
                 # anything else with a year in brackets ("conducted in 2019") is not a citation
         for match in NARRATIVE.finditer(text):
-            found.append((match.group(1).lower().replace("’", "'"), match.group(2), match.group(0)))
+            key = _surname(match.group(1))
+            if key:
+                found.append((key, match.group(2), match.group(0), _organisation(match.group(1))))
         for match in NUMERIC.finditer(text):
             for piece in re.split(r"\s*,\s*", match.group(1)):
                 bounds = re.split(r"\s*[–-]\s*", piece)
@@ -72,9 +111,10 @@ def _citations(model: DocumentModel) -> tuple[list[tuple[str, str, str]], list[s
     return unique, list(dict.fromkeys(unreadable)), sorted(set(numbers))
 
 
-def _references(model: DocumentModel) -> tuple[list[tuple[str, str, str]], list[str], list[int]]:
-    """(surname, year, entry) for each readable reference; unreadable entries; entry numbers."""
-    readable: list[tuple[str, str, str]] = []
+def _references(model: DocumentModel) -> tuple[list[tuple[set[str], str, str, bool]], list[str], list[int]]:
+    """(keys, year, entry, organisation-like) for each readable reference; unreadable entries;
+    entry numbers."""
+    readable: list[tuple[set[str], str, str, bool]] = []
     unreadable: list[str] = []
     numbered: list[int] = []
     for block in model.blocks:
@@ -88,9 +128,10 @@ def _references(model: DocumentModel) -> tuple[list[tuple[str, str, str]], list[
         else:
             entry_body = entry
         year = REF_YEAR.search(entry_body)
-        surname = _surname(entry_body)
-        if year and surname:
-            readable.append((surname, year.group(1) or year.group(2), entry))
+        author = entry_body[: year.start()] if year else entry_body
+        keys = _aliases(author)
+        if year and keys:
+            readable.append((keys, year.group(1) or year.group(2), entry, _organisation(author)))
         else:
             unreadable.append(entry)
     return readable, unreadable, numbered
@@ -129,24 +170,26 @@ def check(model: DocumentModel) -> PaperChecks:
         else:
             # Confirmed claims need both sides read well; otherwise a mismatch is only possible.
             reliable = len(references) >= 0.7 * reference_count and len(unreadable_citations) <= 0.2 * max(1, len(citations))
-            listed = {(s, y) for s, y, _ in references}
-            cited = {(s, y) for s, y, _ in citations}
-            for surname, year, written in citations:
+            listed = {(key, y) for keys, y, _, _ in references for key in keys}
+            cited = {(s, y) for s, y, _, _ in citations}
+            for surname, year, written, org in citations:
                 if (surname, year) in listed:
                     continue
-                near = [entry for s, y, entry in references if (s == surname and y.rstrip("abc") == year.rstrip("abc")) or (s == surname) or (y == year and _similar(s, surname))]
+                near = [entry for keys, y, entry, _ in references if surname in keys or any(y == year and _similar(k, surname) for k in keys)]
                 if near:
                     items.append(PaperCheck(kind="CITED_NOT_LISTED", certainty="POSSIBLE", item=written, detail=f"The closest reference is “{_short(near[0])}”. Check the name and year match."))
                 else:
-                    items.append(PaperCheck(kind="CITED_NOT_LISTED", certainty="CONFIRMED" if reliable else "POSSIBLE", item=written, detail="This citation has no matching entry in your reference list."))
-            for surname, year, entry in references:
-                if (surname, year) in cited:
+                    # An organisation can be written many ways, so a miss is only ever possible.
+                    sure = reliable and not org
+                    items.append(PaperCheck(kind="CITED_NOT_LISTED", certainty="CONFIRMED" if sure else "POSSIBLE", item=written, detail="This citation has no matching entry in your reference list."))
+            for keys, year, entry, org in references:
+                if any((key, year) in cited for key in keys):
                     continue
-                near_cited = any(s == surname or (y == year and _similar(s, surname)) for s, y in cited)
+                near_cited = any(s in keys or (y == year and any(_similar(k, s) for k in keys)) for s, y in cited)
                 items.append(
                     PaperCheck(
                         kind="LISTED_NOT_CITED",
-                        certainty="POSSIBLE" if near_cited or not reliable else "CONFIRMED",
+                        certainty="POSSIBLE" if near_cited or org or not reliable else "CONFIRMED",
                         item=_short(entry),
                         detail="This reference is not cited in the text" + (" under this name and year." if near_cited else "."),
                     )

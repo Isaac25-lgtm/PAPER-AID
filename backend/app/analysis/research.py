@@ -4,7 +4,11 @@ What the models may do is set by prompts; what must never happen is enforced her
 - Data minimisation: the searching step only ever receives a claim and a search query that
   passed these checks, never the paper. A claim built on the paper's own unpublished results, or
   a query carrying contact details or names from the front matter, is dropped before any search.
-- A source is accepted only if its URL is one the search actually opened (no invented URLs).
+- A source is accepted only if its URL is among the search's results (no invented URLs), and its
+  quotation counts only when PaperAid finds it on the page itself (`quote_found`); an unconfirmed
+  quotation can never make a claim supported or contradicted.
+- The queries the search actually sent are checked after the fact too; results from a search that
+  broke these rules are discarded.
 - Verdicts combine cautiously: when the searching model and the checking model disagree, the
   claim is UNCERTAIN, never quietly promoted.
 - "Not found" means a limited search found no support; it is never presented as "no research
@@ -22,6 +26,12 @@ MAX_QUERY_CHARS = 150
 CONTACT = re.compile(r"@|https?://|www\.|\+?\d[\d\s-]{8,}\d")
 NUMBER = re.compile(r"\d[\d,]*(?:\.\d+)?")
 OWN_DATA_SECTIONS = ("methods", "results")
+# The paper reporting its own, unpublished work: never searched.
+OWN_WORK = re.compile(
+    r"\b(?:[Ww]e|[Oo]ur|us)\b"  # case-aware, so "US" (the country) is not the author speaking
+    r"|\b(?i:(?:this|the present|the current) (?:study|research|paper|thesis|dissertation|survey|project))\b"
+    r"|\b(?i:(?:the|these) (?:respondents|participants|interviewees|informants))\b"
+)
 
 
 def claims_for(words: int, cap: int) -> int:
@@ -51,16 +61,46 @@ def front_matter_names(model: DocumentModel) -> set[str]:
     return names - signals.STOPWORDS
 
 
+def _words(text: str) -> set[str]:
+    return {w.lower() for w in re.findall(r"[A-Za-z'’-]+", text)}
+
+
+def query_safe(query: str, own: set[str], names: set[str]) -> bool:
+    """A search query (suggested, or actually sent by the model) that carries nothing private."""
+    if not query.strip() or len(query) > MAX_QUERY_CHARS or CONTACT.search(query) or OWN_WORK.search(query):
+        return False
+    if {n.replace(",", "") for n in NUMBER.findall(query)} & own:
+        return False
+    return not (_words(query) & names)
+
+
 def safe_to_search(claim: str, query: str, own: set[str], names: set[str]) -> bool:
-    if not claim.strip() or not query.strip() or len(query) > MAX_QUERY_CHARS or len(claim) > MAX_CLAIM_CHARS:
+    """Both the claim (which the searching model sees) and its query must be free of private names,
+    contact details, the paper's own result figures and its own unpublished work."""
+    if not claim.strip() or len(claim) > MAX_CLAIM_CHARS or CONTACT.search(claim) or OWN_WORK.search(claim):
         return False
-    if CONTACT.search(query) or CONTACT.search(claim):
+    if {n.replace(",", "") for n in NUMBER.findall(claim)} & own or _words(claim) & names:
         return False
-    figures = {n.replace(",", "") for n in NUMBER.findall(claim + " " + query)}
-    if figures & own:  # the paper's own finding: not something the web can confirm, and unpublished
-        return False
-    query_words = {w.lower() for w in re.findall(r"[A-Za-z'’-]+", query)}
-    return not (query_words & names)
+    return query_safe(query, own, names)
+
+
+def _norm_words(text: str) -> list[str]:
+    text = text.replace("’", "'").replace("‘", "'").replace("“", '"').replace("”", '"').replace("–", "-").replace("—", "-")
+    return re.findall(r"[a-z0-9%]+", text.lower())
+
+
+def quote_found(passage: str, page: str) -> bool:
+    """The quotation appears on the page: every word in order for short quotations, otherwise at
+    least 85% of its five-word sequences (allowing for line breaks, hyphenation and markup)."""
+    quote_words, page_words = _norm_words(passage), _norm_words(page)
+    if len(quote_words) < 4:
+        return False  # too short to confirm anything
+    if len(quote_words) < 8:
+        joined, target = " " + " ".join(page_words) + " ", " " + " ".join(quote_words) + " "
+        return target in joined
+    grams = {tuple(page_words[i : i + 5]) for i in range(len(page_words) - 4)}
+    quoted = [tuple(quote_words[i : i + 5]) for i in range(len(quote_words) - 4)]
+    return sum(1 for g in quoted if g in grams) / len(quoted) >= 0.85
 
 
 def verbatim(claim: str, text: str) -> bool:

@@ -1356,3 +1356,207 @@ def test_latex_follows_the_refined_paper(client):
     refined = next(c["after"] for c in job["refinement"]["changes"] if not c["kept"])
     tex = zipfile.ZipFile(io.BytesIO(client.get(f"/api/jobs/{job_id}/outputs/latex", headers=STUDENT).content)).read("main.tex").decode()
     assert refined.split(".")[0][:40] in tex
+
+
+def test_an_invented_quotation_is_never_evidence(client):
+    """Codex audit #4: a passage not found on the source page cannot make a claim supported."""
+    from tests.fake_models import SOURCE_URL
+
+    client.models.pages[SOURCE_URL] = "<p>This real page is about something else entirely.</p>"
+    _, _, job = _source_check_job(client)
+    claim = job["research"]["claims"][0]
+    assert claim["support"] == "UNCERTAIN" and claim["sources"][0]["verified"] is False
+    assert "could not find the quoted passage on the source page" in claim["note"]
+    assert not any(r.startswith("verify{") for r in client.models.requests)  # nothing unconfirmed goes to the second check
+
+
+def test_a_confirmed_quotation_is_marked_verified(client):
+    _, _, job = _source_check_job(client)
+    assert job["research"]["claims"][0]["sources"][0]["verified"] is True
+
+
+def test_results_of_a_search_that_broke_privacy_rules_are_discarded(client):
+    """Codex audit #3: the queries the model actually sent are checked, not only the suggested one."""
+    client.models.sent_queries = ["Achola Grace mobile money savings"]  # a front-matter name
+    _, _, job = _source_check_job(client)
+    assert all(c["support"] == "NOT_FOUND" and c["sources"] == [] for c in job["research"]["claims"])
+    assert "privacy rules" in job["research"]["claims"][0]["note"]
+
+
+def test_no_admin_view_or_expired_record_carries_the_papers_words(real_client):
+    """Codex audit #5, as an allowlist check: no 6-word run of the paper appears anywhere in what
+    support can see, including the plan's instructions ("why") and section headings."""
+    from app.documents.docx_io import read_docx
+    from app.jobs import service
+    from app.runtime import get_runtime
+    from tests.conftest import fixture_bytes
+
+    def quoting(payload):  # a plan whose instructions quote the paper, as a real one may
+        return {"blocks": [{"id": p["id"], "action": "rewrite", "instruction": f"Rework: {p['text'][:120]}", "preserve": p["text"][:60]} for p in payload["passages"]]}
+
+    real_client.models.overrides["analyse"] = _analyse_all
+    real_client.models.overrides["plan"] = quoting
+    job_id, job = _submit(real_client, {**REFINE_FORMAT, "sourceCheck": True})
+    words = [w for b in read_docx(fixture_bytes("simple_essay.docx")).blocks for w in [b.text.split()] if len(w) >= 6]
+    runs = {" ".join(ws[i : i + 6]) for ws in words for i in range(len(ws) - 5)}
+    admin = json.dumps(real_client.get(f"/api/admin/jobs/{job_id}", headers=ADMIN).json())
+    assert not [r for r in runs if r in admin]
+    rt = get_runtime()
+    expired = service.without_paper_text(rt.store.get(job_id).view()).model_dump_json(by_alias=True)
+    assert not [r for r in runs if r in expired]
+
+
+def test_running_out_of_budget_mid_review_delivers_what_was_verified(real_client, monkeypatch):
+    """Codex audit #10: the budget ran out on the second review batch and the whole job failed."""
+    from app.ai import orchestration
+    from app.core.errors import PermanentStageError
+
+    monkeypatch.setattr(orchestration, "BATCH_WORDS", 60)  # one passage per batch
+
+    models = real_client.models
+    models.overrides["analyse"] = _analyse_all
+    reviews = []
+
+    def review(payload):
+        reviews.append(len(payload["pairs"]))
+        if len(reviews) >= 2:
+            raise PermanentStageError("BUDGET_EXCEEDED", "budget", "spend cap reached")
+        return models.default("review", payload)
+
+    models.overrides["review"] = review
+    _, job = _submit(real_client, REFINE_FORMAT, name="dissertation_long.docx")
+    assert len(reviews) >= 2, "the paper must need more than one review batch"
+    assert job["status"] == "COMPLETED" and job["outcome"] == "PARTIAL"
+    assert job["refinement"]["refinedBlocks"] >= 1 and job["refinement"]["keptOriginal"] >= 1
+    assert any("most it may spend" in w for w in job["warnings"])
+
+
+def test_expired_drafts_lose_their_files_and_paper_text(client):
+    """Codex audit #11: retention cleanup skipped abandoned drafts and quotes."""
+    from datetime import timedelta
+
+    from app.jobs import service
+    from app.jobs.models import utcnow
+    from app.runtime import get_runtime
+
+    rt = get_runtime()
+    job_id, _ = start_job(client, selection={"formatting": "FORMAT", "preset": "apa7"})  # quoted, never submitted
+    path = rt.store.get(job_id).source.path
+    assert rt.files.exists(path)
+    rt.store.update(job_id, lambda j: j.model_copy(update={"expires_at": utcnow() - timedelta(days=1)}))
+    assert service.cleanup_expired(rt) >= 1
+    assert not rt.files.exists(path) and rt.store.get(job_id).files_deleted
+    assert job_id not in [d["id"] for d in client.get("/api/jobs?status=DRAFT", headers=STUDENT).json()["items"]]
+
+
+def test_nothing_new_can_start_while_an_account_is_being_deleted(client, monkeypatch):
+    """Codex audit #2: a job submitted during deletion left a hold on a deleted wallet."""
+    from app.jobs import service
+    from app.runtime import get_runtime
+
+    rt = get_runtime()
+    monkeypatch.setattr(rt.settings, "credits_enabled", False)  # testing mode: a balance does not block deletion
+    headers = {"Authorization": "Dev leaving2@example.com"}
+    first, _ = start_job(client, selection={"formatting": "FORMAT", "preset": "apa7"}, headers=headers)
+    attempts = []
+    original = service._erase
+
+    def meanwhile(rt_, job):
+        if not attempts:
+            attempts.append(client.post("/api/jobs", headers=headers))
+        original(rt_, job)
+
+    monkeypatch.setattr(service, "_erase", meanwhile)
+    assert client.delete("/api/me", headers=headers).status_code == 204
+    assert attempts[0].status_code == 409 and attempts[0].json()["code"] == "ACCOUNT_CLOSING"
+    assert rt.store.get(first) is None  # the job is gone
+    assert not [w for w in rt.store.find_wallets("leaving2@example.com", 5) if w.email == "leaving2@example.com"]
+
+
+def test_an_account_holding_credit_is_not_deleted_while_credits_are_on(client):
+    headers = {"Authorization": "Dev rich@example.com"}
+    grant("rich@example.com", 7_000)
+    response = client.delete("/api/me", headers=headers)
+    assert response.status_code == 409 and response.json()["code"] == "ACCOUNT_HAS_CREDIT"
+    assert client.post("/api/jobs", headers=headers).status_code == 200  # nothing was closed
+
+
+def test_an_old_grant_replayed_after_300_later_entries_adds_nothing(client):
+    """Codex audit: the display ledger keeps 300 entries, so grant ids must be kept elsewhere."""
+    client.get("/api/wallet", headers=STUDENT)
+    body = {"email": "student@example.com", "amount": 1000, "note": "", "opId": "op-first-grant"}
+    after_first = client.post("/api/admin/credits", headers=ADMIN, json=body).json()["available"]
+    for n in range(301):
+        client.post("/api/admin/credits", headers=ADMIN, json={**body, "amount": 1, "opId": f"op-filler-{n:04d}"})
+    replay = client.post("/api/admin/credits", headers=ADMIN, json=body).json()["available"]
+    assert replay == after_first + 301
+
+
+def test_a_rule_change_after_the_estimate_never_repeats_its_paid_calls(client, monkeypatch):
+    """Codex audit #7: a changed signal threshold made the job pay for analysis and planning again."""
+    from dataclasses import replace
+
+    from app.analysis import rules
+
+    job_id, quote = start_job(client)
+    assert client.models.tasks.count("analyse") == 1 and client.models.tasks.count("plan") == 1
+    monkeypatch.setitem(rules.RULES, "RHYTHM_UNIFORM", replace(rules.RULES["RHYTHM_UNIFORM"], threshold=0.9))  # a deploy changes a rule
+    client.post(f"/api/jobs/{job_id}/submit", headers=STUDENT, json={"quoteId": quote["id"]})
+    assert wait(client, job_id)["status"] == "COMPLETED"
+    assert client.models.tasks.count("analyse") == 1 and client.models.tasks.count("plan") == 1
+
+
+def test_a_maximum_length_paper_keeps_its_record_within_firestores_limit(client):
+    """Codex audit #9: full before/after text of a long paper could exceed Firestore's 1 MiB."""
+    import zipfile  # noqa: F401
+
+    from docx import Document as WordDocument
+
+    from app.integrations.store import MAX_RECORD_BYTES
+    from app.runtime import get_runtime
+
+    doc = WordDocument()
+    sentence = "Η πρόσβαση στο διαδίκτυο παραμένει περιορισμένη για πολλούς φοιτητές στις αγροτικές περιοχές της χώρας. "  # 2-byte letters
+    words = 0
+    n = 0
+    while words < 24_500:
+        if n % 6 == 0:
+            doc.add_heading(f"Ενότητα {n // 6 + 1}", 1)
+        doc.add_paragraph(sentence * 8)
+        words += 8 * len(sentence.split())
+        n += 1
+    out = io.BytesIO()
+    doc.save(out)
+    job_id = client.post("/api/jobs", headers=STUDENT).json()["id"]
+    client.post(f"/api/jobs/{job_id}/files/source", headers=STUDENT, files={"file": ("big.docx", out.getvalue(), "application/octet-stream")})
+    quote = get_quote(client, job_id, {"writing": "REDRAFT"})
+    client.post(f"/api/jobs/{job_id}/submit", headers=STUDENT, json={"quoteId": quote["id"]})
+    job = wait(client, job_id, timeout=600)
+    record = get_runtime().store.get(job_id).model_dump_json(by_alias=True).encode()
+    assert job["status"] == "COMPLETED" and job["refinement"]["refinedBlocks"] > 0  # a non-Latin paper can be redrafted
+    assert job["refinement"]["trimmed"] is True
+    assert len(record) < MAX_RECORD_BYTES
+    report = client.get(f"/api/jobs/{job_id}/outputs/change-report", headers=STUDENT).content
+    text = "\n".join(p.text for p in WordDocument(io.BytesIO(report)).paragraphs)
+    assert "full text in the change report" not in text  # the report has every word
+
+
+def test_a_source_that_cannot_be_opened_is_found_but_not_confirmed(client):
+    """Publishers often block automated reading: that is reported as unconfirmed, not as a bad quotation."""
+    from tests.fake_models import SOURCE_URL
+
+    del client.models.pages[SOURCE_URL]  # the page cannot be opened
+    _, _, job = _source_check_job(client)
+    claim = job["research"]["claims"][0]
+    assert claim["support"] == "UNCONFIRMED" and claim["sources"][0]["readable"] is False
+    assert "Open the links to check them yourself" in claim["note"]
+
+
+def test_a_blocked_article_is_confirmed_from_its_abstract(client):
+    from tests.fake_models import SOURCE_URL
+
+    del client.models.pages[SOURCE_URL]
+    client.models.abstracts[SOURCE_URL] = "Background. The report gives the figure for 2022. Methods follow."
+    _, _, job = _source_check_job(client)
+    source = job["research"]["claims"][0]["sources"][0]
+    assert job["research"]["claims"][0]["support"] == "SUPPORTED" and source["verified"] and source["access"] == "ABSTRACT"

@@ -206,6 +206,7 @@ def bound_quote(
     guide_words: int = 0,
     passages: list[Passage] | None = None,
     fee_paid: int = 0,
+    estimate_id: str | None = None,
 ) -> BoundQuote:
     """A quote bound to the exact files, selection and engine it priced, with the rate and
     multiplier frozen. `fee_paid` is every estimate already charged on the job: it counts toward the
@@ -226,6 +227,7 @@ def bound_quote(
         ugx_per_usd=settings.ugx_per_usd,
         multiplier=settings.price_multiplier,
         engine=engine,
+        estimate_id=estimate_id,
     )
 
 

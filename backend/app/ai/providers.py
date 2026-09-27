@@ -34,7 +34,8 @@ class ModelResult:
     provider: str
     model: str
     stop: str = "end_turn"  # "end_turn" | "max_tokens" | "refusal"
-    sources: list[str] = field(default_factory=list)  # every URL a web search actually opened
+    sources: list[str] = field(default_factory=list)  # every URL the web search returned or opened
+    queries: list[str] = field(default_factory=list)  # the search queries the model actually sent
 
 
 class Provider(Protocol):
@@ -171,9 +172,15 @@ class OpenAIProvider:
                 raise RetryableStageError("PROVIDER_UNAVAILABLE", UNAVAILABLE, f"openai {exc.status_code}") from exc
             raise PermanentStageError("PROVIDER_REJECTED", "We couldn't process this document.", f"openai {exc.status_code}") from exc
         result = self._result(response, model, started)
-        searches = [item for item in (getattr(response, "output", None) or []) if getattr(item, "type", None) == "web_search_call"]
+        calls = [item for item in (getattr(response, "output", None) or []) if getattr(item, "type", None) == "web_search_call"]
+        actions = [getattr(item, "action", None) for item in calls]
+        # Only search actions are billed ("Search actions incur a tool call cost"); opening a page or
+        # finding in it is not a search. An action of unknown type is counted, to never undercount.
+        searches = [a for a in actions if getattr(a, "type", "search") == "search"]
         result.usage.search_calls = len(searches)
-        opened = [getattr(src, "url", None) for item in searches for src in (getattr(getattr(item, "action", None), "sources", None) or [])]
+        result.queries = [q for a in searches for q in ([getattr(a, "query", None)] + list(getattr(a, "queries", None) or [])) if q]
+        opened = [getattr(src, "url", None) for a in actions for src in (getattr(a, "sources", None) or [])]
+        opened += [getattr(a, "url", None) for a in actions if getattr(a, "type", None) == "open_page"]
         cited = [
             getattr(a, "url", None)
             for item in (getattr(response, "output", None) or [])

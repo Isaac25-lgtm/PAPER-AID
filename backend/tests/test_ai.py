@@ -162,10 +162,14 @@ def test_skipped_review_items_do_not_pass(monkeypatch):
 
 
 def test_budget_guard_stops_before_the_call(monkeypatch):
-    scripted = ScriptedProvider({"refine": [{"blocks": []}]})
+    scripted = ScriptedProvider({"refine": [{"blocks": []}], "repair": [{"blocks": []}]})
     runner, _ = runner_with(monkeypatch, scripted, budget=0.0001)
+    # A batched writing step stops at the batch boundary: nothing is paid for, the passage keeps its wording.
+    revisions = runner.refine([Target("b1", "Intro", "Some text " * 50)], [], BRIEF)
+    assert scripted.calls == [] and runner.budget_reached and revisions[0].revised == revisions[0].original
+    # A step that cannot stop part-way (here a repair, whose caller handles the budget) refuses outright.
     with pytest.raises(PermanentStageError) as err:
-        runner.refine([Target("b1", "Intro", "Some text " * 50)], [], BRIEF)
+        runner.repair([(Revision("b1", "Some text " * 50, "Other text " * 50, []), ["MEANING_DRIFT"])], {}, BRIEF)
     assert err.value.code == "BUDGET_EXCEEDED" and scripted.calls == []
 
 
@@ -550,6 +554,35 @@ def test_the_spend_cap_is_a_hard_ceiling(monkeypatch):
     assert sent["max_tokens"] < 12000 and worst < 0.05  # output was limited to what the budget can pay
 
 
+def test_dense_input_at_full_output_stays_within_the_cap(monkeypatch):
+    """Codex audit #6: input packing more tokens per character than assumed (1 per 2.5 characters
+    here) at the full allowed output cost $0.0518 against a $0.05 cap. The bound is now 2 characters
+    per token plus the request's framing, billed as a cache write."""
+    import json as _json
+
+    from app.ai import costs
+
+    sent = {}
+
+    class Dense(ScriptedProvider):
+        name = "openai"
+
+        def json(self, task, model, system, payload, schema, max_tokens):
+            sent["max_tokens"] = max_tokens
+            sent["chars"] = len(system) + len(_json.dumps(payload))
+            result = super().json(task, model, system, payload, schema, max_tokens)
+            result.model = "gpt-6-sol"
+            return result
+
+    scripted = Dense({"analyse": [{"blocks": []}]})
+    monkeypatch.setattr(orchestration, "provider_for", lambda ref, settings: (scripted, "gpt-6-sol"))
+    runner = AIRunner(real_settings(), lambda c: None, lambda: 0.0, 0.05)
+    runner.analyse([{"id": "b1", "text": "Dense text 12,345; 67% (x=9) " * 60, "signals": []}], [], {})
+    input_tokens = int(sent["chars"] / 2.5)
+    worst = costs.cost_usd("openai", "gpt-6-sol", 0, sent["max_tokens"], 0, cache_write_tokens=input_tokens)
+    assert worst <= 0.05
+
+
 def test_a_call_the_budget_cannot_afford_is_never_made(monkeypatch):
     class PricedScripted(ScriptedProvider):
         name = "openai"
@@ -561,3 +594,21 @@ def test_a_call_the_budget_cannot_afford_is_never_made(monkeypatch):
     with pytest.raises(PermanentStageError) as err:
         runner.analyse([{"id": "b1", "text": "Text " * 50, "signals": []}], [], {})
     assert err.value.code == "BUDGET_EXCEEDED" and calls == [] and scripted.calls == []
+
+
+def test_only_search_actions_are_billed_and_sent_queries_are_recorded(monkeypatch):
+    """Codex audit #12: opening a page is not a billed search ("Search actions incur a tool call cost")."""
+    provider = OpenAIProvider(real_settings())
+    search = SimpleNamespace(type="web_search_call", action=SimpleNamespace(type="search", query="mobile money Uganda 2022", sources=[SimpleNamespace(url="https://a.org/r")]))
+    opened = SimpleNamespace(type="web_search_call", action=SimpleNamespace(type="open_page", url="https://b.org/p"))
+    response = SimpleNamespace(
+        incomplete_details=None,
+        output_text=json.dumps({"support": "NOT_FOUND", "note": "", "sources": []}),
+        output=[search, opened, SimpleNamespace(type="message", content=[])],
+        usage=SimpleNamespace(input_tokens=9000, output_tokens=200, input_tokens_details=SimpleNamespace(cached_tokens=0)),
+    )
+    monkeypatch.setattr(provider._client.responses, "create", lambda **kw: response)
+    result = provider.search_json("research", "gpt-6-sol", "system", {"claim": "x"}, {"type": "object"}, 500, 2)
+    assert result.usage.search_calls == 1
+    assert result.queries == ["mobile money Uganda 2022"]
+    assert set(result.sources) == {"https://a.org/r", "https://b.org/p"}

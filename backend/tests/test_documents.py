@@ -113,3 +113,79 @@ def test_rewrites_that_insert_editorial_notes_are_rejected():
     assert check_rewrite(original, "Households linked limited access to 208 cases. TODO: add source")
     assert check_rewrite(original, "To clarify the point, households linked limited access to 208 cases.") == []
     assert check_rewrite("A quote [sic] here in 2 cases.", "Here, a quote [sic] in 2 cases.") == []  # brackets already present are fine
+
+
+# --- Deep Redraft structure (Codex audit #8) ------------------------------------------------------
+
+
+def _doc_with(build) -> bytes:
+    import io
+
+    from docx import Document
+
+    doc = Document()
+    build(doc)
+    out = io.BytesIO()
+    doc.save(out)
+    return out.getvalue()
+
+
+LONG = "This paragraph has more than enough words to form part of a redraft group for the test, because a group needs at least twenty-five words of ordinary prose to be eligible."
+
+
+def test_a_section_break_in_an_empty_paragraph_divides_groups():
+    import copy
+
+    from app.documents import groups
+    from app.documents.docx_io import read_docx
+
+    def build(doc):
+        doc.add_heading("Results", 1)
+        doc.add_paragraph(LONG)
+        empty = doc.add_paragraph()
+        empty._p.get_or_add_pPr().append(copy.deepcopy(doc.sections[0]._sectPr))
+        doc.add_paragraph(LONG)
+
+    model = read_docx(_doc_with(build))
+    assert model.barriers and [g.block_ids for g in groups.groups(model)] == [["b00002"], ["b00004"]]
+
+
+def _bookmark(doc, before: str, inside: str, after: str):
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    p = doc.add_paragraph(before)
+    start = OxmlElement("w:bookmarkStart")
+    start.set(qn("w:id"), "7")
+    start.set(qn("w:name"), "claim")
+    p._p.append(start)
+    p.add_run(inside)
+    end = OxmlElement("w:bookmarkEnd")
+    end.set(qn("w:id"), "7")
+    p._p.append(end)
+    if after:
+        p.add_run(after)
+
+
+def test_a_bookmark_inside_the_text_keeps_its_paragraph_untouched():
+    from app.documents.docx_io import read_docx
+
+    model = read_docx(_doc_with(lambda d: (d.add_heading("Intro", 1), _bookmark(d, "Before the claim. ", "The bookmarked claim itself.", " After it."))))
+    assert [b.editable for b in model.blocks if b.kind == "paragraph"] == [False]
+
+
+def test_a_bookmark_around_a_whole_paragraph_still_surrounds_its_text_after_a_redraft():
+    import io
+
+    from docx import Document
+
+    from app.documents import groups
+    from app.documents.docx_io import apply_group_rewrites, read_docx
+
+    data = _doc_with(lambda d: (d.add_heading("Intro", 1), _bookmark(d, "", LONG, ""), d.add_paragraph(LONG.replace("This", "That"))))
+    model = read_docx(data)
+    group = groups.groups(model)[0]
+    reordered = groups.SEPARATOR.join(group.paragraphs(group.masked)[::-1])
+    out = Document(io.BytesIO(apply_group_rewrites(data, [(group.block_ids, groups.to_docx(group, reordered), group.xmap)])))
+    body = [el.tag.split("}")[1] for p in out.paragraphs[1:] for el in p._p if not el.tag.endswith("pPr")]
+    assert body[0] == "bookmarkStart" and body[-1] == "bookmarkEnd" and "r" in body[1:-1]

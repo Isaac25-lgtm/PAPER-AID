@@ -33,6 +33,10 @@ def main() -> None:
     models = FakeModels()
     orchestration.provider_for = lambda ref, settings: (models, ref.split(":")[-1])
     costs.SEARCH_FEE_USD["fake"] = 0.01
+    from app.analysis import fetch
+
+    fetch.page_text = lambda url: fetch._text(models.pages[url].encode(), "text/html") if url in models.pages else None
+    fetch.abstract_text = lambda url: models.abstracts.get(url)
     uvicorn.run(create_app(), host="127.0.0.1", port=8000)
 
 

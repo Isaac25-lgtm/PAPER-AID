@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
+from app.core.errors import PermanentStageError
 from app.jobs.models import Job, JobStatus, Wallet
 
 Mutator = Callable[[Job], Job | None]
@@ -39,8 +40,18 @@ class JobStore(Protocol):
     def delete_wallet(self, uid: str) -> None: ...
 
 
+# Firestore stores at most 1 MiB per document. Job records are kept well under that (long change
+# text is trimmed in the pipeline; full text lives in job storage); this guard turns any record
+# that still grows too large into a clear error instead of an obscure write failure.
+MAX_RECORD_BYTES = 900_000
+
+
 def _dump(job: Job) -> str:
-    return job.model_dump_json(by_alias=True)
+    data = job.model_dump_json(by_alias=True)
+    size = len(data.encode("utf-8"))
+    if size > MAX_RECORD_BYTES:
+        raise PermanentStageError("RECORD_TOO_LARGE", "This job's results were too large to save. Our team has been notified.", f"job record {size} bytes")
+    return data
 
 
 class LocalJobStore:

@@ -33,9 +33,16 @@ CACHE_WRITE_MULTIPLIER = 1.25
 # the provider's usage. OpenAI: $10 per 1,000 searches (pricing page checked 2026-09-27). Only the
 # lead searches (the writer checks what it found), so only the lead's provider needs a fee here.
 SEARCH_FEE_USD: dict[str, float] = {"openai": 0.01}
-# The most input one search can add at "medium" search context (two searches measured 13–17k
-# tokens in total on 2026-09-27); used for the hard ceiling before a search call is made.
-SEARCH_INPUT_TOKENS_WORST = 12_000
+# Input to reserve per search at "medium" search context before a search call is made. Two
+# searches measured 13–17k tokens in total (2026-09-27); OpenAI states the setting "does not set an
+# exact token count", so this is a generous reserve, not a guarantee (Codex audit #6).
+SEARCH_INPUT_TOKENS_WORST = 20_000
+# Characters of request around the paper data that the character count does not see: the data
+# wrapper, the answer format (JSON schema) and message framing.
+REQUEST_OVERHEAD_CHARS = 2_000
+# Worst-case characters per token for the ceiling: English is about 4, dense or non-Latin text can
+# be near 2. Estimates elsewhere use 3.5; the ceiling uses this.
+CEILING_CHARS_PER_TOKEN = 2.0
 
 
 def search_fee_usd(provider: str, searches: int) -> float:
@@ -63,13 +70,17 @@ MIN_OUTPUT_TOKENS = 2000  # below this a structured answer can't be useful: stop
 
 
 def affordable_output_tokens(provider: str, model: str, prompt_chars: int, max_output_tokens: int, remaining_usd: float, overrides: Prices | None = None) -> int:
-    """The most output a call may produce so that even its worst case stays within the remaining
-    budget: the whole prompt billed as a cache write (the dearest input), plus every output token.
-    This makes the job's provider-spend cap a hard ceiling, not an estimate."""
+    """The most output a call may produce so that its worst case stays within the remaining budget:
+    the whole request (plus framing) counted at 2 characters per token and billed as a cache write
+    (the dearest input), plus every output token. Output is therefore capped exactly; the input
+    side is a conservative bound, not an exact count: a call whose text packs more than one token
+    per two characters could still overshoot by that difference, which PaperAid absorbs (the
+    student is never charged above the quote)."""
     inp, out, _ = price_for(provider, model, overrides)
     if out <= 0:
         return max_output_tokens
-    worst_input_usd = (prompt_chars / 3.0) * inp * CACHE_WRITE_MULTIPLIER / 1_000_000  # 3 chars/token: generous
+    worst_input_tokens = (prompt_chars + REQUEST_OVERHEAD_CHARS) / CEILING_CHARS_PER_TOKEN
+    worst_input_usd = worst_input_tokens * inp * CACHE_WRITE_MULTIPLIER / 1_000_000
     return max(0, min(max_output_tokens, int((remaining_usd - worst_input_usd) * 1_000_000 / out)))
 
 

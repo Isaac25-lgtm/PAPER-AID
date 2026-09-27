@@ -13,6 +13,7 @@ from app.formatting.guideline import read_guide
 from tests import fake_writer
 
 SOURCE_URL = "https://stats.example.org/report-2022"
+SOURCE_PAGE = "<html><body><h1>Annual report</h1><p>The report gives the figure for 2022. It covers every district.</p></body></html>"
 INSTRUCTION = "Cut filler and stock phrases, replace stacked transitions and vary sentence structure; keep every claim, number and citation."
 
 
@@ -27,6 +28,9 @@ class FakeModels:
         self.refuse: set[str] = set()  # tasks answered with a refusal
         self.truncate: set[str] = set()  # tasks whose answers are always cut off by the output limit
         self.opened: list[str] = [SOURCE_URL]  # the pages a fake web search "opened"
+        self.sent_queries: list[str] | None = None  # queries the fake search "sent" (default: the suggested one)
+        self.pages: dict[str, str] = {SOURCE_URL: SOURCE_PAGE}  # what reading each source page returns
+        self.abstracts: dict[str, str] = {}  # what the abstract lookup returns for a source URL
 
     def json(self, task: str, model: str, system: str, payload: dict[str, Any], schema: dict[str, Any], max_tokens: int) -> ModelResult:
         self.tasks.append(task)
@@ -45,6 +49,7 @@ class FakeModels:
         result = self.json(task, model, system, payload, schema, max_tokens)
         result.usage.search_calls = min(1, max_searches)
         result.sources = list(self.opened)
+        result.queries = list(self.sent_queries) if self.sent_queries is not None else [payload["query"]]
         return result
 
     @staticmethod

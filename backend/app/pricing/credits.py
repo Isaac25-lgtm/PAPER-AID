@@ -37,12 +37,16 @@ def top_up(w: Wallet, amount: int, note: str) -> Wallet:
 
 
 def grant(w: Wallet, amount: int, note: str, op_id: str, actor: str) -> Wallet:
-    """A manual grant, at most once per operation id (a retried request finds its entry and adds
-    nothing). The id is looked up in the kept ledger, which spans far longer than any retry."""
-    if any(e.op_id == op_id for e in w.entries):
+    """A manual grant, at most once per operation id: every grant's id is kept for good in
+    `grant_ops` (the display ledger keeps only recent entries), so replaying an old request adds
+    nothing (Codex audit, ledger durability)."""
+    if w.closing:
+        raise AppError("This account is being deleted, so no credits can be added.", code="ACCOUNT_CLOSING", status=409)
+    if op_id in w.grant_ops or any(e.op_id == op_id for e in w.entries):
         return w
     top_up(w, amount, note)
     w.entries[-1].op_id, w.entries[-1].actor = op_id, actor
+    w.grant_ops = [*w.grant_ops, op_id]
     return w
 
 

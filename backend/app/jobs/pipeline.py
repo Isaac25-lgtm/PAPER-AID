@@ -16,9 +16,9 @@ from datetime import timedelta
 from pathlib import PurePosixPath
 from typing import Any, Literal
 
-from app.ai.orchestration import NOT_RETURNED, AIRunner, ClaimCandidate, PlanItem, ResearchAnswer, ReviewOutcome, Revision, Target, current_engine
+from app.ai.orchestration import NOT_RETURNED, AIRunner, ClaimCandidate, FoundSource, PlanItem, ResearchAnswer, ReviewOutcome, Revision, Target, current_engine
 from app.ai.styles import writing_brief
-from app.analysis import paper_checks, research, signals
+from app.analysis import fetch, paper_checks, research, signals
 from app.core.errors import InvalidDocument, PermanentStageError, StageError
 from app.core.logging import job_id as job_id_var
 from app.core.logging import log
@@ -218,9 +218,23 @@ def _extract(ctx: StageContext, source_sha: str, guide_sha: str | None, formatti
     return model
 
 
+def _estimate_artifacts(ctx: StageContext) -> dict[str, Any] | None:
+    """The analysis, targets and draft plan the job's estimate paid for, if its quote came from
+    one. Reusing them means no change to PaperAid between estimate and submission (prompts,
+    rules, code) can make the job pay for that work again (Codex audit #7)."""
+    quote = ctx.job.quote
+    name = f"estimates/{quote.estimate_id}.json" if quote is not None and quote.estimate_id else None
+    return ctx.get_json(name) if name and ctx.has(name) else None
+
+
 def stage_analysing(ctx: StageContext) -> None:
     model = ctx.document()
-    result, coverage_warning = _analyse(ctx, model)
+    saved = _estimate_artifacts(ctx)
+    if saved is not None:
+        ctx.put_json("analysis.json", saved["analysis"])
+        result, coverage_warning = AnalysisResult.model_validate(saved["analysis"]["result"]), saved["coverageWarning"]
+    else:
+        result, coverage_warning = _analyse(ctx, model)
     checks = paper_checks.check(model)  # the paper's integrity, reported apart from AI-likeness
 
     def save(j: Job) -> Job:
@@ -348,7 +362,9 @@ def stage_researching(ctx: StageContext) -> None:
     stopped = False
     for n, candidate in enumerate(candidates, start=1):
         try:
-            answer = runner.research_claim(candidate.claim.strip(), candidate.query.strip(), candidate.cited, settings.research_max_searches)
+            answer = runner.research_claim(
+                candidate.claim.strip(), candidate.query.strip(), candidate.cited, settings.research_max_searches, lambda q: research.query_safe(q, own, names)
+            )
         except PermanentStageError as exc:
             if exc.code != "BUDGET_EXCEEDED":
                 raise
@@ -357,15 +373,19 @@ def stage_researching(ctx: StageContext) -> None:
         if answer is not None:
             found.append((f"c{n}", candidate, answer))
 
+    # A quotation counts only if PaperAid finds it itself (Codex audit #4): on the page, or for a
+    # journal article whose page is blocked, in its abstract. The second model then judges only
+    # confirmed passages.
+    confirmed = {cid: [_confirm(s) for s in a.sources] for cid, _, a in found}
     items = [
         {
             "id": cid,
             "claim": c.claim,
             "context": blocks[c.id].text[:900],
-            "sources": [s.model_dump(exclude={"url", "supports"}) for s in a.sources],
+            "sources": [s.model_dump(exclude={"url", "supports", "verified"}) for s in confirmed[cid] if s.verified],
         }
-        for cid, c, a in found
-        if a.sources
+        for cid, c, _ in found
+        if any(s.verified for s in confirmed[cid])
     ]
     try:
         verdicts = runner.verify_claims(items) if items else {}
@@ -376,8 +396,17 @@ def stage_researching(ctx: StageContext) -> None:
     claims = []
     for cid, c, a in found:
         check = verdicts.get(cid)
-        support = research.combine(a.support, check.support if check else None) if a.sources else "NOT_FOUND"
-        note = a.note if check is None or check.support == a.support else f"{a.note} Second check: {check.note}"
+        if not a.sources:
+            support, note = "NOT_FOUND", a.note
+        elif not any(s.verified for s in confirmed[cid]) and any(s.readable for s in confirmed[cid]):
+            support = "UNCERTAIN"  # a page opened but the quotation is not on it: a warning sign
+            note = f"{a.note} PaperAid could not find the quoted passage on the source page, so it is not treated as evidence."
+        elif not any(s.verified for s in confirmed[cid]):
+            support = "UNCONFIRMED"
+            note = f"{a.note} PaperAid could not open these sources to confirm the quotations (publishers often block automated reading). Open the links to check them yourself."
+        else:
+            support = research.combine(a.support, check.support if check else None)
+            note = a.note if check is None or check.support == a.support else f"{a.note} Second check: {check.note}"
         claims.append(
             CheckedClaim(
                 id=cid,
@@ -387,7 +416,7 @@ def stage_researching(ctx: StageContext) -> None:
                 cited=c.cited,
                 support=support,  # type: ignore[arg-type]
                 note=note.strip(),
-                sources=[Source(**s.model_dump()) for s in a.sources],
+                sources=confirmed[cid],
             )
         )
     result = ResearchResult(claims=claims, checked=len(claims), candidates=len(candidates), retrieved_on=utcnow().date().isoformat(), method=RESEARCH_METHOD)
@@ -408,6 +437,19 @@ def stage_researching(ctx: StageContext) -> None:
     ctx.update(save)
 
 
+def _confirm(source: FoundSource) -> Source:
+    """Look for the quoted passage on the source page, then, for an article with a DOI, in its
+    abstract (read at "abstract only" level)."""
+    data = source.model_dump()
+    page = fetch.page_text(source.url)
+    if page is not None and research.quote_found(source.passage, page):
+        return Source(**data, verified=True, readable=True)
+    abstract = fetch.abstract_text(source.url)
+    if abstract is not None and research.quote_found(source.passage, abstract):
+        return Source(**{**data, "access": "ABSTRACT"}, verified=True, readable=True)
+    return Source(**data, verified=False, readable=page is not None or abstract is not None)
+
+
 # --- the refinement estimate ---------------------------------------------------------------
 
 
@@ -418,9 +460,18 @@ def run_estimate(ctx: StageContext) -> tuple[list[Passage], int]:
     run = ctx.job.estimate
     assert run is not None
     model = _extract(ctx, run.source_sha256, run.guideline_sha256, run.selection.formatting)
-    _analyse(ctx, model)
+    _, coverage_warning = _analyse(ctx, model)
     targets = _select_targets(ctx, model)
     draft = ctx.ai().draft_plan(targets, model.outline(), _brief(ctx)) if targets else {}
+    ctx.put_json(
+        f"estimates/{run.id}.json",
+        {
+            "analysis": ctx.get_json("analysis.json"),
+            "coverageWarning": coverage_warning,
+            "targets": [t.__dict__ for t in targets],
+            "draft": {k: v.model_dump() for k, v in draft.items()},
+        },
+    )
     passages = [
         Passage(chars=len(t.masked), words=len(t.masked.split()), rewrite=draft[t.id].action == "rewrite", instruction_chars=len(draft[t.id].instruction) + len(draft[t.id].preserve))
         for t in targets
@@ -493,6 +544,7 @@ def _finish_estimate(rt: Runtime, job_id: str, run_id: str, passages: list[Passa
             guide_words,
             passages,
             fee_paid=j.billing.fee_paid,
+            estimate_id=run.id,
         )
         j.selection = run.selection
         state.transition(j, JobStatus.QUOTED, f"Estimate ready (UGX {fee:,} charged)")
@@ -608,8 +660,13 @@ def _redraft_targets(ctx: StageContext, model: DocumentModel) -> list[Target]:
 
 def stage_planning(ctx: StageContext) -> None:
     model = ctx.document()
-    targets = _select_targets(ctx, model)
-    plan = ctx.ai().negotiate_plan(targets, model.outline(), _brief(ctx)) if targets else None
+    saved = _estimate_artifacts(ctx)
+    if saved is not None:  # exactly the passages and draft plan the estimate priced
+        targets = [Target(**t) for t in saved["targets"]]
+        draft: dict[str, PlanItem] | None = {k: PlanItem.model_validate(v) for k, v in saved["draft"].items()}
+    else:
+        targets, draft = _select_targets(ctx, model), None
+    plan = ctx.ai().negotiate_plan(targets, model.outline(), _brief(ctx), draft) if targets else None
     ctx.put_json(
         "plan.json",
         {
@@ -637,15 +694,24 @@ def _planned_targets(ctx: StageContext) -> list[Target]:
 def stage_refining(ctx: StageContext) -> None:
     model = ctx.document()
     targets = _planned_targets(ctx)
-    revisions = ctx.ai().refine(targets, model.outline(), _brief(ctx)) if targets else []
+    runner = ctx.ai()
+    revisions = runner.refine(targets, model.outline(), _brief(ctx)) if targets else []
     ctx.put_json("revisions.json", [r.__dict__ for r in revisions])
+    if runner.budget_reached:
+        ctx.update(lambda j: _add_warnings(j, [BUDGET_WARNING]))
+
+
+BUDGET_WARNING = "This job reached the most it may spend on AI before every passage was finished, so those passages keep your original wording."
 
 
 def stage_redrafting(ctx: StageContext) -> None:
     model = ctx.document()
     targets = _planned_targets(ctx)
-    revisions = ctx.ai().redraft(targets, model.outline(), _brief(ctx)) if targets else []
+    runner = ctx.ai()
+    revisions = runner.redraft(targets, model.outline(), _brief(ctx)) if targets else []
     ctx.put_json("revisions.json", [r.__dict__ for r in revisions])
+    if runner.budget_reached:
+        ctx.update(lambda j: _add_warnings(j, [BUDGET_WARNING]))
 
 
 def stage_auditing(ctx: StageContext) -> None:
@@ -741,7 +807,10 @@ def stage_auditing(ctx: StageContext) -> None:
         for r in shown
     ]
     prose = [b for b in model.blocks if b.kind in ("paragraph", "list_item")]
+    ctx.put_json("changes_full.json", [c.model_dump() for c in changes])  # every word, for the change report
+    changes, trimmed = _fit_record(changes)
     refinement = RefinementResult(
+        trimmed=trimmed,
         mode="REDRAFT" if deep else "REFINE",
         targeted_blocks=len(revisions),
         refined_blocks=len(accepted),
@@ -757,6 +826,8 @@ def stage_auditing(ctx: StageContext) -> None:
         warnings.append(f"None of the {len(shown)} flagged passages could be improved in a way we could verify, so your wording is unchanged. You are charged only for the analysis.")
     if not shown:
         warnings.append("No passages needed refinement under the selected intensity, so your wording is unchanged.")
+    if runner.budget_reached:
+        warnings.append(BUDGET_WARNING)
     noted = sum(1 for r in accepted if r.id in reviewer_notes)
     if noted:
         done = "redrafted" if deep else "refined"
@@ -871,7 +942,10 @@ def stage_exporting(ctx: StageContext) -> None:
             "writing-report", "Writing report (Word)", "writing report", writing_report(job.source.name if job.source else "", utcnow(), job.analysis, after, job.paper_checks, job.research)
         )
     if job.refinement:
-        output("change-report", "Change report (Word)", "changes", change_report(job.source.name if job.source else "", utcnow(), job.refinement))
+        full = job.refinement
+        if ctx.has("changes_full.json"):  # the record may hold shortened passages; the report has every word
+            full = job.refinement.model_copy(update={"changes": [ChangedBlock.model_validate(c) for c in ctx.get_json("changes_full.json")]})
+        output("change-report", "Change report (Word)", "changes", change_report(job.source.name if job.source else "", utcnow(), full))
     if job.latex is not None and ctx.has("latex.zip"):
         label = "LaTeX project with PDF (.zip)" if job.latex.compiled else "LaTeX project (.zip)"
         output("latex", label, "LaTeX", ctx.get_bytes("latex.zip"), "zip", "application/zip")
@@ -883,6 +957,28 @@ def stage_exporting(ctx: StageContext) -> None:
         return j
 
     ctx.update(save)
+
+
+RECORD_TEXT_BYTES = 300_000  # before/after text kept in the job record (Firestore holds 1 MiB per document)
+
+
+def _clip(text: str, max_bytes: int) -> str:
+    if len(text.encode("utf-8")) <= max_bytes:
+        return text
+    return text.encode("utf-8")[: max(0, max_bytes - 40)].decode("utf-8", errors="ignore").rsplit(" ", 1)[0] + " … (full text in the change report)"
+
+
+def _fit_record(changes: list[ChangedBlock]) -> tuple[list[ChangedBlock], bool]:
+    """Keep the record's change text within RECORD_TEXT_BYTES, shortening long passages evenly
+    (Codex audit #9). Returns (changes, whether anything was shortened)."""
+    total = sum(len(c.before.encode("utf-8")) + len(c.after.encode("utf-8")) for c in changes)
+    if total <= RECORD_TEXT_BYTES:
+        return changes, False
+    share = RECORD_TEXT_BYTES / total
+    return [
+        c.model_copy(update={"before": _clip(c.before, int(len(c.before.encode("utf-8")) * share)), "after": _clip(c.after, int(len(c.after.encode("utf-8")) * share))})
+        for c in changes
+    ], True
 
 
 def _analysis_after(ctx: StageContext, method: str) -> AnalysisResult:

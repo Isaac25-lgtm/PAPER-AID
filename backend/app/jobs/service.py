@@ -22,13 +22,16 @@ from app.jobs.models import (
     AdminJob,
     AdminSummary,
     BoundQuote,
+    ChangedBlock,
     EstimateRun,
     FileMeta,
+    Finding,
     Job,
     JobEvent,
     JobStatus,
     JobView,
     Page,
+    PaperCheck,
     PaymentStatus,
     Quote,
     QuoteResponse,
@@ -157,9 +160,15 @@ def task_name(job: Job, suffix: str = "") -> str:
 # --- owner operations ------------------------------------------------------------------
 
 
+ACCOUNT_CLOSING = "This account is being deleted, so nothing new can be started."
+
+
 def create_draft(rt: Runtime, user: User) -> JobView:
     if not user.verified:
         raise Forbidden("Verify your email address before starting a job. Check your inbox for the link.", code="EMAIL_NOT_VERIFIED")
+    wallet = rt.store.get_wallet(user.uid)
+    if wallet is not None and wallet.closing:
+        raise Conflict(ACCOUNT_CLOSING, code="ACCOUNT_CLOSING")
     _rate_limit(rt, user, "draft", rt.settings.quotes_per_hour)
     now = utcnow()
     job = Job(
@@ -336,6 +345,7 @@ def request_quote(rt: Runtime, user: User, job_id: str, selection: ServiceSelect
             run.guide_words if run else (j.guideline.word_count if guideline_sha and j.guideline else 0),
             run.passages if run else None,
             fee_paid=j.billing.fee_paid,
+            estimate_id=run.id if run else None,
         )
         issued.append(quote)
         j.quote = quote
@@ -385,7 +395,7 @@ def _start_estimate(rt: Runtime, user: User, job: Job, selection: ServiceSelecti
     )
 
     def start(j: Job, w: Wallet) -> tuple[Job, Wallet] | None:
-        if not _open_draft(j) or j.source is None or j.source.sha256 != run.source_sha256:
+        if w.closing or not _open_draft(j) or j.source is None or j.source.sha256 != run.source_sha256:
             return None
         if guideline_sha is not None and (j.guideline is None or j.guideline.sha256 != guideline_sha):
             return None
@@ -430,7 +440,7 @@ def submit(rt: Runtime, user: User, job_id: str, quote_id: str) -> JobView:
 
     def accept(j: Job, w: Wallet) -> tuple[Job, Wallet] | None:
         # Re-checked inside the transaction: a concurrent upload or submit may have changed the job.
-        if j.status != JobStatus.QUOTED or j.deleting or j.quote is None or j.quote.id != quote_id or j.source is None or j.quote.source_sha256 != j.source.sha256:
+        if w.closing or j.status != JobStatus.QUOTED or j.deleting or j.quote is None or j.quote.id != quote_id or j.source is None or j.quote.source_sha256 != j.source.sha256:
             return None
         if any(availability(settings, user).get(service.value) != "available" for service in j.quote.selection.services()):
             return None
@@ -475,7 +485,7 @@ def list_jobs(rt: Runtime, user: User, status: str | None, service: str | None, 
         statuses = {JobStatus(status)} if status and status != "ALL" else state.SUBMITTED
     jobs, next_cursor = rt.store.list(user.uid, statuses, service if service and service != "ALL" else None, cursor, min(limit, 50))
     if status == "DRAFT":
-        jobs = [j for j in jobs if j.source is not None and not j.deleting]
+        jobs = [j for j in jobs if j.source is not None and not j.deleting and not j.files_deleted]
     return Page[JobView](items=[j.view() for j in jobs], next_cursor=next_cursor)
 
 
@@ -565,22 +575,55 @@ def output_file(rt: Runtime, user: User, job_id: str, output_id: str) -> tuple[s
 
 
 def delete_account(rt: Runtime, user: User) -> int:
-    """Delete every job and file the user owns. Refuses while a job is mid-processing: every job
-    is claimed for deletion first, and if any refuses, the claims are released and nothing is deleted."""
-    jobs = every_job(rt, user.uid, None)
+    """Delete every job, file and the wallet of a user (Codex audit #2).
+
+    1. The whole account is claimed first: the wallet is marked `closing` in a transaction, and
+       every operation that starts work or moves credits checks that flag in its own transaction,
+       so nothing new can begin while the account is being deleted.
+    2. Every job is claimed; if one is still working, all claims are released and nothing changes.
+    3. Jobs and files are erased, then a final sweep catches any draft created meanwhile.
+    An interrupted deletion leaves the account closing, and asking again finishes it.
+    Credit balance (proposed default, awaiting the owner's decision): while credits are on, an
+    account holding credit cannot be deleted until PaperAid has refunded it."""
+    settings = rt.settings
+
+    def close(w: Wallet) -> Wallet:
+        if w.held:
+            raise Conflict("One of your jobs is being processed. Delete your account when it finishes.", code="JOB_ACTIVE")
+        if settings.credits_enabled and w.available > 0:
+            raise Conflict(
+                f"Your account still has UGX {w.available:,} of credit. Contact PaperAid to have it refunded before you delete your account.",
+                code="ACCOUNT_HAS_CREDIT",
+            )
+        w.closing = True
+        return w
+
+    def reopen(w: Wallet) -> Wallet:
+        w.closing = False
+        return w
+
+    rt.store.update_wallet(user.uid, user.email, close)
     claimed: list[Job] = []
-    for job in jobs:
+    for job in every_job(rt, user.uid, None):
         marked = _mark_deleting(rt, job.id)
         if marked is None and rt.store.get(job.id) is not None:
             for done in claimed:
                 _unmark_deleting(rt, done.id)
+            rt.store.update_wallet(user.uid, user.email, reopen)
             raise Conflict("One of your jobs is being processed. Delete your account when it finishes.", code="JOB_ACTIVE")
         if marked is not None:
             claimed.append(marked)
     for job in claimed:
         _erase(rt, job)
+    for _ in range(3):  # drafts created while the claim was being taken (they can hold no credits)
+        leftover = [m for j in every_job(rt, user.uid, None) for m in [_mark_deleting(rt, j.id)] if m is not None]
+        if not leftover:
+            break
+        for job in leftover:
+            _erase(rt, job)
+        claimed += leftover
     rt.store.delete_wallet(user.uid)
-    log(logger, logging.WARNING, "account deleted", uid=user.uid, jobs=len(jobs))
+    log(logger, logging.WARNING, "account deleted", uid=user.uid, jobs=len(claimed))
     return len(claimed)
 
 
@@ -637,24 +680,26 @@ def _require(rt: Runtime, job_id: str) -> Job:
 
 
 def without_paper_text[T: JobView](job: T) -> T:
-    """A copy with every passage of the student's paper removed: finding excerpts and explanations,
-    before/after text of changes and reviewer notes, and the citations quoted by paper checks.
-    Counts, bands and rules remain. Used for admin views (support never sees papers) and for jobs
-    past retention (the paper must not outlive its files)."""
+    """A copy that keeps only support metadata (an allowlist, Codex audit #5): ids, reason codes,
+    severities, counts, outcomes and public sources. Every field that can quote or paraphrase the
+    student's paper is emptied: excerpts, explanations and suggestions, section headings, before
+    and after text, the plan's instructions, reviewer notes, checked claims and the citations quoted
+    by paper checks. Used for admin views (support never sees papers) and for jobs past retention
+    (the paper must not outlive its files)."""
     update: dict = {}
-    for field in ("analysis", "analysis_after"):
-        result = getattr(job, field)
+    for name in ("analysis", "analysis_after"):
+        result = getattr(job, name)
         if result is not None:
-            findings = [f.model_copy(update={"excerpt": "", "explanation": "", "suggestion": ""}) for f in result.findings]
-            update[field] = result.model_copy(update={"findings": findings})
+            findings = [Finding(id=f.id, block_id=f.block_id, reason=f.reason, severity=f.severity, section="", excerpt="", explanation="", suggestion="") for f in result.findings]
+            update[name] = result.model_copy(update={"findings": findings})
     if job.refinement is not None:
-        changes = [c.model_copy(update={"before": "", "after": "", "note": None}) for c in job.refinement.changes]
+        changes = [ChangedBlock(block_id=c.block_id, kept=c.kept, section="", before="", after="") for c in job.refinement.changes]
         update["refinement"] = job.refinement.model_copy(update={"changes": changes})
-    if job.research is not None:  # the claims are the paper's words; the public sources stay
-        claims = [c.model_copy(update={"claim": "", "note": ""}) for c in job.research.claims]
+    if job.research is not None:
+        claims = [c.model_copy(update={"section": "", "claim": "", "note": ""}) for c in job.research.claims]
         update["research"] = job.research.model_copy(update={"claims": claims})
-    if job.paper_checks is not None:  # citations and references quote the paper
-        items = [i.model_copy(update={"item": "", "detail": ""}) for i in job.paper_checks.items]
+    if job.paper_checks is not None:
+        items = [PaperCheck(kind=i.kind, certainty=i.certainty, item="", detail="") for i in job.paper_checks.items]
         update["paper_checks"] = job.paper_checks.model_copy(update={"items": items})
     return job.model_copy(update=update)
 
@@ -715,7 +760,7 @@ def admin_retry(rt: Runtime, admin: User, job_id: str) -> AdminJob:
     settings = rt.settings
 
     def retry(j: Job, w: Wallet) -> tuple[Job, Wallet] | None:
-        if j.status != JobStatus.FAILED or j.deleting:
+        if j.status != JobStatus.FAILED or j.deleting or w.closing:
             return None
         # A charged job's failure returned everything, so a retry needs its own hold, but only
         # while credits are on. A job accepted in testing mode is never charged by a retry.
@@ -767,10 +812,13 @@ def reconcile(rt: Runtime) -> int:
 
 
 def cleanup_expired(rt: Runtime) -> int:
-    """Delete files of jobs past retention. The job record stays so history shows 'files expired'."""
+    """Delete files of jobs past retention, and every passage of the paper from their records. The
+    record stays so history shows 'files expired'. Abandoned drafts and unsubmitted quotes are
+    included (Codex audit #11); a draft whose estimate is still running waits for the next run. A
+    paid estimate stays paid: the student chose not to go ahead."""
     now = utcnow()
-    jobs = every_job(rt, None, {JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED})
-    expired = [j for j in jobs if j.expires_at < now and not j.files_deleted]
+    jobs = every_job(rt, None, {JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED, JobStatus.DRAFT, JobStatus.QUOTED})
+    expired = [j for j in jobs if j.expires_at < now and not j.files_deleted and not _estimating(j)]
     for job in expired:
         rt.files.delete_prefix(job.storage_prefix())
 

@@ -304,3 +304,50 @@ def test_claims_are_quoted_from_the_paper_and_scale_with_length():
     assert verbatim("Uganda had more than 30 million", "By 2022, Uganda had  more than 30 million accounts.")
     assert not verbatim("Uganda had over 30 million", "By 2022, Uganda had more than 30 million accounts.")
     assert (claims_for(300, 10), claims_for(2000, 10), claims_for(20000, 10)) == (3, 8, 10)
+
+
+def test_private_names_and_the_papers_own_work_never_reach_a_search():
+    """Codex audit #3: the claim is checked too (the searching model sees it), and first-person
+    reports of the paper's own work are never searched."""
+    from app.analysis import research
+
+    model = _research_doc()
+    own, names = research.own_numbers(model), research.front_matter_names(model)
+    assert not research.safe_to_search("Achola Grace found that traders save little.", "traders savings Uganda", own, names)
+    assert not research.safe_to_search("Our interviews revealed that vendors distrust agents.", "vendors distrust mobile money agents", own, names)
+    assert not research.safe_to_search("This study shows that balances are small.", "mobile money balances", own, names)
+    assert research.safe_to_search("In the US, adoption rose after 2020.", "US mobile payments adoption 2020", own, names)
+    assert not research.query_safe("Achola mobile money", own, names) and research.query_safe("mobile money Uganda 2022", own, names)
+
+
+def test_a_quotation_must_really_be_on_the_page():
+    from app.analysis.research import quote_found
+
+    page = "<p>At the close of December 2022,\nregistered mobile money subscriptions equalled 36.8 million.</p>"
+    assert quote_found("At the close of December 2022, registered mobile money subscriptions equalled 36.8 million", page)
+    assert not quote_found("At the close of December 2022, registered mobile money subscriptions equalled 40 million", page)
+    assert not quote_found("An invented passage that never appears on the source page at all", page)
+
+
+def test_organisations_particles_and_openers_are_matched_not_flagged():
+    """Codex audit #13: "World Health Organization (2021)" produced two false CONFIRMED errors."""
+    from app.analysis import paper_checks
+    from app.documents.model import Block, DocumentModel
+
+    paragraphs = [
+        "World Health Organization (2021) reported rising rates. As Kato (2019) noted, costs matter. Others agree (WHO, 2021; van der Berg, 2018).",
+        "Earlier, Suri and Jack (2016) found gains (see Okello, 2021). Nobody (ibid.) disagrees.",
+    ]
+    references = ["World Health Organization (WHO). (2021). Global report. Geneva.", "Kato, S. (2019). Costs.", "van der Berg, J. (2018). Study.", "Suri, T., & Jack, W. (2016). Title.", "Okello, J. (2021). Phones."]
+    blocks = [Block(id=f"p{i}", kind="paragraph", text=t) for i, t in enumerate(paragraphs)] + [Block(id=f"r{i}", kind="reference", text=t) for i, t in enumerate(references)]
+    items = paper_checks.check(DocumentModel(format="DOCX", blocks=blocks)).items
+    assert items == []  # every citation matched; "(ibid.)" has no year, so it is not a citation to check
+
+
+def test_an_unmatched_organisation_is_only_ever_a_possible_mismatch():
+    from app.analysis import paper_checks
+    from app.documents.model import Block, DocumentModel
+
+    blocks = [Block(id="p", kind="paragraph", text="Uganda Bureau of Statistics (2020) reported the census."), Block(id="r", kind="reference", text="Kato, S. (2019). Costs.")]
+    certainties = {i.certainty for i in paper_checks.check(DocumentModel(format="DOCX", blocks=blocks)).items if i.kind == "CITED_NOT_LISTED"}
+    assert certainties == {"POSSIBLE"}

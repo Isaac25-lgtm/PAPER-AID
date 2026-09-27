@@ -40,6 +40,7 @@ SUPPORT = {
     "CONTRADICTED": "Contradicted",
     "NOT_FOUND": "Not found in this search",
     "UNCERTAIN": "Uncertain",
+    "UNCONFIRMED": "Found, not confirmed",
 }
 ACCESS = {"FULL_TEXT": "full text read", "ABSTRACT": "abstract only", "SNIPPET": "search snippet only"}
 
@@ -139,6 +140,10 @@ def writing_report(
                 line.add_run(f" ({meta}). {source.url}")
                 if source.passage:
                     line.add_run(f" “{source.passage}”").italic = True
+                if source.verified:
+                    line.add_run(" (quotation confirmed in the abstract)" if source.access == "ABSTRACT" else " (quotation confirmed on the page)")
+                else:
+                    line.add_run(" (quotation not found on the page; not used as evidence)" if source.readable else " (page could not be opened to confirm the quotation; check it yourself)")
     return _save(doc)
 
 

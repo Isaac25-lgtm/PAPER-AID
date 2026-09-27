@@ -88,8 +88,14 @@ def groups(model: DocumentModel) -> list[Group]:
             found.append(_build(len(found) + 1, chunk[0].section, chunk))
         run.clear()
 
+    barriers = sorted(int(b[1:]) for b in model.barriers)
+
+    def divided(a: Block, b: Block) -> bool:
+        low, high = int(a.id[1:]), int(b.id[1:])
+        return any(low < x < high for x in barriers)
+
     for block in model.blocks:
-        if _groupable(block) and (not run or run[-1].section == block.section):
+        if _groupable(block) and (not run or (run[-1].section == block.section and not divided(run[-1], block))):
             run.append(block)
             continue
         close()

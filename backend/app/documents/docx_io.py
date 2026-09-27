@@ -28,6 +28,9 @@ W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 _TEXT_RUN_CHILDREN = {W + t for t in ("rPr", "t", "tab", "br", "lastRenderedPageBreak", "softHyphen", "noBreakHyphen")}
 _MARKERS = {W + t for t in ("bookmarkStart", "bookmarkEnd", "proofErr", "commentRangeStart", "commentRangeEnd", "permStart", "permEnd")}
 _TRACKED = {W + t for t in ("ins", "del", "moveFrom", "moveTo")}
+_OPENERS = {W + t for t in ("bookmarkStart", "commentRangeStart", "permStart")}
+_CLOSERS = {W + t for t in ("bookmarkEnd", "commentRangeEnd", "permEnd")}
+_BARRIER_CONTENT = (W + "sectPr", W + "drawing", W + "pict", W + "object", "{http://schemas.openxmlformats.org/officeDocument/2006/math}oMath")
 _REFERENCE_HEADINGS = re.compile(r"^(references|reference list|bibliography|works cited|literature cited)$", re.I)
 _CAPTION = re.compile(r"^(table|figure|fig\.)\s+\d+", re.I)
 _NUMBERED_HEADING = re.compile(r"^(\d+(?:\.\d+)*)\.?\s+\S")
@@ -129,6 +132,37 @@ def _field_result(elements: list) -> str:
     return "".join(parts)
 
 
+def _is_goback(el) -> bool:
+    return el.get(W + "name") == "_GoBack"  # Word's own last-edit marker: zero length, no meaning
+
+
+def range_inside_text(segments: list[Segment]) -> bool:
+    """True when a bookmark, comment or permission range starts or ends in the middle of the
+    paragraph's text. Such a paragraph is never rewritten: the rebuilt text could not keep the
+    range around the same words (Codex audit #8)."""
+    content = [i for i, s in enumerate(segments) if s.kind != "marker" and s.text.strip()]
+    if not content:
+        return False
+    first, last = content[0], content[-1]
+    for i, s in enumerate(segments):
+        if s.kind == "marker" and first < i < last:
+            el = s.elements[0]
+            if (el.tag in _OPENERS or el.tag in _CLOSERS) and not _is_goback(el):
+                return True
+    return False
+
+
+def split_markers(segments: list[Segment]) -> tuple[list, list]:
+    """(elements that go before the text, elements that go after it): range openers and other
+    markers first, range closers last, so every range still encloses the rebuilt text."""
+    before, after = [], []
+    for s in segments:
+        if s.kind == "marker":
+            for el in s.elements:
+                (after if el.tag in _CLOSERS else before).append(el)
+    return before, after
+
+
 def masked_text(segments: list[Segment]) -> str:
     out, n = [], 0
     for s in segments:
@@ -216,11 +250,15 @@ def read_docx(data: bytes) -> DocumentModel:
     blocks: list[Block] = []
     section, in_references, reference_level = "", False, 0
     tracked_found = False
+    barriers: list[str] = []
     for block_id, p, in_table in iter_paragraphs(doc):
         paragraph = Paragraph(p, doc._body)
         segments, tracked = segment_paragraph(p)
         text = "".join(s.text for s in segments if s.kind != "marker").strip()
         if not text:
+            page_break = any(br.get(W + "type") == "page" for br in p.iter(W + "br"))
+            if in_table or page_break or any(next(p.iter(tag), None) is not None for tag in _BARRIER_CONTENT):
+                barriers.append(block_id)
             continue
         kind, level, detected = _classify(paragraph, text, in_table, in_references)
         if kind == "heading":
@@ -230,8 +268,8 @@ def read_docx(data: bytes) -> DocumentModel:
                 in_references, reference_level = True, level or 1
             section = text
         tracked_found = tracked_found or tracked
-        has_editable_text = any(s.kind == "text" and re.search(r"[A-Za-z]{3}", s.text) for s in segments)
-        editable = kind in ("paragraph", "list_item") and has_editable_text and not tracked
+        has_editable_text = any(s.kind == "text" and re.search(r"[^\W\d_]{3}", s.text) for s in segments)  # letters in any script
+        editable = kind in ("paragraph", "list_item") and has_editable_text and not tracked and not range_inside_text(segments)
         blocks.append(
             Block(
                 id=block_id,
@@ -249,7 +287,7 @@ def read_docx(data: bytes) -> DocumentModel:
     warnings = []
     if tracked_found:
         warnings.append("This document contains someone else's tracked changes. Paragraphs with tracked changes were left untouched.")
-    return DocumentModel(format="DOCX", blocks=blocks, warnings=warnings)
+    return DocumentModel(format="DOCX", blocks=blocks, warnings=warnings, barriers=barriers)
 
 
 def _make_runs(text: str, rpr) -> list:
@@ -288,12 +326,12 @@ def apply_revisions(data: bytes, revisions: dict[str, str]) -> bytes:
             if s.kind == "opaque":
                 n += 1
                 opaque[f"X{n}"] = s.elements
-        markers = [el for s in segments if s.kind == "marker" for el in s.elements]
+        leading, trailing = split_markers(segments)
         rpr_copy = deepcopy(dominant_rpr) if dominant_rpr is not None else None
         for child in list(p):
             if child.tag != W + "pPr":
                 p.remove(child)
-        for el in markers:
+        for el in leading:
             p.append(el)
         for piece in re.split(r"(⟦X\d+⟧)", revisions[block_id]):
             token = TOKEN.fullmatch(piece)
@@ -303,6 +341,8 @@ def apply_revisions(data: bytes, revisions: dict[str, str]) -> bytes:
             elif piece:
                 for run in _make_runs(piece, rpr_copy):
                     p.append(run)
+        for el in trailing:
+            p.append(el)
     out = io.BytesIO()
     doc.save(out)
     return out.getvalue()
@@ -320,7 +360,8 @@ def apply_group_rewrites(data: bytes, groups: list[tuple[list[str], list[str], d
     for block_ids, texts, tokens in groups:
         originals = [paragraphs[b] for b in block_ids]
         opaque: dict[tuple[str, str], list] = {}
-        markers: list = []
+        leading: list = []
+        trailing: list = []
         dominant = None
         for block_id, p in zip(block_ids, originals, strict=True):
             segments, _tracked = segment_paragraph(p)
@@ -331,8 +372,9 @@ def apply_group_rewrites(data: bytes, groups: list[tuple[list[str], list[str], d
                 if s.kind == "opaque":
                     n += 1
                     opaque[(block_id, f"X{n}")] = s.elements
-                elif s.kind == "marker":
-                    markers.extend(s.elements)
+            before, after = split_markers(segments)
+            leading.extend(before)
+            trailing.extend(after)
         rebuilt = []
         for i, text in enumerate(texts):
             template = originals[min(i, len(originals) - 1)].find(W + "pPr")
@@ -340,7 +382,7 @@ def apply_group_rewrites(data: bytes, groups: list[tuple[list[str], list[str], d
             if template is not None:
                 p.append(deepcopy(template))
             if i == 0:
-                for el in markers:
+                for el in leading:
                     p.append(el)
             for piece in re.split(r"(⟦X\d+⟧)", text):
                 token = TOKEN.fullmatch(piece)
@@ -350,6 +392,9 @@ def apply_group_rewrites(data: bytes, groups: list[tuple[list[str], list[str], d
                 elif piece:
                     for run in _make_runs(piece, deepcopy(dominant) if dominant is not None else None):
                         p.append(run)
+            if i == len(texts) - 1:
+                for el in trailing:
+                    p.append(el)
             rebuilt.append(p)
         # Keep each paragraph's position (so blank spacer paragraphs between them stay put).
         last = None

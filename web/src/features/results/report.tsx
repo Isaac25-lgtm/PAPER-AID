@@ -187,6 +187,9 @@ export function ChangesPanel({ refinement }: { refinement: RefinementResult }) {
         reviewed by an independent accuracy check.
       </p>
       {refinement.method && <p className="text-xs text-fg-subtle">Method: {refinement.method}</p>}
+      {refinement.trimmed && (
+        <p className="text-xs text-amber-800">Some long passages are shortened here to keep this page fast. Your change report (Word) has every word.</p>
+      )}
       {refinement.changes.length === 0 && (
         <p className="rounded-lg bg-surface-subtle p-4 text-sm text-fg-muted">No passages needed changes, so your wording is exactly as you wrote it.</p>
       )}
@@ -294,6 +297,7 @@ const SUPPORT: Record<CheckedClaim['support'], { label: string; tone: 'brand' | 
   CONTRADICTED: { label: 'Contradicted', tone: 'danger' },
   NOT_FOUND: { label: 'Not found in this search', tone: 'neutral' },
   UNCERTAIN: { label: 'Uncertain', tone: 'warning' },
+  UNCONFIRMED: { label: 'Found, not confirmed', tone: 'neutral' },
 }
 
 const ACCESS: Record<Source['access'], string> = { FULL_TEXT: 'full text read', ABSTRACT: 'abstract only', SNIPPET: 'search snippet only' }
@@ -310,6 +314,13 @@ function SourceItem({ source }: { source: Source }) {
         {source.scope && ` · covers ${source.scope}`}
       </p>
       {source.passage && <blockquote className="mt-2 border-l-2 border-line-strong pl-3 font-serif text-fg-muted italic">&ldquo;{source.passage}&rdquo;</blockquote>}
+      <p className={clsx('mt-1.5 text-xs', source.verified ? 'text-brand-800' : 'text-amber-800')}>
+        {source.verified
+          ? `Quotation confirmed by PaperAid${source.access === 'ABSTRACT' ? ' in the article’s abstract' : ' on the page'}.`
+          : source.readable
+            ? 'PaperAid could not find this quotation on the page, so it is not used as evidence.'
+            : 'PaperAid could not open this page to confirm the quotation. Check it yourself.'}
+      </p>
     </li>
   )
 }

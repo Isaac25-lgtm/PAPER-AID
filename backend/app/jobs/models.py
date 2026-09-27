@@ -154,6 +154,7 @@ class BoundQuote(Quote):
     ugx_per_usd: float = 0.0  # frozen with the quote so a later rate change can't alter it
     multiplier: float = 0.0
     engine: Engine | None = None  # None only on quotes issued before engines were recorded
+    estimate_id: str | None = None  # the estimate this quote was priced from; the job reuses its saved analysis and draft plan
 
 
 # --- credits ---------------------------------------------------------------------------------
@@ -223,6 +224,8 @@ class Wallet(Camel):
     held: int = 0
     entries: list[LedgerEntry] = []  # newest last; the most recent 300 are kept
     updated_at: datetime = Field(default_factory=utcnow)
+    grant_ops: list[str] = []  # every manual grant's operation id, kept for good (not trimmed like entries)
+    closing: bool = False  # the account is being deleted: nothing new may start or move credits
 
 
 class QuoteResponse(Camel):
@@ -280,7 +283,8 @@ class PaperChecks(Camel):
     method: str = ""
 
 
-SupportLevel = Literal["SUPPORTED", "PARTLY_SUPPORTED", "CONTRADICTED", "NOT_FOUND", "UNCERTAIN"]
+# UNCONFIRMED: sources were found but PaperAid could not open them to confirm the quotations.
+SupportLevel = Literal["SUPPORTED", "PARTLY_SUPPORTED", "CONTRADICTED", "NOT_FOUND", "UNCERTAIN", "UNCONFIRMED"]
 
 
 class Source(Camel):
@@ -294,6 +298,8 @@ class Source(Camel):
     passage: str  # the words in the source that bear on the claim, quoted
     scope: str = ""  # population, place and period the source covers
     supports: Literal["SUPPORTED", "PARTLY_SUPPORTED", "CONTRADICTED", "NOT_FOUND"]
+    verified: bool = False  # PaperAid found the quoted passage on the page itself, or in the article's abstract
+    readable: bool = False  # PaperAid could open the page or the abstract (False: blocked, paywalled, unreachable)
 
 
 class CheckedClaim(Camel):
@@ -336,6 +342,7 @@ class RefinementResult(Camel):
     untouched_blocks: int
     changes: list[ChangedBlock]
     method: str = ""
+    trimmed: bool = False  # long passages are shortened here to keep the record small; the change report has every word
 
 
 class FormattingRule(Camel):

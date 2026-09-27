@@ -37,6 +37,9 @@ class DocumentModel(BaseModel):
     blocks: list[Block]
     warnings: list[str] = []
     page_count: int | None = None
+    # Paragraphs without text that still divide the document (a section break, an image, an
+    # equation, a table cell, a page break): Deep Redraft never groups text across them.
+    barriers: list[str] = []
 
     @property
     def word_count(self) -> int:
