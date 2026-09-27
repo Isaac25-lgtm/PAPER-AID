@@ -185,10 +185,11 @@ export function NewJobPage() {
     if (writing !== 'NONE' && !ok(writing)) writing = 'NONE'
     if (formatting !== 'NONE' && !ok(formatting)) formatting = 'NONE'
     // The source check comes with AI Check or Check + Refine only.
-    const sourceCheck = selection.sourceCheck && (writing === 'AI_CHECK' || writing === 'REFINE') && ok('SOURCE_CHECK')
-    if (writing !== selection.writing || formatting !== selection.formatting || sourceCheck !== selection.sourceCheck)
-      setSelection((s) => ({ ...s, writing, formatting, sourceCheck }))
-  }, [config.availability, isPdf, selection.writing, selection.formatting, selection.sourceCheck])
+    const sourceCheck = selection.sourceCheck && (writing === 'AI_CHECK' || writing === 'REFINE' || writing === 'REDRAFT') && ok('SOURCE_CHECK')
+    const latex = selection.latex && !isPdf && ok('LATEX') // LaTeX needs the Word file
+    if (writing !== selection.writing || formatting !== selection.formatting || sourceCheck !== selection.sourceCheck || latex !== selection.latex)
+      setSelection((s) => ({ ...s, writing, formatting, sourceCheck, latex }))
+  }, [config.availability, isPdf, selection.writing, selection.formatting, selection.sourceCheck, selection.latex])
 
   useEffect(() => {
     if (!draftId || !meta) return
@@ -287,6 +288,8 @@ export function NewJobPage() {
   const chosen: ServiceId[] = [
     ...(selection.writing !== 'NONE' ? [selection.writing] : []),
     ...(selection.formatting !== 'NONE' ? [selection.formatting] : []),
+    ...(selection.sourceCheck ? (['SOURCE_CHECK'] as const) : []),
+    ...(selection.latex ? (['LATEX'] as const) : []),
   ]
   const hold = pricing.quote ? pricing.quote.amount - pricing.quote.paid : 0
   const charging = config.creditsEnabled
@@ -370,6 +373,24 @@ export function NewJobPage() {
                 <OptionCard name="writing" checked={selection.writing === 'NONE'} onSelect={() => set({ writing: 'NONE' })} title="No writing check" body="Formatting only." disabledReason={pdfReason} />
               </div>
 
+              {selection.writing === 'REDRAFT' && (
+                <div className="mt-4 rounded-xl bg-surface-subtle p-4">
+                  <p className="text-sm font-semibold">What Deep Redraft changes</p>
+                  <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-fg-muted">
+                    <li>Paragraphs within each section may be reordered, merged, split and rewritten so your argument reads clearly.</li>
+                    <li>Every claim keeps its strength, and your evidence, citations, quotations and figures stay exactly as they are.</li>
+                    <li>Nothing moves between sections, and nothing new is added. Headings, lists and tables are not touched.</li>
+                    <li>Much more of your paper will change than with Check + Refine, and every change is listed in the change report.</li>
+                  </ul>
+                  <p className="mt-5 text-sm font-semibold">Writing style</p>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    {STYLE_OPTIONS.map((s) => (
+                      <OptionCard key={s.id} name="style" checked={selection.style === s.id} onSelect={() => set({ style: s.id })} title={s.title} body={s.body} />
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {selection.writing === 'REFINE' && (
                 <div className="mt-4 rounded-xl bg-surface-subtle p-4">
                   <p className="text-sm font-semibold">How much should we refine?</p>
@@ -394,7 +415,7 @@ export function NewJobPage() {
                 </div>
               )}
 
-              {(selection.writing === 'AI_CHECK' || selection.writing === 'REFINE') && (
+              {(selection.writing === 'AI_CHECK' || selection.writing === 'REFINE' || selection.writing === 'REDRAFT') && (
                 <div className="mt-4 rounded-xl border border-line p-4">
                   <Checkbox
                     checked={selection.sourceCheck}
@@ -464,6 +485,22 @@ export function NewJobPage() {
                   ))}
                 </Select>
               )}
+              <div className="mt-4 rounded-xl border border-line p-4">
+                <Checkbox
+                  checked={selection.latex}
+                  onChange={(e) => set({ latex: e.target.checked })}
+                  disabled={!!reasonFor('LATEX', pdfReason)}
+                  label={
+                    <>
+                      <span className="font-semibold text-fg">Also convert to LaTeX</span> {badgeFor('LATEX')}
+                      <span className="mt-0.5 block text-xs">
+                        {reasonFor('LATEX', pdfReason) ??
+                          'A LaTeX project (.tex, figures and a compiled PDF when possible) of your finished paper. Citations and references stay exactly as written.'}
+                      </span>
+                    </>
+                  }
+                />
+              </div>
             </fieldset>
           </Step>
         </div>

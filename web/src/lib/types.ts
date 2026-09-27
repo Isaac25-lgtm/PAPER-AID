@@ -16,7 +16,7 @@ export type JobStatus =
   | 'FAILED'
   | 'CANCELLED'
 
-export type Stage = 'EXTRACTING' | 'ANALYSING' | 'RESEARCHING' | 'PLANNING' | 'REFINING' | 'REDRAFTING' | 'FORMATTING' | 'AUDITING' | 'EXPORTING'
+export type Stage = 'EXTRACTING' | 'ANALYSING' | 'RESEARCHING' | 'PLANNING' | 'CONVERTING' | 'REFINING' | 'REDRAFTING' | 'FORMATTING' | 'AUDITING' | 'EXPORTING'
 export type PaymentStatus = 'NOT_REQUIRED' | 'PENDING' | 'PAID' | 'FAILED' | 'REFUNDED'
 export type FileRole = 'source' | 'guideline'
 export type Intensity = 'LIGHT' | 'STANDARD'
@@ -156,6 +156,7 @@ export interface ChangedBlock {
 }
 
 export interface RefinementResult {
+  mode: 'REFINE' | 'REDRAFT' // REDRAFT: each change is a group of paragraphs
   targetedBlocks: number
   refinedBlocks: number
   keptOriginal: number
@@ -206,6 +207,7 @@ export interface Job {
   analysisAfter: AnalysisResult | null
   paperChecks: PaperChecks | null
   research: ResearchResult | null
+  latex: LatexResult | null
   refinement: RefinementResult | null
   formatting: FormattingResult | null
   outputs: OutputFile[]
@@ -238,6 +240,14 @@ export interface CheckedClaim {
   support: SupportLevel
   note: string
   sources: Source[]
+}
+
+export interface LatexResult {
+  compiled: boolean
+  equations: number
+  equationsConverted: number
+  figures: number
+  warnings: string[]
 }
 
 export interface ResearchResult {

@@ -16,6 +16,12 @@ Refinement (the revised algorithm, adopted 2026-09-27):
      linked to it, grading PASS / PASS_WITH_WARNINGS / REPAIR; writer fixes what
      is raised and the lead reviews the fix again (bounded rounds)                  (AUDITING)
 
+Deep Redraft (a separate job the student chooses): the same loop over groups of consecutive
+paragraphs within a section. The plan (steps 2–4) runs at the "deep" intervention level; the
+writer may reorder, merge and split paragraphs inside a group (never across sections) and
+returns the group's new paragraphs (REDRAFTING); code rechecks the whole group; the lead reviews;
+the writer fixes (redraft_fix); a group that cannot be verified keeps the student's text.
+
 Source check (optional, with AI Check or Refine):
   a. lead picks the paper's important factual claims and a safe search query for each (RESEARCHING)
   b. code drops any claim built on the paper's own results and any unsafe query
@@ -83,6 +89,8 @@ STEPS: dict[str, Step] = {
     "refine": Step("writer", Stage.REFINING, "refine-v3", 16000),
     "review": Step("lead", Stage.AUDITING, "review-v2", 8000),
     "repair": Step("writer", Stage.AUDITING, "repair-v3", 16000),
+    "redraft": Step("writer", Stage.REDRAFTING, "redraft-v1", 16000),
+    "redraft_fix": Step("writer", Stage.AUDITING, "redraft-fix-v1", 16000),
     "claims": Step("lead", Stage.RESEARCHING, "claims-v1", 6000),
     "research": Step("lead", Stage.RESEARCHING, "research-v1", 4000),
     "verify": Step("writer", Stage.RESEARCHING, "verify-v1", 6000),
@@ -116,6 +124,7 @@ def _list_of(item: dict[str, Any]) -> dict[str, Any]:
 
 _STR, _BOOL = {"type": "string"}, {"type": "boolean"}
 _TEXT_BLOCKS = _obj({"blocks": _list_of(_obj({"id": _STR, "text": _STR}))})
+_GROUPS = _obj({"groups": _list_of(_obj({"id": _STR, "paragraphs": _list_of(_STR)}))})
 _ANALYSIS = _obj(
     {
         "blocks": _list_of(
@@ -193,6 +202,15 @@ class _TextBlock(BaseModel):
 
 class _TextBlocks(BaseModel):
     blocks: list[_TextBlock]
+
+
+class _GroupText(BaseModel):
+    id: str
+    paragraphs: list[str]
+
+
+class _Groups(BaseModel):
+    groups: list[_GroupText]
 
 
 class _AnalysisBlock(BaseModel):
@@ -598,6 +616,43 @@ class AIRunner:
             revisions.append(Revision(t.id, t.masked, revised, protect.check_rewrite(t.masked, revised) if revised != t.masked else []))
         return revisions
 
+    # --- 5b. Deep Redraft: the writer rewrites whole paragraph groups ----------------------------
+
+    def _group_revisions(self, answers: list[_Groups], targets: dict[str, Target], originals: dict[str, str]) -> list[Revision]:
+        returned = {g.id: SEPARATOR.join(p.replace(SEPARATOR, " ").strip() for p in g.paragraphs if p.strip()) for a in answers for g in a.groups if g.id in targets}
+        revisions = []
+        for gid, original in originals.items():
+            if gid not in returned:
+                revisions.append(Revision(gid, original, original, [NOT_RETURNED]))
+                continue
+            revised = returned[gid]
+            problems = (protect.check_rewrite(original, revised) + _structure_problems(original, revised)) if revised != original else []
+            revisions.append(Revision(gid, original, revised, problems))
+        return revisions
+
+    def redraft(self, targets: list[Target], outline: list[str], brief: dict[str, str]) -> list[Revision]:
+        """Each target is a paragraph group whose `masked` text joins its paragraphs with blank
+        lines. Returns one Revision per group, rechecked as a whole."""
+        by_id = {t.id: t for t in targets}
+        items = [
+            {"id": t.id, "section": t.section, "instruction": t.instruction, "preserve": t.preserve, "before": t.before, "after": t.after, "paragraphs": t.masked.split(SEPARATOR), "_words": t.masked}
+            for t in targets
+        ]
+        answers = self._batched("redraft", items, lambda b: {**brief, "outline": outline, "groups": b}, _GROUPS, _Groups)
+        return self._group_revisions(answers, by_id, {t.id: t.masked for t in targets})
+
+    def redraft_fix(self, failed: list[tuple[Revision, list[str]]], instructions: dict[str, str], brief: dict[str, str]) -> list[Revision]:
+        items = [
+            {"id": r.id, "original": r.original.split(SEPARATOR), "rejected": r.revised.split(SEPARATOR), "instruction": instructions.get(r.id, ""), "objections": issues, "_words": r.original}
+            for r, issues in failed
+        ]
+        answers = self._batched("redraft_fix", items, lambda b: {**brief, "groups": b}, _GROUPS, _Groups)
+        by_id = {r.id: Target(r.id, "", r.original) for r, _ in failed}
+        out = []
+        for r in self._group_revisions(answers, by_id, {r.id: r.original for r, _ in failed}):
+            out.append(Revision(r.id, r.original, r.original, []) if NOT_RETURNED in r.problems else r)  # not returned: keep the original
+        return out
+
     # --- 6. review (lead) and fix (writer) --------------------------------------------------
 
     def review(
@@ -704,6 +759,19 @@ class AIRunner:
 
     def fix_spec(self, guide: str, spec: dict[str, Any], problems: list[dict[str, str]]) -> dict[str, Any]:
         return self._spec("spec_fix", {"guide": guide, "spec": spec, "problems": problems}, _SpecAnswer, SPEC_SCHEMA)
+
+
+SEPARATOR = "\n\n"  # between the paragraphs of a Deep Redraft group (app.documents.groups)
+
+
+def _structure_problems(original: str, revised: str) -> list[str]:
+    count = len([p for p in original.split(SEPARATOR) if p.strip()])
+    new = len([p for p in revised.split(SEPARATOR) if p.strip()])
+    if new == 0:
+        return ["the redraft is empty"]
+    if new > 2 * count + 1:
+        return [f"the redraft split {count} paragraphs into {new}"]
+    return []
 
 
 def _batches(items: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:

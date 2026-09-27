@@ -1,5 +1,7 @@
+import io
 import json
 import logging
+import re
 import time
 
 from tests.conftest import fixture_bytes, grant
@@ -1241,3 +1243,116 @@ def test_the_word_report_carries_the_source_check(client):
     report = client.get(f"/api/jobs/{job_id}/outputs/writing-report", headers=STUDENT)
     text = "\n".join(p.text for p in Document(io.BytesIO(report.content)).paragraphs)
     assert "Source check" in text and "https://stats.example.org/report-2022" in text and "not that no evidence exists" in text
+
+
+# --- phase 7: Deep Redraft (owner decision 2026-09-27) --------------------------------------------
+
+REDRAFT = {"writing": "REDRAFT", "style": "STANDARD_ACADEMIC"}
+
+
+def _field_count(data: bytes) -> int:
+    from app.documents.docx_io import read_docx
+
+    return sum(len(b.locked) for b in read_docx(data).blocks)
+
+
+def test_deep_redraft_restructures_groups_and_keeps_every_citation_field(client):
+    from tests.conftest import fixture_bytes
+
+    job_id, quote = start_job(client, name="citation_fields.docx", selection=REDRAFT)
+    assert any(line["label"] == "Deep redraft (up to)" for line in quote["lines"]) and quote["paid"] >= 0
+    client.post(f"/api/jobs/{job_id}/submit", headers=STUDENT, json={"quoteId": quote["id"]})
+    job = wait(client, job_id)
+    assert job["status"] == "COMPLETED" and job["pipeline"] == ["EXTRACTING", "ANALYSING", "PLANNING", "REDRAFTING", "AUDITING", "EXPORTING"]
+    assert job["refinement"]["mode"] == "REDRAFT" and job["refinement"]["refinedBlocks"] == 1
+    paper = client.get(f"/api/jobs/{job_id}/outputs/paper", headers=STUDENT).content
+    from app.documents.docx_io import read_docx
+
+    before = [b for b in read_docx(fixture_bytes("citation_fields.docx")).blocks if b.kind == "paragraph"]
+    after = [b for b in read_docx(paper).blocks if b.kind == "paragraph"]
+    assert len(after) == len(before) - 1  # the writer merged two paragraphs
+    assert _field_count(paper) == _field_count(fixture_bytes("citation_fields.docx")) == 4  # the Word citation fields moved, not retyped
+    assert any(o["label"] == "Redrafted paper (Word)" for o in job["outputs"])
+    assert "Standard academic" in next(r for r in client.models.requests if r.startswith("redraft{"))
+
+
+def test_a_redraft_that_loses_a_citation_keeps_the_students_text(client):
+    def drop_first_token(paragraphs):
+        return [re.sub(r"⟦X\d+⟧", "", paragraphs[0], count=1), *paragraphs[1:]]
+
+    client.models.overrides["redraft"] = lambda p: {"groups": [{"id": g["id"], "paragraphs": drop_first_token(g["paragraphs"])} for g in p["groups"]]}
+    # the fix makes the same mistake, so the group is never verified
+    client.models.overrides["redraft_fix"] = lambda p: {"groups": [{"id": g["id"], "paragraphs": drop_first_token(g["original"])} for g in p["groups"]]}
+    job_id, quote = start_job(client, name="citation_fields.docx", selection=REDRAFT)
+    client.post(f"/api/jobs/{job_id}/submit", headers=STUDENT, json={"quoteId": quote["id"]})
+    job = wait(client, job_id)
+    assert job["status"] == "COMPLETED" and job["outcome"] == "PARTIAL" and job["refinement"]["keptOriginal"] == 1
+    paper = client.get(f"/api/jobs/{job_id}/outputs/paper", headers=STUDENT).content
+    assert _field_count(paper) == 4
+
+
+def test_a_citation_may_move_to_another_paragraph_of_its_group(client):
+    def move_token(payload):
+        answer = {"groups": []}
+        for g in payload["groups"]:
+            paragraphs = list(g["paragraphs"])
+            last = paragraphs[-1]
+            token = re.search(r"⟦X\d+⟧", last)
+            if token and len(paragraphs) > 1:
+                paragraphs[-1] = last.replace(token.group(0), "", 1)
+                paragraphs[0] = paragraphs[0].rstrip(".") + " " + token.group(0) + "."
+            answer["groups"].append({"id": g["id"], "paragraphs": paragraphs})
+        return answer
+
+    client.models.overrides["redraft"] = move_token
+    job_id, quote = start_job(client, name="citation_fields.docx", selection=REDRAFT)
+    client.post(f"/api/jobs/{job_id}/submit", headers=STUDENT, json={"quoteId": quote["id"]})
+    job = wait(client, job_id)
+    assert job["outcome"] == "FULL" and job["refinement"]["refinedBlocks"] == 1
+    assert _field_count(client.get(f"/api/jobs/{job_id}/outputs/paper", headers=STUDENT).content) == 4
+
+
+def test_deep_redraft_needs_an_estimate_and_never_touches_preserved_passages(real_client):
+    def preserve_all(payload):
+        return {
+            "blocks": [
+                {"id": b["id"], "riskBand": "low", "reasons": [], "explanation": "", "suggestion": "", "excerpt": "", "confirmed": [], "rejected": [], "preserve": True, "risk": ""}
+                for b in payload["blocks"]
+            ]
+        }
+
+    real_client.models.overrides["analyse"] = preserve_all
+    job_id = real_client.post("/api/jobs", headers=STUDENT).json()["id"]
+    _upload(real_client, job_id, "source", "simple_essay.docx")
+    preview = real_client.post(f"/api/jobs/{job_id}/quote", headers=STUDENT, json={"selection": REDRAFT}).json()
+    assert preview["estimateFeeCap"] > 0 and preview["quote"] is None  # sized by a paid estimate first
+    quote = get_quote(real_client, job_id, REDRAFT)
+    real_client.post(f"/api/jobs/{job_id}/submit", headers=STUDENT, json={"quoteId": quote["id"]})
+    job = wait(real_client, job_id)
+    assert job["refinement"]["refinedBlocks"] == 0 and "redraft" not in real_client.models.tasks
+
+
+def test_latex_conversion_is_a_fixed_price_job_with_a_downloadable_project(client):
+    import zipfile
+
+    job_id, quote = start_job(client, name="equation.docx", selection={"latex": True})
+    assert [line["label"] for line in quote["lines"]] == ["LaTeX conversion"] and quote["amount"] == 3000
+    client.post(f"/api/jobs/{job_id}/submit", headers=STUDENT, json={"quoteId": quote["id"]})
+    job = wait(client, job_id)
+    assert job["pipeline"] == ["EXTRACTING", "CONVERTING", "EXPORTING"] and job["latex"]["equationsConverted"] == 1
+    assert job["billing"]["charged"] == 3000
+    download = client.get(f"/api/jobs/{job_id}/outputs/latex", headers=STUDENT)
+    names = zipfile.ZipFile(io.BytesIO(download.content)).namelist()
+    assert "main.tex" in names and ("main.pdf" in names) == job["latex"]["compiled"]
+    assert job["outcome"] == ("FULL" if job["latex"]["compiled"] else "PARTIAL")
+
+
+def test_latex_follows_the_refined_paper(client):
+    import zipfile
+
+    job_id, quote = start_job(client, selection={**REFINE_FORMAT, "latex": True})
+    client.post(f"/api/jobs/{job_id}/submit", headers=STUDENT, json={"quoteId": quote["id"]})
+    job = wait(client, job_id)
+    refined = next(c["after"] for c in job["refinement"]["changes"] if not c["kept"])
+    tex = zipfile.ZipFile(io.BytesIO(client.get(f"/api/jobs/{job_id}/outputs/latex", headers=STUDENT).content)).read("main.tex").decode()
+    assert refined.split(".")[0][:40] in tex

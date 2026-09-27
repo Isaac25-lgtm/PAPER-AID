@@ -69,6 +69,8 @@ class Settings(BaseSettings):
     quote_safety_margin: float = 0.2
     format_ugx_per_300_words: int = 100  # APA/Harvard formatting uses no AI
     format_min_ugx: int = 2000
+    latex_ugx_per_300_words: int = 150  # LaTeX conversion uses no AI (owner decision 2026-09-27)
+    latex_min_ugx: int = 3000
     min_top_up_ugx: int = 5000
 
     # Google Cloud (production only)

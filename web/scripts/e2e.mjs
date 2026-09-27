@@ -77,6 +77,7 @@ try {
   await page.getByRole('combobox', { name: 'Formatting style' }).selectOption('harvard')
   await page.getByText('Concise academic').click() // the writing style is part of what is priced
   await page.getByText('Check my claims against live sources').click()
+  await page.getByText('Also convert to LaTeX').click()
   await page.getByText('First, a short AI estimate').waitFor()
   await shot('1a-estimate-offer')
   await page.getByRole('button', { name: /Get my estimate/ }).click() // the paid scan only runs on the student's click
@@ -105,12 +106,13 @@ try {
   await shot('3-overview')
   step('job completed')
   await page.getByText('Concise academic · standard refinement').waitFor()
-  for (const tab of ['Writing report', 'Source check', 'Changes', 'Formatting']) {
+  for (const tab of ['Writing report', 'Source check', 'Changes', 'Formatting', 'LaTeX']) {
     await page.getByRole('tab', { name: tab }).click()
     await page.waitForTimeout(300)
     await shot(`4-${tab.toLowerCase().replace(' ', '-')}`)
     if (tab === 'Writing report') await page.getByRole('heading', { name: 'Citations and consistency' }).waitFor()
     if (tab === 'Source check') await page.getByText('not that no evidence exists', { exact: false }).waitFor()
+    if (tab === 'LaTeX') await page.getByText(/Compiled to PDF by PaperAid|Not compiled/).waitFor()
   }
   step('result tabs render, with the chosen style and the citation checks')
 
@@ -122,6 +124,26 @@ try {
   const head = readFileSync(path).subarray(0, 2).toString()
   if (head !== 'PK') throw new Error('downloaded file is not a Word document')
   step(`downloaded "${download.suggestedFilename()}"`)
+  const [zip] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: /Download LaTeX project/ }).click()])
+  if (!zip.suggestedFilename().endsWith('.zip')) throw new Error(`LaTeX download is not a zip: ${zip.suggestedFilename()}`)
+  step(`downloaded "${zip.suggestedFilename()}"`)
+
+  // Deep Redraft: a separate job the student chooses, with the style picker and a full change report.
+  await page.goto(`${base}/app/new`)
+  await upload('citation_fields.docx', 'Chapter two.docx')
+  await page.getByText('Readable text found').waitFor({ timeout: 20000 })
+  await page.getByText('Deep redraft', { exact: true }).first().click()
+  await page.getByText('What Deep Redraft changes').waitFor()
+  await page.getByRole('button', { name: /Get my estimate/ }).click()
+  await page.locator('aside dl').getByText('Deep redraft (up to)').waitFor({ timeout: 60000 })
+  await page.getByLabel(/This is my own work/).check()
+  await page.getByRole('button', { name: /Start job/ }).click()
+  await page.waitForURL(/\/app\/jobs\/job_/)
+  await page.getByRole('tab', { name: 'Overview' }).waitFor({ timeout: 120000 })
+  await page.getByRole('tab', { name: 'Changes' }).click()
+  await page.getByText('Passages redrafted').waitFor()
+  await page.getByText('Preserve my voice · deep redraft').waitFor()
+  step('Deep Redraft job: estimate, quote, redraft and change report')
 
   // Regression (external review): a PDF uploaded the instant the page opens must quote on the
   // same draft it was uploaded to, and a visit must create exactly one draft.

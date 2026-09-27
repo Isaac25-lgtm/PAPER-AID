@@ -54,8 +54,8 @@ export const SERVICES: Record<ServiceId, ServiceInfo> = {
     short: 'Restructure your own draft section by section, with a full change report.',
     icon: Shuffle,
     accepts: 'DOCX',
-    youGet: ['Redrafted Word file', 'Section-by-section change summary', 'Independent accuracy audit'],
-    untouched: ['Your sources, data and findings'],
+    youGet: ['Redrafted Word file', 'Every reworked passage shown before and after', 'Independent accuracy review of each change'],
+    untouched: ['Citations, quotations, numbers and your findings', 'Headings, lists and tables', 'What each section covers'],
   },
   SOURCE_CHECK: {
     name: 'Source check',
@@ -69,9 +69,9 @@ export const SERVICES: Record<ServiceId, ServiceInfo> = {
     name: 'LaTeX conversion',
     short: 'Convert your paper into a clean, compilable LaTeX project.',
     icon: Braces,
-    accepts: 'DOCX',
-    youGet: ['.tex project with figures', 'Compiled PDF when possible'],
-    untouched: ['Your wording and references'],
+    accepts: 'DOCX (on its own, or after refining, redrafting or formatting)',
+    youGet: ['.tex project with figures', 'Compiled PDF when possible', 'A list of anything to check by hand'],
+    untouched: ['Your wording, citations and reference list'],
   },
 }
 
@@ -81,6 +81,7 @@ export const STAGE_LABELS: Record<Stage, string> = {
   EXTRACTING: 'Reading your document',
   ANALYSING: 'Reviewing writing patterns',
   RESEARCHING: 'Checking claims against live sources',
+  CONVERTING: 'Converting to LaTeX',
   PLANNING: 'Agreeing the refinement plan',
   REFINING: 'Refining flagged passages',
   REDRAFTING: 'Redrafting sections',

@@ -32,6 +32,14 @@ _STYLES: dict[WritingStyle, str] = {
 _ALWAYS = "Whatever the style: no new facts, no new technical detail, and no claim made stronger, wider or more certain than the student made it."
 
 _INTENSITY = {
+    "DEEP": (
+        "Deep (Deep Redraft, chosen by the student): rework each group of paragraphs as a whole. Reorder, merge or split paragraphs and "
+        "rewrite sentences so the argument is clear and reads naturally. Keep every claim at its original strength, all evidence, "
+        "citations and figures, and the section's scope; never move material to another section and never add anything new. "
+        "At this level, rework every group whose wording, register, structure or flow can be improved without new facts, even when "
+        "a deeper problem (such as missing evidence) can only be solved by the student: fix what prose can fix, and leave a group "
+        "alone only when it is already clear and well written."
+    ),
     "LIGHT": "Light: fix the problems found with the smallest change that works; leave the structure and most of the wording as it is.",
     "STANDARD": (
         "Standard: improve flow, reduce formulaic language, vary sentence structure and strengthen the academic tone within each passage, "
@@ -40,6 +48,6 @@ _INTENSITY = {
 }
 
 
-def writing_brief(style: WritingStyle, intensity: str) -> dict[str, str]:
+def writing_brief(style: WritingStyle, intensity: str) -> dict[str, str]:  # intensity: LIGHT, STANDARD or DEEP
     """The style and intervention constraints, as every planning and writing step receives them."""
     return {"style": f"{_STYLES[style]} {_ALWAYS}", "intervention": _INTENSITY.get(intensity, _INTENSITY["STANDARD"])}

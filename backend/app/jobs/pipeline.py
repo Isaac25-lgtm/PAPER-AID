@@ -22,8 +22,9 @@ from app.analysis import paper_checks, research, signals
 from app.core.errors import InvalidDocument, PermanentStageError, StageError
 from app.core.logging import job_id as job_id_var
 from app.core.logging import log
+from app.documents import groups as paragraph_groups
 from app.documents import protect
-from app.documents.docx_io import apply_revisions, read_docx
+from app.documents.docx_io import apply_group_rewrites, apply_revisions, read_docx
 from app.documents.intake import inspect_upload
 from app.documents.model import DocumentModel
 from app.formatting.apply import apply_formatting
@@ -40,6 +41,7 @@ from app.jobs.models import (
     JobEvent,
     JobFailure,
     JobStatus,
+    LatexResult,
     ModelCall,
     RefinementResult,
     ResearchResult,
@@ -50,6 +52,7 @@ from app.jobs.models import (
     utcnow,
 )
 from app.jobs.service import DOCX_TYPE, processing_enabled, task_name
+from app.latex import package as latex
 from app.pricing import credits
 from app.pricing.billing import refund_job, settle_completed
 from app.pricing.quote import Passage, bound_quote, to_ugx
@@ -64,7 +67,7 @@ LEASE = timedelta(minutes=25)
 STAGE_WORK_LIMIT = timedelta(minutes=20)
 GENERIC_FAILURE = "Something went wrong while processing your paper. Our team has been notified."
 ESTIMATE_FAILURE = "We couldn't estimate this paper right now. Your credits were returned; please try again shortly."
-REFINE_STAGES = (Stage.PLANNING, Stage.REFINING, Stage.AUDITING)
+REFINE_STAGES = (Stage.PLANNING, Stage.REFINING, Stage.REDRAFTING, Stage.AUDITING)
 
 
 class StageContinues(Exception):  # noqa: N818 - a signal, not an error
@@ -304,8 +307,13 @@ def _analyse(ctx: StageContext, model: DocumentModel) -> tuple[AnalysisResult, s
     return result, coverage_warning
 
 
+def _deep(ctx: StageContext) -> bool:
+    """Deep Redraft: the student chose to have groups of paragraphs reworked, not single passages."""
+    return ctx.job.selection.writing == "REDRAFT"
+
+
 def _brief(ctx: StageContext) -> dict[str, str]:
-    return writing_brief(ctx.job.selection.style, ctx.job.selection.intensity)
+    return writing_brief(ctx.job.selection.style, "DEEP" if _deep(ctx) else ctx.job.selection.intensity)
 
 
 # --- the source check (phase 4 of the revised algorithm) --------------------------------------
@@ -522,6 +530,8 @@ def _estimate_failed(rt: Runtime, job_id: str, run_id: str, code: str, message: 
 
 
 def _select_targets(ctx: StageContext, model: DocumentModel) -> list[Target]:
+    if _deep(ctx):
+        return _redraft_targets(ctx, model)
     saved = ctx.get_json("analysis.json")
     result = AnalysisResult.model_validate(saved["result"])
     scores: dict[str, float] = saved["scores"]
@@ -565,6 +575,37 @@ def _select_targets(ctx: StageContext, model: DocumentModel) -> list[Target]:
     return targets
 
 
+def _redraft_targets(ctx: StageContext, model: DocumentModel) -> list[Target]:
+    """Deep Redraft works on every paragraph group (the plan may still leave a group alone),
+    except a group holding a passage the lead said must not be rewritten."""
+    saved = ctx.get_json("analysis.json")
+    result = AnalysisResult.model_validate(saved["result"])
+    preserve = set(saved.get("preserve", []))
+    risks: dict[str, str] = saved.get("risks", {})
+    findings: dict[str, list[str]] = {}
+    for f in result.findings:
+        findings.setdefault(f.block_id, []).append(f"{f.reason}: {f.explanation}")
+    prose = [b for b in model.blocks if b.kind in ("paragraph", "list_item")]
+    position = {b.id: i for i, b in enumerate(prose)}
+    targets = []
+    for group in paragraph_groups.groups(model):
+        if preserve & set(group.block_ids):
+            continue
+        first, last = position[group.block_ids[0]], position[group.block_ids[-1]]
+        targets.append(
+            Target(
+                id=group.id,
+                section=group.section,
+                masked=group.masked,
+                before=prose[first - 1].text[-400:] if first > 0 else "",
+                after=prose[last + 1].text[:400] if last + 1 < len(prose) else "",
+                findings=[f for bid in group.block_ids for f in findings.get(bid, [])],
+                risk=" ".join(risks[bid] for bid in group.block_ids if bid in risks),
+            )
+        )
+    return targets
+
+
 def stage_planning(ctx: StageContext) -> None:
     model = ctx.document()
     targets = _select_targets(ctx, model)
@@ -600,10 +641,19 @@ def stage_refining(ctx: StageContext) -> None:
     ctx.put_json("revisions.json", [r.__dict__ for r in revisions])
 
 
+def stage_redrafting(ctx: StageContext) -> None:
+    model = ctx.document()
+    targets = _planned_targets(ctx)
+    revisions = ctx.ai().redraft(targets, model.outline(), _brief(ctx)) if targets else []
+    ctx.put_json("revisions.json", [r.__dict__ for r in revisions])
+
+
 def stage_auditing(ctx: StageContext) -> None:
     settings = ctx.rt.settings
     model = ctx.document()
     blocks = model.by_id()
+    deep = _deep(ctx)
+    groups = {g.id: g for g in paragraph_groups.groups(model)} if deep else {}
     revisions = [Revision(**r) for r in ctx.get_json("revisions.json")]
     targets = {t.id: t for t in _planned_targets(ctx)}
     instructions = {tid: t.instruction for tid, t in targets.items()}
@@ -616,7 +666,8 @@ def stage_auditing(ctx: StageContext) -> None:
 
     # Stage 8–9: code has already rechecked every rewrite (check_rewrite); the lead now reviews
     # each one with PaperAid's post-scan, its neighbours and the passages linked to it.
-    review = runner.review(changed, instructions, brief, _review_context(model, targets, changed)) if changed else ReviewOutcome()
+    review = runner.review(changed, instructions, brief, _review_context(model, targets, changed, groups)) if changed else ReviewOutcome()
+    fix = runner.redraft_fix if deep else runner.repair
     failed = {r.id: (r.problems or review.issues.get(r.id, [])) for r in changed if r.problems or review.issues.get(r.id)}
     reviewer_notes, risk = dict(review.warnings), dict(review.risk)
     notes: dict[str, str] = {}
@@ -624,10 +675,10 @@ def stage_auditing(ctx: StageContext) -> None:
         if not failed:
             break
         try:
-            repaired = runner.repair([(r, failed[r.id]) for r in changed if r.id in failed], instructions, brief)
+            repaired = fix([(r, failed[r.id]) for r in changed if r.id in failed], instructions, brief)
             clean = [r for r in repaired if r.revised != r.original and not r.problems]
             # A repair is reviewed again, with the same context: fixing one problem must not create another.
-            second = runner.review(clean, instructions, brief, _review_context(model, targets, clean)) if clean else ReviewOutcome()
+            second = runner.review(clean, instructions, brief, _review_context(model, targets, clean, groups)) if clean else ReviewOutcome()
         except PermanentStageError as exc:
             if exc.code != "BUDGET_EXCEEDED":
                 raise
@@ -656,18 +707,31 @@ def stage_auditing(ctx: StageContext) -> None:
 
     shown = changed + missing + unchanged
     kept_ids = {r.id for r in kept}
-    originals = {r.id: protect.mask(blocks[r.id].masked or "")[1] for r in shown}
     source = ctx.rt.files.get(ctx.job.source.path)  # type: ignore[union-attr]
-    patch = {r.id: protect.unmask(r.revised, originals[r.id]) for r in accepted}
-    ctx.put_bytes("refined.docx", apply_revisions(source, patch) if patch else source)
+    if deep:
+        rewrites = [(groups[r.id].block_ids, paragraph_groups.to_docx(groups[r.id], r.revised), groups[r.id].xmap) for r in accepted]
+        ctx.put_bytes("refined.docx", apply_group_rewrites(source, rewrites) if rewrites else source)
 
-    def readable(r: Revision, text: str) -> str:
-        return blocks[r.id].readable(protect.unmask(text, originals[r.id]))
+        def readable(r: Revision, text: str) -> str:
+            return "\n\n".join(groups[r.id].readable(p) for p in groups[r.id].paragraphs(text))
+
+        def section_of(r: Revision) -> str:
+            return groups[r.id].section
+    else:
+        originals = {r.id: protect.mask(blocks[r.id].masked or "")[1] for r in shown}
+        patch = {r.id: protect.unmask(r.revised, originals[r.id]) for r in accepted}
+        ctx.put_bytes("refined.docx", apply_revisions(source, patch) if patch else source)
+
+        def readable(r: Revision, text: str) -> str:
+            return blocks[r.id].readable(protect.unmask(text, originals[r.id]))
+
+        def section_of(r: Revision) -> str:
+            return blocks[r.id].section
 
     changes = [
         ChangedBlock(
             block_id=r.id,
-            section=blocks[r.id].section,
+            section=section_of(r),
             before=readable(r, r.original),
             after=readable(r, r.revised),
             kept=r.id in kept_ids,
@@ -678,12 +742,13 @@ def stage_auditing(ctx: StageContext) -> None:
     ]
     prose = [b for b in model.blocks if b.kind in ("paragraph", "list_item")]
     refinement = RefinementResult(
+        mode="REDRAFT" if deep else "REFINE",
         targeted_blocks=len(revisions),
         refined_blocks=len(accepted),
         kept_original=len(kept),
-        untouched_blocks=len(prose) - len(accepted),
+        untouched_blocks=(len(groups) if deep else len(prose)) - len(accepted),
         changes=changes,
-        method=_method(ctx, "refinement"),
+        method=_method(ctx, "redraft" if deep else "refinement"),
     )
     warnings = []
     if kept and accepted:
@@ -694,7 +759,8 @@ def stage_auditing(ctx: StageContext) -> None:
         warnings.append("No passages needed refinement under the selected intensity, so your wording is unchanged.")
     noted = sum(1 for r in accepted if r.id in reviewer_notes)
     if noted:
-        warnings.append(f"{noted} refined passage{'s have' if noted > 1 else ' has'} a reviewer note in the change report: worth a look before you submit.")
+        done = "redrafted" if deep else "refined"
+        warnings.append(f"{noted} {done} passage{'s have' if noted > 1 else ' has'} a reviewer note in the change report: worth a look before you submit.")
 
     def save(j: Job) -> Job:
         j.refinement = refinement
@@ -761,21 +827,41 @@ def _format_from_guide(ctx: StageContext, base: bytes) -> tuple[bytes, Formattin
     return formatted, result, bool(unresolved or checks)
 
 
+def stage_converting(ctx: StageContext) -> None:
+    """LaTeX from the finished Word file (refined or redrafted, then formatted, when chosen)."""
+    base = next((ctx.get_bytes(n) for n in ("formatted.docx", "refined.docx") if ctx.has(n)), None) or ctx.rt.files.get(ctx.job.source.path)  # type: ignore[union-attr]
+    archive, result, compiled, problem = latex.package(base)
+    ctx.put_bytes("latex.zip", archive)
+    summary = LatexResult(compiled=compiled, equations=result.equations, equations_converted=result.equations_converted, figures=result.figures, warnings=result.warnings)
+    warnings = [f"LaTeX: {w}" for w in result.warnings]
+    if not compiled:
+        warnings.append(f"The LaTeX was not compiled on our server ({problem}). Your .tex project is included; compile it yourself, for example in Overleaf.")
+
+    def save(j: Job) -> Job:
+        j.latex = summary
+        if not compiled or result.equations_converted < result.equations:
+            j.outcome = "PARTIAL"
+        return _add_warnings(j, warnings)
+
+    ctx.update(save)
+
+
 def stage_exporting(ctx: StageContext) -> None:
     job = ctx.job
     base_name = PurePosixPath(job.source.name).stem[:120] if job.source else "paper"  # display only
     outputs: list[StoredOutput] = []
 
-    def output(key: str, label: str, suffix: str, data: bytes) -> None:
-        path = f"{ctx.prefix}/output/{key}.docx"
-        ctx.rt.files.put(path, data, DOCX_TYPE)
-        outputs.append(StoredOutput(id=key, label=label, name=f"{base_name} – {suffix}.docx", size_bytes=len(data), path=path, content_type=DOCX_TYPE))
+    def output(key: str, label: str, suffix: str, data: bytes, ext: str = "docx", content_type: str = DOCX_TYPE) -> None:
+        path = f"{ctx.prefix}/output/{key}.{ext}"
+        ctx.rt.files.put(path, data, content_type)
+        outputs.append(StoredOutput(id=key, label=label, name=f"{base_name} – {suffix}.{ext}", size_bytes=len(data), path=path, content_type=content_type))
 
     final = ctx.get_bytes("formatted.docx") if ctx.has("formatted.docx") else ctx.get_bytes("refined.docx") if ctx.has("refined.docx") else None
     if final is not None:
         refined, formatted = job.refinement is not None, job.formatting is not None
-        label = "Refined and formatted paper (Word)" if refined and formatted else "Refined paper (Word)" if refined else "Formatted paper (Word)"
-        output("paper", label, "refined" if refined else "formatted", final)
+        done = "Redrafted" if job.refinement is not None and job.refinement.mode == "REDRAFT" else "Refined"
+        label = f"{done} and formatted paper (Word)" if refined and formatted else f"{done} paper (Word)" if refined else "Formatted paper (Word)"
+        output("paper", label, done.lower() if refined else "formatted", final)
 
     after = None
     if job.analysis:
@@ -786,6 +872,9 @@ def stage_exporting(ctx: StageContext) -> None:
         )
     if job.refinement:
         output("change-report", "Change report (Word)", "changes", change_report(job.source.name if job.source else "", utcnow(), job.refinement))
+    if job.latex is not None and ctx.has("latex.zip"):
+        label = "LaTeX project with PDF (.zip)" if job.latex.compiled else "LaTeX project (.zip)"
+        output("latex", label, "LaTeX", ctx.get_bytes("latex.zip"), "zip", "application/zip")
 
     def save(j: Job) -> Job:
         j.outputs = outputs
@@ -801,6 +890,8 @@ def _analysis_after(ctx: StageContext, method: str) -> AnalysisResult:
     refined paper, blended with the lead's judgement: its original judgement for untouched
     passages (their rejected false positives stay rejected) and its review of each rewrite."""
     saved = ctx.get_json("analysis.json")
+    if ctx.job.refinement is not None and ctx.job.refinement.mode == "REDRAFT":
+        return _redraft_after(ctx, method, saved)
     refined_ids = {c.block_id for c in (ctx.job.refinement.changes if ctx.job.refinement else []) if not c.kept}
     review_risk: dict[str, str] = ctx.get_json("review.json")["risk"] if ctx.has("review.json") else {}
     rejected: dict[str, list[str]] = saved.get("rejected", {})
@@ -814,30 +905,59 @@ def _analysis_after(ctx: StageContext, method: str) -> AnalysisResult:
     return signals.aggregate(found.blocks, found.excluded_words, method, scores)
 
 
-def _review_context(model: DocumentModel, targets: dict[str, Target], revisions: list[Revision]) -> dict[str, dict[str, Any]]:
+def _redraft_after(ctx: StageContext, method: str, saved: dict[str, Any]) -> AnalysisResult:
+    """After a Deep Redraft, paragraphs move and merge, so passages are matched by their text: an
+    unchanged paragraph keeps the lead's original judgement (and its rejected false positives
+    stay rejected); a rewritten one takes the lead's review of its group."""
+    before = {b.text: b.id for b in ctx.document().blocks if b.kind in ("paragraph", "list_item")}
+    review_risk: dict[str, str] = ctx.get_json("review.json")["risk"] if ctx.has("review.json") else {}
+    group_sections = {c.section for c in (ctx.job.refinement.changes if ctx.job.refinement else []) if not c.kept}
+    section_risk = max((signals.MODEL_SCORE[band] for band in review_risk.values()), default=None)
+    rejected: dict[str, list[str]] = saved.get("rejected", {})
+    model_scores: dict[str, float] = saved.get("modelScores", {})
+    found = signals.scan(read_docx(ctx.get_bytes("refined.docx")))
+    scores: dict[str, float] = {}
+    for s in found.blocks:
+        original = before.get(s.block.text)
+        if original is not None:
+            if original in rejected:
+                s.hits = [h for h in s.hits if h.rule not in rejected[original]]
+                s.rescore()
+            if original in model_scores:
+                scores[s.block.id] = model_scores[original]
+        elif s.block.section in group_sections and section_risk is not None:
+            scores[s.block.id] = section_risk
+    return signals.aggregate(found.blocks, found.excluded_words, method, scores)
+
+
+def _review_context(model: DocumentModel, targets: dict[str, Target], revisions: list[Revision], groups: dict[str, Any] | None = None) -> dict[str, dict[str, Any]]:
     """For each rewrite: its neighbours, up to two passages elsewhere that share its key terms
-    (objectives, methods, results or conclusions it relates to), and PaperAid's post-scan."""
+    (objectives, methods, results or conclusions it relates to), and PaperAid's post-scan. For a
+    Deep Redraft group, "elsewhere" means outside the group."""
     blocks = model.by_id()
+    groups = groups or {}
     prose = [b for b in model.blocks if b.kind in ("paragraph", "list_item")]
     phrases = {b.id: signals.phrases(b.masked or b.text) for b in prose}
     linkable = ("introduction", "methods", "results", "discussion", "conclusion", "abstract")
     context: dict[str, dict[str, Any]] = {}
     for r in revisions:
-        block, target = blocks[r.id], targets.get(r.id)
+        target = targets.get(r.id)
+        members = set(groups[r.id].block_ids) if r.id in groups else {r.id}
+        section = groups[r.id].section if r.id in groups else blocks[r.id].section
         keys = {w for w in signals.words_of(r.original) if len(w) >= 7 and w not in signals.STOPWORDS}
         scored = []
         for b in prose:
-            if b.id == r.id or b.section == block.section or signals.section_type(b.section) not in linkable:
+            if b.id in members or b.section == section or signals.section_type(b.section) not in linkable:
                 continue
             overlap = len(keys & set(signals.words_of(b.text)))
             if overlap >= 2:
                 scored.append((overlap, b))
         linked = [{"section": b.section, "text": b.text[:500]} for _, b in sorted(scored, key=lambda item: -item[0])[:2]]
-        elsewhere = set().union(*(p for bid, p in phrases.items() if bid != r.id))
+        elsewhere = set().union(*(p for bid, p in phrases.items() if bid not in members))
         context[r.id] = {
             "context": {"before": target.before if target else "", "after": target.after if target else ""},
             "linked": linked,
-            "postScan": signals.post_scan(r.original, r.revised, block.section, elsewhere),
+            "postScan": signals.post_scan(r.original, r.revised, section, elsewhere),
         }
     return context
 
@@ -848,8 +968,10 @@ STAGES = {
     Stage.RESEARCHING: stage_researching,
     Stage.PLANNING: stage_planning,
     Stage.REFINING: stage_refining,
+    Stage.REDRAFTING: stage_redrafting,
     Stage.AUDITING: stage_auditing,
     Stage.FORMATTING: stage_formatting,
+    Stage.CONVERTING: stage_converting,
     Stage.EXPORTING: stage_exporting,
 }
 
@@ -1001,4 +1123,6 @@ def _method(ctx: StageContext, kind: str) -> str:
         return "PaperAid writing-pattern signals and AI analysis"
     if kind == "formatting":
         return "Rules read from your guide and checked by PaperAid's AI, applied by PaperAid's formatter"
+    if kind == "redraft":
+        return "Planned, redrafted section by section and independently reviewed by PaperAid's AI"
     return "Planned, rewritten and independently reviewed by PaperAid's AI"

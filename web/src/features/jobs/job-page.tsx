@@ -9,7 +9,7 @@ import { formatDate, formatDateTime, formatUGX } from '../../lib/format'
 import type { Job, Quote } from '../../lib/types'
 import { STYLE_OPTIONS } from '../../lib/services'
 import { useTitle } from '../../lib/use-title'
-import { BandChange, ChangesPanel, DownloadList, FindingsList, FormattingPanel, PaperChecksPanel, ScoreCard, SourceCheckPanel } from '../results/report'
+import { BandChange, ChangesPanel, DownloadList, FindingsList, FormattingPanel, LatexPanel, PaperChecksPanel, ScoreCard, SourceCheckPanel } from '../results/report'
 import { useJob } from './hooks'
 import { jobLink, jobTitle, serviceNames, StageTimeline, StatusBadge } from './job-bits'
 
@@ -179,6 +179,7 @@ function Completed({ job }: { job: Job }) {
     { id: 'sources', label: 'Source check', show: !!job.research },
     { id: 'changes', label: 'Changes', show: !!job.refinement },
     { id: 'formatting', label: 'Formatting', show: !!job.formatting },
+    { id: 'latex', label: 'LaTeX', show: !!job.latex },
   ].filter((t) => t.show)
 
   return (
@@ -229,6 +230,11 @@ function Completed({ job }: { job: Job }) {
         {job.formatting && (
           <TabsContent value="formatting">
             <FormattingPanel formatting={job.formatting} />
+          </TabsContent>
+        )}
+        {job.latex && (
+          <TabsContent value="latex">
+            <LatexPanel latex={job.latex} />
           </TabsContent>
         )}
       </Tabs>
@@ -309,11 +315,12 @@ function JobDetails({ job }: { job: Job }) {
       <Card className="p-5">
         <h2 className="text-sm font-semibold">Details</h2>
         <dl className="mt-3 space-y-2.5 text-sm">
-          {job.selection.writing === 'REFINE' && (
+          {(job.selection.writing === 'REFINE' || job.selection.writing === 'REDRAFT') && (
             <div>
               <dt className="text-xs text-fg-subtle">Writing style</dt>
               <dd>
-                {STYLE_OPTIONS.find((s) => s.id === job.selection.style)?.title} · {job.selection.intensity === 'LIGHT' ? 'light' : 'standard'} refinement
+                {STYLE_OPTIONS.find((s) => s.id === job.selection.style)?.title} ·{' '}
+                {job.selection.writing === 'REDRAFT' ? 'deep redraft' : `${job.selection.intensity === 'LIGHT' ? 'light' : 'standard'} refinement`}
               </dd>
             </div>
           )}

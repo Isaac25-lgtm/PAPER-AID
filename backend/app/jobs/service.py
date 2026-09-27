@@ -47,8 +47,8 @@ from app.runtime import Runtime
 
 logger = logging.getLogger("paperaid.jobs")
 
-BUILT = ("AI_CHECK", "REFINE", "FORMAT", "TEMPLATE_FORMAT", "SOURCE_CHECK")
-NEEDS_AI = ("AI_CHECK", "REFINE", "TEMPLATE_FORMAT", "SOURCE_CHECK")
+BUILT = ("AI_CHECK", "REFINE", "FORMAT", "TEMPLATE_FORMAT", "SOURCE_CHECK", "REDRAFT", "LATEX")
+NEEDS_AI = ("AI_CHECK", "REFINE", "TEMPLATE_FORMAT", "SOURCE_CHECK", "REDRAFT")
 
 
 def availability(settings: Settings, user: "User | None" = None) -> dict[str, str]:
@@ -104,8 +104,12 @@ def pipeline_for(selection: ServiceSelection) -> list[Stage]:
         stages.append(Stage.RESEARCHING)
     if selection.writing == "REFINE":
         stages += [Stage.PLANNING, Stage.REFINING, Stage.AUDITING]
+    elif selection.writing == "REDRAFT":
+        stages += [Stage.PLANNING, Stage.REDRAFTING, Stage.AUDITING]
     if selection.formatting != "NONE":
         stages.append(Stage.FORMATTING)
+    if selection.latex:
+        stages.append(Stage.CONVERTING)
     stages.append(Stage.EXPORTING)
     return stages
 
@@ -274,8 +278,8 @@ def request_quote(rt: Runtime, user: User, job_id: str, selection: ServiceSelect
     offered = availability(rt.settings, user)
     if any(offered.get(s.value) != "available" for s in services):
         raise AppError("That service is not available right now.", code="SERVICE_UNAVAILABLE")
-    if selection.source_check and selection.writing not in ("AI_CHECK", "REFINE"):
-        raise AppError("Source check comes with AI Check or Check + Refine.", code="SOURCE_CHECK_NEEDS_CHECK")
+    if selection.source_check and selection.writing not in ("AI_CHECK", "REFINE", "REDRAFT"):
+        raise AppError("Source check comes with AI Check, Check + Refine or Deep Redraft.", code="SOURCE_CHECK_NEEDS_CHECK")
     if job.source.format == "PDF" and any(s.value not in ("AI_CHECK", "SOURCE_CHECK") for s in services):
         raise AppError("PDF files can use AI Check (and Source check) only. Upload the Word file to refine or format it.", code="PDF_AI_CHECK_ONLY")
     if selection.formatting == "TEMPLATE_FORMAT" and job.guideline is None:
@@ -360,7 +364,7 @@ def _finished_estimate(j: Job, selection: ServiceSelection, guideline_sha: str |
 
 def _estimate_fee_cap(rt: Runtime, job: Job, selection: ServiceSelection) -> int:
     assert job.source is not None
-    return with_margin(estimate_scan_usd(rt.settings, job.source.word_count, selection.intensity), rt.settings)
+    return with_margin(estimate_scan_usd(rt.settings, job.source.word_count, selection), rt.settings)
 
 
 def _start_estimate(rt: Runtime, user: User, job: Job, selection: ServiceSelection, guideline_sha: str | None) -> QuoteResponse:

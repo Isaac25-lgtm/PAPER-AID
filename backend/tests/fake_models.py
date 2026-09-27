@@ -87,6 +87,16 @@ class FakeModels:
             return {"support": "SUPPORTED", "note": "The report states the same figure.", "sources": [source]}
         if task == "verify":
             return {"results": [{"id": c["id"], "support": "SUPPORTED", "note": "The passage matches."} for c in payload["claims"]]}
+        if task == "redraft":  # rewrites each paragraph and merges the first two, to exercise restructuring
+            answer = []
+            for g in payload["groups"]:
+                paragraphs = [fake_writer.rewrite(p) for p in g["paragraphs"]]
+                if len(paragraphs) > 1:
+                    paragraphs = [paragraphs[0] + " " + paragraphs[1], *paragraphs[2:]]
+                answer.append({"id": g["id"], "paragraphs": paragraphs})
+            return {"groups": answer}
+        if task == "redraft_fix":
+            return {"groups": [{"id": g["id"], "paragraphs": g["original"]} for g in payload["groups"]]}
         if task == "spec_plan":
             return read_guide(payload["guide"])
         if task == "spec_critique":

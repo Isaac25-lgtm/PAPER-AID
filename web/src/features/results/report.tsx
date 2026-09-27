@@ -6,7 +6,7 @@ import { Button } from '../../components/ui/button'
 import { Badge, Card } from '../../components/ui/primitives'
 import { formatBytes, formatDate, formatNumber } from '../../lib/format'
 import { REASON_LABELS } from '../../lib/services'
-import type { AnalysisResult, Band, ChangedBlock, CheckedClaim, Finding, FormattingResult, OutputFile, PaperCheck, PaperChecks, ReasonCode, RefinementResult, ResearchResult, Source } from '../../lib/types'
+import type { AnalysisResult, Band, ChangedBlock, CheckedClaim, Finding, FormattingResult, LatexResult, OutputFile, PaperCheck, PaperChecks, ReasonCode, RefinementResult, ResearchResult, Source } from '../../lib/types'
 
 const BANDS: { id: Band; label: string; active: string }[] = [
   { id: 'LOW', label: 'Low', active: 'bg-brand-100 text-brand-800 ring-1 ring-inset ring-brand-300' },
@@ -130,7 +130,7 @@ export function FindingsList({ findings }: { findings: Finding[] }) {
   )
 }
 
-function ChangeItem({ change }: { change: ChangedBlock }) {
+function ChangeItem({ change, deep }: { change: ChangedBlock; deep: boolean }) {
   return (
     <details className="group rounded-xl border border-line bg-white shadow-card open:shadow-raised" open={change.kept}>
       <summary className="flex cursor-pointer list-none items-center gap-3 p-4 [&::-webkit-details-marker]:hidden">
@@ -138,17 +138,17 @@ function ChangeItem({ change }: { change: ChangedBlock }) {
           <span className="block text-xs font-medium text-fg-subtle">{change.section}</span>
           <span className="mt-0.5 block truncate text-sm text-fg">{change.kept ? change.before : change.after}</span>
         </span>
-        {change.kept ? <Badge tone="warning">Kept original</Badge> : <Badge tone="brand">Refined</Badge>}
+        {change.kept ? <Badge tone="warning">Kept original</Badge> : <Badge tone="brand">{deep ? 'Redrafted' : 'Refined'}</Badge>}
         <ChevronDown className="size-4 shrink-0 text-fg-subtle transition-transform group-open:rotate-180" aria-hidden />
       </summary>
       <div className="grid gap-3 border-t border-line p-4 lg:grid-cols-2">
         <div className="rounded-lg bg-rose-50/70 p-3">
           <p className="text-xs font-semibold text-rose-800">Your original</p>
-          <p className="mt-1.5 font-serif text-[0.95rem] leading-relaxed text-fg-muted">{change.before}</p>
+          <p className="mt-1.5 font-serif text-[0.95rem] leading-relaxed whitespace-pre-line text-fg-muted">{change.before}</p>
         </div>
         <div className={clsx('rounded-lg p-3', change.kept ? 'bg-surface-muted' : 'bg-brand-50')}>
-          <p className={clsx('text-xs font-semibold', change.kept ? 'text-fg-subtle' : 'text-brand-800')}>{change.kept ? 'Proposed (not applied)' : 'Refined'}</p>
-          <p className={clsx('mt-1.5 font-serif text-[0.95rem] leading-relaxed', change.kept ? 'text-fg-subtle line-through decoration-fg-subtle/40' : 'text-fg')}>
+          <p className={clsx('text-xs font-semibold', change.kept ? 'text-fg-subtle' : 'text-brand-800')}>{change.kept ? 'Proposed (not applied)' : deep ? 'Redrafted' : 'Refined'}</p>
+          <p className={clsx('mt-1.5 font-serif text-[0.95rem] leading-relaxed whitespace-pre-line', change.kept ? 'text-fg-subtle line-through decoration-fg-subtle/40' : 'text-fg')}>
             {change.after}
           </p>
         </div>
@@ -165,8 +165,9 @@ function ChangeItem({ change }: { change: ChangedBlock }) {
 }
 
 export function ChangesPanel({ refinement }: { refinement: RefinementResult }) {
+  const deep = refinement.mode === 'REDRAFT'
   const stats = [
-    { label: 'Passages refined', value: refinement.refinedBlocks, tone: 'text-brand-700' },
+    { label: deep ? 'Passages redrafted' : 'Passages refined', value: refinement.refinedBlocks, tone: 'text-brand-700' },
     { label: 'Kept original', value: refinement.keptOriginal, tone: 'text-amber-700' },
     { label: 'Left untouched', value: refinement.untouchedBlocks, tone: 'text-fg' },
   ]
@@ -182,8 +183,8 @@ export function ChangesPanel({ refinement }: { refinement: RefinementResult }) {
       </div>
       <p className="flex items-start gap-2 text-sm text-fg-muted">
         <Lock className="mt-0.5 size-4 shrink-0 text-brand-600" aria-hidden />
-        Citations, quotations, numbers and links were locked during refinement and checked afterwards. Every change was reviewed by an independent
-        accuracy check.
+        Citations, quotations, numbers and links were locked during {deep ? 'the redraft' : 'refinement'} and checked afterwards. Every change was
+        reviewed by an independent accuracy check.
       </p>
       {refinement.method && <p className="text-xs text-fg-subtle">Method: {refinement.method}</p>}
       {refinement.changes.length === 0 && (
@@ -191,7 +192,7 @@ export function ChangesPanel({ refinement }: { refinement: RefinementResult }) {
       )}
       <div className="space-y-3">
         {refinement.changes.map((c) => (
-          <ChangeItem key={c.blockId} change={c} />
+          <ChangeItem key={c.blockId} change={c} deep={deep} />
         ))}
       </div>
       {refinement.refinedBlocks > refinement.changes.filter((c) => !c.kept).length && (
@@ -353,6 +354,38 @@ export function SourceCheckPanel({ research }: { research: ResearchResult }) {
         ))}
       </ul>
       {research.method && <p className="text-xs text-fg-subtle">Method: {research.method}</p>}
+    </div>
+  )
+}
+
+export function LatexPanel({ latex }: { latex: LatexResult }) {
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        {latex.compiled ? (
+          <Badge tone="brand">
+            <ShieldCheck className="size-3" aria-hidden /> Compiled to PDF by PaperAid
+          </Badge>
+        ) : (
+          <Badge tone="warning">Not compiled: see the warnings</Badge>
+        )}
+        <span className="text-xs text-fg-subtle">
+          {latex.figures} figure{latex.figures === 1 ? '' : 's'} · {latex.equationsConverted} of {latex.equations} equation{latex.equations === 1 ? '' : 's'} converted
+        </span>
+      </div>
+      {latex.warnings.length > 0 ? (
+        <ul className="list-disc space-y-1 pl-5 text-sm text-fg-muted">
+          {latex.warnings.map((w) => (
+            <li key={w}>{w}</li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-sm text-fg-muted">Nothing needs checking by hand.</p>
+      )}
+      <p className="text-xs text-fg-subtle">
+        Download the project from Overview. Open it in Overleaf (New project, then Upload project) or compile main.tex with pdfLaTeX. Citations and your reference list are
+        kept exactly as written; they are not converted to BibTeX, because that would mean guessing.
+      </p>
     </div>
   )
 }

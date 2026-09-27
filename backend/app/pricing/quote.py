@@ -66,16 +66,17 @@ def analysis_usd(settings: Settings, words: int) -> float:
     return _step_usd(settings, "analyse", payload, words)
 
 
-def estimate_scan_usd(settings: Settings, words: int, intensity: str) -> float:
-    """The most the refinement estimate can cost: the lead's analysis of the whole paper plus
-    its draft plan for the share of the paper that intensity allows."""
-    share = 0.25 if intensity == "LIGHT" else 0.5
+def estimate_scan_usd(settings: Settings, words: int, selection: ServiceSelection) -> float:
+    """The most the paid estimate can cost: the lead's analysis of the whole paper plus its draft
+    plan for the share of the paper the service may change (a quarter or a half for refinement,
+    all of it for Deep Redraft)."""
+    share = 1.0 if selection.writing == "REDRAFT" else 0.25 if selection.intensity == "LIGHT" else 0.5
     planned_words = max(150, share * words)
     plan = _step_usd(settings, "plan", planned_words * CHARS_PER_WORD * 1.4 + BRIEF_CHARS * _batches_for(planned_words), planned_words)
     return analysis_usd(settings, words) + plan
 
 
-def refinement_usd(settings: Settings, passages: list[Passage]) -> float:
+def refinement_usd(settings: Settings, passages: list[Passage], deep: bool = False) -> float:
     """The rest of the refinement once the draft plan exists: critique and final plan over every
     planned passage, then rewrite, review, one fix round and a second review of the rewrites."""
     if not passages:
@@ -92,9 +93,10 @@ def refinement_usd(settings: Settings, passages: list[Passage]) -> float:
         n = len(rewrites)
         review_words = 2 * rw_words + n * REVIEW_CONTEXT_CHARS / CHARS_PER_WORD  # context counts toward batch size
         review_chars = 2 * rw_chars + n * (200 + ITEM_OVERHEAD + REVIEW_CONTEXT_CHARS) + BRIEF_CHARS * _batches_for(review_words)
-        usd += _step_usd(settings, "refine", rw_chars + n * (800 + 200 + ITEM_OVERHEAD) + BRIEF_CHARS * _batches_for(rw_words), rw_words)
+        write, fix = ("redraft", "redraft_fix") if deep else ("refine", "repair")
+        usd += _step_usd(settings, write, rw_chars + n * (800 + 200 + ITEM_OVERHEAD) + BRIEF_CHARS * _batches_for(rw_words), rw_words)
         usd += _step_usd(settings, "review", review_chars, review_words)
-        usd += _step_usd(settings, "repair", 2 * rw_chars + n * (400 + ITEM_OVERHEAD) + BRIEF_CHARS * _batches_for(rw_words), rw_words)
+        usd += _step_usd(settings, fix, 2 * rw_chars + n * (400 + ITEM_OVERHEAD) + BRIEF_CHARS * _batches_for(rw_words), rw_words)
         usd += _step_usd(settings, "review", review_chars, review_words)
     return usd
 
@@ -134,6 +136,10 @@ def format_ugx(settings: Settings, words: int) -> int:
     return max(settings.format_min_ugx, math.ceil(words / 300) * settings.format_ugx_per_300_words)
 
 
+def latex_ugx(settings: Settings, words: int) -> int:
+    return max(settings.latex_min_ugx, math.ceil(words / 300) * settings.latex_ugx_per_300_words)
+
+
 def with_margin(ugx_usd: float, settings: Settings) -> int:
     return to_ugx(ugx_usd * (1 + settings.quote_safety_margin), settings)
 
@@ -162,6 +168,10 @@ def price(
         amount = with_margin(analysis_usd(settings, words), settings)
         lines.append(QuoteLine(label="AI Check (up to)", amount=amount))
         ai += amount
+    elif selection.writing == "REDRAFT":
+        amount = with_margin(refinement_usd(settings, passages or [], deep=True), settings)
+        lines.append(QuoteLine(label="Deep redraft (up to)", amount=amount))
+        ai += amount
     elif selection.writing == "REFINE":
         light = selection.intensity == "LIGHT"
         amount = with_margin(refinement_usd(settings, passages or []), settings)
@@ -179,6 +189,10 @@ def price(
         amount = with_margin(template_usd(settings, guide_words), settings)
         lines.append(QuoteLine(label="University template formatting (up to)", amount=amount))
         ai += amount
+    if selection.latex:
+        conversion = latex_ugx(settings, words)
+        lines.append(QuoteLine(label="LaTeX conversion", amount=conversion))
+        fixed += conversion
     return Priced(lines=lines, ai_ugx=ai, fixed_ugx=fixed)
 
 
@@ -216,5 +230,5 @@ def bound_quote(
 
 
 def needs_estimate(selection: ServiceSelection) -> bool:
-    """Only refinement needs a paid AI scan to size the work; everything else is priced from length."""
-    return selection.writing == "REFINE"
+    """Refinement and Deep Redraft need a paid AI scan to size the work; everything else is priced from length."""
+    return selection.writing in ("REFINE", "REDRAFT")

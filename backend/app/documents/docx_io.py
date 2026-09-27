@@ -243,6 +243,7 @@ def read_docx(data: bytes) -> DocumentModel:
                 editable=editable,
                 detected_heading=detected,
                 locked=[s.text for s in segments if s.kind == "opaque"] if editable else [],
+                section_break=p.find(W + "pPr") is not None and p.find(W + "pPr").find(W + "sectPr") is not None,
             )
         )
     warnings = []
@@ -302,6 +303,65 @@ def apply_revisions(data: bytes, revisions: dict[str, str]) -> bytes:
             elif piece:
                 for run in _make_runs(piece, rpr_copy):
                     p.append(run)
+    out = io.BytesIO()
+    doc.save(out)
+    return out.getvalue()
+
+
+def apply_group_rewrites(data: bytes, groups: list[tuple[list[str], list[str], dict[str, tuple[str, str]]]]) -> bytes:
+    """Deep Redraft: replace each group of consecutive body paragraphs with its rewritten
+    paragraphs (there may be more or fewer). Each group is (block ids, new paragraph texts with
+    group-wide ⟦Xg⟧ tokens and ⟦Pn⟧ already restored, token → (block id, the paragraph's own Xn)).
+    Paragraph formatting comes from the originals in order, locked items move back as their
+    original XML wherever the writer placed them, and bookmarks stay in the group's first
+    paragraph. Paragraphs outside the groups are never touched."""
+    doc = Document(io.BytesIO(data))
+    paragraphs = {block_id: p for block_id, p, in_table in iter_paragraphs(doc) if not in_table}
+    for block_ids, texts, tokens in groups:
+        originals = [paragraphs[b] for b in block_ids]
+        opaque: dict[tuple[str, str], list] = {}
+        markers: list = []
+        dominant = None
+        for block_id, p in zip(block_ids, originals, strict=True):
+            segments, _tracked = segment_paragraph(p)
+            if dominant is None:
+                dominant = next((s.elements[0].find(W + "rPr") for s in segments if s.kind == "text"), None)
+            n = 0
+            for s in segments:
+                if s.kind == "opaque":
+                    n += 1
+                    opaque[(block_id, f"X{n}")] = s.elements
+                elif s.kind == "marker":
+                    markers.extend(s.elements)
+        rebuilt = []
+        for i, text in enumerate(texts):
+            template = originals[min(i, len(originals) - 1)].find(W + "pPr")
+            p = OxmlElement("w:p")
+            if template is not None:
+                p.append(deepcopy(template))
+            if i == 0:
+                for el in markers:
+                    p.append(el)
+            for piece in re.split(r"(⟦X\d+⟧)", text):
+                token = TOKEN.fullmatch(piece)
+                if token:
+                    for el in opaque[tokens[token.group(1)]]:
+                        p.append(el)
+                elif piece:
+                    for run in _make_runs(piece, deepcopy(dominant) if dominant is not None else None):
+                        p.append(run)
+            rebuilt.append(p)
+        # Keep each paragraph's position (so blank spacer paragraphs between them stay put).
+        last = None
+        for i in range(max(len(originals), len(rebuilt))):
+            if i < len(originals) and i < len(rebuilt):
+                originals[i].getparent().replace(originals[i], rebuilt[i])
+                last = rebuilt[i]
+            elif i < len(originals):
+                originals[i].getparent().remove(originals[i])
+            elif last is not None:
+                last.addnext(rebuilt[i])
+                last = rebuilt[i]
     out = io.BytesIO()
     doc.save(out)
     return out.getvalue()

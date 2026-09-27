@@ -143,10 +143,12 @@ def writing_report(
 
 
 def change_report(paper_name: str, when: datetime, refinement: RefinementResult) -> bytes:
+    deep = refinement.mode == "REDRAFT"
+    done = "redrafted" if deep else "refined"
     doc = _document("Change report", paper_name, when)
     doc.add_paragraph(
-        f"{refinement.refined_blocks} passages refined · {refinement.kept_original} kept in your original wording · "
-        f"{refinement.untouched_blocks} paragraphs untouched."
+        f"{refinement.refined_blocks} passages {done} · {refinement.kept_original} kept in your original wording · "
+        f"{refinement.untouched_blocks} {'passages' if deep else 'paragraphs'} untouched."
     )
     doc.add_paragraph(
         "Citations, quotations, numbers, links and footnotes were locked during editing and checked afterwards. "
@@ -154,12 +156,12 @@ def change_report(paper_name: str, when: datetime, refinement: RefinementResult)
     )
     _note(doc, f"Refinement method: {refinement.method}.")
     for change in refinement.changes:
-        doc.add_heading(f"{change.section or 'Body'} — {'kept original' if change.kept else 'refined'}", level=3)
+        doc.add_heading(f"{change.section or 'Body'} — {'kept original' if change.kept else done}", level=3)
         label = doc.add_paragraph()
         label.add_run("Your original").bold = True
         doc.add_paragraph(change.before)
         label = doc.add_paragraph()
-        label.add_run("Proposed (not applied)" if change.kept else "Refined").bold = True
+        label.add_run("Proposed (not applied)" if change.kept else done.capitalize()).bold = True
         revised = doc.add_paragraph(change.after)
         if change.kept:
             for run in revised.runs:

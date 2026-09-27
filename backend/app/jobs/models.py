@@ -45,6 +45,7 @@ class Stage(StrEnum):
     REFINING = "REFINING"
     REDRAFTING = "REDRAFTING"
     FORMATTING = "FORMATTING"
+    CONVERTING = "CONVERTING"
     AUDITING = "AUDITING"
     EXPORTING = "EXPORTING"
 
@@ -328,6 +329,7 @@ class ChangedBlock(Camel):
 
 
 class RefinementResult(Camel):
+    mode: Literal["REFINE", "REDRAFT"] = "REFINE"  # REDRAFT: each "block" is a group of paragraphs
     targeted_blocks: int
     refined_blocks: int
     kept_original: int
@@ -353,6 +355,16 @@ class FormattingResult(Camel):
     warnings: list[str]
     evidence: list[RuleEvidence] = []  # where each rule was found in an uploaded guide
     method: str = ""
+
+
+class LatexResult(Camel):
+    """The LaTeX conversion (no AI). `compiled`: PaperAid compiled main.tex into main.pdf."""
+
+    compiled: bool
+    equations: int
+    equations_converted: int
+    figures: int
+    warnings: list[str] = []
 
 
 class OutputFile(Camel):
@@ -421,6 +433,7 @@ class JobView(Camel):
     analysis_after: AnalysisResult | None = None
     paper_checks: PaperChecks | None = None
     research: ResearchResult | None = None
+    latex: LatexResult | None = None
     refinement: RefinementResult | None = None
     formatting: FormattingResult | None = None
     outputs: list[OutputFile] = []
