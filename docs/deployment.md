@@ -149,6 +149,12 @@ firebase deploy --only hosting,firestore:rules,firestore:indexes --project PROJE
 
   Do the same for the worker, then run `firebase hosting:rollback` if the website also needs to go back.
 
+## Release log
+
+| Date | Commit | Image | API revision | Worker revision | Hosting release |
+|---|---|---|---|---|---|
+| 2026-09-27 | `898aa1c` | `backend:v11` (`sha256:114fb0dbd3284f417879b6eb3cb6327ee7d281ad7ab65bd674467eccc54aea0e`) | `paperaid-api-00012-prd` | `paperaid-worker-00012-gfv` | live channel, 2026-09-27 22:40 EAT (web unchanged since `b150929`) |
+
 ## Alerts worth creating (Cloud Monitoring)
 
 - API 5xx rate above 2% for 5 minutes.
