@@ -1,23 +1,23 @@
 import { ArrowLeft, CircleSlash, Clock, Copy, FileSearch, Trash2 } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
-import { Link, useNavigate, useParams } from 'react-router'
+import { Link, Navigate, useNavigate, useParams } from 'react-router'
 import { Button, ButtonLink } from '../../components/ui/button'
 import { Dialog, Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/overlays'
 import { Alert, Card, EmptyState, Skeleton } from '../../components/ui/primitives'
 import { DataError, useData } from '../../lib/data'
 import { formatDate, formatDateTime, formatUGX } from '../../lib/format'
-import type { Job } from '../../lib/types'
+import type { Job, Quote } from '../../lib/types'
 import { useTitle } from '../../lib/use-title'
 import { BandChange, ChangesPanel, DownloadList, FindingsList, FormattingPanel, ScoreCard } from '../results/report'
 import { useJob } from './hooks'
-import { serviceNames, StageTimeline, StatusBadge } from './job-bits'
+import { jobLink, jobTitle, serviceNames, StageTimeline, StatusBadge } from './job-bits'
 
 const isTerminal = (j: Job) => j.status === 'COMPLETED' || j.status === 'FAILED' || j.status === 'CANCELLED'
 
 export function JobPage() {
   const { jobId = '' } = useParams()
   const { job, loading, blocked } = useJob(jobId)
-  useTitle(job?.source.name ?? 'Job')
+  useTitle(job ? jobTitle(job) : 'Job')
 
   if (loading) return <JobSkeleton />
   if (blocked)
@@ -40,6 +40,7 @@ export function JobPage() {
         It may have been deleted, or the link may be wrong.
       </EmptyState>
     )
+  if (job.status === 'DRAFT' || job.status === 'QUOTED') return <Navigate to={jobLink(job)} replace /> // not submitted yet: resume it
 
   return (
     <>
@@ -48,7 +49,7 @@ export function JobPage() {
       </Link>
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <h1 className="text-xl font-bold break-words sm:text-2xl">{job.source.name}</h1>
+          <h1 className="text-xl font-bold break-words sm:text-2xl">{jobTitle(job)}</h1>
           <p className="mt-1 text-sm text-fg-muted">
             {serviceNames(job)} · Submitted {formatDateTime(job.createdAt)}
           </p>
@@ -279,31 +280,35 @@ function JobDetails({ job }: { job: Job }) {
 
   return (
     <>
-      <Card className="p-5">
-        <h2 className="text-sm font-semibold">Quote</h2>
-        <dl className="mt-3 space-y-2 text-sm">
-          {job.quote.lines.map((l) => (
-            <div key={l.label} className="flex justify-between gap-4">
-              <dt className="text-fg-muted">{l.label}</dt>
-              <dd>{formatUGX(l.amount)}</dd>
+      {job.quote && (
+        <Card className="p-5">
+          <h2 className="text-sm font-semibold">Quote</h2>
+          <dl className="mt-3 space-y-2 text-sm">
+            {job.quote.lines.map((l) => (
+              <div key={l.label} className="flex justify-between gap-4">
+                <dt className="text-fg-muted">{l.label}</dt>
+                <dd>{formatUGX(l.amount)}</dd>
+              </div>
+            ))}
+            <div className="flex justify-between gap-4 border-t border-line pt-2 font-semibold">
+              <dt>Most it could cost</dt>
+              <dd>{formatUGX(job.quote.amount)}</dd>
             </div>
-          ))}
-          <div className="flex justify-between gap-4 border-t border-line pt-2 font-semibold">
-            <dt>Most it could cost</dt>
-            <dd>{formatUGX(job.quote.amount)}</dd>
-          </div>
-        </dl>
-        <BillingNote job={job} />
-      </Card>
+          </dl>
+          <BillingNote job={job} quote={job.quote} />
+        </Card>
+      )}
       <Card className="p-5">
         <h2 className="text-sm font-semibold">Details</h2>
         <dl className="mt-3 space-y-2.5 text-sm">
-          <div>
-            <dt className="text-xs text-fg-subtle">Paper</dt>
-            <dd>
-              {job.source.wordCount.toLocaleString('en')} words · ~{job.source.pageEstimate} pages · {job.source.format}
-            </dd>
-          </div>
+          {job.source && (
+            <div>
+              <dt className="text-xs text-fg-subtle">Paper</dt>
+              <dd>
+                {job.source.wordCount.toLocaleString('en')} words · ~{job.source.pageEstimate} pages · {job.source.format}
+              </dd>
+            </div>
+          )}
           <div>
             <dt className="text-xs text-fg-subtle">Job ID</dt>
             <dd className="flex items-center gap-2 font-mono text-xs">
@@ -365,7 +370,7 @@ function JobSkeleton() {
 }
 
 /** Where this job's credits stand: held while it runs, then what was charged and what came back. */
-function BillingNote({ job }: { job: Job }) {
+function BillingNote({ job, quote }: { job: Job; quote: Quote }) {
   const b = job.billing
   const paid = b.feePaid + b.charged
   if (b.state === 'HELD')
@@ -373,7 +378,7 @@ function BillingNote({ job }: { job: Job }) {
   if (b.state === 'SETTLED')
     return (
       <p className="mt-3 rounded-lg bg-brand-50 p-2.5 text-xs font-medium text-brand-800">
-        Charged {formatUGX(paid)}{b.feePaid > 0 && ` (including the ${formatUGX(b.feePaid)} estimate)`}. {job.quote.amount - paid > 0 && `${formatUGX(job.quote.amount - paid)} less than the most it could cost.`}
+        Charged {formatUGX(paid)}{b.feePaid > 0 && ` (including the ${formatUGX(b.feePaid)} estimate)`}. {quote.amount - paid > 0 && `${formatUGX(quote.amount - paid)} less than the most it could cost.`}
       </p>
     )
   if (b.state === 'NONE' && job.paymentStatus === 'NOT_REQUIRED')

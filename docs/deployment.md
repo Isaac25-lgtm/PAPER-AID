@@ -102,7 +102,7 @@ gcloud run deploy paperaid-api --image $IMAGE --region europe-west1 --allow-unau
   --set-env-vars "SERVICE_ROLE=api,$COMMON,WORKER_URL=$WORKER_URL"   --set-secrets ANTHROPIC_API_KEY=anthropic-api-key:latest,OPENAI_API_KEY=openai-api-key:latest
 ```
 
-Only the worker calls AI providers. If a required setting is missing (including either model key), the app refuses to start rather than running insecurely. That includes `SERVICE_ROLE`: each service must say whether it is `api` or `worker`. The worker also re-verifies the Google-signed identity token of `paperaid-tasks` on every call, in addition to Cloud Run IAM.
+Only the worker calls AI providers. If a required security setting is missing, the app refuses to start rather than running insecurely. The model keys are the exception: without both, the AI services show as "Not set up" and cannot be quoted or run, while APA/Harvard formatting keeps working. That includes `SERVICE_ROLE`: each service must say whether it is `api` or `worker`. The worker also re-verifies the Google-signed identity token of `paperaid-tasks` on every call, in addition to Cloud Run IAM.
 
 Downloads need no bucket CORS setup. The API returns a 10-minute signed link, and the browser opens it directly rather than fetching it.
 

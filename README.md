@@ -202,8 +202,8 @@ The automated tests never call a paid provider: scripted stand-ins for both mode
 - [x] Locked citations and numbers, wording fingerprint, honest partial results
 - [x] Admin console with costs, retries and a pause switch
 - [x] **Prepaid credits:** a UGX balance (dollar equivalent shown); each job is priced from its actual AI cost × 2, held on acceptance and settled on completion; refinement is sized by a paid AI estimate first
+- [x] Firebase sign-in (Google and email) and production deployment, in testing mode for invited testers
 - [ ] Mobile-money payments through an aggregator
-- [ ] Firebase sign-in (Google and email) and production deployment
 - [ ] Deep redraft and LaTeX conversion
 
 ## Documentation

@@ -17,7 +17,7 @@ import type {
 
 export interface JobQuery {
   cursor?: string | null
-  status?: JobStatus | 'ALL'
+  status?: JobStatus | 'ALL' // 'DRAFT' lists unfinished drafts (priced or not) that have a paper
   service?: ServiceId | 'ALL'
   search?: string
   limit?: number
@@ -36,6 +36,8 @@ export class DataError extends Error {
 export interface DataSource {
   config: PublicConfig
   listJobs(query: JobQuery): Promise<Page<Job>>
+  /** One of the student's jobs, or null when it no longer exists. */
+  getJob(jobId: string): Promise<Job | null>
   /** Polls a job. `onBlocked` receives the server's message when the request is refused (signed out,
    *  or App Check could not verify the browser); polling then stops until the page is refreshed. */
   watchJob(jobId: string, onChange: (job: Job | null) => void, onBlocked?: (message: string) => void): () => void
@@ -59,7 +61,8 @@ export interface DataSource {
     cancelJob(jobId: string): Promise<void>
     setProcessing(enabled: boolean): Promise<void>
     listWallets(search: string): Promise<WalletSummary[]>
-    grantCredits(email: string, amount: number, note: string): Promise<WalletSummary>
+    /** `opId` identifies one intended grant: sending it again adds nothing. */
+    grantCredits(email: string, amount: number, note: string, opId: string): Promise<WalletSummary>
   }
 }
 

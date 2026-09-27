@@ -1,6 +1,6 @@
 import { clsx } from 'clsx'
 import { ArrowLeft, Copy, Search, Wallet as WalletIcon } from 'lucide-react'
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router'
 import { Button, ButtonLink } from '../../components/ui/button'
 import { Input, Select } from '../../components/ui/field'
@@ -12,7 +12,7 @@ import { SERVICES, SERVICE_ORDER, STAGE_LABELS, STATUS_LABELS } from '../../lib/
 import type { AdminJob, AdminSummary, JobStatus, ServiceId, WalletSummary } from '../../lib/types'
 import { useTitle } from '../../lib/use-title'
 import { walletChanged } from '../../lib/use-wallet'
-import { serviceNames, StatusBadge } from '../jobs/job-bits'
+import { jobTitle, serviceNames, StatusBadge } from '../jobs/job-bits'
 
 const usd = (n: number) => `$${n.toFixed(n < 1 ? 3 : 2)}`
 
@@ -248,7 +248,7 @@ export function AdminJobPage() {
         <div>
           <h1 className="font-mono text-xl font-bold">{job.id}</h1>
           <p className="mt-1 text-sm text-fg-muted">
-            {detail.ownerEmail} · {serviceNames(job)} · {job.source.wordCount.toLocaleString('en')} words
+            {detail.ownerEmail} · {serviceNames(job)} · {job.source ? `${job.source.wordCount.toLocaleString('en')} words` : 'no paper yet'}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -333,15 +333,16 @@ export function AdminJobPage() {
           <Card className="p-5 text-sm">
             <h2 className="font-semibold">Quote &amp; payment</h2>
             <p className="mt-2 text-fg-muted">
-              {formatUGX(job.quote.amount)} · pricing {job.quote.pricingVersion}
+              {job.quote ? `${formatUGX(job.quote.amount)} · pricing ${job.quote.pricingVersion}` : 'Not priced'}
             </p>
             <p className="text-fg-muted">Payment: {job.paymentStatus.replace('_', ' ').toLowerCase()}</p>
           </Card>
           <Card className="p-5 text-sm">
             <h2 className="font-semibold">Files</h2>
-            <p className="mt-2 break-words text-fg-muted">{job.source.name}</p>
+            <p className="mt-2 break-words text-fg-muted">{jobTitle(job)}</p>
             <p className="text-xs text-fg-subtle">
-              {job.source.format} · {job.outputs.length} output files · paper content hidden
+              {job.source ? `${job.source.format} · ` : ''}
+              {job.outputs.length} output files · paper content hidden
             </p>
           </Card>
           <Card className="p-5 text-sm">
@@ -409,6 +410,9 @@ export function AdminCreditsPage() {
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
+  // One id per intended grant: retrying the same grant after an error reuses it, so a grant whose
+  // response was lost is never added twice. A success or different details start a new one.
+  const operation = useRef<{ key: string; id: string } | null>(null)
 
   const load = useCallback((term: string) => data.admin.listWallets(term).then(setWallets), [data])
   useEffect(() => {
@@ -422,8 +426,11 @@ export function AdminCreditsPage() {
     if (!Number.isInteger(value) || value <= 0) return setResult({ tone: 'danger', text: 'Enter a whole number of UGX above zero.' })
     setBusy(true)
     setResult(null)
+    const key = `${email.trim().toLowerCase()}|${value}|${note}`
+    if (operation.current?.key !== key) operation.current = { key, id: crypto.randomUUID() }
     try {
-      const updated = await data.admin.grantCredits(email.trim(), value, note)
+      const updated = await data.admin.grantCredits(email.trim(), value, note, operation.current.id)
+      operation.current = null
       setResult({ tone: 'success', text: `Added ${formatUGX(value)} to ${updated.email}. Their balance is now ${formatUGX(updated.available)}.` })
       walletChanged() // the admin may have credited their own account
       setAmount('')

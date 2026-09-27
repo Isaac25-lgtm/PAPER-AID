@@ -112,6 +112,27 @@ class Quote(Camel):
     expires_at: datetime
 
 
+class Engine(Camel):
+    """What a run executes with, frozen when it is priced: the two models and the prompt version of
+    every algorithm step. A job runs with its quote's engine even if PaperAid is updated meanwhile,
+    so the calls its estimate made replay from the cache instead of being paid for again."""
+
+    lead_model: str
+    writer_model: str
+    prompts: dict[str, str]  # step → prompt version (released prompt files never change)
+
+
+class Passage(Camel):
+    """A passage the refinement plan covers: its size and whether the plan rewrites it."""
+
+    model_config = ConfigDict(frozen=True)
+
+    chars: int
+    words: int
+    rewrite: bool
+    instruction_chars: int = 200
+
+
 class BoundQuote(Quote):
     """The server copy of a quote, bound to the exact file and selection that were priced."""
 
@@ -122,6 +143,7 @@ class BoundQuote(Quote):
     fixed_ugx: int = 0  # the part not priced from AI cost (APA/Harvard formatting)
     ugx_per_usd: float = 0.0  # frozen with the quote so a later rate change can't alter it
     multiplier: float = 0.0
+    engine: Engine | None = None  # None only on quotes issued before engines were recorded
 
 
 # --- credits ---------------------------------------------------------------------------------
@@ -144,6 +166,9 @@ class EstimateRun(EstimateView):
     budget_usd: float
     cost_base_usd: float = 0.0  # the job's estimate spend before this run; the run's cost is the rise from here
     held: bool = True  # False in testing mode: nothing was held, so nothing is charged
+    engine: Engine | None = None
+    passages: list[Passage] = []  # the result, kept so an expired quote is repriced without a new scan
+    guide_words: int = 0
     attempts: int = 0
     lease_until: datetime | None = None
     requested_at: datetime = Field(default_factory=utcnow)
@@ -153,7 +178,7 @@ class Billing(Camel):
     """Where this job's credits stand. Every amount is UGX."""
 
     state: Literal["NONE", "HELD", "SETTLED", "RELEASED"] = "NONE"
-    fee_paid: int = 0  # the estimate charge, counted toward this job
+    fee_paid: int = 0  # every estimate charged on this job and not refunded; counts toward its quote
     held: int = 0
     charged: int = 0  # final charge for the job itself, excluding the fee
     refunded: int = 0
@@ -168,6 +193,8 @@ class LedgerEntry(Camel):
     note: str
     available_after: int
     held_after: int
+    op_id: str | None = None  # a manual grant's operation id: repeating the request adds nothing
+    actor: str | None = None  # who made a manual grant
 
 
 class WalletView(Camel):
@@ -358,6 +385,7 @@ class Job(JobView):
     admin_actions: list[AdminAction] = []
     failure_detail: str | None = None
     files_deleted: bool = False
+    deleting: bool = False  # set atomically before deletion: no new work may start on the job
 
     def view(self) -> JobView:
         return JobView.model_validate(self.model_dump())

@@ -88,6 +88,8 @@ export interface LedgerEntry {
   note: string
   availableAfter: number
   heldAfter: number
+  opId?: string | null
+  actor?: string | null
 }
 
 export interface Wallet {
@@ -187,9 +189,9 @@ export interface Job {
   selection: ServiceSelection
   services: ServiceId[]
   pipeline: Stage[]
-  source: FileMeta
+  source: FileMeta | null // null only on a draft before its upload
   guideline: FileMeta | null
-  quote: Quote
+  quote: Quote | null // null on a draft that has not been priced
   estimate: EstimateView | null
   billing: Billing
   outcome: 'FULL' | 'PARTIAL' | null
@@ -213,12 +215,14 @@ export interface Page<T> {
 
 export interface ModelCall {
   stage: Stage
+  phase: 'estimate' | 'job'
   provider: string
   model: string
   promptVersion: string
   inputTokens: number
   outputTokens: number
   cachedTokens: number
+  cacheWriteTokens: number
   latencyMs: number
   costUsd: number
 }

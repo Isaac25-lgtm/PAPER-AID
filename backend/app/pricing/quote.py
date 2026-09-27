@@ -10,12 +10,14 @@ Every amount is rounded up to the next UGX 100.
 """
 
 import math
+import secrets
 from dataclasses import dataclass
+from datetime import timedelta
 
 from app.ai import costs
 from app.ai.orchestration import BATCH_WORDS, PROMPTS, STEPS
 from app.core.config import Settings
-from app.jobs.models import QuoteLine, ServiceSelection
+from app.jobs.models import BoundQuote, Engine, Passage, QuoteLine, ServiceSelection, utcnow
 
 PRICING_VERSION = "credits-v1"
 CHARS_PER_WORD = 6.5  # prose plus JSON framing, measured on the fixture papers
@@ -44,16 +46,6 @@ def _step_usd(settings: Settings, task: str, payload_chars: float, words: float)
     batches = max(1, math.ceil(words / BATCH_WORDS))
     per_batch = len(PROMPTS[step.prompt]) + payload_chars / batches
     return batches * costs.estimate_usd(provider, model, int(per_batch), step.max_tokens, settings.model_prices)
-
-
-@dataclass(frozen=True)
-class Passage:
-    """A passage the plan covers: its text and whether the plan rewrites it."""
-
-    chars: int
-    words: int
-    rewrite: bool
-    instruction_chars: int = 200
 
 
 # --- projections (USD of provider spend) ------------------------------------------------------
@@ -155,6 +147,39 @@ def price(
         lines.append(QuoteLine(label="University template formatting (up to)", amount=amount))
         ai += amount
     return Priced(lines=lines, ai_ugx=ai, fixed_ugx=fixed)
+
+
+def bound_quote(
+    settings: Settings,
+    selection: ServiceSelection,
+    source_sha256: str,
+    words: int,
+    engine: Engine,
+    guideline_sha256: str | None = None,
+    guide_words: int = 0,
+    passages: list[Passage] | None = None,
+    fee_paid: int = 0,
+) -> BoundQuote:
+    """A quote bound to the exact files, selection and engine it priced, with the rate and
+    multiplier frozen. `fee_paid` is every estimate already charged on the job: it counts toward the
+    quote, so accepting holds only the rest."""
+    priced = price(settings, selection, words, guide_words, passages, fee_paid)
+    return BoundQuote(
+        id=f"quote_{secrets.token_hex(6)}",
+        lines=priced.lines,
+        amount=sum(line.amount for line in priced.lines),
+        paid=fee_paid,
+        pricing_version=PRICING_VERSION,
+        expires_at=utcnow() + timedelta(minutes=settings.quote_ttl_minutes),
+        selection=selection,
+        source_sha256=source_sha256,
+        guideline_sha256=guideline_sha256,
+        word_count=words,
+        fixed_ugx=priced.fixed_ugx,
+        ugx_per_usd=settings.ugx_per_usd,
+        multiplier=settings.price_multiplier,
+        engine=engine,
+    )
 
 
 def needs_estimate(selection: ServiceSelection) -> bool:

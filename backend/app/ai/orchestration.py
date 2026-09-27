@@ -45,7 +45,7 @@ from app.core.config import Settings
 from app.core.errors import PermanentStageError, RetryableStageError
 from app.documents import protect
 from app.formatting.guideline import SPEC_SCHEMA
-from app.jobs.models import ModelCall, Stage
+from app.jobs.models import Engine, ModelCall, Stage
 
 PROMPTS = {p.stem: p.read_text(encoding="utf-8") for p in (Path(__file__).parent / "prompts").glob("*.md")}
 BATCH_WORDS = 1500
@@ -77,6 +77,13 @@ STEPS: dict[str, Step] = {
     "spec_review": Step("lead", Stage.FORMATTING, "spec-review-v1", 6000),
     "spec_fix": Step("writer", Stage.FORMATTING, "spec-fix-v1", 8000),
 }
+
+
+
+def current_engine(settings: Settings) -> Engine:
+    """The engine a run priced now will execute with (see `Engine`)."""
+    return Engine(lead_model=settings.lead_model, writer_model=settings.writer_model, prompts={task: step.prompt for task, step in STEPS.items()})
+
 
 REASONS = ["GENERIC_PHRASING", "UNIFORM_STRUCTURE", "LOW_SPECIFICITY", "FORMULAIC_TRANSITIONS", "OVER_HEDGING", "UNSUPPORTED_SUMMARY"]
 REVIEW_ISSUES = ["MEANING_DRIFT", "NUMBER_CHANGED", "CITATION_LOST", "INVENTED_CLAIM", "BROKEN_TRANSITION", "VOICE_SHIFT", "INSTRUCTION_NOT_FOLLOWED"]
@@ -271,8 +278,10 @@ class AIRunner:
         cache: ResponseCache | None = None,
         heartbeat: Callable[[], None] | None = None,
         phase: Literal["estimate", "job"] = "job",
+        engine: Engine | None = None,
     ):
         self.settings = settings
+        self._engine = engine or current_engine(settings)
         self._phase = phase
         self._record = record
         self._spent = spent
@@ -283,14 +292,18 @@ class AIRunner:
         self._heartbeat = heartbeat or (lambda: None)
 
     def model_for(self, task: str) -> str:
-        return self.settings.lead_model if STEPS[task].role == "lead" else self.settings.writer_model
+        return self._engine.lead_model if STEPS[task].role == "lead" else self._engine.writer_model
+
+    def _prompt_for(self, task: str) -> str:
+        return self._engine.prompts.get(task, STEPS[task].prompt)  # a step added after pricing uses its current prompt
 
     def _call[T: BaseModel](self, task: str, payload: dict[str, Any], schema: dict[str, Any], shape: type[T]) -> T | None:
         """Returns the schema-validated answer, or None when the response was cut off. Only answers
         that passed validation are cached, so a retry never replays a bad response."""
         step = STEPS[task]
         model_ref = self.model_for(task)
-        system = PROMPTS[step.prompt]
+        prompt = self._prompt_for(task)
+        system = PROMPTS[prompt]
         key = hashlib.sha256(json.dumps([task, model_ref, system, payload], sort_keys=True).encode()).hexdigest()[:40]
         cached = self._cache.get(key) if self._cache else None
         if cached is not None:
@@ -317,7 +330,7 @@ class AIRunner:
                 phase=self._phase,
                 provider=result.provider,
                 model=result.model,
-                prompt_version=step.prompt,
+                prompt_version=prompt,
                 input_tokens=u.input_tokens,
                 output_tokens=u.output_tokens,
                 cached_tokens=u.cached_tokens,

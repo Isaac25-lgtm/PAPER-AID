@@ -36,6 +36,16 @@ def top_up(w: Wallet, amount: int, note: str) -> Wallet:
     return _record(w, "TOP_UP", amount, None, note)
 
 
+def grant(w: Wallet, amount: int, note: str, op_id: str, actor: str) -> Wallet:
+    """A manual grant, at most once per operation id (a retried request finds its entry and adds
+    nothing). The id is looked up in the kept ledger, which spans far longer than any retry."""
+    if any(e.op_id == op_id for e in w.entries):
+        return w
+    top_up(w, amount, note)
+    w.entries[-1].op_id, w.entries[-1].actor = op_id, actor
+    return w
+
+
 def hold(w: Wallet, amount: int, job_id: str, note: str) -> Wallet:
     if amount < 0:
         raise ValueError("negative hold")

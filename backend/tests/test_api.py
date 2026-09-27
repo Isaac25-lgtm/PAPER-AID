@@ -558,13 +558,13 @@ def test_a_quote_is_not_saved_for_files_that_changed_while_pricing(client, monke
 
     job_id = client.post("/api/jobs", headers=STUDENT).json()["id"]
     _upload(client, job_id, "source", "simple_essay.docx")
-    original = service.price
+    original = service._rate_limit
 
     def upload_meanwhile(*args, **kwargs):
         _upload(client, job_id, "source", "fake_headings.docx")  # lands between reading the job and saving the quote
         return original(*args, **kwargs)
 
-    monkeypatch.setattr(service, "price", upload_meanwhile)
+    monkeypatch.setattr(service, "_rate_limit", upload_meanwhile)
     response = client.post(f"/api/jobs/{job_id}/quote", headers=STUDENT, json={"selection": {"formatting": "FORMAT", "preset": "apa7"}})
     assert response.status_code == 409 and response.json()["code"] == "FILES_CHANGED"
     assert get_runtime().store.get(job_id).quote is None
@@ -697,10 +697,10 @@ def test_formatting_only_is_charged_its_fixed_price(client):
 def test_only_admins_grant_credits_and_only_to_known_accounts(client):
     client.get("/api/wallet", headers=STUDENT)
     before = _wallet(client)["available"]
-    granted = client.post("/api/admin/credits", headers=ADMIN, json={"email": "student@example.com", "amount": 5_000, "note": ""}).json()
+    granted = client.post("/api/admin/credits", headers=ADMIN, json={"email": "student@example.com", "amount": 5_000, "note": "", "opId": "grant-test-1"}).json()
     assert granted["available"] == before + 5_000
-    assert client.post("/api/admin/credits", headers=STUDENT, json={"email": "student@example.com", "amount": 5_000}).status_code == 403
-    assert client.post("/api/admin/credits", headers=ADMIN, json={"email": "nobody@example.com", "amount": 5_000}).status_code == 404
+    assert client.post("/api/admin/credits", headers=STUDENT, json={"email": "student@example.com", "amount": 5_000, "opId": "grant-test-2"}).status_code == 403
+    assert client.post("/api/admin/credits", headers=ADMIN, json={"email": "nobody@example.com", "amount": 5_000, "opId": "grant-test-3"}).status_code == 404
     assert _wallet(client)["testCredits"] is True and _wallet(client)["entries"][0]["kind"] == "TOP_UP"
 
 
@@ -816,3 +816,200 @@ def test_admins_never_receive_paper_text_and_expiry_purges_it(client):
     expired = client.get(f"/api/jobs/{job_id}", headers=STUDENT).json()
     assert all(c["before"] == "" for c in expired["refinement"]["changes"])
     assert all(f["excerpt"] == "" for f in expired["analysis"]["findings"])
+
+
+
+# --- money lifecycle (Codex audit, 2026-09-27) ------------------------------------------------
+
+
+def _expire_quote(job_id):
+    from datetime import timedelta
+
+    from app.jobs.models import utcnow
+    from app.runtime import get_runtime
+
+    def expire(j):
+        j.quote.expires_at = utcnow() - timedelta(minutes=1)
+        return j
+
+    get_runtime().store.update(job_id, expire)
+
+
+def test_an_expired_quote_is_repriced_from_the_finished_estimate_and_keeps_its_fee(client, monkeypatch):
+    _priced_models(client, monkeypatch)
+    start = _wallet(client)["available"]
+    job_id, quote = start_job(client)
+    fee = quote["paid"]
+    assert fee > 0
+    _expire_quote(job_id)
+    calls = len(client.models.tasks)
+    again = client.post(f"/api/jobs/{job_id}/quote", headers=STUDENT, json={"selection": REFINE_FORMAT, "startEstimate": True}).json()
+    assert again["quote"]["id"] != quote["id"] and again["quote"]["paid"] == fee
+    assert len(client.models.tasks) == calls  # repriced from the saved result: no new scan, no new fee
+    assert _wallet(client)["available"] == start - fee
+
+    client.models.refuse.add("critique")
+    client.post(f"/api/jobs/{job_id}/submit", headers=STUDENT, json={"quoteId": again["quote"]["id"]})
+    job = wait(client, job_id)
+    assert job["status"] == "FAILED" and job["billing"]["refunded"] == fee
+    assert (_wallet(client)["available"], _wallet(client)["held"]) == (start, 0)
+
+
+def test_a_second_estimate_keeps_the_first_fee_on_the_job(client, monkeypatch):
+    _priced_models(client, monkeypatch)
+    start = _wallet(client)["available"]
+    job_id, first = start_job(client)
+    light = {**REFINE_FORMAT, "intensity": "LIGHT"}
+    second = get_quote(client, job_id, light)
+    job = client.get(f"/api/jobs/{job_id}", headers=STUDENT).json()
+    assert second["paid"] == first["paid"] + job["estimate"]["fee"] == job["billing"]["feePaid"]
+    assert _wallet(client)["available"] == start - second["paid"]
+
+
+def test_the_job_runs_with_the_engine_it_was_priced_with(client, monkeypatch):
+    """A deploy that changes a prompt between estimate and submit must not re-bill the estimate's calls."""
+    from app.ai import orchestration
+    from app.jobs.models import Stage
+
+    job_id, quote = start_job(client)
+    monkeypatch.setitem(orchestration.PROMPTS, "plan-v0-test", "An updated planning prompt.")
+    monkeypatch.setitem(orchestration.STEPS, "plan", orchestration.Step("lead", Stage.PLANNING, "plan-v0-test", 12000))
+    client.post(f"/api/jobs/{job_id}/submit", headers=STUDENT, json={"quoteId": quote["id"]})
+    assert wait(client, job_id)["status"] == "COMPLETED"
+    assert client.models.tasks.count("plan") == 1 and client.models.tasks.count("analyse") == 1
+
+
+def test_released_prompts_never_change():
+    """Runs pin prompt versions (see Engine), so a released prompt file is frozen: change a prompt by
+    adding the next version and pointing STEPS at it. New prompts are added to released.json."""
+    import hashlib
+    from pathlib import Path
+
+    from app.ai.orchestration import STEPS
+
+    folder = Path(__file__).parents[1] / "app" / "ai" / "prompts"
+    released = json.loads((folder / "released.json").read_text(encoding="utf-8"))
+    current = {p.stem: hashlib.sha256(p.read_text(encoding="utf-8").replace("\r\n", "\n").encode()).hexdigest() for p in folder.glob("*.md")}
+    assert {name: current.get(name) for name in released} == released  # none edited or deleted
+    assert {step.prompt for step in STEPS.values()} <= set(released)
+
+
+def test_admin_retry_follows_the_current_credit_mode(client, monkeypatch):
+    from app.jobs import state
+    from app.jobs.models import JobFailure, JobStatus
+    from app.pricing.billing import refund_job
+    from app.runtime import get_runtime
+
+    rt = get_runtime()
+    start = _wallet(client)["available"]
+    rt.store.set_flag("processing_enabled", False)
+    job_id, quote = start_job(client, selection={"formatting": "FORMAT", "preset": "apa7"})
+    client.post(f"/api/jobs/{job_id}/submit", headers=STUDENT, json={"quoteId": quote["id"]})
+
+    def fail(j, w):
+        refund_job(j, w, "failed")
+        j.failure = JobFailure(code="PROVIDER_UNAVAILABLE", user_message="delayed", retryable=True)
+        return state.transition(j, JobStatus.FAILED), w
+
+    rt.store.update_job_and_wallet(job_id, fail)
+    rt.store.set_flag("processing_enabled", True)
+    monkeypatch.setattr(rt.settings, "credits_enabled", False)
+    client.post(f"/api/admin/jobs/{job_id}/retry", headers=ADMIN)
+    job = wait(client, job_id)
+    assert job["status"] == "COMPLETED" and job["paymentStatus"] == "NOT_REQUIRED" and job["billing"]["state"] == "NONE"
+    assert (_wallet(client)["available"], _wallet(client)["held"]) == (start, 0)
+
+
+def test_no_work_can_start_on_a_job_being_deleted(client, monkeypatch):
+    """The race Codex reproduced: an estimate started between deletion's check and its delete."""
+    from app.jobs import service
+
+    job_id = client.post("/api/jobs", headers=STUDENT).json()["id"]
+    _upload(client, job_id, "source", "simple_essay.docx")
+    original = service._erase
+    raced = []
+
+    def estimate_meanwhile(rt, job):
+        raced.append(client.post(f"/api/jobs/{job_id}/quote", headers=STUDENT, json={"selection": REFINE_FORMAT, "startEstimate": True}))
+        raced.append(_upload(client, job_id, "source", "fake_headings.docx"))
+        original(rt, job)
+
+    monkeypatch.setattr(service, "_erase", estimate_meanwhile)
+    assert client.delete(f"/api/jobs/{job_id}", headers=STUDENT).status_code == 204
+    assert all(r.status_code == 409 for r in raced), [r.json() for r in raced]
+    assert _wallet(client)["held"] == 0
+
+
+def test_account_deletion_touches_nothing_while_a_job_runs(client):
+    from app.runtime import get_runtime
+
+    rt = get_runtime()
+    headers = {"Authorization": "Dev leaving@example.com"}
+    grant("leaving@example.com", 50_000)
+    done, quote = start_job(client, selection={"formatting": "FORMAT", "preset": "apa7"}, headers=headers)
+    client.post(f"/api/jobs/{done}/submit", headers=headers, json={"quoteId": quote["id"]})
+    wait(client, done, headers=headers)
+    rt.store.set_flag("processing_enabled", False)
+    running, quote = start_job(client, selection={"formatting": "FORMAT", "preset": "apa7"}, headers=headers)
+    client.post(f"/api/jobs/{running}/submit", headers=headers, json={"quoteId": quote["id"]})
+    response = client.delete("/api/me", headers=headers)
+    assert response.status_code == 409 and response.json()["code"] == "JOB_ACTIVE"
+    kept = rt.store.get(done)
+    assert kept is not None and not kept.deleting  # the claim on the finished job was released
+
+
+def test_repeating_a_grant_request_adds_credits_once(client):
+    client.get("/api/wallet", headers=STUDENT)
+    before = _wallet(client)["available"]
+    body = {"email": "student@example.com", "amount": 5_000, "note": "refund", "opId": "op-refund-0001"}
+    first = client.post("/api/admin/credits", headers=ADMIN, json=body).json()
+    repeat = client.post("/api/admin/credits", headers=ADMIN, json=body).json()
+    assert first["available"] == repeat["available"] == before + 5_000
+    other = client.post("/api/admin/credits", headers=ADMIN, json={**body, "opId": "op-refund-0002"}).json()
+    assert other["available"] == before + 10_000
+    entry = next(e for e in _wallet(client)["entries"] if e.get("opId") == "op-refund-0001")
+    assert entry["actor"] == "demo@paperaid.app"
+
+
+def test_local_job_and_wallet_change_survives_a_failed_write(tmp_path, monkeypatch):
+    """Codex #7: the wallet was written and the job write failed, so a retry held twice."""
+    import pytest
+
+    from app.integrations.store import LocalJobStore
+    from app.jobs.models import Job, JobStatus, utcnow
+    from app.pricing import credits
+
+    store = LocalJobStore(tmp_path)
+    store.create(Job(id="job_abc123", status=JobStatus.QUOTED, owner_uid="u1", owner_email="a@b.co", expires_at=utcnow()))
+    store.update_wallet("u1", "a@b.co", lambda w: credits.top_up(w, 10_000, "test"))
+
+    def hold_once(j, w):
+        if j.billing.state == "HELD":
+            return j, w  # already done: the operation is idempotent through the job record
+        credits.hold(w, 2_000, j.id, "hold")
+        j.billing.held, j.billing.state = 2_000, "HELD"
+        return j, w
+
+    original, calls = store._write, []
+
+    def failing_write(job):
+        calls.append(job.id)
+        if len(calls) == 1:
+            raise OSError("disk full")
+        original(job)
+
+    monkeypatch.setattr(store, "_write", failing_write)
+    with pytest.raises(OSError):
+        store.update_job_and_wallet("job_abc123", hold_once)
+    job, wallet = store.update_job_and_wallet("job_abc123", hold_once)  # the retry sees the finished change
+    assert job.billing.held == wallet.held == 2_000 and wallet.available == 8_000
+    assert LocalJobStore(tmp_path).get("job_abc123").billing.state == "HELD"
+
+
+def test_unfinished_drafts_are_listed_for_resuming(client):
+    job_id, quote = start_job(client, selection={"formatting": "FORMAT", "preset": "apa7"})
+    client.post("/api/jobs", headers=STUDENT)  # an empty draft (no paper) is not worth resuming
+    drafts = client.get("/api/jobs?status=DRAFT", headers=STUDENT).json()["items"]
+    assert [d["id"] for d in drafts] == [job_id] and drafts[0]["quote"]["id"] == quote["id"]
+    assert job_id not in [j["id"] for j in client.get("/api/jobs", headers=STUDENT).json()["items"]]
+    assert client.get("/api/jobs?status=DRAFT", headers=OTHER).json()["items"] == []

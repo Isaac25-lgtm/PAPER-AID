@@ -50,8 +50,23 @@ class LocalJobStore:
         self._flags_path = root / "flags.json"
         self._wallets = root / "wallets"
         self._wallets.mkdir(parents=True, exist_ok=True)
+        # A job and its wallet are two files. Their paired change is first written, whole, to this
+        # journal; it is removed only after both files are replaced. A leftover journal (a crash or
+        # a failed write in between) is applied before anything is read again, so the two files
+        # can never be seen disagreeing.
+        self._journal = root / "pending-pair.json"
         self._lock = threading.RLock()
         self._hits: dict[str, list[float]] = {}
+        with self._lock:
+            self._recover()
+
+    def _recover(self) -> None:
+        if not self._journal.exists():
+            return
+        pending = json.loads(self._journal.read_text(encoding="utf-8"))
+        self._write_wallet(Wallet.model_validate(pending["wallet"]))
+        self._write(Job.model_validate(pending["job"]))
+        self._journal.unlink()
 
     def _path(self, job_id: str) -> Path:
         if not job_id.replace("_", "").isalnum():
@@ -71,6 +86,7 @@ class LocalJobStore:
     def get(self, job_id: str) -> Job | None:
         path = self._path(job_id)
         with self._lock:
+            self._recover()
             return Job.model_validate_json(path.read_text(encoding="utf-8")) if path.exists() else None
 
     def update(self, job_id: str, mutate: Mutator) -> Job | None:
@@ -89,6 +105,7 @@ class LocalJobStore:
 
     def _all(self) -> list[Job]:
         with self._lock:
+            self._recover()
             return [Job.model_validate_json(p.read_text(encoding="utf-8")) for p in self._dir.glob("*.json")]
 
     def list(self, owner_uid, statuses, service, cursor, limit):
@@ -142,6 +159,7 @@ class LocalJobStore:
     def get_wallet(self, uid: str) -> Wallet | None:
         path = self._wallet_path(uid)
         with self._lock:
+            self._recover()
             return Wallet.model_validate_json(path.read_text(encoding="utf-8")) if path.exists() else None
 
     def update_wallet(self, uid: str, email: str, mutate: WalletMutator) -> Wallet | None:
@@ -160,13 +178,16 @@ class LocalJobStore:
             wallet = self.get_wallet(job.owner_uid) or Wallet(uid=job.owner_uid, email=job.owner_email)
             result = mutate(job, wallet)
             if result is not None:
-                # wallet first: if the job write then failed, a restart reconciles from the job record
-                self._write_wallet(result[1])
-                self._write(result[0])
+                tmp = self._journal.with_suffix(".tmp")
+                pair = {"job": json.loads(_dump(result[0])), "wallet": json.loads(result[1].model_dump_json(by_alias=True))}
+                tmp.write_text(json.dumps(pair), encoding="utf-8")
+                tmp.replace(self._journal)  # the change is now durable as one unit
+                self._recover()
             return result
 
     def find_wallets(self, email_contains: str | None, limit: int) -> list[Wallet]:
         with self._lock:
+            self._recover()
             wallets = [Wallet.model_validate_json(p.read_text(encoding="utf-8")) for p in self._wallets.glob("*.json")]
         term = (email_contains or "").strip().lower()
         matches = [w for w in wallets if term in w.email.lower()]

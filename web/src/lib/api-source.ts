@@ -58,6 +58,12 @@ export function createApiSource({ config, getAuthHeaders }: Options): DataSource
     listJobs: (q: JobQuery) =>
       request<Page<Job>>(`/api/jobs${query({ status: q.status, service: q.service, cursor: q.cursor, limit: q.limit })}`),
 
+    getJob: (jobId) =>
+      request<Job>(`/api/jobs/${encodeURIComponent(jobId)}`).catch((err: unknown) => {
+        if (err instanceof DataError && err.status === 404) return null
+        throw err
+      }),
+
     watchJob(jobId, onChange, onBlocked) {
       let stopped = false
       let failures = 0
@@ -170,7 +176,8 @@ export function createApiSource({ config, getAuthHeaders }: Options): DataSource
         await request<{ processingEnabled: boolean }>('/api/admin/processing', { method: 'POST', body: JSON.stringify({ enabled }) })
       },
       listWallets: (search) => request<WalletSummary[]>(`/api/admin/wallets${query({ search })}`),
-      grantCredits: (email, amount, note) => request<WalletSummary>('/api/admin/credits', { method: 'POST', body: JSON.stringify({ email, amount, note }) }),
+      grantCredits: (email, amount, note, opId) =>
+        request<WalletSummary>('/api/admin/credits', { method: 'POST', body: JSON.stringify({ email, amount, note, opId }) }),
     },
   }
 }

@@ -12,12 +12,11 @@ being saved; the job's spend ceiling bounds even that."""
 import hashlib
 import json
 import logging
-import secrets
 from datetime import timedelta
 from pathlib import PurePosixPath
 from typing import Any, Literal
 
-from app.ai.orchestration import NOT_RETURNED, AIRunner, PlanItem, Revision, Target
+from app.ai.orchestration import NOT_RETURNED, AIRunner, PlanItem, Revision, Target, current_engine
 from app.analysis import signals
 from app.core.errors import InvalidDocument, PermanentStageError, StageError
 from app.core.logging import job_id as job_id_var
@@ -32,8 +31,6 @@ from app.formatting.presets import PRESETS
 from app.jobs import state
 from app.jobs.models import (
     AnalysisResult,
-    Billing,
-    BoundQuote,
     ChangedBlock,
     Finding,
     FormattingResult,
@@ -51,7 +48,7 @@ from app.jobs.models import (
 from app.jobs.service import DOCX_TYPE, processing_enabled, task_name
 from app.pricing import credits
 from app.pricing.billing import refund_job, settle_completed
-from app.pricing.quote import PRICING_VERSION, Passage, price, to_ugx
+from app.pricing.quote import Passage, bound_quote, to_ugx
 from app.reports.builder import change_report, writing_report
 from app.runtime import Runtime
 
@@ -156,7 +153,11 @@ class StageContext:
             return current.cost_usd - current.estimate_cost_usd
 
         budget = estimate.budget_usd if estimate is not None else self.job.budget_usd
-        return AIRunner(self.rt.settings, record, spent, budget, cache=_ResponseCache(self), heartbeat=self.heartbeat, phase=self.phase)
+        # The run executes with the engine it was priced with (its estimate's, then its quote's).
+        engine = estimate.engine if estimate is not None else self.job.quote.engine if self.job.quote else None
+        return AIRunner(
+            self.rt.settings, record, spent, budget, cache=_ResponseCache(self), heartbeat=self.heartbeat, phase=self.phase, engine=engine
+        )
 
 
 class _ResponseCache:
@@ -328,32 +329,27 @@ def _run_estimate_task(rt: Runtime, job_id: str) -> None:
 
 def _finish_estimate(rt: Runtime, job_id: str, run_id: str, passages: list[Passage], guide_words: int) -> None:
     settings = rt.settings
-    now = utcnow()
 
     def finish(j: Job, w: Wallet) -> tuple[Job, Wallet] | None:
         run = j.estimate
         if j.status != JobStatus.DRAFT or run is None or run.id != run_id or run.status != "RUNNING" or j.source is None:
             return None
         fee = min(run.fee_cap, to_ugx(j.estimate_cost_usd - run.cost_base_usd, settings)) if run.held else 0
-        priced = price(settings, run.selection, j.source.word_count, guide_words, passages, fee_paid=fee)
         if run.held:
             credits.settle(w, held=run.fee_cap, charge=fee, job_id=j.id, note="AI estimate")
         run.status, run.fee, run.lease_until = "READY", fee, None
-        j.billing = Billing(fee_paid=fee)
-        j.quote = BoundQuote(
-            id=f"quote_{secrets.token_hex(6)}",
-            lines=priced.lines,
-            amount=sum(line.amount for line in priced.lines),
-            paid=fee,
-            pricing_version=PRICING_VERSION,
-            expires_at=now + timedelta(minutes=settings.quote_ttl_minutes),
-            selection=run.selection,
-            source_sha256=run.source_sha256,
-            guideline_sha256=run.guideline_sha256,
-            word_count=j.source.word_count,
-            fixed_ugx=priced.fixed_ugx,
-            ugx_per_usd=settings.ugx_per_usd,
-            multiplier=settings.price_multiplier,
+        run.passages, run.guide_words = passages, guide_words
+        j.billing.fee_paid += fee  # earlier estimates on this job stay counted (and refundable)
+        j.quote = bound_quote(
+            settings,
+            run.selection,
+            run.source_sha256,
+            j.source.word_count,
+            run.engine or current_engine(settings),
+            run.guideline_sha256,
+            guide_words,
+            passages,
+            fee_paid=j.billing.fee_paid,
         )
         j.selection = run.selection
         state.transition(j, JobStatus.QUOTED, f"Estimate ready (UGX {fee:,} charged)")

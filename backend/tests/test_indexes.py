@@ -69,7 +69,7 @@ def shapes():
     rt = Runtime(Settings(_env_file=None), _Store(recorded), files=None)  # type: ignore[arg-type]
     user = service.User(uid="u1", email="a@b.co", is_admin=False)
     service.delete_account(rt, user)
-    for status in (None, "COMPLETED"):
+    for status in (None, "COMPLETED", "DRAFT"):
         for svc in (None, "REFINE"):
             service.list_jobs(rt, user, status, svc, None, 20)
             service.admin_list(rt, status, svc, None, None, 20)

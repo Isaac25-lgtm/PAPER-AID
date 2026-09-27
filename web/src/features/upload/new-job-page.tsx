@@ -1,7 +1,7 @@
 import { clsx } from 'clsx'
 import { ArrowRight, Check, CheckCircle2, Info, Loader2 } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Link, useNavigate } from 'react-router'
+import { Link, useNavigate, useSearchParams } from 'react-router'
 import { Button, ButtonLink } from '../../components/ui/button'
 import { Checkbox, Select } from '../../components/ui/field'
 import { FileChip, FileDropzone, fileMetaLine } from '../../components/ui/file-dropzone'
@@ -100,14 +100,17 @@ export function NewJobPage() {
   const { user } = useAuth()
   const navigate = useNavigate()
   const { config } = data
+  const [params, setParams] = useSearchParams()
+  const resumeId = params.get('draft')
   const [draftId, setDraftId] = useState<string | null>(null)
   // One draft per visit, created on the first upload and shared by concurrent uploads. Creating it
   // on mount let React (and token refreshes) create several, so an upload and its quote could land
-  // on different drafts.
+  // on different drafts. The draft's id goes in the address, so a refresh resumes it.
   const draftPromise = useRef<Promise<string> | null>(null)
   const ensureDraft = () => {
     draftPromise.current ??= data.createDraft().then((id) => {
       setDraftId(id)
+      setParams({ draft: id }, { replace: true })
       return id
     })
     return draftPromise.current
@@ -115,6 +118,36 @@ export function NewJobPage() {
   const [source, setSource] = useState<Upload | null>(null)
   const [guide, setGuide] = useState<Upload | null>(null)
   const [selection, setSelection] = useState<ServiceSelection>(INITIAL)
+  const [restoring, setRestoring] = useState(!!resumeId)
+  const [resumeError, setResumeError] = useState<string | null>(null)
+
+  // Resume a draft from the address: its files and chosen services come back from the server, and
+  // pricing below picks up its quote or its running estimate.
+  useEffect(() => {
+    if (!resumeId || draftPromise.current) return // this visit's own draft is already loaded
+    let cancelled = false
+    data
+      .getJob(resumeId)
+      .then((job) => {
+        if (cancelled) return
+        if (!job) {
+          setResumeError('That draft is no longer available. Upload your paper to start again.')
+          setParams({}, { replace: true })
+          return
+        }
+        if (job.status !== 'DRAFT' && job.status !== 'QUOTED') return navigate(`/app/jobs/${job.id}`, { replace: true })
+        draftPromise.current = Promise.resolve(job.id)
+        setDraftId(job.id)
+        if (job.source) setSource({ name: job.source.name, progress: 100, meta: job.source, error: null })
+        if (job.guideline) setGuide({ name: job.guideline.name, progress: 100, meta: job.guideline, error: null })
+        if (job.quote || job.estimate) setSelection(job.selection)
+      })
+      .catch((e: unknown) => !cancelled && setResumeError(e instanceof DataError ? e.message : 'We could not load your draft. Refresh to try again.'))
+      .finally(() => !cancelled && setRestoring(false))
+    return () => {
+      cancelled = true
+    }
+  }, [data, resumeId, navigate, setParams])
   const [pricing, setPricing] = useState<Pricing>(NO_PRICE)
   const { wallet } = useWallet()
   const [ownWork, setOwnWork] = useState(false)
@@ -258,9 +291,22 @@ export function NewJobPage() {
   const canSubmit = !!meta && !needsGuide && !!pricing.quote && ownWork && !pricing.loading && !shortOfCredit
   const rate = wallet?.ugxPerUsd ?? config.ugxPerUsd
 
+  if (restoring)
+    return (
+      <>
+        <PageHeader title="New paper job" description="Loading your draft…" />
+        <Skeleton className="h-64 rounded-2xl" />
+      </>
+    )
+
   return (
     <>
       <PageHeader title="New paper job" description="Upload your paper, choose the work, and see your price before anything starts." />
+      {resumeError && (
+        <Alert tone="warning" className="mb-5">
+          {resumeError}
+        </Alert>
+      )}
       {user && !user.emailVerified && (
         <Alert tone="warning" className="mb-5" title="Verify your email first">
           We sent a verification link to {user.email}. Open it, then refresh this page to start a job.

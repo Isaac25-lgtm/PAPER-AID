@@ -9,7 +9,7 @@ import type { Job, JobStatus, ServiceId } from '../../lib/types'
 import { useTitle } from '../../lib/use-title'
 import { useAuth } from '../auth/auth-context'
 import { useJobList } from './hooks'
-import { JobRow } from './job-bits'
+import { jobTitle, JobRow } from './job-bits'
 
 function greeting() {
   const h = new Date().getHours()
@@ -45,7 +45,7 @@ function ActiveJobCard({ jobs }: { jobs: Job[] }) {
           {active.slice(0, 2).map((job) => (
             <li key={job.id}>
               <Link to={`/app/jobs/${job.id}`} className="group block">
-                <p className="truncate text-sm font-medium group-hover:text-brand-700">{job.source.name}</p>
+                <p className="truncate text-sm font-medium group-hover:text-brand-700">{jobTitle(job)}</p>
                 <p className="mt-0.5 flex items-center gap-1.5 text-xs text-fg-subtle">
                   <Loader2 className="size-3 animate-spin text-brand-600" aria-hidden />
                   {job.status === 'QUEUED' ? 'Waiting to start' : 'Processing'}
@@ -63,6 +63,7 @@ export function DashboardPage() {
   useTitle('Dashboard')
   const { user } = useAuth()
   const { jobs, loading, error } = useJobList({ limit: 6 })
+  const drafts = useJobList({ status: 'DRAFT', limit: 3 })
   const firstName = user?.displayName.split(' ')[0] ?? ''
 
   return (
@@ -90,6 +91,21 @@ export function DashboardPage() {
         </Link>
         {loading ? <Skeleton className="h-full min-h-32 rounded-xl" /> : <ActiveJobCard jobs={jobs} />}
       </div>
+
+      {drafts.jobs.length > 0 && (
+        <section className="mt-10" aria-labelledby="drafts-title">
+          <h2 id="drafts-title" className="mb-3 text-lg font-semibold">
+            Pick up where you left off
+          </h2>
+          <Card className="p-1.5">
+            <ul className="divide-y divide-line">
+              {drafts.jobs.map((job) => (
+                <JobRow key={job.id} job={job} />
+              ))}
+            </ul>
+          </Card>
+        </section>
+      )}
 
       <section className="mt-10" aria-labelledby="recent-title">
         <div className="mb-3 flex items-center justify-between">

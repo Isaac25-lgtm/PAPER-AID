@@ -9,6 +9,7 @@ from datetime import timedelta
 from pathlib import PurePosixPath
 from typing import Literal
 
+from app.ai.orchestration import current_engine
 from app.core.config import Settings
 from app.core.errors import AppError, Conflict, Forbidden, InvalidDocument, LimitExceeded, NotFound
 from app.core.logging import log
@@ -20,7 +21,6 @@ from app.jobs.models import (
     AdminAction,
     AdminJob,
     AdminSummary,
-    Billing,
     BoundQuote,
     EstimateRun,
     FileMeta,
@@ -42,7 +42,7 @@ from app.jobs.models import (
 )
 from app.pricing import credits
 from app.pricing.billing import hold_for_job, refund_job, release_hold
-from app.pricing.quote import PRICING_VERSION, ai_cap_usd, estimate_scan_usd, needs_estimate, price, with_margin
+from app.pricing.quote import ai_cap_usd, bound_quote, estimate_scan_usd, needs_estimate, with_margin
 from app.runtime import Runtime
 
 logger = logging.getLogger("paperaid.jobs")
@@ -210,8 +210,8 @@ def upload_file(rt: Runtime, user: User, job_id: str, role: FileRole, filename: 
     previous: list[str] = []
 
     def attach(j: Job) -> Job | None:
-        if j.status not in (JobStatus.DRAFT, JobStatus.QUOTED) or _estimating(j):
-            return None  # submitted (or being estimated) meanwhile: the new file must not touch it
+        if not _open_draft(j):
+            return None  # submitted, being estimated or being deleted meanwhile: the new file must not touch it
         current = j.source if role == "source" else j.guideline
         if current and current.path != path:
             previous.append(current.path)
@@ -239,7 +239,7 @@ def remove_guideline(rt: Runtime, user: User, job_id: str) -> None:
     removed: list[str] = []
 
     def detach(j: Job) -> Job | None:
-        if j.status not in (JobStatus.DRAFT, JobStatus.QUOTED) or _estimating(j):
+        if not _open_draft(j):
             return None
         if j.guideline is None:
             return j
@@ -293,45 +293,65 @@ def request_quote(rt: Runtime, user: User, job_id: str, selection: ServiceSelect
         and existing.expires_at > now + timedelta(minutes=2)
     ):
         return QuoteResponse(quote=Quote.model_validate(existing.model_dump()), estimate=job.estimate)
-    wallet = rt.store.get_wallet(user.uid)
-    available = wallet.available if wallet else 0
-    if needs_estimate(selection):
+    settings = rt.settings
+    source_sha, words = job.source.sha256, job.source.word_count
+    finished = _finished_estimate(job, selection, guideline_sha)
+    if needs_estimate(selection) and finished is None:
         if not start_estimate:
             return QuoteResponse(estimate_fee_cap=_estimate_fee_cap(rt, job, selection), estimate=job.estimate)
         return _start_estimate(rt, user, job, selection, guideline_sha)
-    if available <= 0 and rt.settings.credits_enabled:
-        raise credits.InsufficientCredits(rt.settings.min_top_up_ugx, available)
-    _rate_limit(rt, user, "quote", rt.settings.quotes_per_hour)
-    settings = rt.settings
-    priced = price(settings, selection, job.source.word_count, job.guideline.word_count if guideline_sha and job.guideline else 0)
-    quote = BoundQuote(
-        id=f"quote_{secrets.token_hex(6)}",
-        lines=priced.lines,
-        amount=sum(line.amount for line in priced.lines),
-        pricing_version=PRICING_VERSION,
-        expires_at=now + timedelta(minutes=settings.quote_ttl_minutes),
-        selection=selection,
-        source_sha256=job.source.sha256,
-        guideline_sha256=guideline_sha,
-        word_count=job.source.word_count,
-        fixed_ugx=priced.fixed_ugx,
-        ugx_per_usd=settings.ugx_per_usd,
-        multiplier=settings.price_multiplier,
-    )
+    if finished is None and settings.credits_enabled:
+        wallet = rt.store.get_wallet(user.uid)
+        available = wallet.available if wallet else 0
+        if available <= 0:
+            raise credits.InsufficientCredits(settings.min_top_up_ugx, available)
+    _rate_limit(rt, user, "quote", settings.quotes_per_hour)
+    issued: list[BoundQuote] = []
 
     def save(j: Job) -> Job | None:
-        if j.status not in (JobStatus.DRAFT, JobStatus.QUOTED) or j.source is None or j.source.sha256 != quote.source_sha256 or _estimating(j):
+        if not _open_draft(j) or j.source is None or j.source.sha256 != source_sha:
             return None
         if guideline_sha is not None and (j.guideline is None or j.guideline.sha256 != guideline_sha):
             return None
+        run = _finished_estimate(j, selection, guideline_sha)
+        if needs_estimate(selection) and run is None:
+            return None
+        # A finished estimate is repriced from its saved result: no new scan, no new fee. Any
+        # estimate already charged on this job counts toward whichever quote follows it.
+        quote = bound_quote(
+            settings,
+            selection,
+            source_sha,
+            words,
+            (run.engine if run else None) or current_engine(settings),
+            guideline_sha,
+            run.guide_words if run else (j.guideline.word_count if guideline_sha and j.guideline else 0),
+            run.passages if run else None,
+            fee_paid=j.billing.fee_paid,
+        )
+        issued.append(quote)
         j.quote = quote
         j.selection = selection
-        j.billing = Billing()  # a length-priced job has no estimate to count toward it
-        return state.transition(j, JobStatus.QUOTED, "Quote issued")
+        return state.transition(j, JobStatus.QUOTED, "Quote issued") if j.status == JobStatus.DRAFT else j
 
     if rt.store.update(job.id, save) is None:
         raise Conflict("Your files changed while we were pricing them. We'll price the new ones.", code="FILES_CHANGED")
-    return QuoteResponse(quote=Quote.model_validate(quote.model_dump()))
+    return QuoteResponse(quote=Quote.model_validate(issued[-1].model_dump()), estimate=job.estimate)
+
+
+def _open_draft(j: Job) -> bool:
+    """A draft that may still change: not submitted, not being estimated, not being deleted."""
+    return j.status in (JobStatus.DRAFT, JobStatus.QUOTED) and not _estimating(j) and not j.deleting
+
+
+def _finished_estimate(j: Job, selection: ServiceSelection, guideline_sha: str | None) -> EstimateRun | None:
+    """The job's finished estimate, if it sized exactly these files and this selection."""
+    run = j.estimate
+    if run is None or run.status != "READY" or j.source is None or not needs_estimate(selection):
+        return None
+    if run.selection != selection or run.source_sha256 != j.source.sha256 or run.guideline_sha256 != guideline_sha:
+        return None
+    return run
 
 
 def _estimate_fee_cap(rt: Runtime, job: Job, selection: ServiceSelection) -> int:
@@ -353,10 +373,11 @@ def _start_estimate(rt: Runtime, user: User, job: Job, selection: ServiceSelecti
         source_sha256=job.source.sha256,
         guideline_sha256=guideline_sha,
         budget_usd=ai_cap_usd(fee_cap, settings),
+        engine=current_engine(settings),
     )
 
     def start(j: Job, w: Wallet) -> tuple[Job, Wallet] | None:
-        if j.status not in (JobStatus.DRAFT, JobStatus.QUOTED) or _estimating(j) or j.source is None or j.source.sha256 != run.source_sha256:
+        if not _open_draft(j) or j.source is None or j.source.sha256 != run.source_sha256:
             return None
         if guideline_sha is not None and (j.guideline is None or j.guideline.sha256 != guideline_sha):
             return None
@@ -366,8 +387,7 @@ def _start_estimate(rt: Runtime, user: User, job: Job, selection: ServiceSelecti
         run.cost_base_usd = j.estimate_cost_usd
         j.estimate = run
         j.selection = selection
-        j.quote = None
-        j.billing = Billing()
+        j.quote = None  # earlier estimate fees stay on j.billing and count toward the next quote
         if j.status == JobStatus.QUOTED:
             state.transition(j, JobStatus.DRAFT, "New estimate requested; previous quote cleared")
         j.events.append(JobEvent(label=f"Estimate started (up to UGX {fee_cap:,} held)"))
@@ -402,7 +422,7 @@ def submit(rt: Runtime, user: User, job_id: str, quote_id: str) -> JobView:
 
     def accept(j: Job, w: Wallet) -> tuple[Job, Wallet] | None:
         # Re-checked inside the transaction: a concurrent upload or submit may have changed the job.
-        if j.status != JobStatus.QUOTED or j.quote is None or j.quote.id != quote_id or j.source is None or j.quote.source_sha256 != j.source.sha256:
+        if j.status != JobStatus.QUOTED or j.deleting or j.quote is None or j.quote.id != quote_id or j.source is None or j.quote.source_sha256 != j.source.sha256:
             return None
         if any(availability(settings, user).get(service.value) != "available" for service in j.quote.selection.services()):
             return None
@@ -439,8 +459,15 @@ def get_job(rt: Runtime, user: User, job_id: str) -> JobView:
 
 
 def list_jobs(rt: Runtime, user: User, status: str | None, service: str | None, cursor: str | None, limit: int) -> Page[JobView]:
-    statuses = {JobStatus(status)} if status and status != "ALL" else state.SUBMITTED
+    """Submitted jobs by default. `status=DRAFT` lists unfinished drafts (priced or not) that have a
+    paper, so a student can resume them."""
+    if status == "DRAFT":
+        statuses = {JobStatus.DRAFT, JobStatus.QUOTED}
+    else:
+        statuses = {JobStatus(status)} if status and status != "ALL" else state.SUBMITTED
     jobs, next_cursor = rt.store.list(user.uid, statuses, service if service and service != "ALL" else None, cursor, min(limit, 50))
+    if status == "DRAFT":
+        jobs = [j for j in jobs if j.source is not None and not j.deleting]
     return Page[JobView](items=[j.view() for j in jobs], next_cursor=next_cursor)
 
 
@@ -470,18 +497,51 @@ def cancel(rt: Runtime, user: User, job_id: str, actor: str | None = None) -> Jo
     return result[0].view()
 
 
+ACTIVE = (JobStatus.QUEUED, JobStatus.PROCESSING, JobStatus.AWAITING_PAYMENT)
+
+
+def _mark_deleting(rt: Runtime, job_id: str) -> Job | None:
+    """Atomically claim a job for deletion. Refused (None) while work runs or credits are held;
+    once claimed, nothing new can start on it (every operation checks `deleting` in its own
+    transaction), so deleting the files and record afterwards cannot strand a hold."""
+
+    def mark(j: Job) -> Job | None:
+        if j.status in ACTIVE or _estimating(j) or j.billing.state == "HELD":
+            return None
+        j.deleting = True
+        return j
+
+    return rt.store.update(job_id, mark)
+
+
+def _unmark_deleting(rt: Runtime, job_id: str) -> None:
+    def unmark(j: Job) -> Job:
+        j.deleting = False
+        return j
+
+    rt.store.update(job_id, unmark)
+
+
+def _erase(rt: Runtime, job: Job) -> None:
+    rt.files.delete_prefix(job.storage_prefix())
+    rt.store.delete(job.id)
+
+
 def delete(rt: Runtime, user: User, job_id: str) -> None:
     job = rt.store.get(job_id) if _valid_id(job_id) else None
     if job is None:
         return  # already gone: deletion is idempotent
     if job.owner_uid != user.uid:
         raise NotFound("We couldn't find this job.")
-    if job.status in (JobStatus.QUEUED, JobStatus.PROCESSING, JobStatus.AWAITING_PAYMENT):
+    claimed = _mark_deleting(rt, job.id)
+    if claimed is None:
+        current = rt.store.get(job.id)
+        if current is None:
+            return
+        if _estimating(current):
+            raise Conflict(ESTIMATE_BUSY, code="ESTIMATE_RUNNING")
         raise Conflict("Cancel the job or wait for it to finish before deleting it.", code="JOB_ACTIVE")
-    if _estimating(job):
-        raise Conflict(ESTIMATE_BUSY, code="ESTIMATE_RUNNING")
-    rt.files.delete_prefix(job.storage_prefix())
-    rt.store.delete(job.id)
+    _erase(rt, claimed)
     log(logger, logging.INFO, "job deleted", jobId=job.id)
 
 
@@ -497,16 +557,23 @@ def output_file(rt: Runtime, user: User, job_id: str, output_id: str) -> tuple[s
 
 
 def delete_account(rt: Runtime, user: User) -> int:
-    """Delete every job and file the user owns. Refuses while a job is mid-processing."""
+    """Delete every job and file the user owns. Refuses while a job is mid-processing: every job
+    is claimed for deletion first, and if any refuses, the claims are released and nothing is deleted."""
     jobs = every_job(rt, user.uid, None)
-    if any(j.status in (JobStatus.QUEUED, JobStatus.PROCESSING) or _estimating(j) for j in jobs):
-        raise Conflict("One of your jobs is being processed. Delete your account when it finishes.", code="JOB_ACTIVE")
+    claimed: list[Job] = []
     for job in jobs:
-        rt.files.delete_prefix(job.storage_prefix())
-        rt.store.delete(job.id)
+        marked = _mark_deleting(rt, job.id)
+        if marked is None and rt.store.get(job.id) is not None:
+            for done in claimed:
+                _unmark_deleting(rt, done.id)
+            raise Conflict("One of your jobs is being processed. Delete your account when it finishes.", code="JOB_ACTIVE")
+        if marked is not None:
+            claimed.append(marked)
+    for job in claimed:
+        _erase(rt, job)
     rt.store.delete_wallet(user.uid)
     log(logger, logging.WARNING, "account deleted", uid=user.uid, jobs=len(jobs))
-    return len(jobs)
+    return len(claimed)
 
 
 # --- credits ---------------------------------------------------------------------------------
@@ -532,17 +599,19 @@ def my_wallet(rt: Runtime, user: User) -> WalletView:
 # --- admin operations ------------------------------------------------------------------
 
 
-def admin_grant(rt: Runtime, admin: User, email: str, amount: int, note: str) -> WalletSummary:
+def admin_grant(rt: Runtime, admin: User, email: str, amount: int, note: str, op_id: str) -> WalletSummary:
     """Add credits by hand: test credits locally, refunds or goodwill in production. Payments will
-    add credits through the aggregator instead."""
+    add credits through the aggregator instead. `op_id` identifies the request: repeating it (a
+    retry after a lost response) adds nothing."""
     term = email.strip().lower()
     match = next((w for w in rt.store.find_wallets(term, 5) if w.email.lower() == term), None)
     if match is None:
         raise NotFound("No PaperAid account with that email has opened its credits yet. Ask them to sign in once, then try again.")
     default_note = "Test credits added by an admin" if rt.settings.env == "local" else "Credits added by PaperAid"
-    wallet = rt.store.update_wallet(match.uid, match.email, lambda w: credits.top_up(w, amount, (note.strip() or default_note)[:120]))
+    text = (note.strip() or default_note)[:120]
+    wallet = rt.store.update_wallet(match.uid, match.email, lambda w: credits.grant(w, amount, text, op_id, admin.email))
     assert wallet is not None
-    log(logger, logging.WARNING, "credits granted", actor=admin.email, amount=amount, uid=wallet.uid)
+    log(logger, logging.WARNING, "credits granted", actor=admin.email, amount=amount, uid=wallet.uid, op=op_id)
     return WalletSummary(email=wallet.email, available=wallet.available, held=wallet.held, updated_at=wallet.updated_at)
 
 
@@ -628,11 +697,18 @@ def admin_retry(rt: Runtime, admin: User, job_id: str) -> AdminJob:
     if job.status != JobStatus.FAILED or not (job.failure and job.failure.retryable):
         raise Conflict("Only retryable failures can be retried.", code="NOT_RETRYABLE")
 
+    settings = rt.settings
+
     def retry(j: Job, w: Wallet) -> tuple[Job, Wallet] | None:
-        if j.status != JobStatus.FAILED:
+        if j.status != JobStatus.FAILED or j.deleting:
             return None
-        if j.billing.state != "NONE":  # a charged job's failure returned everything, so the retry needs its own hold
+        # A charged job's failure returned everything, so a retry needs its own hold, but only
+        # while credits are on. A job accepted in testing mode is never charged by a retry.
+        if j.billing.state != "NONE" and settings.credits_enabled:
             hold_for_job(j, w)
+        elif j.billing.state != "NONE":
+            j.billing.state = "NONE"
+            j.payment_status = PaymentStatus.NOT_REQUIRED
         j.generation += 1
         j.attempts = 0
         j.failure = None

@@ -36,18 +36,25 @@ export function StatusBadge({ job }: { job: Pick<Job, 'status' | 'outcome' | 'ex
 
 export const serviceNames = (job: Pick<Job, 'services'>) => job.services.map((s) => SERVICES[s].name).join(' + ')
 
+/** A job's display name: its paper, or a plain label for a draft that has none yet. */
+export const jobTitle = (job: Pick<Job, 'source'>) => job.source?.name ?? 'Draft (no paper yet)'
+
+/** Where a job opens: an unfinished draft resumes on the new-job page. */
+export const jobLink = (job: Pick<Job, 'id' | 'status'>) =>
+  job.status === 'DRAFT' || job.status === 'QUOTED' ? `/app/new?draft=${job.id}` : `/app/jobs/${job.id}`
+
 export function JobRow({ job }: { job: Job }) {
   return (
     <li>
       <Link
-        to={`/app/jobs/${job.id}`}
+        to={jobLink(job)}
         className="group flex items-center gap-4 rounded-xl px-3 py-3.5 transition-colors hover:bg-surface-subtle sm:px-4"
       >
         <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-brand-50 text-brand-700">
           <FileText className="size-5" aria-hidden />
         </div>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold text-fg">{job.source.name}</p>
+          <p className="truncate text-sm font-semibold text-fg">{jobTitle(job)}</p>
           <p className="mt-0.5 truncate text-xs text-fg-subtle">
             {serviceNames(job)} · {formatRelative(job.createdAt)}
           </p>
@@ -55,7 +62,7 @@ export function JobRow({ job }: { job: Job }) {
             <StatusBadge job={job} />
           </div>
         </div>
-        <div className="hidden text-right text-sm text-fg-muted sm:block">{formatUGX(job.quote.amount)}</div>
+        <div className="hidden text-right text-sm text-fg-muted sm:block">{job.quote ? formatUGX(job.quote.amount) : 'Not priced'}</div>
         <div className="hidden sm:block">
           <StatusBadge job={job} />
         </div>

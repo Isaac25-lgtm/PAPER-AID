@@ -175,10 +175,11 @@ def admin_credits(
     email: str = Body(..., embed=True),
     amount: int = Body(..., embed=True),
     note: str = Body("", embed=True),
+    op_id: str = Body(..., embed=True, alias="opId", min_length=8, max_length=64),
     admin: User = Depends(require_admin),
     rt: Runtime = Depends(get_runtime),
 ) -> WalletSummary:
-    return service.admin_grant(rt, admin, email, amount, note)
+    return service.admin_grant(rt, admin, email, amount, note, op_id)
 
 
 @api.post("/admin/processing")
