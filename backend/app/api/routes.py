@@ -1,12 +1,15 @@
 """HTTP routes. Deliberately thin: parse input, call app.jobs.service, return its result."""
 
+from typing import Literal
+
 from fastapi import APIRouter, Body, Depends, File, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
+from pydantic import Field
 
 from app.core.auth import current_user, optional_user, require_admin
 from app.core.errors import AppError, Forbidden
 from app.jobs import service, workspace
-from app.jobs.models import AdminJob, AdminSummary, FileMeta, ImageMeta, JobView, Page, QuoteResponse, ServiceSelection, WalletSummary, WalletView
+from app.jobs.models import AdminJob, AdminSummary, Camel, FileMeta, ImageMeta, JobView, Page, QuoteResponse, ServiceSelection, WalletSummary, WalletView
 from app.jobs.pipeline import run_step
 from app.jobs.service import User
 from app.runtime import Runtime, get_runtime
@@ -166,6 +169,17 @@ def job_change(job_id: str, change_id: str, accepted: bool = Body(..., embed=Tru
 @api.post("/jobs/{job_id}/rebuild", response_model=JobView)
 def job_rebuild(job_id: str, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> JobView:
     return workspace.rebuild(rt, user, job_id)
+
+
+class ContinueRequest(Camel):
+    origin: Literal["original", "result"] = "original"
+    instruction: str = Field(default="", max_length=2000)
+    blocks: list[str] = Field(default=[], max_length=400)
+
+
+@api.post("/jobs/{job_id}/continue", response_model=JobView)
+def continue_job(job_id: str, body: ContinueRequest, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> JobView:
+    return workspace.continue_from(rt, user, job_id, body.origin, body.instruction, body.blocks)
 
 
 @api.post("/jobs/{job_id}/fix", response_model=JobView)

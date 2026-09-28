@@ -442,6 +442,7 @@ def aggregate(signals: list[BlockSignals], excluded_words: int, method: str, mod
     return AnalysisResult(
         band=band_for(score),  # type: ignore[arg-type]
         confidence=confidence,  # type: ignore[arg-type]
+        percent=round(max(0.0, min(1.0, score)) * 100),
         analysed_words=total_words,
         excluded_words=excluded_words,
         findings=findings[:60],

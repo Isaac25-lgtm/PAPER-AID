@@ -55,7 +55,7 @@ from app.proposals.pipeline import INPUT, _confirmed_gap, load_library
 from app.runtime import Runtime
 
 logger = logging.getLogger("paperaid.proposals")
-Step = Literal["PLAN", "CHAPTER_1", "CHAPTER_2", "CHAPTER_3", "CONCEPT", "REVISE_1", "REVISE_2", "REVISE_3", "PROFILE"]
+Step = Literal["PLAN", "CHAPTER_1", "CHAPTER_2", "CHAPTER_3", "CONCEPT", "REVISE_1", "REVISE_2", "REVISE_3", "REVISE_4", "PROFILE"]
 CONCEPT = 4  # the concept paper is stored like a chapter, as number 4
 PDF_SLOTS = threading.BoundedSemaphore(2)  # PDF compilations at once on one API instance (Codex audit 56c4f83 M27)
 
@@ -680,7 +680,7 @@ def update_feedback(
     rt: Runtime, user: User, project_id: str, comment_id: str, chapter: int | None, sections: list[str], status: FeedbackStatus, response: str
 ) -> ProjectView:
     """The student places a comment, marks it handled or declined, or writes their reply."""
-    if chapter not in (None, 1, 2, 3):
+    if chapter not in (None, 1, 2, 3, CONCEPT):
         raise NotFound("That chapter doesn't exist.")
     p = _owned(rt, user, project_id)
     keys = {w.key for w in _written(rt, p) if w.chapter == chapter}
@@ -695,6 +695,31 @@ def update_feedback(
             raise AppError("A comment is marked applied when a revision answers it.", code="NOT_APPLIED")
         comment.chapter, comment.status, comment.response = chapter, status, response.strip()[:1000]
         comment.sections = list(dict.fromkeys(sections))[:12] if chapter else []
+        return q
+
+    return view(rt, _change(rt, user, project_id, apply))
+
+
+def request_changes(rt: Runtime, user: User, project_id: str, number: int, instruction: str, sections: list[str]) -> ProjectView:
+    """The student's own request for changes to a chapter or the concept paper, on the sections they
+    chose (or all of them). It is revised like a supervisor comment; the price comes next."""
+    if number not in (1, 2, 3, CONCEPT):
+        raise NotFound("That chapter doesn't exist.")
+    text = " ".join(instruction.split())[:1500]
+    if len(text) < 3:
+        raise AppError("Say what you would like changed.", code="NO_FEEDBACK")
+    p = _owned(rt, user, project_id)
+    _rate_limit(rt, user, "feedback", rt.settings.uploads_per_hour)
+    keys = [w.key for w in _written(rt, p) if w.chapter == number]
+    if not keys:
+        raise AppError("Write this chapter before asking for changes.", code="NOTHING_TO_REVISE")
+    chosen = [k for k in dict.fromkeys(sections) if k in set(keys)] or keys
+
+    def apply(q: Project) -> Project:
+        if len(q.feedback) >= feedback.MAX_COMMENTS:
+            raise AppError(f"A proposal keeps up to {feedback.MAX_COMMENTS} comments. Remove ones already dealt with first.", code="TOO_MANY_COMMENTS")
+        round_ = max((c.round for c in q.feedback), default=0) + 1
+        q.feedback.append(FeedbackComment(id=f"fb_{secrets.token_hex(4)}", round=round_, text=text, anchor="Your request", chapter=number, sections=chosen, by="STUDENT"))
         return q
 
     return view(rt, _change(rt, user, project_id, apply))
@@ -716,7 +741,7 @@ def response_report(rt: Runtime, user: User, project_id: str) -> tuple[bytes, st
     headings = {(w.chapter, w.key): f"{w.number} {w.heading}" for w in _written(rt, p)}
     default = {"DONE_BY_STUDENT": "Addressed.", "DECLINED": "Not changed.", "OPEN": "Not yet addressed."}
     rows = []
-    for c in p.feedback:
+    for c in (c for c in p.feedback if c.by == "SUPERVISOR"):  # the student's own requests are not answers to the supervisor
         if c.chapter and c.sections:
             where = f"Chapter {c.chapter}: " + "; ".join(headings.get((c.chapter, k), k) for k in c.sections)
         else:

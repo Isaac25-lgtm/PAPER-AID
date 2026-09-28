@@ -753,8 +753,12 @@ def _planned_targets(ctx: StageContext) -> list[Target]:
     targets = []
     for raw in saved["targets"]:
         item = final.get(raw["id"])
-        if item and item.action == "rewrite":
-            targets.append(Target(**{**raw, "instruction": item.instruction, "preserve": item.preserve}))
+        # The student's own request (Ask for changes) reaches the writer in their words, and a passage
+        # they asked to change is always rewritten (owner request 2026-09-29).
+        asked = [n for n in ctx.job.fix_notes.get(raw["id"], []) if n.startswith("The student asks:")]
+        if (item and item.action == "rewrite") or asked:
+            instruction = " ".join([item.instruction if item and item.action == "rewrite" else "", *asked]).strip()
+            targets.append(Target(**{**raw, "instruction": instruction, "preserve": item.preserve if item else ""}))
     return targets
 
 

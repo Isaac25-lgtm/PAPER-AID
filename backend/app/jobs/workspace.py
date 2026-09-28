@@ -17,7 +17,9 @@ from app.core.logging import log
 from app.documents import groups as paragraph_groups
 from app.documents import protect
 from app.documents.docx_io import apply_group_rewrites, apply_revisions, read_docx
+from app.documents.intake import inspect_upload
 from app.documents.model import DocumentModel
+from app.documents.pdf_io import read_pdf
 from app.formatting.apply import apply_formatting
 from app.formatting.guideline import to_spec
 from app.formatting.presets import PRESETS, with_custom
@@ -47,9 +49,13 @@ def document(rt: Runtime, user: User, job_id: str) -> dict[str, Any]:
     in full, so the workspace can show the whole document beside its findings."""
     job = _readable(rt, _owned(rt, user, job_id))
     raw = _internal(rt, job, "document.json")
-    if raw is None:
-        raise NotFound("This paper has not been read yet.")
-    model = DocumentModel.model_validate(raw)
+    if raw is not None:
+        model = DocumentModel.model_validate(raw)
+    elif job.source is not None:  # not processed yet: the paper as uploaded, so it shows at once
+        data = rt.files.get(job.source.path)
+        model = read_docx(data) if job.source.format == "DOCX" else read_pdf(data, rt.settings.max_pdf_pages)
+    else:
+        raise NotFound("Upload your paper first.")
     blocks = [{"id": b.id, "kind": b.kind, "level": b.level, "section": b.section, "text": b.text} for b in model.blocks if b.text.strip()]
     groups = {g.id: g.block_ids for g in paragraph_groups.groups(model)} if job.refinement and job.refinement.mode == "REDRAFT" else {}
     changes = [ChangedBlock.model_validate(c).model_dump(by_alias=True) for c in _internal(rt, job, "changes_full.json") or []]
@@ -138,6 +144,61 @@ def rebuild(rt: Runtime, user: User, job_id: str) -> JobView:
     updated = rt.store.update(job.id, save)
     assert updated is not None
     return updated.view()
+
+
+def continue_from(rt: Runtime, user: User, job_id: str, origin: str, instruction: str, blocks: list[str]) -> JobView:
+    """The next step on the same screen: a new draft of this paper, as uploaded ("original") or as
+    PaperAid finished it ("result"), priced and started like any job. With an instruction, the
+    student's own request is what the writer follows for the chosen passages (or the whole paper)."""
+    job = _readable(rt, _owned(rt, user, job_id))
+    if job.status != JobStatus.COMPLETED or job.source is None:
+        raise Conflict("Wait for this job to finish first.", code="NOT_FINISHED")
+    if origin == "result":
+        output = next((o for o in job.outputs if o.id == "paper-reviewed"), None) or next((o for o in job.outputs if o.id == "paper"), None)
+        if output is None or output.content_type != DOCX_TYPE:
+            raise AppError("There is no finished Word file to continue from.", code="NO_RESULT")
+        data, name = rt.files.get(output.path), output.name
+    else:
+        data, name = rt.files.get(job.source.path), job.source.name
+    instruction = " ".join(instruction.split())[:1000]
+    _rate_limit(rt, user, "draft", rt.settings.quotes_per_hour)
+    model = inspect_upload(data, name, rt.settings.max_upload_bytes, rt.settings.max_words, rt.settings.max_pdf_pages)
+    selection = ServiceSelection(writing="REFINE" if model.format == "DOCX" else "AI_CHECK", style=job.selection.style)
+    notes: dict[str, list[str]] = {}
+    if instruction:
+        if model.format != "DOCX":
+            raise AppError("Changes need the Word file. Upload the .docx version of this paper.", code="PDF_AI_CHECK_ONLY")
+        editable = [b.id for b in model.blocks if b.editable and b.kind in ("paragraph", "list_item")]
+        chosen = [b for b in dict.fromkeys(blocks) if b in set(editable)] or editable
+        chosen = chosen[:300]
+        selection = selection.model_copy(update={"academic": False, "only_blocks": chosen})
+        notes = {b: [f"The student asks: {instruction}"] for b in chosen}
+    now = utcnow()
+    new = Job(
+        id=f"job_{secrets.token_hex(6)}",
+        status=JobStatus.DRAFT,
+        owner_uid=user.uid,
+        owner_email=user.email,
+        created_at=now,
+        expires_at=now + timedelta(days=rt.settings.retention_days),
+        selection=selection,
+        source_job=job.id,
+        fix_notes=notes,
+        events=[JobEvent(at=now, label=f"Draft continued from {job.id} ({'finished paper' if origin == 'result' else 'original paper'})")],
+    )
+    digest = hashlib.sha256(data).hexdigest()
+    ext = "docx" if model.format == "DOCX" else "pdf"
+    path = f"{new.storage_prefix()}/input/source-{digest[:12]}-{secrets.token_hex(4)}.{ext}"
+    rt.files.put(path, data, DOCX_TYPE if ext == "docx" else "application/pdf")
+    new.source = StoredFile(
+        name=name, format=model.format, size_bytes=len(data), word_count=model.word_count, page_estimate=model.page_count or 1,
+        heading_count=model.heading_count, path=path, sha256=digest,
+    )
+    if not rt.store.create_if_open(new):
+        rt.files.delete_prefix(new.storage_prefix())
+        raise Conflict(ACCOUNT_CLOSING, code="ACCOUNT_CLOSING")
+    log(logger, logging.INFO, "draft continued", jobId=new.id, fromJob=job.id, origin=origin, instructed=bool(instruction))
+    return new.view()
 
 
 def fix_draft(rt: Runtime, user: User, job_id: str, finding_ids: list[str], safe_only: bool) -> JobView:

@@ -95,7 +95,7 @@ class ServiceSelection(Camel):
     logo: Literal["NONE", "CENTER", "LEFT"] = "NONE"  # an institution logo at the top of the first page
     only_blocks: list[str] = Field(default=[], max_length=300)  # "Fix selected": refine exactly these passages
     # A step of a proposal project, or REVIEW: an uploaded proposal checked against the rulebook.
-    proposal: Literal["NONE", "PLAN", "CHAPTER_1", "CHAPTER_2", "CHAPTER_3", "CONCEPT", "REVISE_1", "REVISE_2", "REVISE_3", "PROFILE", "REVIEW"] = "NONE"
+    proposal: Literal["NONE", "PLAN", "CHAPTER_1", "CHAPTER_2", "CHAPTER_3", "CONCEPT", "REVISE_1", "REVISE_2", "REVISE_3", "REVISE_4", "PROFILE", "REVIEW"] = "NONE"
     level: Literal["BACHELORS", "PGD", "MASTERS", "PHD"] = "MASTERS"  # the proposal's level (REVIEW only)
 
     def services(self) -> list[ServiceId]:
@@ -301,6 +301,9 @@ class Finding(Camel):
 class AnalysisResult(Camel):
     band: Band
     confidence: Confidence
+    # Estimated AI-likeness as a percentage (owner decision 2026-09-29): the word-weighted passage
+    # score the band comes from, computed by code. None for analyses made before it was recorded.
+    percent: int | None = None
     analysed_words: int
     excluded_words: int
     findings: list[Finding]

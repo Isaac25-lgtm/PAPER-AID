@@ -31,12 +31,17 @@ class PlanEdit(Camel):
 
 
 class StepRequest(Camel):
-    step: Literal["PLAN", "CHAPTER_1", "CHAPTER_2", "CHAPTER_3", "CONCEPT", "REVISE_1", "REVISE_2", "REVISE_3", "PROFILE"]
+    step: Literal["PLAN", "CHAPTER_1", "CHAPTER_2", "CHAPTER_3", "CONCEPT", "REVISE_1", "REVISE_2", "REVISE_3", "REVISE_4", "PROFILE"]
     note: str = ""
 
 
 class FeedbackText(Camel):
     text: str = Field(min_length=3, max_length=30000)
+
+
+class ChangeRequest(Camel):
+    instruction: str = Field(min_length=3, max_length=2000)
+    sections: list[str] = Field(default=[], max_length=40)
 
 
 class FeedbackEdit(Camel):
@@ -178,6 +183,11 @@ def upload_guide(project_id: str, file: UploadFile = File(...), user: User = Dep
 @router.post("/{project_id}/rulebook/default", response_model=ProjectView)
 def default_rulebook(project_id: str, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> ProjectView:
     return projects.use_default_rulebook(rt, user, project_id)
+
+
+@router.post("/{project_id}/chapters/{number}/request", response_model=ProjectView)
+def request_changes(project_id: str, number: int, body: ChangeRequest, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> ProjectView:
+    return projects.request_changes(rt, user, project_id, number, body.instruction, body.sections)
 
 
 @router.post("/{project_id}/feedback", response_model=ProjectView)

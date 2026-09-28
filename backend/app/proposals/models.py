@@ -231,6 +231,7 @@ class FeedbackComment(Camel):
     status: FeedbackStatus = "OPEN"
     applied_in: int | None = None  # the chapter version that applied it
     response: str = Field(default="", max_length=1000)  # the student's own reply for the response report
+    by: Literal["SUPERVISOR", "STUDENT"] = "SUPERVISOR"  # STUDENT: the student's own request (not in the response report)
 
     def signature(self) -> str:
         """What a revision was priced to answer: the comment and where it was placed. A revision
