@@ -120,6 +120,8 @@ def pipeline_for(selection: ServiceSelection) -> list[Stage]:
         return [Stage.EXTRACTING, Stage.ANALYSING, Stage.EXPORTING]
     if selection.proposal == "PLAN":
         return [Stage.RESEARCHING, Stage.PLANNING, Stage.EXPORTING]
+    if selection.proposal.startswith("REVISE_"):
+        return [Stage.AUDITING, Stage.EXPORTING]
     if selection.proposal != "NONE":
         return [Stage.RESEARCHING, Stage.PLANNING, Stage.DRAFTING, Stage.AUDITING, Stage.EXPORTING]
     stages = [Stage.EXTRACTING]

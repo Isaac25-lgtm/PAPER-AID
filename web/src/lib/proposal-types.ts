@@ -5,7 +5,7 @@ export type Level = 'BACHELORS' | 'PGD' | 'MASTERS' | 'PHD'
 export type StudyType = 'QUANTITATIVE' | 'QUALITATIVE' | 'MIXED' | 'SECONDARY' | 'NON_EMPIRICAL'
 export type CitationStyle = 'APA6' | 'APA7'
 export type SampleMethod = 'YAMANE' | 'COCHRAN' | 'KREJCIE_MORGAN' | 'CENSUS' | 'SATURATION' | 'AUTHOR_STATED' | 'NOT_APPLICABLE'
-export type StepId = 'PLAN' | 'CHAPTER_1' | 'CHAPTER_2' | 'CHAPTER_3'
+export type StepId = 'PLAN' | 'CHAPTER_1' | 'CHAPTER_2' | 'CHAPTER_3' | 'REVISE_1' | 'REVISE_2' | 'REVISE_3'
 export type ReadinessStatus = 'PASS' | 'NEEDS_REVIEW' | 'MISSING' | 'NOT_APPLICABLE' | 'BLOCKED'
 
 export interface ProposalInputs {
@@ -90,6 +90,36 @@ export interface ChapterState {
   needsReview: string[]
 }
 
+export type FeedbackStatus = 'OPEN' | 'APPLIED' | 'DONE_BY_STUDENT' | 'DECLINED'
+
+/** One supervisor comment: where it applies, and what was done about it. */
+export interface FeedbackComment {
+  id: string
+  round: number
+  text: string
+  anchor: string
+  chapter: 1 | 2 | 3 | null
+  sections: string[]
+  status: FeedbackStatus
+  appliedIn: number | null
+  response: string
+}
+
+export interface WrittenSection {
+  chapter: 1 | 2 | 3
+  key: string
+  number: string
+  heading: string
+}
+
+export interface Comparison {
+  number: number
+  older: number
+  newer: number
+  changed: number
+  sections: { number: string; heading: string; status: 'SAME' | 'CHANGED' | 'ADDED' | 'REMOVED'; pieces: { op: 'same' | 'added' | 'removed'; text: string }[] }[]
+}
+
 export interface Project {
   id: string
   kind: 'PROPOSAL'
@@ -103,6 +133,11 @@ export interface Project {
   planProblems: string[]
   candidatePlan: ProposalPlan | null
   autoChapterOne: boolean
+  feedback: FeedbackComment[]
+  /** The current chapters' sections, where comments can be placed. */
+  written: WrittenSection[]
+  /** What stands between the proposal and a complete download. */
+  blockers: string[]
   /** A one-off message returned by an action (for example why Chapter One did not start). */
   notice: string | null
   chapters: ChapterState[]
@@ -129,11 +164,13 @@ export interface ChapterView {
   title: string
   version: number
   planVersion: number
-  sections: { number: string; heading: string; paragraphs: string[]; table: string[][] | null; tableCaption: string; needsReview: boolean }[]
+  sections: { key: string; number: string; heading: string; paragraphs: string[]; table: string[][] | null; tableCaption: string; needsReview: boolean }[]
   readiness: ReadinessItem[]
   warnings: string[]
   words: number
   references: string[]
+  /** Chapter One's conceptual framework, drawn from the plan's variables. */
+  framework: { label: string; items: string[] }[]
 }
 
 export interface EvidenceItem {

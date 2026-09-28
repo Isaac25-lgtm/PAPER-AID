@@ -178,6 +178,18 @@ def proposal_usd(settings: Settings, step: str, words: int) -> float:
     return usd
 
 
+def revise_usd(settings: Settings, words: int) -> float:
+    """Sections revised from supervisor comments at their worst: the first fix, every review and
+    further fix round, and the chapter's readiness check again. `words` is the revised text."""
+    batches = _batches_for(words)
+    fix_input = batches * (PLAN_CHARS + BRIEF_CHARS) + LIBRARY_ITEMS * EVIDENCE_ITEM_CHARS + words * CHARS_PER_WORD * 2
+    rounds = settings.repair_attempts
+    usd = (rounds + 1) * _step_usd(settings, "p_fix", fix_input, words)
+    usd += (rounds + 1) * _step_usd(settings, "p_review", batches * (PLAN_CHARS + 6000) + words * CHARS_PER_WORD * 2 + LIBRARY_ITEMS * EVIDENCE_ITEM_CHARS, words * 2)
+    usd += _step_usd(settings, "p_readiness", PLAN_CHARS + 12000 * CHARS_PER_WORD + 2 * 2500 * 12 + 4000, 0)
+    return usd
+
+
 def proposal_review_usd(settings: Settings, words: int) -> float:
     """The lead's audit of an uploaded proposal: one call over the whole text."""
     return _step_usd(settings, "p_audit", words * CHARS_PER_WORD + 150 * max(1, words // 120) + 12000, 0)
@@ -258,6 +270,9 @@ def price(
         services.append(("SOURCE_CHECK", "Source check with live search", source_check_usd(settings, words), words))
     if selection.proposal == "REVIEW":
         services.append(("REVIEW", "Proposal review", proposal_review_usd(settings, words), words))
+    elif selection.proposal.startswith("REVISE_"):
+        banded = scope_words or words
+        services.append(("REVISE", f"Chapter {selection.proposal[-1]} revised from your supervisor's comments", revise_usd(settings, banded), banded))
     elif selection.proposal != "NONE":
         label = "Proposal plan" if selection.proposal == "PLAN" else f"Chapter {selection.proposal[-1]}"
         services.append((selection.proposal, label, proposal_usd(settings, selection.proposal, words), None))

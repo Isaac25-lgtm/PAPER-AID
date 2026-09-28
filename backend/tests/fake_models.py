@@ -193,7 +193,10 @@ class FakeModels:
             out = []
             for s in payload["sections"]:
                 if task == "p_fix":
-                    out.append({"key": s["key"], "paragraphs": s["text"], "table": s["table"]})
+                    # a revision from supervisor comments answers them; other fixes keep the text
+                    asked = any(str(point).startswith("Your supervisor asked:") for point in s.get("points", []))
+                    extra = ["The study will address the supervisor's comment on this section."] if asked else []
+                    out.append({"key": s["key"], "paragraphs": [*s["text"], *extra], "table": s["table"]})
                     continue
                 cite = f" ⟦{s['evidence'][0]['id']}⟧" if s["evidence"] else ""
                 table = {"caption": "Work plan", "rows": [["Activity", "Months"], ["Data collection", "Month 3"]]} if s["table"] else {"caption": "", "rows": []}

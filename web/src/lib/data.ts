@@ -16,7 +16,7 @@ import type {
   Wallet,
   WalletSummary,
 } from './types'
-import type { ChapterView, CitationStyle, EvidenceItem, Project, ProposalInputs, ProposalPlan, Rulebook, SampleSize, StepId, StepQuote, TitlePage } from './proposal-types'
+import type { ChapterView, CitationStyle, Comparison, EvidenceItem, FeedbackStatus, Project, ProposalInputs, ProposalPlan, Rulebook, SampleSize, StepId, StepQuote, TitlePage } from './proposal-types'
 
 export interface JobQuery {
   cursor?: string | null
@@ -87,6 +87,13 @@ export interface DataSource {
     evidence(id: string): Promise<EvidenceItem[]>
     download(id: string, final: boolean, fileName: string): Promise<void>
     remove(id: string): Promise<void>
+    compare(id: string, number: number, older: number, newer: number): Promise<Comparison>
+    /** Supervisor comments, pasted or from a marked-up Word file or PDF. */
+    addFeedback(id: string, text: string): Promise<Project>
+    addFeedbackFile(id: string, file: File): Promise<Project>
+    editFeedback(id: string, commentId: string, edit: { chapter: number | null; sections: string[]; status: FeedbackStatus; response: string }): Promise<Project>
+    deleteFeedback(id: string, commentId: string): Promise<Project>
+    downloadResponse(id: string): Promise<void>
   }
   admin: {
     summary(): Promise<AdminSummary>

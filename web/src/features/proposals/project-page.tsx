@@ -1,5 +1,5 @@
 import { clsx } from 'clsx'
-import { CheckCircle2, Circle, Download, ExternalLink, Trash2, TriangleAlert } from 'lucide-react'
+import { ArrowRight, CheckCircle2, Circle, Download, ExternalLink, Trash2, TriangleAlert } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
 import { Button } from '../../components/ui/button'
@@ -8,9 +8,10 @@ import { Dialog, Tabs, TabsContent, TabsList, TabsTrigger } from '../../componen
 import { Alert, Badge, Card, PageHeader, Skeleton } from '../../components/ui/primitives'
 import { DataError, useData } from '../../lib/data'
 import { formatDate } from '../../lib/format'
-import type { ChapterView, EvidenceItem, Project, Rulebook } from '../../lib/proposal-types'
+import type { ChapterView, Comparison, EvidenceItem, Project, Rulebook } from '../../lib/proposal-types'
 import type { Job } from '../../lib/types'
 import { useTitle } from '../../lib/use-title'
+import { FeedbackPanel } from './feedback-panel'
 import { PlanEditor } from './plan-editor'
 import { DetailsForm } from './projects-page'
 import { LEVELS, ReadinessList, StepProgress, StepRunner } from './shared'
@@ -41,6 +42,8 @@ function ChapterPanel({ project, number, running, onStarted, onChanged }: { proj
   const [version, setVersion] = useState(state.current)
   const [chapter, setChapter] = useState<ChapterView | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [against, setAgainst] = useState(0)
+  const [comparison, setComparison] = useState<Comparison | null>(null)
 
   useEffect(() => setVersion(state.current), [state.current])
   useEffect(() => {
@@ -54,6 +57,19 @@ function ChapterPanel({ project, number, running, onStarted, onChanged }: { proj
       cancelled = true
     }
   }, [data, project.id, number, version, project.citation, project.planVersion])
+
+  useEffect(() => {
+    setComparison(null)
+    if (!against || !version || against === version) return
+    let cancelled = false
+    data.projects
+      .compare(project.id, number, Math.min(against, version), Math.max(against, version))
+      .then((c) => !cancelled && setComparison(c))
+      .catch((e: unknown) => !cancelled && setError(e instanceof DataError ? e.message : 'We could not compare these versions.'))
+    return () => {
+      cancelled = true
+    }
+  }, [data, project.id, number, version, against])
 
   const choose = async (approved: boolean) => {
     try {
@@ -75,6 +91,17 @@ function ChapterPanel({ project, number, running, onStarted, onChanged }: { proj
     />
   )
   if (!state.current) return runner
+  const comments = project.feedback.filter((c) => c.status === 'OPEN' && c.chapter === number && c.sections.length)
+  const reviser = comments.length > 0 && (
+    <StepRunner
+      projectId={project.id}
+      step={`REVISE_${number}`}
+      label={`Revise from your supervisor's comments (${comments.length})`}
+      description="PaperAid revises only the sections these comments are on and checks them again. Every other section stays exactly as it is, and the current version is kept."
+      disabledReason={running ? 'A step is running for this proposal. Wait for it to finish.' : planReady ? undefined : 'Approve your plan first.'}
+      onStarted={onStarted}
+    />
+  )
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
       <div className="min-w-0 space-y-4">
@@ -87,6 +114,16 @@ function ChapterPanel({ project, number, running, onStarted, onChanged }: { proj
               </option>
             ))}
           </Select>
+          {state.versions.length > 1 && (
+            <Select label="Compare with" className="w-56" value={against} onChange={(e) => setAgainst(Number(e.target.value))}>
+              <option value={0}>No comparison</option>
+              {[...state.versions].reverse().filter((v) => v.version !== version).map((v) => (
+                <option key={v.version} value={v.version}>
+                  Version {v.version}
+                </option>
+              ))}
+            </Select>
+          )}
           {version !== state.current ? (
             <Button variant="secondary" onClick={() => choose(false)}>
               Use this version
@@ -108,7 +145,9 @@ function ChapterPanel({ project, number, running, onStarted, onChanged }: { proj
             {w}
           </Alert>
         ))}
-        {!chapter ? (
+        {comparison ? (
+          <CompareView comparison={comparison} />
+        ) : !chapter ? (
           <Skeleton className="h-96 rounded-2xl" />
         ) : (
           <Card className="p-5 sm:p-8">
@@ -126,6 +165,7 @@ function ChapterPanel({ project, number, running, onStarted, onChanged }: { proj
                     {p}
                   </p>
                 ))}
+                {s.key === 'framework' && chapter.framework.length > 0 && <Framework columns={chapter.framework} />}
                 {s.table && (
                   <div className="mt-3 overflow-x-auto">
                     {s.tableCaption && <p className="mb-1 text-sm font-semibold">{s.tableCaption}</p>}
@@ -168,8 +208,116 @@ function ChapterPanel({ project, number, running, onStarted, onChanged }: { proj
             <ReadinessList items={chapter.readiness} />
           </Card>
         )}
+        {reviser}
         {runner}
       </aside>
+    </div>
+  )
+}
+
+/** Chapter One's conceptual framework, drawn from the plan's variables (the Word file has the same figure). */
+function Framework({ columns }: { columns: { label: string; items: string[] }[] }) {
+  return (
+    <figure className="mt-4">
+      <figcaption className="mb-2 text-sm font-semibold">Figure 1.1: Conceptual framework</figcaption>
+      <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+        {columns.map((c, i) => (
+          <div key={c.label} className="contents">
+            {i > 0 && <ArrowRight className="mx-auto size-5 shrink-0 rotate-90 text-fg-subtle sm:rotate-0" aria-hidden />}
+            <div className="flex-1 rounded-lg border-2 border-fg/70 p-3">
+              <p className="text-sm font-semibold">{c.label}</p>
+              <ul className="mt-1 list-disc pl-5 text-sm">
+                {c.items.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        ))}
+      </div>
+      <p className="mt-2 text-xs text-fg-subtle">Drawn from the variables in your approved plan.</p>
+    </figure>
+  )
+}
+
+/** Two versions side by side in one text: what was removed struck through, what was added marked. */
+function CompareView({ comparison }: { comparison: Comparison }) {
+  return (
+    <Card className="p-5 sm:p-8">
+      <p className="text-sm text-fg-muted">
+        Version {comparison.older} → version {comparison.newer}: {comparison.changed === 0 ? 'no section changed.' : `${comparison.changed} section${comparison.changed === 1 ? '' : 's'} changed.`}
+      </p>
+      {comparison.sections.map((s) => (
+        <section key={`${s.number}-${s.heading}`} className="mt-6">
+          <h3 className="flex items-center gap-2 font-semibold">
+            {s.number} {s.heading}
+            {s.status !== 'SAME' && <Badge tone={s.status === 'REMOVED' ? 'warning' : 'brand'}>{s.status === 'CHANGED' ? 'Changed' : s.status === 'ADDED' ? 'New' : 'Removed'}</Badge>}
+          </h3>
+          <p className={clsx('mt-2 text-[15px] leading-relaxed whitespace-pre-line', s.status === 'SAME' && 'text-fg-subtle')}>
+            {s.pieces.map((piece, i) =>
+              piece.op === 'same' ? (
+                <span key={i}>{piece.text} </span>
+              ) : piece.op === 'added' ? (
+                <ins key={i} className="bg-brand-100 text-brand-900 no-underline">
+                  {piece.text}{' '}
+                </ins>
+              ) : (
+                <del key={i} className="bg-red-50 text-red-800">
+                  {piece.text}{' '}
+                </del>
+              ),
+            )}
+          </p>
+        </section>
+      ))}
+    </Card>
+  )
+}
+
+/** Everything that stands between the proposal and a complete download, in one place. */
+function ReadyPanel({ project, onDownload }: { project: Project; onDownload: (final: boolean) => void }) {
+  const data = useData()
+  const [error, setError] = useState<string | null>(null)
+  const open = project.feedback.filter((c) => c.status === 'OPEN').length
+  const ready = project.blockers.length === 0
+  return (
+    <div className="max-w-3xl space-y-4">
+      {error && <Alert tone="danger">{error}</Alert>}
+      {ready ? (
+        <Alert tone="success" title="Your proposal is complete">
+          Every chapter is written and approved and the title page is filled in. Read it through once more, then download it.
+        </Alert>
+      ) : (
+        <Card className="p-5">
+          <p className="font-semibold">Before the complete proposal can be downloaded</p>
+          <ul className="mt-3 space-y-2">
+            {project.blockers.map((b) => (
+              <li key={b} className="flex gap-2 text-sm">
+                <Circle className="mt-0.5 size-4 shrink-0 text-amber-600" aria-hidden /> {b}
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+      {open > 0 && (
+        <Alert tone="info">
+          {open === 1 ? 'One supervisor comment is' : `${open} supervisor comments are`} still to do. They do not stop the download, but your supervisor will
+          look for them.
+        </Alert>
+      )}
+      <div className="flex flex-wrap gap-2">
+        <Button disabled={!ready} onClick={() => onDownload(true)}>
+          <Download className="size-4" aria-hidden /> Complete proposal (Word)
+        </Button>
+        <Button variant="secondary" disabled={!project.chapters.some((c) => c.current)} onClick={() => onDownload(false)}>
+          <Download className="size-4" aria-hidden /> Draft (Word)
+        </Button>
+        {project.feedback.length > 0 && (
+          <Button variant="secondary" onClick={() => data.projects.downloadResponse(project.id).catch((e: unknown) => setError(e instanceof DataError ? e.message : 'We could not prepare the report.'))}>
+            <Download className="size-4" aria-hidden /> Response to comments
+          </Button>
+        )}
+      </div>
     </div>
   )
 }
@@ -333,7 +481,15 @@ export function ProjectPage() {
               {c.needsReview.length > 0 && <TriangleAlert className="ml-1 size-3.5 text-amber-600" aria-label="needs review" />}
             </TabsTrigger>
           ))}
+          <TabsTrigger value="feedback">
+            Supervisor feedback
+            {project.feedback.some((c) => c.status === 'OPEN') && ` (${project.feedback.filter((c) => c.status === 'OPEN').length})`}
+          </TabsTrigger>
           <TabsTrigger value="evidence">Evidence ({project.evidenceCount})</TabsTrigger>
+          <TabsTrigger value="ready">
+            Ready?
+            {project.blockers.length === 0 && <CheckCircle2 className="ml-1 size-3.5 text-brand-700" aria-label="ready" />}
+          </TabsTrigger>
           <TabsTrigger value="details">Details</TabsTrigger>
         </TabsList>
         <TabsContent value="plan" className="space-y-5">
@@ -374,6 +530,12 @@ export function ProjectPage() {
             <ChapterPanel project={project} number={n} running={!!running} onStarted={setRunning} onChanged={setProject} />
           </TabsContent>
         ))}
+        <TabsContent value="feedback">
+          <FeedbackPanel project={project} onChanged={setProject} />
+        </TabsContent>
+        <TabsContent value="ready">
+          <ReadyPanel project={project} onDownload={download} />
+        </TabsContent>
         <TabsContent value="evidence">
           <EvidencePanel projectId={project.id} count={project.evidenceCount} />
         </TabsContent>

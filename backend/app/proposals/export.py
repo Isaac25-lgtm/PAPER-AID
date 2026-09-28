@@ -19,7 +19,7 @@ from docx.shared import Inches, Pt
 
 from app.formatting.apply import _page_field_paragraph, _set_font, _set_page_numbering
 from app.proposals import decisions, evidence, rulebook
-from app.proposals.models import ChapterDocument, EvidenceItem, Project
+from app.proposals.models import ChapterDocument, EvidenceItem, Project, ProposalPlan
 
 ORDINALS = {1: "ONE", 2: "TWO", 3: "THREE"}
 
@@ -142,6 +142,42 @@ def _footer_numbers(section, fmt: str) -> None:
     _set_page_numbering(section._sectPr, fmt)
 
 
+def framework_columns(plan: ProposalPlan | None) -> list[tuple[str, list[str]]]:
+    """The conceptual framework as boxes, from the approved plan's variables (none for a study
+    without independent and dependent variables, such as a qualitative one)."""
+    if plan is None or not plan.variables.independent or not plan.variables.dependent:
+        return []
+    v = plan.variables
+    columns = [("Independent variables" if len(v.independent) > 1 else "Independent variable", v.independent)]
+    if v.intervening:
+        columns.append(("Intervening variables" if len(v.intervening) > 1 else "Intervening variable", v.intervening))
+    columns.append(("Dependent variables" if len(v.dependent) > 1 else "Dependent variable", v.dependent))
+    return columns
+
+
+def _box_borders(cell) -> None:
+    tcpr = cell._tc.get_or_add_tcPr()
+    tcpr.append(parse_xml(f'<w:tcBorders {nsdecls("w")}>' + "".join(f'<w:{side} w:val="single" w:sz="8" w:color="000000"/>' for side in ("top", "left", "bottom", "right")) + "</w:tcBorders>"))
+
+
+def _framework(doc, columns: list[tuple[str, list[str]]]) -> None:
+    caption = doc.add_paragraph()
+    caption.add_run("Figure 1.1: Conceptual framework").bold = True
+    grid = doc.add_table(rows=1, cols=len(columns) * 2 - 1)
+    for i, (label, items) in enumerate(columns):
+        cell = grid.cell(0, i * 2)
+        _box_borders(cell)
+        cell.paragraphs[0].add_run(label).bold = True
+        for item in items:
+            cell.add_paragraph(f"• {item}").paragraph_format.line_spacing = 1.0
+        if i < len(columns) - 1:
+            arrow = grid.cell(0, i * 2 + 1).paragraphs[0]
+            arrow.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            arrow.add_run("→").font.size = Pt(20)
+            grid.cell(0, i * 2 + 1).width = Inches(0.5)
+    doc.add_paragraph("Source: Researcher's own conceptualisation")
+
+
 def build(project: Project, chapters: dict[int, ChapterDocument], library: dict[str, EvidenceItem], draft: bool) -> bytes:
     doc = Document()
     _setup(doc)
@@ -178,6 +214,12 @@ def build(project: Project, chapters: dict[int, ChapterDocument], library: dict[
         doc.add_heading("List of Tables", level=1)
         for i, (n, s) in enumerate(tables, start=1):
             doc.add_paragraph(f"Table {n}.{i}: {s.table_caption or s.heading}")
+    columns = framework_columns(project.plan)
+    has_figure = bool(columns) and 1 in chapters and any(s.key == "framework" for s in chapters[1].sections)
+    if has_figure:
+        doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
+        doc.add_heading("List of Figures", level=1)
+        doc.add_paragraph("Figure 1.1: Conceptual framework")
     _footer_numbers(prelim, "lowerRoman")
 
     citer = evidence.Citer(library, project.citation)
@@ -198,6 +240,8 @@ def build(project: Project, chapters: dict[int, ChapterDocument], library: dict[
                 cited += [i for i in evidence.cited_ids(paragraph) if i not in cited]
                 p = doc.add_paragraph(citer.render(paragraph))
                 p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+            if n == 1 and s.key == "framework" and has_figure:
+                _framework(doc, columns)
             if s.table:
                 table_count += 1
                 for field in [s.table_caption, *[c for row in s.table for c in row]]:
@@ -220,6 +264,31 @@ def build(project: Project, chapters: dict[int, ChapterDocument], library: dict[
             p = doc.add_paragraph(entry)
             p.paragraph_format.left_indent = Inches(0.5)
             p.paragraph_format.first_line_indent = Inches(-0.5)
+    out = io.BytesIO()
+    doc.save(out)
+    return out.getvalue()
+
+
+def response_report(project: Project, rows: list[tuple[str, str, str]], draft: bool) -> bytes:
+    """"Response to the supervisor's comments": every comment, where it applied and what was done,
+    for the student to hand in with the revised proposal."""
+    doc = Document()
+    _setup(doc)
+    doc.add_heading("RESPONSE TO THE SUPERVISOR'S COMMENTS", level=1)
+    _centered(doc, project.plan.title if project.plan else project.inputs.topic, bold=True, space_after=12)
+    if project.title_page.student_name.strip():
+        _centered(doc, project.title_page.student_name)
+    if draft:
+        _centered(doc, "Some comments are not yet addressed.", space_after=12)
+    grid = doc.add_table(rows=1, cols=4)
+    grid.style = "Table Grid"
+    for c, label in enumerate(("No.", "Comment", "Where", "Response")):
+        grid.cell(0, c).paragraphs[0].add_run(label).bold = True
+    for number, (comment, where, response) in enumerate(rows, start=1):
+        cells = grid.add_row().cells
+        for c, value in enumerate((str(number), comment, where, response)):
+            cells[c].text = value
+            cells[c].paragraphs[0].paragraph_format.line_spacing = 1.0
     out = io.BytesIO()
     doc.save(out)
     return out.getvalue()

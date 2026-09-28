@@ -1,7 +1,7 @@
 // DataSource backed by the PaperAid API. Identity comes from `getAuthHeader`, which the auth layer
 // supplies (a Firebase ID token in production, a local developer identity when running locally).
 import { DataError, type DataSource, type JobQuery } from './data'
-import type { ChapterView, EvidenceItem, Project, Rulebook, StepQuote } from './proposal-types'
+import type { ChapterView, Comparison, EvidenceItem, Project, Rulebook, StepQuote } from './proposal-types'
 import type { AdminJob, AdminSummary, FileMeta, ImageMeta, Job, JobDocument, Page, PublicConfig, QuoteResponse, Wallet, WalletSummary } from './types'
 
 interface Options {
@@ -51,6 +51,23 @@ export function createApiSource({ config, getAuthHeaders }: Options): DataSource
     const body = await res.json().catch(() => null)
     if (!res.ok) throw new DataError((body as { message?: string } | null)?.message ?? 'Something went wrong. Please try again.', res.status)
     return body as T
+  }
+
+  /** A Word file built on request: fetched with the student's credentials and saved by the browser. */
+  async function saveFile(path: string, fileName: string): Promise<void> {
+    const res = await fetch(path, { headers: await getAuthHeaders() })
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as { message?: string } | null
+      throw new DataError(body?.message ?? 'The document could not be prepared.', res.status)
+    }
+    const url = URL.createObjectURL(await res.blob())
+    const link = document.createElement('a')
+    link.href = url
+    link.download = fileName
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 5000)
   }
 
   return {
@@ -201,22 +218,18 @@ export function createApiSource({ config, getAuthHeaders }: Options): DataSource
       setChapter: (id, number, version, approved) =>
         request<Project>(`/api/projects/${id}/chapters/${number}`, { method: 'POST', body: JSON.stringify({ version, approved }) }),
       evidence: (id) => request<EvidenceItem[]>(`/api/projects/${id}/evidence`),
-      async download(id, final, fileName) {
-        const res = await fetch(`/api/projects/${id}/export${query({ final: final ? 'true' : null })}`, { headers: await getAuthHeaders() })
-        if (!res.ok) {
-          const body = (await res.json().catch(() => null)) as { message?: string } | null
-          throw new DataError(body?.message ?? 'The proposal could not be prepared.', res.status)
-        }
-        const url = URL.createObjectURL(await res.blob())
-        const link = document.createElement('a')
-        link.href = url
-        link.download = fileName
-        document.body.appendChild(link)
-        link.click()
-        link.remove()
-        setTimeout(() => URL.revokeObjectURL(url), 5000)
-      },
+      download: (id, final, fileName) => saveFile(`/api/projects/${id}/export${query({ final: final ? 'true' : null })}`, fileName),
       remove: (id) => request<void>(`/api/projects/${id}`, { method: 'DELETE' }),
+      compare: (id, number, older, newer) => request<Comparison>(`/api/projects/${id}/chapters/${number}/compare${query({ older, newer })}`),
+      addFeedback: (id, text) => request<Project>(`/api/projects/${id}/feedback`, { method: 'POST', body: JSON.stringify({ text }) }),
+      addFeedbackFile(id, file) {
+        const form = new FormData()
+        form.append('file', file)
+        return request<Project>(`/api/projects/${id}/feedback/file`, { method: 'POST', body: form })
+      },
+      editFeedback: (id, commentId, edit) => request<Project>(`/api/projects/${id}/feedback/${commentId}`, { method: 'POST', body: JSON.stringify(edit) }),
+      deleteFeedback: (id, commentId) => request<Project>(`/api/projects/${id}/feedback/${commentId}`, { method: 'DELETE' }),
+      downloadResponse: (id) => saveFile(`/api/projects/${id}/feedback/report`, 'Response to supervisor comments.docx'),
     },
 
     admin: {

@@ -403,10 +403,14 @@ def stage_auditing(ctx: "StageContext") -> None:
     sample = sampling.calculate(inp.plan.sample_size) if inp.chapter == 3 else None
     allowed = _allowed_text(inp, sample.figures if sample else "")
     common = _common(inp, sample.steps if sample else "")
-    items = {i["key"]: i for i in _section_items(inp, library, ctx.get_json("briefs.json")["briefs"])}
-    current = {k: SectionText.model_validate(v) for k, v in ctx.get_json("drafted.json").items()}
     vetting = rulebook.vetting(inp.rulebook, inp.chapter)
     warnings: list[str] = []
+    base: ChapterDocument | None = None
+    if inp.step == "REVISE":
+        base, items, current = _revision(ctx, runner, inp, library, common)
+    else:
+        items = {i["key"]: i for i in _section_items(inp, library, ctx.get_json("briefs.json")["briefs"])}
+        current = {k: SectionText.model_validate(v) for k, v in ctx.get_json("drafted.json").items()}
     unresolved: dict[str, list[str]] = {}
     grades: dict[str, Grade] = {}
     rounds = settings.repair_attempts
@@ -458,11 +462,56 @@ def stage_auditing(ctx: "StageContext") -> None:
             warnings.append(f"Note on {items[key]['number']} {items[key]['heading']}: {grade.note.strip()}")
 
     document = _document(inp, current, items, library)
+    if base is not None:
+        document, kept = _merge(base, document, set(current))
+        if kept:
+            warnings.append(f"These sections could not be revised this time, so your earlier text is kept: {', '.join(kept)}.")
     document.readiness = _readiness(ctx, runner, inp, document, library, bool(stripped), unreviewed)
     document.warnings = warnings
     ctx.put_json("chapter.json", document.model_dump(by_alias=True))
     if warnings:
         ctx.update(lambda j: _warn(j, warnings, partial=bool(unresolved or stripped or unreviewed)))
+
+
+def _revision(
+    ctx: "StageContext", runner: ProposalRunner, inp: StepInput, library: dict[str, EvidenceItem], common: dict[str, Any]
+) -> tuple[ChapterDocument, dict[str, dict[str, Any]], dict[str, SectionText]]:
+    """A chapter revised from supervisor comments: the sections they concern, from the current
+    version, with the comments as what the writer must fix (the revision is the rewrite; the usual
+    review and at most two fixes follow). The comments are also points the reviewer checks."""
+    base = ChapterDocument.model_validate_json(ctx.rt.files.get(inp.base))
+    items = {i["key"]: i for i in _section_items(inp, library, {})}
+    current: dict[str, SectionText] = {}
+    for s in base.sections:
+        if s.key in inp.revise and s.key in items:
+            current[s.key] = SectionText(key=s.key, paragraphs=s.paragraphs, table=Table(caption=s.table_caption, rows=s.table or []))
+            asked = [f"Your supervisor asked: {c}" for c in inp.revise[s.key]]
+            cited = [library[i] for i in evidence.cited_ids(" ".join(s.paragraphs)) if i in library and library[i].usable]
+            items[s.key] = {**items[s.key], "points": asked, "evidence": _for_model(cited, passages=True) or items[s.key]["evidence"]}
+    if not current:
+        raise PermanentStageError("NOTHING_TO_REVISE", "The sections your comments are on are no longer in this chapter. Nothing was charged.", "revise: no sections")
+    first = [
+        {**items[k], "text": t.paragraphs, "table": t.table.model_dump(), "issues": inp.revise[k], "_words": " ".join(t.paragraphs)}
+        for k, t in current.items()
+    ]
+    for key, fixed in runner.fix(first, common).items():
+        if key in current:
+            current[key] = fixed
+    return base, {k: v for k, v in items.items() if k in current}, current
+
+
+def _merge(base: ChapterDocument, revised: ChapterDocument, keys: set[str]) -> tuple[ChapterDocument, list[str]]:
+    """The revised sections in place of their earlier text; every other section unchanged. A
+    section that came back empty keeps its earlier text (and is named)."""
+    fresh = {s.key: s for s in revised.sections}
+    sections = [fresh.get(s.key, s) for s in base.sections]
+    cited: list[str] = []
+    for section in sections:
+        for field in [*section.paragraphs, section.table_caption, *[c for row in section.table or [] for c in row]]:
+            cited += [i for i in evidence.cited_ids(field) if i not in cited]
+    words = sum(len(evidence.ANY_TOKEN.sub(" ", p).split()) for s in sections for p in s.paragraphs)
+    merged = ChapterDocument(number=base.number, title=base.title, plan_version=revised.plan_version, sections=sections, cited=cited, words=words)
+    return merged, [f"{s.number} {s.heading}" for s in base.sections if s.key in keys and s.key not in fresh]
 
 
 def _document(inp: StepInput, current: dict[str, SectionText], items: dict[str, dict[str, Any]], library: dict[str, EvidenceItem]) -> ChapterDocument:
@@ -582,7 +631,7 @@ def stage_exporting(ctx: "StageContext") -> None:
         ctx.rt.files.put(evidence_path, ctx.get_bytes("evidence.json"), "application/json")
     chapter_path = ""
     document: ChapterDocument | None = None
-    if inp.step == "CHAPTER":
+    if inp.step in ("CHAPTER", "REVISE"):
         document = ChapterDocument.model_validate(ctx.get_json("chapter.json"))
         chapter_path = f"{project.storage_prefix()}/chapters/{inp.chapter}/{job_id}.json"
         ctx.rt.files.put(chapter_path, document.model_dump_json(by_alias=True).encode(), "application/json")
@@ -612,11 +661,15 @@ def stage_exporting(ctx: "StageContext") -> None:
             version = len(state.versions) + 1
             state.versions.append(
                 StoredChapterVersion(
-                    version=version, job_id=job_id, words=document.words, plan_version=inp.plan_version, path=chapter_path, note=inp.note[:300],
+                    version=version, job_id=job_id, words=document.words, plan_version=inp.plan_version, path=chapter_path,
+                    note=(inp.note or ("Revised from your supervisor's comments" if inp.step == "REVISE" else ""))[:300],
                     passed=sum(1 for r in document.readiness if r.status in ("PASS", "NOT_APPLICABLE")), total=len(document.readiness),
                 )
             )
             state.current, state.approved = version, False
+            for comment in p.feedback:
+                if comment.id in inp.comment_ids and comment.status == "OPEN":
+                    comment.status, comment.applied_in = "APPLIED", version
         p.updated_at = utcnow()
         return p
 

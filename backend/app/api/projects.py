@@ -3,15 +3,16 @@
 from typing import Literal
 from urllib.parse import quote
 
-from fastapi import APIRouter, Body, Depends, Query
+from fastapi import APIRouter, Body, Depends, File, Query, UploadFile
 from fastapi.responses import Response
+from pydantic import Field
 
 from app.core.auth import current_user
 from app.jobs.models import Camel, JobView
 from app.jobs.service import User
-from app.proposals import rulebook
+from app.proposals import feedback, rulebook
 from app.proposals import service as projects
-from app.proposals.models import CitationStyle, EvidenceItem, ProjectView, ProposalInputs, ProposalPlan, SampleSize, TitlePage
+from app.proposals.models import CitationStyle, EvidenceItem, FeedbackStatus, ProjectView, ProposalInputs, ProposalPlan, SampleSize, TitlePage
 from app.runtime import Runtime, get_runtime
 
 router = APIRouter(prefix="/api/projects")
@@ -30,8 +31,19 @@ class PlanEdit(Camel):
 
 
 class StepRequest(Camel):
-    step: Literal["PLAN", "CHAPTER_1", "CHAPTER_2", "CHAPTER_3"]
+    step: Literal["PLAN", "CHAPTER_1", "CHAPTER_2", "CHAPTER_3", "REVISE_1", "REVISE_2", "REVISE_3"]
     note: str = ""
+
+
+class FeedbackText(Camel):
+    text: str = Field(min_length=3, max_length=30000)
+
+
+class FeedbackEdit(Camel):
+    chapter: int | None = None
+    sections: list[str] = Field(default=[], max_length=12)
+    status: FeedbackStatus = "OPEN"
+    response: str = Field(default="", max_length=1000)
 
 
 class ChapterChoice(Camel):
@@ -129,7 +141,41 @@ def evidence(project_id: str, user: User = Depends(current_user), rt: Runtime = 
 @router.get("/{project_id}/export")
 def export(project_id: str, final: bool = Query(False), user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> Response:
     """Built on request (no AI) and streamed; the browser saves it from the response."""
-    data, name = projects.export_docx(rt, user, project_id, final)
+    return _docx(*projects.export_docx(rt, user, project_id, final))
+
+
+def _docx(data: bytes, name: str) -> Response:
     ascii_name = name.encode("ascii", "ignore").decode() or "proposal.docx"
     disposition = f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(name)}"
     return Response(data, media_type=DOCX, headers={"Content-Disposition": disposition, "Cache-Control": "no-store"})
+
+
+@router.get("/{project_id}/chapters/{number}/compare", response_model=projects.Comparison)
+def compare(project_id: str, number: int, older: int = Query(...), newer: int = Query(...), user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> projects.Comparison:
+    return projects.compare(rt, user, project_id, number, older, newer)
+
+
+@router.post("/{project_id}/feedback", response_model=ProjectView)
+def add_feedback(project_id: str, body: FeedbackText, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> ProjectView:
+    return projects.add_feedback(rt, user, project_id, body.text)
+
+
+@router.post("/{project_id}/feedback/file", response_model=ProjectView)
+async def add_feedback_file(project_id: str, file: UploadFile = File(...), user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> ProjectView:
+    data = await file.read(feedback.MAX_FILE_BYTES + 1)
+    return projects.add_feedback(rt, user, project_id, "", file.filename or "feedback", data)
+
+
+@router.get("/{project_id}/feedback/report")
+def feedback_report(project_id: str, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> Response:
+    return _docx(*projects.response_report(rt, user, project_id))
+
+
+@router.post("/{project_id}/feedback/{comment_id}", response_model=ProjectView)
+def edit_feedback(project_id: str, comment_id: str, body: FeedbackEdit, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> ProjectView:
+    return projects.update_feedback(rt, user, project_id, comment_id, body.chapter, body.sections, body.status, body.response)
+
+
+@router.delete("/{project_id}/feedback/{comment_id}", response_model=ProjectView)
+def delete_feedback(project_id: str, comment_id: str, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> ProjectView:
+    return projects.delete_feedback(rt, user, project_id, comment_id)

@@ -182,6 +182,34 @@ class StoredChapterState(ChapterState):
     versions: list[StoredChapterVersion] = []  # type: ignore[assignment]
 
 
+FeedbackStatus = Literal["OPEN", "APPLIED", "DONE_BY_STUDENT", "DECLINED"]
+
+
+class FeedbackComment(Camel):
+    """One supervisor comment (V2, master context §47): pasted or read from a marked-up Word file.
+    PaperAid suggests where it applies; the student confirms, then a revision step fixes exactly
+    those sections and the comment records the version that answered it."""
+
+    id: str
+    round: int  # the feedback round it came with (1 = the first set of comments)
+    text: str = Field(max_length=1500)
+    anchor: str = Field(default="", max_length=300)  # the passage or heading the supervisor attached it to
+    chapter: int | None = None  # 1-3, or None: not placed yet (or about the plan / the whole proposal)
+    sections: list[str] = []  # section keys in that chapter
+    status: FeedbackStatus = "OPEN"
+    applied_in: int | None = None  # the chapter version that applied it
+    response: str = Field(default="", max_length=1000)  # the student's own reply for the response report
+
+
+class WrittenSection(Camel):
+    """A section in a chapter's current version: where supervisor comments can be placed."""
+
+    chapter: int
+    key: str
+    number: str
+    heading: str
+
+
 PlanStatus = Literal["NONE", "DRAFT", "APPROVED"]
 CitationStyle = Literal["APA6", "APA7"]
 
@@ -201,6 +229,9 @@ class ProjectView(Camel):
     plan_problems: list[str] = []  # what must be fixed before the plan can be approved (computed for the view)
     candidate_plan: ProposalPlan | None = None  # a plan PaperAid produced while the student was editing theirs
     auto_chapter_one: bool = False  # the student started the plan with Chapter One to follow on approval
+    feedback: list[FeedbackComment] = []  # supervisor comments, oldest first
+    written: list[WrittenSection] = []  # the current chapters' sections (computed for the view)
+    blockers: list[str] = []  # what stands between the project and a complete download (computed for the view)
     notice: str | None = None  # a one-off message for the student (not stored meaningfully; set on a response)
     chapters: list[ChapterState]
     evidence_count: int = 0
@@ -248,7 +279,7 @@ class StepInput(Camel):
     its input version). Stored with the job; its hash binds the quote."""
 
     project_id: str
-    step: Literal["PLAN", "CHAPTER"]
+    step: Literal["PLAN", "CHAPTER", "REVISE"]
     chapter: int  # 0 for the plan
     note: str = ""  # the student's instruction for this run
     rulebook: str
@@ -258,6 +289,11 @@ class StepInput(Camel):
     evidence_files: list[str] = []
     chapters: dict[int, str] = {}  # the other chapters' current version files, for consistency checks
     private: list[str] = []  # title-page words that must never reach a search (never sent to a model)
+    # REVISE: the version being revised, and the supervisor's comments by section key; every other
+    # section is carried over unchanged.
+    base: str = ""
+    revise: dict[str, list[str]] = {}
+    comment_ids: list[str] = []
 
 
 class ChapterDocument(Camel):

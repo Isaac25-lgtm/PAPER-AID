@@ -9,6 +9,7 @@ user, so ownership, versions and state rules can be tested directly.
   accepted, and a claim whose job is no longer queued or running is free again.
 - Genuine actions renew the project's expiry (30 days); reading it does not."""
 
+import difflib
 import hashlib
 import logging
 import secrets
@@ -23,12 +24,14 @@ from app.jobs import state
 from app.jobs.models import Job, JobEvent, JobStatus, JobView, Quote, QuoteLine, ReadinessItem, ServiceSelection, utcnow
 from app.jobs.service import ACCOUNT_CLOSING, User, _erase_project, _rate_limit, availability, current_engine, step_running, submit
 from app.pricing.quote import bound_quote, fixed_price, proposal_usd, with_margin
-from app.proposals import decisions, evidence, rulebook, sampling
+from app.proposals import decisions, evidence, feedback, rulebook, sampling
 from app.proposals import export as proposal_export
 from app.proposals.models import (
     ChapterDocument,
     CitationStyle,
     EvidenceItem,
+    FeedbackComment,
+    FeedbackStatus,
     Project,
     ProjectView,
     ProposalInputs,
@@ -37,12 +40,13 @@ from app.proposals.models import (
     StepInput,
     StoredChapterState,
     TitlePage,
+    WrittenSection,
 )
 from app.proposals.pipeline import INPUT, load_library
 from app.runtime import Runtime
 
 logger = logging.getLogger("paperaid.proposals")
-Step = Literal["PLAN", "CHAPTER_1", "CHAPTER_2", "CHAPTER_3"]
+Step = Literal["PLAN", "CHAPTER_1", "CHAPTER_2", "CHAPTER_3", "REVISE_1", "REVISE_2", "REVISE_3"]
 
 
 def _valid_id(project_id: str) -> bool:
@@ -105,14 +109,17 @@ def view(rt: Runtime, p: Project) -> ProjectView:
     """The browser's view, with what is computed from the current plan: what blocks approval and
     which written sections were built on decisions that have since changed."""
     out = p.view()
+    docs = {c.number: doc for c in p.chapters if c.current and (doc := _chapter_doc(rt, c)) is not None}
+    out.written = [WrittenSection(chapter=n, key=s.key, number=s.number, heading=s.heading) for n, doc in sorted(docs.items()) for s in doc.sections]
+    out.blockers = proposal_export.final_blockers(p, docs)
     if p.plan is not None:
         out.plan_problems = rulebook.plan_problems(p.rulebook, p.plan)
-        for chapter, stored in zip(out.chapters, p.chapters, strict=True):
-            doc = _chapter_doc(rt, stored) if stored.current else None
+        for chapter in out.chapters:
+            doc = docs.get(chapter.number)
             if doc is None:
                 continue
             written = {s.key for s in doc.sections}
-            expected = rulebook.sections(p.rulebook, stored.number, p.inputs.level, p.plan)
+            expected = rulebook.sections(p.rulebook, chapter.number, p.inputs.level, p.plan)
             missing = [f"{s.number} {s.heading} (not written yet)" for s in expected if s.key not in written]
             chapter.needs_review = decisions.stale(doc, p.plan) + missing
     out.active_job = p.active_job if step_running(rt, p) else None
@@ -248,12 +255,18 @@ def set_chapter(rt: Runtime, user: User, project_id: str, number: int, version: 
 
 
 class RenderedSection(BaseModel):
+    key: str
     number: str
     heading: str
     paragraphs: list[str]
     table: list[list[str]] | None = None
     table_caption: str = ""
     needs_review: bool = False
+
+
+class FrameworkColumn(BaseModel):
+    label: str
+    items: list[str]
 
 
 class ChapterView(BaseModel):
@@ -266,6 +279,7 @@ class ChapterView(BaseModel):
     warnings: list[str]
     words: int
     references: list[str]
+    framework: list[FrameworkColumn] = []  # Chapter One's conceptual framework figure, from the plan
 
 
 def _citer(rt: Runtime, p: Project) -> evidence.Citer:
@@ -276,7 +290,7 @@ def _render(doc: ChapterDocument, citer: evidence.Citer, plan: ProposalPlan | No
     stale = set(decisions.stale(doc, plan)) if plan else set()
     return [
         RenderedSection(
-            number=s.number, heading=s.heading, paragraphs=[citer.render(par) for par in s.paragraphs],
+            key=s.key, number=s.number, heading=s.heading, paragraphs=[citer.render(par) for par in s.paragraphs],
             table=[[citer.render(cell) for cell in row] for row in s.table] if s.table else None,
             table_caption=citer.render(s.table_caption), needs_review=f"{s.number} {s.heading}" in stale,
         )
@@ -301,6 +315,8 @@ def chapter(rt: Runtime, user: User, project_id: str, number: int, version: int 
         number=number, title=doc.title, version=version or stored.current, plan_version=doc.plan_version, sections=_render(doc, citer, p.plan),
         readiness=doc.readiness, warnings=doc.warnings, words=doc.words,
         references=evidence.reference_list(sources, p.citation),
+        framework=[FrameworkColumn(label=label, items=items) for label, items in proposal_export.framework_columns(p.plan)]
+        if number == 1 and any(s.key == "framework" for s in doc.sections) else [],
     )
 
 
@@ -356,6 +372,25 @@ def quote_step(rt: Runtime, user: User, project_id: str, step: Step, note: str) 
         raise Conflict("A step is already running for this proposal. Wait for it to finish.", code="STEP_RUNNING")
     note = note.strip()[:1000]
     chapter = 0 if step == "PLAN" else int(step[-1])
+    revising = step.startswith("REVISE_")
+    base, revise, comment_ids, revised_words = "", {}, [], 0
+    if revising:
+        stored = p.chapter(chapter)
+        doc = _chapter_doc(rt, stored)
+        if doc is None:
+            raise AppError("Write this chapter before revising it.", code="NOTHING_TO_REVISE")
+        base = next(v.path for v in stored.versions if v.version == stored.current)
+        written = {s.key: s for s in doc.sections}
+        for comment in p.feedback:
+            if comment.status == "OPEN" and comment.chapter == chapter:
+                for key in comment.sections:
+                    if key in written and len(revise.setdefault(key, [])) < 8:
+                        revise[key].append(comment.text)
+                        comment_ids.append(comment.id)
+        revise = {k: v for k, v in revise.items() if v}
+        if not revise:
+            raise AppError(f"Place at least one open comment on a section of Chapter {chapter} first.", code="NO_FEEDBACK")
+        revised_words = sum(len(evidence.ANY_TOKEN.sub(" ", par).split()) for k in revise for par in written[k].paragraphs)
     if chapter:
         if p.plan is None or p.plan_status != "APPROVED":
             raise AppError("Approve your plan before writing chapters.", code="PLAN_NOT_APPROVED")
@@ -365,7 +400,6 @@ def quote_step(rt: Runtime, user: User, project_id: str, step: Step, note: str) 
     _rate_limit(rt, user, "quote", rt.settings.quotes_per_hour)
     inp = StepInput(
         project_id=p.id,
-        step="PLAN" if chapter == 0 else "CHAPTER",
         chapter=chapter,
         note=note,
         rulebook=p.rulebook,
@@ -375,12 +409,16 @@ def quote_step(rt: Runtime, user: User, project_id: str, step: Step, note: str) 
         evidence_files=list(p.evidence_files),
         chapters={c.number: next(v.path for v in c.versions if v.version == c.current) for c in p.chapters if c.current and c.number != chapter},
         private=[w for w in " ".join([p.title_page.student_name, p.title_page.reg_number, p.title_page.supervisor]).split() if len(w) > 2],
+        step="REVISE" if revising else "PLAN" if chapter == 0 else "CHAPTER",
+        base=base,
+        revise=revise,
+        comment_ids=list(dict.fromkeys(comment_ids)),
     )
     data = inp.model_dump_json(by_alias=True).encode()
     sha = hashlib.sha256(data).hexdigest()
     now = utcnow()
-    words = 0
-    if chapter:
+    words = revised_words
+    if chapter and not revising:
         assert p.plan is not None
         words = sum(s.words for s in rulebook.sections(p.rulebook, chapter, p.inputs.level, p.plan))
     selection = ServiceSelection(proposal=step)
@@ -394,7 +432,7 @@ def quote_step(rt: Runtime, user: User, project_id: str, step: Step, note: str) 
         selection=selection,
         created_at=now,
         expires_at=now + timedelta(days=rt.settings.retention_days),
-        events=[JobEvent(at=now, label=f"{'Plan' if chapter == 0 else f'Chapter {chapter}'} step priced for proposal {p.id}")],
+        events=[JobEvent(at=now, label=f"{'Plan' if chapter == 0 else f'Chapter {chapter} revision' if revising else f'Chapter {chapter}'} step priced for proposal {p.id}")],
     )
     rt.files.put(f"{job.storage_prefix()}/internal/{INPUT}", data, "application/json")
     job.quote = bound_quote(rt.settings, selection, sha, words, current_engine(rt.settings))
@@ -439,6 +477,171 @@ def submit_step(rt: Runtime, user: User, project_id: str, job_id: str, quote_id:
         return _renew(rt, q)
 
     return submit(rt, user, job_id, quote_id, project_gate=gate)
+
+
+# --- supervisor feedback (V2) -------------------------------------------------------------------
+
+
+def _written(rt: Runtime, p: Project) -> list[feedback.Written]:
+    out = []
+    for stored in p.chapters:
+        doc = _chapter_doc(rt, stored) if stored.current else None
+        out += [feedback.Written(stored.number, s.key, s.number, s.heading) for s in doc.sections] if doc else []
+    return out
+
+
+def add_feedback(rt: Runtime, user: User, project_id: str, text: str, filename: str = "", data: bytes = b"") -> ProjectView:
+    """A round of supervisor comments, pasted or from a file, each placed where code suggests."""
+    p = _owned(rt, user, project_id)
+    read = feedback.read_file(filename, data) if data else feedback.split(text)
+    if not read:
+        raise AppError("No comments were found. Paste them one per line or paragraph, or upload the marked-up file.", code="NO_FEEDBACK")
+    written = _written(rt, p)
+
+    def apply(q: Project) -> Project:
+        if len(q.feedback) + len(read) > feedback.MAX_COMMENTS:
+            raise AppError(f"A proposal keeps up to {feedback.MAX_COMMENTS} comments. Remove ones already dealt with first.", code="TOO_MANY_COMMENTS")
+        round_ = max((c.round for c in q.feedback), default=0) + 1
+        for r in read:
+            chapter, sections = feedback.suggest(r, written)
+            q.feedback.append(FeedbackComment(id=f"fb_{secrets.token_hex(4)}", round=round_, text=r.text, anchor=r.anchor, chapter=chapter, sections=sections))
+        return q
+
+    return view(rt, _change(rt, user, project_id, apply))
+
+
+def update_feedback(
+    rt: Runtime, user: User, project_id: str, comment_id: str, chapter: int | None, sections: list[str], status: FeedbackStatus, response: str
+) -> ProjectView:
+    """The student places a comment, marks it handled or declined, or writes their reply."""
+    if chapter not in (None, 1, 2, 3):
+        raise NotFound("That chapter doesn't exist.")
+    p = _owned(rt, user, project_id)
+    keys = {w.key for w in _written(rt, p) if w.chapter == chapter}
+    if any(k not in keys for k in sections):
+        raise AppError("Choose sections that are in that chapter.", code="UNKNOWN_SECTION")
+
+    def apply(q: Project) -> Project:
+        comment = next((c for c in q.feedback if c.id == comment_id), None)
+        if comment is None:
+            raise NotFound("We couldn't find that comment.")
+        if status == "APPLIED" and comment.status != "APPLIED":
+            raise AppError("A comment is marked applied when a revision answers it.", code="NOT_APPLIED")
+        comment.chapter, comment.status, comment.response = chapter, status, response.strip()[:1000]
+        comment.sections = list(dict.fromkeys(sections))[:12] if chapter else []
+        return q
+
+    return view(rt, _change(rt, user, project_id, apply))
+
+
+def delete_feedback(rt: Runtime, user: User, project_id: str, comment_id: str) -> ProjectView:
+    def apply(q: Project) -> Project:
+        q.feedback = [c for c in q.feedback if c.id != comment_id]
+        return q
+
+    return view(rt, _change(rt, user, project_id, apply))
+
+
+def response_report(rt: Runtime, user: User, project_id: str) -> tuple[bytes, str]:
+    """Every comment with where it applied and what was done, as a Word table."""
+    p = _owned(rt, user, project_id)
+    if not p.feedback:
+        raise AppError("Add your supervisor's comments first.", code="NO_FEEDBACK")
+    headings = {(w.chapter, w.key): f"{w.number} {w.heading}" for w in _written(rt, p)}
+    default = {"DONE_BY_STUDENT": "Addressed.", "DECLINED": "Not changed.", "OPEN": "Not yet addressed."}
+    rows = []
+    for c in p.feedback:
+        if c.chapter and c.sections:
+            where = f"Chapter {c.chapter}: " + "; ".join(headings.get((c.chapter, k), k) for k in c.sections)
+        else:
+            where = f"Chapter {c.chapter}" if c.chapter else "The whole proposal"
+        reply = c.response or default.get(c.status) or f"Revised in Chapter {c.chapter} (version {c.applied_in})."
+        rows.append((c.text, where, reply))
+    data = proposal_export.response_report(p, rows, draft=any(c.status == "OPEN" for c in p.feedback))
+    _change(rt, user, project_id, lambda q: q)
+    return data, "Response to supervisor comments.docx"
+
+
+# --- comparing versions (V2) ----------------------------------------------------------------------
+
+
+class DiffPiece(BaseModel):
+    op: Literal["same", "added", "removed"]
+    text: str
+
+
+class SectionDiff(BaseModel):
+    number: str
+    heading: str
+    status: Literal["SAME", "CHANGED", "ADDED", "REMOVED"]
+    pieces: list[DiffPiece]
+
+
+class Comparison(BaseModel):
+    number: int
+    older: int
+    newer: int
+    changed: int
+    sections: list[SectionDiff]
+
+
+BREAK = "\n"  # a paragraph break, compared like a word
+
+
+def _words(paragraphs: list[str]) -> list[str]:
+    out: list[str] = []
+    for i, paragraph in enumerate(paragraphs):
+        out += ([BREAK] if i else []) + paragraph.split()
+    return out
+
+
+def _joined(words: list[str]) -> str:
+    return " ".join(words).replace(f" {BREAK} ", BREAK).replace(f"{BREAK} ", BREAK).replace(f" {BREAK}", BREAK)
+
+
+def _pieces(old: list[str], new: list[str]) -> list[DiffPiece]:
+    pieces: list[DiffPiece] = []
+    for op, a1, a2, b1, b2 in difflib.SequenceMatcher(None, old, new, autojunk=False).get_opcodes():
+        if op == "equal":
+            pieces.append(DiffPiece(op="same", text=_joined(old[a1:a2])))
+            continue
+        if a2 > a1:
+            pieces.append(DiffPiece(op="removed", text=_joined(old[a1:a2])))
+        if b2 > b1:
+            pieces.append(DiffPiece(op="added", text=_joined(new[b1:b2])))
+    return pieces
+
+
+def compare(rt: Runtime, user: User, project_id: str, number: int, older: int, newer: int) -> Comparison:
+    """Two versions of a chapter, section by section and word by word, citations as they print."""
+    p = _owned(rt, user, project_id)
+    if number not in (1, 2, 3):
+        raise NotFound("That chapter doesn't exist.")
+    stored = p.chapter(number)
+    a, b = _chapter_doc(rt, stored, older), _chapter_doc(rt, stored, newer)
+    if a is None or b is None:
+        raise NotFound("That version doesn't exist.")
+    library = load_library(rt.files, p.evidence_files)
+
+    def rendered(doc: ChapterDocument) -> dict[str, tuple[str, str, list[str]]]:
+        citer = evidence.Citer(library, p.citation)  # its own: APA 6 names all authors only at a first citation
+        return {s.key: (s.number, s.heading, [citer.render(par) for par in s.paragraphs]) for s in doc.sections}
+
+    before, after = rendered(a), rendered(b)
+    sections = []
+    for key in [*after, *[k for k in before if k not in after]]:
+        if key not in before:
+            num, heading, pars = after[key]
+            sections.append(SectionDiff(number=num, heading=heading, status="ADDED", pieces=[DiffPiece(op="added", text=BREAK.join(pars))]))
+        elif key not in after:
+            num, heading, pars = before[key]
+            sections.append(SectionDiff(number=num, heading=heading, status="REMOVED", pieces=[DiffPiece(op="removed", text=BREAK.join(pars))]))
+        else:
+            num, heading, pars = after[key]
+            same = before[key][2] == pars
+            pieces = [DiffPiece(op="same", text=BREAK.join(pars))] if same else _pieces(_words(before[key][2]), _words(pars))
+            sections.append(SectionDiff(number=num, heading=heading, status="SAME" if same else "CHANGED", pieces=pieces))
+    return Comparison(number=number, older=older, newer=newer, changed=sum(1 for s in sections if s.status != "SAME"), sections=sections)
 
 
 # --- deletion -------------------------------------------------------------------------------------

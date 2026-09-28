@@ -87,6 +87,7 @@ class Settings(BaseSettings):
         "AI_CHECK": 2, "ACADEMIC": 1, "REFINE_LIGHT": 3, "REFINE": 4, "REDRAFT": 7,
         "SOURCE_CHECK": 3,  # not in the owner's table: to be confirmed
         "TEMPLATE_FORMAT": 3, "PLAN": 2, "CHAPTER_1": 5, "CHAPTER_2": 7, "CHAPTER_3": 5, "REVIEW": 2,
+        "REVISE": 2,  # a chapter revised from supervisor comments, per band of revised text: to be confirmed
     }
     band_pages: int = 10
     band_step: float = 0.75
