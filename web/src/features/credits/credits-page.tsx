@@ -1,8 +1,10 @@
 import { clsx } from 'clsx'
 import { ArrowDownLeft, ArrowUpRight, Lock, Smartphone, Wallet as WalletIcon } from 'lucide-react'
+import { useState } from 'react'
 import { Link } from 'react-router'
+import { Button } from '../../components/ui/button'
 import { Alert, Badge, Card, EmptyState, PageHeader, Skeleton } from '../../components/ui/primitives'
-import { useData } from '../../lib/data'
+import { DataError, useData } from '../../lib/data'
 import { formatDateTime, formatTokens, formatUGX } from '../../lib/format'
 import type { LedgerEntry } from '../../lib/types'
 import { useTitle } from '../../lib/use-title'
@@ -21,8 +23,28 @@ const SIGN: Record<LedgerEntry['kind'], 1 | -1 | 0> = { TOP_UP: 1, HOLD: -1, CHA
 
 export function CreditsPage() {
   useTitle('Tokens')
-  const { config } = useData()
+  const data = useData()
+  const { config } = data
   const { wallet, error } = useWallet()
+  // Earlier activity, a page at a time: the balance card shows only the most recent entries.
+  const [earlier, setEarlier] = useState<LedgerEntry[]>([])
+  const [next, setNext] = useState<string | null | undefined>(undefined)
+  const [loading, setLoading] = useState(false)
+  const [historyError, setHistoryError] = useState<string | null>(null)
+  const shown = [...(wallet?.entries ?? []), ...earlier.filter((e) => !wallet?.entries.some((w) => w.id === e.id))]
+  const loadEarlier = async () => {
+    setLoading(true)
+    setHistoryError(null)
+    try {
+      const page = await data.walletHistory(next ?? shown.at(-1)?.at ?? null)
+      setEarlier((prev) => [...prev, ...page.entries])
+      setNext(page.next)
+    } catch (e) {
+      setHistoryError(e instanceof DataError ? e.message : 'We could not load earlier activity.')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   return (
     <>
@@ -76,7 +98,7 @@ export function CreditsPage() {
         </EmptyState>
       ) : (
         <Card className="divide-y divide-line">
-          {wallet.entries.map((e) => {
+          {shown.map((e) => {
             const sign = SIGN[e.kind]
             return (
               <div key={e.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 text-sm">
@@ -111,6 +133,14 @@ export function CreditsPage() {
             )
           })}
         </Card>
+      )}
+      {wallet && wallet.entries.length > 0 && next !== null && (
+        <div className="mt-3 flex items-center gap-3">
+          <Button variant="secondary" size="sm" loading={loading} onClick={loadEarlier}>
+            Show earlier activity
+          </Button>
+          {historyError && <span className="text-sm text-red-700">{historyError}</span>}
+        </div>
       )}
     </>
   )

@@ -34,6 +34,7 @@ jobs:
         with:
           node-version: "22"
       - run: npm ci
+      - run: npm test
       - run: npm run build
       - name: No provider secrets in the bundle
         run: "! grep -rEi 'sk-ant-|sk-proj-|ANTHROPIC_API_KEY|OPENAI_API_KEY' dist"

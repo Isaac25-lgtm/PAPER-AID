@@ -2,7 +2,7 @@
 // supplies (a Firebase ID token in production, a local developer identity when running locally).
 import { DataError, type DataSource, type JobQuery } from './data'
 import type { ChapterView, Comparison, EvidenceItem, Project, Rulebook, StepQuote } from './proposal-types'
-import type { AdminJob, AdminSummary, FileMeta, ImageMeta, Job, JobDocument, Page, PublicConfig, QuoteResponse, Wallet, WalletSummary } from './types'
+import type { AdminJob, AdminSummary, FileMeta, ImageMeta, Job, JobDocument, LedgerEntry, Page, PublicConfig, QuoteResponse, Wallet, WalletSummary } from './types'
 
 interface Options {
   config: PublicConfig
@@ -144,6 +144,7 @@ export function createApiSource({ config, getAuthHeaders }: Options): DataSource
       request<QuoteResponse>(`/api/jobs/${draftId}/quote`, { method: 'POST', body: JSON.stringify({ selection, startEstimate }) }),
 
     getWallet: () => request<Wallet>('/api/wallet'),
+    walletHistory: (before) => request<{ entries: LedgerEntry[]; next: string | null }>(`/api/wallet/history${query({ before })}`),
 
     submitJob: async (draftId, quoteId) =>
       (await request<Job>(`/api/jobs/${draftId}/submit`, { method: 'POST', body: JSON.stringify({ quoteId }) })).id,

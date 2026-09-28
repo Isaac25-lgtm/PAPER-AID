@@ -2,6 +2,7 @@
 user, so ownership, pricing and state rules can be unit-tested directly."""
 
 import hashlib
+import json
 import logging
 import re
 import secrets
@@ -24,6 +25,7 @@ from app.jobs.models import (
     AdminJob,
     AdminSummary,
     BoundQuote,
+    Camel,
     ChangedBlock,
     EstimateRun,
     FileMeta,
@@ -33,6 +35,7 @@ from app.jobs.models import (
     JobEvent,
     JobStatus,
     JobView,
+    LedgerEntry,
     Page,
     PaperCheck,
     PaymentStatus,
@@ -784,6 +787,20 @@ def _wallet_view(rt: Runtime, wallet: Wallet) -> WalletView:
         ugx_per_usd=rt.settings.ugx_per_usd,
         test_credits=rt.settings.env == "local",
     )
+
+
+class LedgerPage(Camel):
+    entries: list[LedgerEntry]
+    next: str | None = None  # pass as `before` for the next (older) page
+
+
+def wallet_history(rt: Runtime, user: User, before: str | None, limit: int = 50) -> LedgerPage:
+    """The complete history, newest first, a page at a time (the wallet keeps only recent entries)."""
+    limit = max(1, min(limit, 100))
+    entries = rt.store.ledger(user.uid, before, limit + 1)
+    more = len(entries) > limit
+    entries = entries[:limit]
+    return LedgerPage(entries=entries, next=json.loads(entries[-1].model_dump_json())["at"] if more else None)
 
 
 def my_wallet(rt: Runtime, user: User) -> WalletView:

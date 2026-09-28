@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Protocol
 
 from app.core.errors import PermanentStageError
-from app.jobs.models import Job, JobStatus, Wallet
+from app.jobs.models import Job, JobStatus, LedgerEntry, Wallet
 from app.proposals.models import Project
 
 Mutator = Callable[[Job], Job | None]
@@ -43,6 +43,7 @@ class JobStore(Protocol):
     def update_job_and_wallet(self, job_id: str, mutate: PairMutator) -> tuple[Job, Wallet] | None: ...
     def find_wallets(self, email_contains: str | None, limit: int) -> list[Wallet]: ...
     def delete_wallet(self, uid: str) -> None: ...
+    def ledger(self, uid: str, before: str | None, limit: int) -> list[LedgerEntry]: ...
     # proposal projects: one record each, changed only by atomic read-modify-write
     def create_project_if_open(self, project: Project) -> bool: ...
     def get_project(self, project_id: str) -> Project | None: ...
@@ -57,6 +58,16 @@ class JobStore(Protocol):
 # text is trimmed in the pipeline; full text lives in job storage); this guard turns any record
 # that still grows too large into a clear error instead of an obscure write failure.
 MAX_RECORD_BYTES = 900_000
+
+
+def _new_entries(seen: set[str], wallet: Wallet) -> list[LedgerEntry]:
+    """Entries a transaction added. The wallet keeps only its recent entries for display; each new
+    entry is also written as its own record, in the same transaction, so the history is complete."""
+    return [e for e in wallet.entries if e.id not in seen]
+
+
+def _entry_json(entry: LedgerEntry) -> dict:
+    return json.loads(entry.model_dump_json(by_alias=True))
 
 
 def _dump(job: Job | Project) -> str:
@@ -187,8 +198,17 @@ class LocalJobStore:
             raise ValueError("invalid uid")
         return self._wallets / f"{uid}.json"
 
+    def _ledger_path(self, uid: str) -> Path:
+        return self._wallet_path(uid).with_suffix(".ledger.jsonl")
+
     def _write_wallet(self, wallet: Wallet) -> None:
         self._wallets.mkdir(parents=True, exist_ok=True)
+        path = self._wallet_path(wallet.uid)
+        seen = {e.id for e in Wallet.model_validate_json(path.read_text(encoding="utf-8")).entries} if path.exists() else set()
+        new = _new_entries(seen, wallet)
+        if new:  # appended before the wallet is replaced; a repeat after a crash is removed on reading
+            with self._ledger_path(wallet.uid).open("a", encoding="utf-8") as ledger:
+                ledger.writelines(json.dumps(_entry_json(e)) + "\n" for e in new)
         tmp = self._wallet_path(wallet.uid).with_suffix(".tmp")
         tmp.write_text(wallet.model_dump_json(by_alias=True), encoding="utf-8")
         tmp.replace(self._wallet_path(wallet.uid))
@@ -233,6 +253,15 @@ class LocalJobStore:
     def delete_wallet(self, uid: str) -> None:
         with self._lock:
             self._wallet_path(uid).unlink(missing_ok=True)
+            self._ledger_path(uid).unlink(missing_ok=True)
+
+    def ledger(self, uid: str, before: str | None, limit: int) -> list[LedgerEntry]:
+        with self._lock:
+            path = self._ledger_path(uid)
+            lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+        entries = {e.id: e for e in (LedgerEntry.model_validate_json(line) for line in lines if line.strip())}
+        ordered = sorted(entries.values(), key=lambda e: (e.at, e.id), reverse=True)
+        return [e for e in ordered if before is None or _entry_json(e)["at"] < before][:limit]
 
     # projects: one file each, replaced atomically under the same lock
     def _project_path(self, project_id: str) -> Path:
@@ -401,9 +430,12 @@ class FirestoreJobStore:
         def run(transaction) -> Wallet | None:
             snap = ref.get(transaction=transaction)
             wallet = Wallet.model_validate(snap.to_dict()) if snap.exists else Wallet(uid=uid, email=email)
+            seen = {e.id for e in wallet.entries}
             result = mutate(wallet)
             if result is not None:
                 transaction.set(ref, json.loads(result.model_dump_json(by_alias=True)))
+                for entry in _new_entries(seen, result):
+                    transaction.set(ref.collection("ledger").document(entry.id), _entry_json(entry))
             return result
 
         return run(self._db.transaction())
@@ -420,10 +452,13 @@ class FirestoreJobStore:
             wallet_ref = self._wallets.document(job.owner_uid)
             wallet_snap = wallet_ref.get(transaction=transaction)  # every read before any write
             wallet = Wallet.model_validate(wallet_snap.to_dict()) if wallet_snap.exists else Wallet(uid=job.owner_uid, email=job.owner_email)
+            seen = {e.id for e in wallet.entries}
             result = mutate(job, wallet)
             if result is not None:
                 transaction.set(job_ref, json.loads(_dump(result[0])))
                 transaction.set(wallet_ref, json.loads(result[1].model_dump_json(by_alias=True)))
+                for entry in _new_entries(seen, result[1]):
+                    transaction.set(wallet_ref.collection("ledger").document(entry.id), _entry_json(entry))
             return result
 
         return run(self._db.transaction())
@@ -436,7 +471,22 @@ class FirestoreJobStore:
         return [w for w in found if not w.closing]  # closed-account tombstones are never offered to admins
 
     def delete_wallet(self, uid: str) -> None:
-        self._wallets.document(uid).delete()
+        ref = self._wallets.document(uid)
+        while True:  # the history goes with the account (in batches: a subcollection is not deleted with its parent)
+            docs = list(ref.collection("ledger").limit(400).stream())
+            if not docs:
+                break
+            batch = self._db.batch()
+            for doc in docs:
+                batch.delete(doc.reference)
+            batch.commit()
+        ref.delete()
+
+    def ledger(self, uid: str, before: str | None, limit: int) -> list[LedgerEntry]:
+        query = self._wallets.document(uid).collection("ledger").order_by("at", direction=self._fs.Query.DESCENDING)
+        if before:
+            query = query.where(filter=self._fs.FieldFilter("at", "<", before))
+        return [LedgerEntry.model_validate(d.to_dict()) for d in query.limit(limit).stream()]
 
     def create_project_if_open(self, project: Project) -> bool:
         """Like `create_if_open`: the account check and the write are one transaction."""
@@ -485,11 +535,14 @@ class FirestoreJobStore:
             project_snap = project_ref.get(transaction=transaction)
             wallet = Wallet.model_validate(wallet_snap.to_dict()) if wallet_snap.exists else Wallet(uid=job.owner_uid, email=job.owner_email)
             project = Project.model_validate(project_snap.to_dict()) if project_snap.exists else None
+            seen = {e.id for e in wallet.entries}
             result = mutate(job, wallet, project)
             if result is not None:
                 transaction.set(job_ref, json.loads(_dump(result[0])))
                 transaction.set(wallet_ref, json.loads(result[1].model_dump_json(by_alias=True)))
                 transaction.set(project_ref, json.loads(_dump(result[2])))
+                for entry in _new_entries(seen, result[1]):
+                    transaction.set(wallet_ref.collection("ledger").document(entry.id), _entry_json(entry))
             return result
 
         return run(self._db.transaction())

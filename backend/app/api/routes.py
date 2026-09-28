@@ -87,6 +87,11 @@ def quote(
     return service.request_quote(rt, user, job_id, selection, start_estimate)
 
 
+@api.get("/wallet/history", response_model=service.LedgerPage)
+def wallet_history(before: str | None = Query(None, max_length=40), user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> service.LedgerPage:
+    return service.wallet_history(rt, user, before)
+
+
 @api.get("/wallet", response_model=WalletView)
 def wallet(user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> WalletView:
     return service.my_wallet(rt, user)

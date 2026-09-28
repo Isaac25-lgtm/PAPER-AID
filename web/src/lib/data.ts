@@ -8,6 +8,7 @@ import type {
   Job,
   JobDocument,
   JobStatus,
+  LedgerEntry,
   Page,
   PublicConfig,
   QuoteResponse,
@@ -54,6 +55,8 @@ export interface DataSource {
   /** A price, or for refinement the estimate that runs first (watch the draft until it is READY). */
   requestQuote(draftId: string, selection: ServiceSelection, startEstimate?: boolean): Promise<QuoteResponse>
   getWallet(): Promise<Wallet>
+  /** The complete history, newest first; `before` is the previous page's `next`. */
+  walletHistory(before: string | null): Promise<{ entries: LedgerEntry[]; next: string | null }>
   submitJob(draftId: string, quoteId: string): Promise<string>
   cancelJob(jobId: string): Promise<void>
   deleteJob(jobId: string): Promise<void>
