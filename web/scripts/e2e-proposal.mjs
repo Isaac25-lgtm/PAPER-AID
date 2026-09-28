@@ -148,6 +148,21 @@ try {
   await shot('p8-concept')
   step('concept paper written from the plan, checked against its limits and downloaded')
 
+  // Another institution: a new proposal follows the student's own research guide.
+  await page.goto(`${base}/app/projects`)
+  await page.getByRole('link', { name: 'New proposal' }).click()
+  await page.getByLabel('Topic').fill('Teacher motivation and pupil performance in Kampala primary schools')
+  await page.getByRole('button', { name: 'Create proposal' }).click()
+  await page.waitForURL(/\/app\/projects\/prj_/)
+  await page.getByRole('tab', { name: 'Details' }).click()
+  await page.getByText('Written to the standard proposal structure', { exact: false }).waitFor()
+  await page.locator('input[type=file]').first().setInputFiles({ name: 'research-guide.docx', mimeType: 'application/octet-stream', buffer: readFileSync(new URL('./fixtures/research-guide.docx', import.meta.url)) })
+  await runStep(page.getByRole('tabpanel').locator('div.rounded-xl', { hasText: "Use my institution's guide" }))
+  await page.getByText('Kyambogo University', { exact: false }).first().waitFor({ timeout: 90_000 })
+  await page.getByText('Check these with your supervisor').waitFor()
+  await shot('p9-institution')
+  step("a new proposal follows the student's institution, read from their guide")
+
   if (reviewFile) {
     await page.goto(`${base}/app/new?review=1`)
     await page.locator('input[type=file]').setInputFiles({ name: 'proposal.docx', mimeType: 'application/octet-stream', buffer: readFileSync(reviewFile) })

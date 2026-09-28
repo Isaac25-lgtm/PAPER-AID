@@ -121,6 +121,10 @@ STEPS: dict[str, Step] = {
     "p_review": Step("lead", Stage.AUDITING, "p-review-v1", 8000),
     "p_fix": Step("writer", Stage.AUDITING, "p-fix-v1", 16000),
     "p_readiness": Step("lead", Stage.AUDITING, "p-readiness-v1", 8000),
+    # An institution profile from an uploaded guide (Proposal V2): lead drafts → writer critiques → lead finalises.
+    "p_profile": Step("lead", Stage.PLANNING, "p-profile-v1", 12000),
+    "p_profile_critique": Step("writer", Stage.PLANNING, "p-profile-critique-v1", 6000),
+    "p_profile_finalise": Step("lead", Stage.PLANNING, "p-profile-finalise-v1", 12000),
     # Review of an uploaded proposal: the lead audits it against the rulebook (it is never rewritten).
     "p_audit": Step("lead", Stage.ANALYSING, "p-audit-v1", 12000),
 }

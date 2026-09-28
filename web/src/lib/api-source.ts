@@ -233,6 +233,12 @@ export function createApiSource({ config, getAuthHeaders }: Options): DataSource
       deleteFeedback: (id, commentId) => request<Project>(`/api/projects/${id}/feedback/${commentId}`, { method: 'DELETE' }),
       downloadResponse: (id) => saveFile(`/api/projects/${id}/feedback/report`, 'Response to supervisor comments.docx'),
       downloadConcept: (id, fileName) => saveFile(`/api/projects/${id}/concept/export`, fileName),
+      uploadGuide(id, file) {
+        const form = new FormData()
+        form.append('file', file)
+        return request<Project>(`/api/projects/${id}/guide`, { method: 'POST', body: form })
+      },
+      useDefaultRulebook: (id) => request<Project>(`/api/projects/${id}/rulebook/default`, { method: 'POST' }),
     },
 
     admin: {

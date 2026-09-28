@@ -51,6 +51,29 @@ PLAN = {
 }
 
 
+def profile_answer(payload: dict[str, Any]) -> dict[str, Any]:
+    """A guide read into a profile: the reference structure under another university's headings, with
+    one section of its own, its own formatting and one point it leaves open. A text that is not a
+    guide gets no chapters."""
+    if "research proposal" not in payload["guide"].lower():
+        return {"institution": "", "short": "", "citation": "APA7", "chapters": [], "levels": [], "objectives": {"min": 0, "max": 0},
+                "formatting": {"font": "", "sizePt": 0, "lineSpacing": 0, "marginsIn": 0}, "rules": [], "vetting": [], "unclear": ["This is not a research guide."]}
+    chapters = []
+    for c in payload["reference"]["structure"]:
+        sections = [{"key": s["key"], "heading": s["heading"], "brief": f"As the guide describes {s['heading'].lower()}.", "share": s["share"],
+                     "perObjective": s["key"] == "empirical", "table": s["key"] == "workplan"} for s in c["sections"]]
+        if c["number"] == 1:
+            sections.insert(1, {"key": "definitions", "heading": "Definition of Key Terms", "brief": "Operational definitions.", "share": 0.05, "perObjective": False, "table": False})
+        chapters.append({"number": c["number"], "title": "Introduction" if c["number"] == 1 else c["title"], "purpose": "As the guide sets out.", "share": c["share"], "sections": sections})
+    return {
+        "institution": "Kyambogo University", "short": "KyU", "citation": "APA7", "chapters": chapters,
+        "levels": [{"level": "MASTERS", "pagesMin": 20, "pagesMax": 40}], "objectives": {"min": 3, "max": 4},
+        "formatting": {"font": "Times New Roman", "sizePt": 12, "lineSpacing": 1.5, "marginsIn": 1.0},
+        "rules": ["Write the proposal in the future tense."], "vetting": [{"chapter": 3, "question": "Is the sampling procedure justified?"}],
+        "unclear": ["The guide does not say how long the literature review should be."],
+    }
+
+
 class FakeModels:
     name = "fake"
 
@@ -187,6 +210,12 @@ class FakeModels:
                 "evidence": [*cited, "Enot0found"],  # one id that was never given: code must drop it
             }
             return {**PLAN, "researchGap": gap}
+        if task == "p_profile":
+            return profile_answer(payload)
+        if task == "p_profile_critique":
+            return {"items": [], "overall": "Faithful to the guide."}
+        if task == "p_profile_finalise":
+            return payload["draft"]
         if task == "p_critique":
             return {"items": [], "overall": "Sound."}
         if task == "p_finalise":

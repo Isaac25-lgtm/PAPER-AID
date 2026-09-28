@@ -89,6 +89,7 @@ class Settings(BaseSettings):
         "TEMPLATE_FORMAT": 3, "PLAN": 2, "CHAPTER_1": 5, "CHAPTER_2": 7, "CHAPTER_3": 5, "REVIEW": 2,
         "REVISE": 2,  # a chapter revised from supervisor comments, per band of revised text: to be confirmed
         "CONCEPT": 2,  # the concept paper (at most five pages): to be confirmed
+        "PROFILE": 2,  # an institution profile from the student's guide: to be confirmed
     }
     band_pages: int = 10
     band_step: float = 0.75

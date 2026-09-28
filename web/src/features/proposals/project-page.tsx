@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
 import { Button } from '../../components/ui/button'
 import { Select } from '../../components/ui/field'
+import { FileDropzone } from '../../components/ui/file-dropzone'
 import { Dialog, Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/overlays'
 import { Alert, Badge, Card, PageHeader, Skeleton } from '../../components/ui/primitives'
 import { DataError, useData } from '../../lib/data'
@@ -300,6 +301,87 @@ function CompareView({ comparison }: { comparison: Comparison }) {
   )
 }
 
+/** The institution the proposal is written for: the default structure, or one read from the
+ * student's own research guide (before any chapter is written). */
+function InstitutionCard({ project, running, onStarted, onChanged }: { project: Project; running: boolean; onStarted: (id: string) => void; onChanged: (p: Project) => void }) {
+  const data = useData()
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const custom = project.rulebook.startsWith('custom-')
+  const written = project.chapters.some((c) => c.versions.length > 0)
+  const run = async (action: () => Promise<Project>) => {
+    setBusy(true)
+    setError(null)
+    try {
+      onChanged(await action())
+    } catch (e) {
+      setError(e instanceof DataError ? e.message : 'That did not work. Try again.')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Card className="space-y-3 p-5">
+      <div>
+        <p className="text-sm font-semibold">Your institution</p>
+        <p className="mt-1 text-sm text-fg-muted">
+          {custom ? (
+            <>
+              Written to <span className="font-medium text-fg">{project.institution}</span>&rsquo;s structure, read from your guide
+              {project.guideName ? ` (${project.guideName})` : ''}.
+            </>
+          ) : (
+            <>
+              Written to the standard proposal structure: introduction, literature review and methodology. If your institution has its own research
+              guide, upload it and PaperAid follows its chapters, headings and rules instead.
+            </>
+          )}
+        </p>
+      </div>
+      {custom && project.institutionNotes.length > 0 && (
+        <Alert tone="info" title="Check these with your supervisor">
+          <ul className="list-disc pl-5">
+            {project.institutionNotes.map((n) => (
+              <li key={n}>{n}</li>
+            ))}
+          </ul>
+        </Alert>
+      )}
+      {error && <Alert tone="danger">{error}</Alert>}
+      {written ? (
+        <p className="text-xs text-fg-subtle">Your chapters follow this structure; it stays the same for this proposal.</p>
+      ) : (
+        <>
+          <FileDropzone
+            compact
+            label={project.guideName ? `Replace your guide (${project.guideName})` : "Upload your institution's research guide"}
+            hint="Word or PDF, up to 15,000 words"
+            accept=".docx,.pdf"
+            disabled={busy}
+            onFile={(file) => run(() => data.projects.uploadGuide(project.id, file))}
+          />
+          {project.guideName && !project.guideRead && (
+            <StepRunner
+              key={project.guideName}
+              projectId={project.id}
+              step="PROFILE"
+              label="Use my institution's guide"
+              description="PaperAid reads your guide for its proposal structure, rules and assessment questions, and writes your proposal to them."
+              disabledReason={running ? 'A step is running for this proposal. Wait for it to finish.' : undefined}
+              onStarted={onStarted}
+            />
+          )}
+          {custom && (
+            <Button variant="ghost" size="sm" disabled={busy} onClick={() => run(() => data.projects.useDefaultRulebook(project.id))}>
+              Use the default structure instead
+            </Button>
+          )}
+        </>
+      )}
+    </Card>
+  )
+}
+
 /** Everything that stands between the proposal and a complete download, in one place. */
 function ReadyPanel({ project, onDownload }: { project: Project; onDownload: (final: boolean, pdf?: boolean) => void }) {
   const data = useData()
@@ -569,8 +651,10 @@ export function ProjectPage() {
         <TabsContent value="evidence">
           <EvidencePanel projectId={project.id} count={project.evidenceCount} />
         </TabsContent>
-        <TabsContent value="details" className="max-w-3xl">
+        <TabsContent value="details" className="max-w-3xl space-y-5">
+          <InstitutionCard project={project} running={!!running} onStarted={setRunning} onChanged={setProject} />
           <DetailsForm
+            key={`${project.rulebook}-${project.citation}`}
             initial={project.inputs}
             titlePage={project.titlePage}
             citation={project.citation}

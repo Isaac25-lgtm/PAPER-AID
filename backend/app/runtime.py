@@ -27,6 +27,9 @@ def get_runtime() -> Runtime:
         GcsFileStore(settings.gcs_bucket or "", settings.gcp_project) if settings.storage_backend == "gcs" else LocalFileStore(settings.data_dir)
     )
     runtime = Runtime(settings, store, files)
+    from app.proposals import rulebook
+
+    rulebook.use_storage(files.get)  # institution profiles built from students' guides
     runtime.queue = (
         CloudTasksQueue(settings)
         if settings.queue_backend == "cloud_tasks"

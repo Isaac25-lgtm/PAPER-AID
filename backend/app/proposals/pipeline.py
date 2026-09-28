@@ -19,7 +19,7 @@ from pydantic import ValidationError
 from app.analysis import fetch, research
 from app.core.errors import PermanentStageError
 from app.jobs.models import Job, ReadinessItem, Stage, utcnow
-from app.proposals import decisions, evidence, rulebook, sampling
+from app.proposals import decisions, evidence, profile, rulebook, sampling
 from app.proposals.ai import Grade, ProposalRunner, SectionText, Table
 from app.proposals.models import (
     ChapterDocument,
@@ -236,6 +236,18 @@ def stage_planning(ctx: "StageContext") -> None:
     inp = step_input(ctx)
     runner = ctx.ai(ProposalRunner)
     assert isinstance(runner, ProposalRunner)
+    if inp.step == "PROFILE":
+        guide = ctx.rt.files.get(inp.guide).decode("utf-8")
+        final, draft, critique = runner.profile({"guide": guide, "reference": profile.reference()})
+        try:
+            book = profile.build(final, inp.guide_name)
+            book["guide_sha256"] = hashlib.sha256(guide.encode()).hexdigest()  # which upload it was read from
+        except profile.NotAGuide as exc:
+            raise PermanentStageError(
+                "NOT_A_GUIDE", "PaperAid could not find a proposal structure in this guide, so nothing was charged. Check it is your institution's research guide.", f"profile: {exc}"
+            ) from exc
+        ctx.put_json("profile.json", {"profile": book, "draft": draft, "critique": critique.model_dump()})
+        return
     usable = [i for i in _library(ctx, inp).values() if i.usable]
     rules = rulebook.rules_for(inp.rulebook)
     if inp.step == "PLAN":
@@ -658,6 +670,10 @@ def stage_exporting(ctx: "StageContext") -> None:
         chapter_path = f"{project.storage_prefix()}/chapters/{inp.chapter}/{job_id}.json"
         ctx.rt.files.put(chapter_path, document.model_dump_json(by_alias=True).encode(), "application/json")
     plan = ProposalPlan.model_validate(ctx.get_json("plan.json")["plan"]) if inp.step == "PLAN" else None
+    book = ctx.get_json("profile.json")["profile"] if inp.step == "PROFILE" else None
+    if book is not None:  # written once under its own id; a retry writes the same file again
+        ctx.rt.files.put(rulebook.stored_path(book["id"]), json.dumps(book).encode(), "application/json")
+    written_meanwhile = False
     library_paths = list(dict.fromkeys([*project.evidence_files, *([evidence_path] if evidence_path else [])]))
     usable = sum(1 for i in load_library(ctx.rt.files, library_paths).values() if i.usable)
     candidate = False
@@ -666,9 +682,17 @@ def stage_exporting(ctx: "StageContext") -> None:
         nonlocal candidate
         if p.deleting:
             return None
+        nonlocal written_meanwhile
         if job_id in p.published:  # a retry after this job's transaction already committed
             return p
         p.published.append(job_id)
+        if book is not None:
+            p.profiles = list(dict.fromkeys([*p.profiles, book["id"]]))
+            if any(c.versions for c in p.chapters):
+                written_meanwhile = True  # a chapter was written to the current structure: keep it
+            else:
+                p.rulebook = book["id"]
+                p.citation = book["default_citation"]
         if evidence_path and evidence_path not in p.evidence_files:
             p.evidence_files.append(evidence_path)
         p.evidence_count = usable
@@ -698,6 +722,8 @@ def stage_exporting(ctx: "StageContext") -> None:
     if ctx.rt.store.update_project(inp.project_id, publish) is None:
         raise PermanentStageError("PROJECT_DELETED", "This proposal was deleted before the step finished, so nothing was charged.", "project deleting at export")
     notes = ["You edited your plan while PaperAid was drafting one, so the new plan is kept alongside yours for you to compare."] if candidate else []
+    if written_meanwhile:
+        notes.append("A chapter was written before your institution's profile was ready, so your proposal keeps its current structure.")
 
     def done(j: Job) -> Job:
         j = _warn(j, notes, partial=False)

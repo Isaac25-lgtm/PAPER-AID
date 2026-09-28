@@ -4,6 +4,7 @@ revision never changes a proposal already under way. Prompts receive only the ru
 never the whole manual."""
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
@@ -16,11 +17,31 @@ RULEBOOKS = Path(__file__).parent / "rulebooks"
 DEFAULT = "ucu-2018-v1"
 
 
+_stored: Callable[[str], bytes] | None = None  # reads an institution profile saved in storage (set by the runtime)
+
+
+def use_storage(reader: Callable[[str], bytes]) -> None:
+    global _stored
+    _stored = reader
+    load.cache_clear()
+
+
+def stored_path(rulebook_id: str) -> str:
+    return f"rulebooks/{rulebook_id}.json"
+
+
 @cache
 def load(rulebook_id: str) -> dict[str, Any]:
+    """A packaged rulebook, or a profile built from a student's guide (saved once, never changed:
+    a new guide gives a new id)."""
     if not rulebook_id.replace("-", "").isalnum():
         raise ValueError("invalid rulebook id")
-    return json.loads((RULEBOOKS / f"{rulebook_id}.json").read_text(encoding="utf-8"))
+    packaged = RULEBOOKS / f"{rulebook_id}.json"
+    if packaged.exists():
+        return json.loads(packaged.read_text(encoding="utf-8"))
+    if _stored is None or not rulebook_id.startswith("custom-"):
+        raise ValueError(f"unknown rulebook {rulebook_id}")
+    return json.loads(_stored(stored_path(rulebook_id)))
 
 
 def chapter_spec(rulebook_id: str, number: int) -> dict[str, Any]:

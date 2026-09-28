@@ -31,7 +31,7 @@ class PlanEdit(Camel):
 
 
 class StepRequest(Camel):
-    step: Literal["PLAN", "CHAPTER_1", "CHAPTER_2", "CHAPTER_3", "CONCEPT", "REVISE_1", "REVISE_2", "REVISE_3"]
+    step: Literal["PLAN", "CHAPTER_1", "CHAPTER_2", "CHAPTER_3", "CONCEPT", "REVISE_1", "REVISE_2", "REVISE_3", "PROFILE"]
     note: str = ""
 
 
@@ -166,6 +166,17 @@ def export_concept(project_id: str, user: User = Depends(current_user), rt: Runt
 @router.get("/{project_id}/chapters/{number}/compare", response_model=projects.Comparison)
 def compare(project_id: str, number: int, older: int = Query(...), newer: int = Query(...), user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> projects.Comparison:
     return projects.compare(rt, user, project_id, number, older, newer)
+
+
+@router.post("/{project_id}/guide", response_model=ProjectView)
+async def upload_guide(project_id: str, file: UploadFile = File(...), user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> ProjectView:
+    data = await file.read(rt.settings.max_upload_bytes + 1)
+    return projects.upload_guide(rt, user, project_id, file.filename or "guide", data)
+
+
+@router.post("/{project_id}/rulebook/default", response_model=ProjectView)
+def default_rulebook(project_id: str, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> ProjectView:
+    return projects.use_default_rulebook(rt, user, project_id)
 
 
 @router.post("/{project_id}/feedback", response_model=ProjectView)

@@ -125,6 +125,8 @@ def pipeline_for(selection: ServiceSelection) -> list[Stage]:
         return [Stage.RESEARCHING, Stage.PLANNING, Stage.EXPORTING]
     if selection.proposal.startswith("REVISE_"):
         return [Stage.AUDITING, Stage.EXPORTING]
+    if selection.proposal == "PROFILE":
+        return [Stage.PLANNING, Stage.EXPORTING]
     if selection.proposal != "NONE":
         return [Stage.RESEARCHING, Stage.PLANNING, Stage.DRAFTING, Stage.AUDITING, Stage.EXPORTING]
     stages = [Stage.EXTRACTING]
@@ -1083,6 +1085,8 @@ def _erase_project(rt: Runtime, project: Project, expired_before: datetime | Non
             continue
         _erase(rt, claimed)
     rt.files.delete_prefix(project.storage_prefix())
+    for profile_id in project.profiles:  # institution profiles built from this project's guide
+        rt.files.delete(f"rulebooks/{profile_id}.json")
     rt.store.delete_project(project.id)
     return True
 

@@ -190,6 +190,13 @@ def revise_usd(settings: Settings, words: int) -> float:
     return usd
 
 
+def profile_usd(settings: Settings, guide_words: int) -> float:
+    """An institution profile: the lead drafts it from the whole guide, the writer critiques it and
+    the lead finalises it (each call reads the guide)."""
+    guide = guide_words * CHARS_PER_WORD + 12000
+    return _step_usd(settings, "p_profile", guide, 0) + _step_usd(settings, "p_profile_critique", guide + 8000, 0) + _step_usd(settings, "p_profile_finalise", guide + 12000, 0)
+
+
 def proposal_review_usd(settings: Settings, words: int) -> float:
     """The lead's audit of an uploaded proposal: one call over the whole text."""
     return _step_usd(settings, "p_audit", words * CHARS_PER_WORD + 150 * max(1, words // 120) + 12000, 0)
@@ -270,6 +277,8 @@ def price(
         services.append(("SOURCE_CHECK", "Source check with live search", source_check_usd(settings, words), words))
     if selection.proposal == "REVIEW":
         services.append(("REVIEW", "Proposal review", proposal_review_usd(settings, words), words))
+    elif selection.proposal == "PROFILE":
+        services.append(("PROFILE", "Your institution's guide, read into a profile", profile_usd(settings, guide_words), None))
     elif selection.proposal.startswith("REVISE_"):
         banded = scope_words or words
         services.append(("REVISE", f"Chapter {selection.proposal[-1]} revised from your supervisor's comments", revise_usd(settings, banded), banded))

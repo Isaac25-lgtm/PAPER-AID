@@ -100,6 +100,9 @@ export interface DataSource {
     deleteFeedback(id: string, commentId: string): Promise<Project>
     downloadResponse(id: string): Promise<void>
     downloadConcept(id: string, fileName: string): Promise<void>
+    /** The institution's research guide, read into a profile by the PROFILE step. */
+    uploadGuide(id: string, file: File): Promise<Project>
+    useDefaultRulebook(id: string): Promise<Project>
   }
   admin: {
     summary(): Promise<AdminSummary>

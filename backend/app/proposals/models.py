@@ -197,6 +197,15 @@ class StoredChapterState(ChapterState):
 FeedbackStatus = Literal["OPEN", "APPLIED", "DONE_BY_STUDENT", "DECLINED"]
 
 
+class GuideFile(Camel):
+    """The institution's research guide the student uploaded, kept as text for the profile step."""
+
+    name: str
+    words: int
+    sha256: str
+    path: str  # the extracted text in storage (never shown to browsers)
+
+
 class FeedbackComment(Camel):
     """One supervisor comment (V2, master context §47): pasted or read from a marked-up Word file.
     PaperAid suggests where it applies; the student confirms, then a revision step fixes exactly
@@ -243,6 +252,10 @@ class ProjectView(Camel):
     auto_chapter_one: bool = False  # the student started the plan with Chapter One to follow on approval
     feedback: list[FeedbackComment] = []  # supervisor comments, oldest first
     written: list[WrittenSection] = []  # the current chapters' sections (computed for the view)
+    institution: str = ""  # the rulebook's institution (computed for the view)
+    institution_notes: list[str] = []  # what the student's guide left open (computed for the view)
+    guide_name: str | None = None  # the uploaded guide's file name (computed for the view)
+    guide_read: bool = False  # the current profile was read from the current guide (computed for the view)
     blockers: list[str] = []  # what stands between the project and a complete download (computed for the view)
     notice: str | None = None  # a one-off message for the student (not stored meaningfully; set on a response)
     chapters: list[ChapterState]
@@ -263,6 +276,8 @@ class Project(ProjectView):
     evidence_files: list[str] = []  # one file per job that gathered evidence
     published: list[str] = []  # jobs whose results were published here (a retried publish adds nothing)
     deleting: bool = False  # claimed for deletion (by the student, account deletion or expiry): nothing new may start
+    guide: GuideFile | None = None
+    profiles: list[str] = []  # institution profiles built for this project (deleted with it)
 
     @model_validator(mode="after")
     def _has_concept(self) -> "Project":
@@ -298,7 +313,7 @@ class StepInput(Camel):
     its input version). Stored with the job; its hash binds the quote."""
 
     project_id: str
-    step: Literal["PLAN", "CHAPTER", "REVISE"]
+    step: Literal["PLAN", "CHAPTER", "REVISE", "PROFILE"]
     chapter: int  # 0 for the plan
     note: str = ""  # the student's instruction for this run
     rulebook: str
@@ -311,6 +326,8 @@ class StepInput(Camel):
     # REVISE: the version being revised, and the supervisor's comments by section key; every other
     # section is carried over unchanged.
     base: str = ""
+    guide: str = ""  # PROFILE: the guide's text in storage, and its file name
+    guide_name: str = ""
     revise: dict[str, list[str]] = {}
     comment_ids: list[str] = []
 

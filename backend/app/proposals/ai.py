@@ -261,6 +261,17 @@ class ProposalRunner(AIRunner):
         final = self._raw("p_finalise", {**payload, "kind": kind, "draft": draft, "critique": critique.model_dump()}, schema, shape)
         return final, draft, critique
 
+    def profile(self, payload: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], Critique]:
+        """An institution profile from a guide: (final, draft, critique); code validates the final."""
+        from app.proposals.profile import CRITIQUE_SCHEMA as PROFILE_CRITIQUE
+        from app.proposals.profile import SCHEMA as PROFILE
+
+        draft = self._raw("p_profile", payload, PROFILE, None)
+        critique = _whole(self._call("p_profile_critique", {**payload, "draft": draft}, PROFILE_CRITIQUE, Critique), "p_profile_critique")
+        assert isinstance(critique, Critique)
+        final = self._raw("p_profile_finalise", {**payload, "draft": draft, "critique": critique.model_dump()}, PROFILE, None)
+        return final, draft, critique
+
     def _raw(self, task: str, payload: dict[str, Any], schema: dict[str, Any], shape: type[BaseModel] | None) -> dict[str, Any]:
         answer = _whole(self._call(task, payload, schema, shape or _AnyObject), task)
         return answer.model_dump()

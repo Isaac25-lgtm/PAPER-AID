@@ -14,12 +14,15 @@ import hashlib
 import logging
 import secrets
 from datetime import timedelta
+from pathlib import PurePosixPath
 from typing import Literal
 
 from pydantic import BaseModel
 
 from app.core.errors import AppError, Conflict, Forbidden, NotFound
 from app.core.logging import log
+from app.documents.intake import inspect_upload
+from app.formatting.guideline import MAX_GUIDE_WORDS
 from app.jobs import state
 from app.jobs.models import Job, JobEvent, JobStatus, JobView, Quote, QuoteLine, ReadinessItem, ServiceSelection, utcnow
 from app.jobs.service import ACCOUNT_CLOSING, User, _erase_project, _rate_limit, availability, current_engine, step_running, submit
@@ -34,6 +37,7 @@ from app.proposals.models import (
     EvidenceItem,
     FeedbackComment,
     FeedbackStatus,
+    GuideFile,
     Project,
     ProjectView,
     ProposalInputs,
@@ -48,7 +52,7 @@ from app.proposals.pipeline import INPUT, load_library
 from app.runtime import Runtime
 
 logger = logging.getLogger("paperaid.proposals")
-Step = Literal["PLAN", "CHAPTER_1", "CHAPTER_2", "CHAPTER_3", "CONCEPT", "REVISE_1", "REVISE_2", "REVISE_3"]
+Step = Literal["PLAN", "CHAPTER_1", "CHAPTER_2", "CHAPTER_3", "CONCEPT", "REVISE_1", "REVISE_2", "REVISE_3", "PROFILE"]
 CONCEPT = 4  # the concept paper is stored like a chapter, as number 4
 
 
@@ -115,6 +119,10 @@ def view(rt: Runtime, p: Project) -> ProjectView:
     docs = {c.number: doc for c in p.chapters if c.current and (doc := _chapter_doc(rt, c)) is not None}
     out.written = [WrittenSection(chapter=n, key=s.key, number=s.number, heading=s.heading) for n, doc in sorted(docs.items()) if n != CONCEPT for s in doc.sections]
     out.blockers = proposal_export.final_blockers(p, docs)
+    book = rulebook.load(p.rulebook)
+    out.institution, out.institution_notes = book["institution"], list(book.get("unclear", []))
+    out.guide_name = p.guide.name if p.guide else None
+    out.guide_read = p.guide is not None and book.get("guide_sha256") == p.guide.sha256
     if p.plan is not None:
         out.plan_problems = rulebook.plan_problems(p.rulebook, p.plan)
         for chapter in out.chapters:
@@ -399,6 +407,8 @@ def quote_step(rt: Runtime, user: User, project_id: str, step: Step, note: str) 
     if step_running(rt, p):
         raise Conflict("A step is already running for this proposal. Wait for it to finish.", code="STEP_RUNNING")
     note = note.strip()[:1000]
+    if step == "PROFILE":
+        return _quote_profile(rt, user, p)
     chapter = 0 if step == "PLAN" else CONCEPT if step == "CONCEPT" else int(step[-1])
     revising = step.startswith("REVISE_")
     base, revise, comment_ids, revised_words = "", {}, [], 0
@@ -476,6 +486,68 @@ def quote_step(rt: Runtime, user: User, project_id: str, step: Step, note: str) 
         raise NotFound("We couldn't find this proposal.")
     then = [chapter_one_estimate(rt.settings, p.inputs.level)] if chapter == 0 and not p.chapter(1).versions else []
     return StepQuote(job=job.view(), quote=Quote.model_validate(job.quote.model_dump()), then=then)
+
+
+def _quote_profile(rt: Runtime, user: User, p: Project) -> StepQuote:
+    """Price reading the student's guide into an institution profile. Only before any chapter is
+    written: chapters follow one structure from start to finish."""
+    if p.guide is None:
+        raise AppError("Upload your institution's research guide first.", code="NO_GUIDE")
+    if any(c.versions for c in p.chapters):
+        raise AppError("Your chapters already follow the current structure. Start a new proposal to use your institution's guide.", code="CHAPTERS_WRITTEN")
+    _rate_limit(rt, user, "quote", rt.settings.quotes_per_hour)
+    inp = StepInput(
+        project_id=p.id, step="PROFILE", chapter=0, rulebook=p.rulebook, inputs=p.inputs, plan_version=p.plan_version,
+        guide=p.guide.path, guide_name=p.guide.name,
+    )
+    data = inp.model_dump_json(by_alias=True).encode()
+    sha = hashlib.sha256(data).hexdigest()
+    now = utcnow()
+    selection = ServiceSelection(proposal="PROFILE")
+    job = Job(
+        id=f"job_{secrets.token_hex(6)}", status=JobStatus.DRAFT, owner_uid=user.uid, owner_email=user.email, project_id=p.id, input_sha256=sha,
+        selection=selection, created_at=now, expires_at=now + timedelta(days=rt.settings.retention_days),
+        events=[JobEvent(at=now, label=f"Institution profile step priced for proposal {p.id}")],
+    )
+    rt.files.put(f"{job.storage_prefix()}/internal/{INPUT}", data, "application/json")
+    job.quote = bound_quote(rt.settings, selection, sha, 0, current_engine(rt.settings), guide_words=p.guide.words)
+    state.transition(job, JobStatus.QUOTED, "Quote issued")
+    if not rt.store.create_if_open(job):
+        rt.files.delete_prefix(job.storage_prefix())
+        raise Conflict(ACCOUNT_CLOSING, code="ACCOUNT_CLOSING")
+    return StepQuote(job=job.view(), quote=Quote.model_validate(job.quote.model_dump()))
+
+
+def upload_guide(rt: Runtime, user: User, project_id: str, filename: str, data: bytes) -> ProjectView:
+    """The institution's research guide (Word or PDF), kept as text for the profile step."""
+    _require_ai(rt, user)
+    p = _owned(rt, user, project_id)
+    if any(c.versions for c in p.chapters):
+        raise AppError("Your chapters already follow the current structure. Start a new proposal to use your institution's guide.", code="CHAPTERS_WRITTEN")
+    model = inspect_upload(data, filename, rt.settings.max_upload_bytes, MAX_GUIDE_WORDS, rt.settings.max_pdf_pages, min_words=300)
+    text = "\n".join(b.text for b in model.blocks if b.text.strip())
+    sha = hashlib.sha256(text.encode()).hexdigest()
+    path = f"{p.storage_prefix()}/guide/{sha[:16]}.txt"
+    rt.files.put(path, text.encode("utf-8"), "text/plain")
+    guide = GuideFile(name=PurePosixPath(filename).name[:120] or "guide", words=model.word_count, sha256=sha, path=path)
+
+    def apply(q: Project) -> Project:
+        q.guide = guide
+        return q
+
+    return view(rt, _change(rt, user, project_id, apply))
+
+
+def use_default_rulebook(rt: Runtime, user: User, project_id: str) -> ProjectView:
+    """Go back to the default structure (before any chapter is written)."""
+
+    def apply(q: Project) -> Project:
+        if any(c.versions for c in q.chapters):
+            raise AppError("Your chapters already follow the current structure.", code="CHAPTERS_WRITTEN")
+        q.rulebook = rulebook.DEFAULT
+        return q
+
+    return view(rt, _change(rt, user, project_id, apply))
 
 
 def submit_step(rt: Runtime, user: User, project_id: str, job_id: str, quote_id: str) -> JobView:

@@ -1,5 +1,6 @@
-"""The proposal as a Word document in the UCU layout (manual §2.2, pp. 9-10): Trebuchet MS 12,
-double spacing, one-inch margins, page numbers at the bottom centre; preliminary pages numbered in
+"""The proposal as a Word document in the institution's layout (the default: UCU manual §2.2,
+pp. 9-10, Trebuchet MS 12, double spacing, one-inch margins; a profile from the student's guide sets
+its own), page numbers at the bottom centre; preliminary pages numbered in
 Roman numerals, the chapters in Arabic; a reference list built from the evidence actually cited.
 
 Nothing is invented to fill a gap. A draft export leaves out what is missing (a title-page detail,
@@ -58,8 +59,8 @@ def final_blockers(project: Project, chapters: dict[int, ChapterDocument]) -> li
     return problems
 
 
-def _setup(doc) -> None:
-    book = rulebook.load(rulebook.DEFAULT)["formatting"]
+def _setup(doc, rulebook_id: str = rulebook.DEFAULT) -> None:
+    book = rulebook.load(rulebook_id)["formatting"]
     normal = doc.styles["Normal"]
     _set_font(normal, book["font"], book["size_pt"])
     normal.paragraph_format.line_spacing = book["line_spacing"]
@@ -100,7 +101,7 @@ def _title_page(doc, project: Project, draft: bool) -> None:
     faculty = f" TO THE {inputs.faculty.upper()}" if inputs.faculty.strip() else ""
     programme = inputs.programme.upper() if inputs.programme.strip() else level.upper()
     _centered(doc, "")
-    _centered(doc, f"A RESEARCH PROPOSAL SUBMITTED{faculty} IN PARTIAL FULFILMENT OF THE REQUIREMENTS FOR THE AWARD OF THE {programme} OF UGANDA CHRISTIAN UNIVERSITY")
+    _centered(doc, f"A RESEARCH PROPOSAL SUBMITTED{faculty} IN PARTIAL FULFILMENT OF THE REQUIREMENTS FOR THE AWARD OF THE {programme} OF {book['institution'].upper()}")
     _centered(doc, "")
     if page.supervisor.strip():
         _centered(doc, f"Supervisor: {page.supervisor}")
@@ -180,7 +181,7 @@ def _framework(doc, columns: list[tuple[str, list[str]]], figure: str = "Figure 
 
 def build(project: Project, chapters: dict[int, ChapterDocument], library: dict[str, EvidenceItem], draft: bool) -> bytes:
     doc = Document()
-    _setup(doc)
+    _setup(doc, project.rulebook)
     _title_page(doc, project, draft)
 
     prelim = doc.add_section(WD_SECTION.NEW_PAGE)
@@ -273,7 +274,7 @@ def concept(project: Project, paper: ChapterDocument, library: dict[str, Evidenc
     """The concept paper (manual §1.4): the student's details, the sections, and 5-8 references,
     each annotated with what the confirmed evidence from it shows."""
     doc = Document()
-    _setup(doc)
+    _setup(doc, project.rulebook)
     plan, page, inputs = project.plan, project.title_page, project.inputs
     doc.add_heading("CONCEPT PAPER", level=1)
     _centered(doc, (plan.title if plan else inputs.topic), bold=True, space_after=12)
@@ -316,7 +317,7 @@ def response_report(project: Project, rows: list[tuple[str, str, str]], draft: b
     """"Response to the supervisor's comments": every comment, where it applied and what was done,
     for the student to hand in with the revised proposal."""
     doc = Document()
-    _setup(doc)
+    _setup(doc, project.rulebook)
     doc.add_heading("RESPONSE TO THE SUPERVISOR'S COMMENTS", level=1)
     _centered(doc, project.plan.title if project.plan else project.inputs.topic, bold=True, space_after=12)
     if project.title_page.student_name.strip():

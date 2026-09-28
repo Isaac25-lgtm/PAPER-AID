@@ -5,7 +5,7 @@ export type Level = 'BACHELORS' | 'PGD' | 'MASTERS' | 'PHD'
 export type StudyType = 'QUANTITATIVE' | 'QUALITATIVE' | 'MIXED' | 'SECONDARY' | 'NON_EMPIRICAL'
 export type CitationStyle = 'APA6' | 'APA7'
 export type SampleMethod = 'YAMANE' | 'COCHRAN' | 'KREJCIE_MORGAN' | 'CENSUS' | 'SATURATION' | 'AUTHOR_STATED' | 'NOT_APPLICABLE'
-export type StepId = 'PLAN' | 'CHAPTER_1' | 'CHAPTER_2' | 'CHAPTER_3' | 'CONCEPT' | 'REVISE_1' | 'REVISE_2' | 'REVISE_3'
+export type StepId = 'PLAN' | 'CHAPTER_1' | 'CHAPTER_2' | 'CHAPTER_3' | 'CONCEPT' | 'REVISE_1' | 'REVISE_2' | 'REVISE_3' | 'PROFILE'
 export type ReadinessStatus = 'PASS' | 'NEEDS_REVIEW' | 'MISSING' | 'NOT_APPLICABLE' | 'BLOCKED'
 
 export interface ProposalInputs {
@@ -149,6 +149,12 @@ export interface Project {
   written: WrittenSection[]
   /** What stands between the proposal and a complete download. */
   blockers: string[]
+  /** The institution the proposal is written for, what its guide left open, and the guide's file. */
+  institution: string
+  institutionNotes: string[]
+  guideName: string | null
+  /** The current profile was read from the current guide. */
+  guideRead: boolean
   /** A one-off message returned by an action (for example why Chapter One did not start). */
   notice: string | null
   chapters: ChapterState[]
