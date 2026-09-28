@@ -20,7 +20,8 @@ from app.analysis import research
 from app.core.config import Settings
 from app.jobs.models import BoundQuote, Engine, Passage, QuoteLine, ServiceSelection, utcnow
 
-PRICING_VERSION = "credits-v1"
+PRICING_VERSION = "credits-v1"  # actual AI spend × multiplier, quoted as a ceiling
+FIXED_VERSION = "fixed-v1"  # fixed prices by page band (owner decision 2026-09-28)
 CHARS_PER_WORD = 6.5  # prose plus JSON framing, measured on the fixture papers
 ITEM_OVERHEAD = 160  # ids, keys and instructions around each passage in a payload
 SIGNAL_CHARS = 250  # PaperAid's measurements travelling with each passage to the analysis
@@ -64,6 +65,16 @@ def analysis_usd(settings: Settings, words: int) -> float:
     passages = max(1, words // 120)
     payload = words * CHARS_PER_WORD + (ITEM_OVERHEAD + SIGNAL_CHARS) * passages + BUNDLE_CHARS * _batches_for(words)
     return _step_usd(settings, "analyse", payload, words)
+
+
+ANCHOR_CHARS = 4000  # the objectives passages sent with every academic-review batch
+
+
+def academic_usd(settings: Settings, words: int) -> float:
+    """The lead's academic, evidence and methodology review over every passage."""
+    passages = max(1, words // 120)
+    payload = words * CHARS_PER_WORD + ITEM_OVERHEAD * passages + (ANCHOR_CHARS + BUNDLE_CHARS) * _batches_for(words)
+    return _step_usd(settings, "academic", payload, words)
 
 
 def estimate_scan_usd(settings: Settings, words: int, selection: ServiceSelection) -> float:
@@ -190,8 +201,28 @@ def with_margin(ugx_usd: float, settings: Settings) -> int:
 @dataclass(frozen=True)
 class Priced:
     lines: list[QuoteLine]
-    ai_ugx: int  # the AI part of the ceiling; its USD equivalent is the job's spend cap
+    ai_ugx: int  # the AI part of the price
     fixed_ugx: int
+    budget_usd: float  # the provider-spend cap: the worst-case projection with the safety margin
+
+
+def band_factor(settings: Settings, words: int) -> float:
+    """Each fixed price covers up to `band_pages` pages; each further band adds `band_step` of it."""
+    pages = max(1, math.ceil(words / settings.words_per_page))
+    return 1 + settings.band_step * (math.ceil(pages / settings.band_pages) - 1)
+
+
+def fixed_price(settings: Settings, key: str, words: int | None) -> int:
+    """A service's fixed price in UGX (students see it in tokens). `words` None: not banded."""
+    factor = band_factor(settings, words) if words is not None else 1.0
+    return round_up(settings.fixed_tokens[key] * factor * settings.ugx_per_token)
+
+
+def worst_passages(words: int, share: float) -> list[Passage]:
+    """Without an estimate: the most a refinement may rewrite, as 150-word passages."""
+    target = max(150, int(words * share))
+    count = max(1, target // 150)
+    return [Passage(chars=int(150 * CHARS_PER_WORD), words=150, rewrite=True) for _ in range(count)]
 
 
 def price(
@@ -201,51 +232,56 @@ def price(
     guide_words: int = 0,
     passages: list[Passage] | None = None,
     fee_paid: int = 0,
+    scope_words: int | None = None,
 ) -> Priced:
-    """Quote lines for a selection. Refinement needs `passages` from its estimate."""
+    """Quote lines for a selection. Under the fixed policy each AI service has its price by page
+    band; under the cost policy (refinement priced from its estimate's `passages`) each is its
+    worst-case AI cost as a ceiling. Either way the job's spend cap is the worst-case projection,
+    so quality is never cut to fit a price."""
+    fixed_mode = settings.pricing_mode == "fixed"
+    services: list[tuple[str, str, float, int | None]] = []  # (key, label, worst-case USD, banded words)
+    if selection.writing == "AI_CHECK":
+        services.append(("AI_CHECK", "AI Check", analysis_usd(settings, words), words))
+    elif selection.writing in ("REFINE", "REDRAFT"):
+        deep = selection.writing == "REDRAFT"
+        light = selection.intensity == "LIGHT" and not deep
+        share = 1.0 if deep or selection.only_blocks else 0.25 if light else 0.5
+        scope = scope_words or words  # "Fix selected": the chosen passages, not the whole paper
+        planned = passages or worst_passages(scope, share)
+        usd = refinement_usd(settings, planned, deep=deep) + (0 if passages else analysis_usd(settings, words))
+        key = "REDRAFT" if deep else "REFINE_LIGHT" if light else "REFINE"
+        label = "Deep redraft" if deep else f"Check + Refine, {'light' if light else 'standard'}"
+        services.append((key, label, usd, scope))
+    if selection.academic and selection.writing in ("AI_CHECK", "REFINE", "REDRAFT"):
+        services.append(("ACADEMIC", "Academic, evidence and method review", academic_usd(settings, words), words))
+    if selection.source_check:
+        services.append(("SOURCE_CHECK", "Source check with live search", source_check_usd(settings, words), words))
+    if selection.proposal == "REVIEW":
+        services.append(("REVIEW", "Proposal review", proposal_review_usd(settings, words), words))
+    elif selection.proposal != "NONE":
+        label = "Proposal plan" if selection.proposal == "PLAN" else f"Chapter {selection.proposal[-1]}"
+        services.append((selection.proposal, label, proposal_usd(settings, selection.proposal, words), None))
+    if selection.formatting == "TEMPLATE_FORMAT":
+        services.append(("TEMPLATE_FORMAT", "University template formatting", template_usd(settings, guide_words), words))
+
     lines: list[QuoteLine] = []
-    ai = 0
     if fee_paid:
         lines.append(QuoteLine(label="AI estimate (already paid, counts toward this job)", amount=fee_paid))
-    if selection.writing == "AI_CHECK":
-        amount = with_margin(analysis_usd(settings, words), settings)
-        lines.append(QuoteLine(label="AI Check (up to)", amount=amount))
-        ai += amount
-    elif selection.writing == "REDRAFT":
-        amount = with_margin(refinement_usd(settings, passages or [], deep=True), settings)
-        lines.append(QuoteLine(label="Deep redraft (up to)", amount=amount))
-        ai += amount
-    elif selection.writing == "REFINE":
-        light = selection.intensity == "LIGHT"
-        amount = with_margin(refinement_usd(settings, passages or []), settings)
-        lines.append(QuoteLine(label=f"Check + Refine, {'light' if light else 'standard'} (up to)", amount=amount))
-        ai += amount
-    if selection.source_check:
-        amount = with_margin(source_check_usd(settings, words), settings)
-        lines.append(QuoteLine(label="Source check with live search (up to)", amount=amount))
-        ai += amount
-    if selection.proposal == "REVIEW":
-        amount = with_margin(proposal_review_usd(settings, words), settings)
-        lines.append(QuoteLine(label="Proposal review (up to)", amount=amount))
-        ai += amount
-    elif selection.proposal != "NONE":
-        label = "Proposal plan (up to)" if selection.proposal == "PLAN" else f"Chapter {selection.proposal[-1]} (up to)"
-        amount = with_margin(proposal_usd(settings, selection.proposal, words), settings)
-        lines.append(QuoteLine(label=label, amount=amount))
+    ai = 0
+    for key, label, usd, banded in services:
+        amount = fixed_price(settings, key, banded) if fixed_mode else with_margin(usd, settings)
+        lines.append(QuoteLine(label=label if fixed_mode else f"{label} (up to)", amount=amount, service=key))
         ai += amount
     fixed = 0
     if selection.formatting == "FORMAT":
         fixed = format_ugx(settings, words)
-        lines.append(QuoteLine(label="Academic formatting", amount=fixed))
-    elif selection.formatting == "TEMPLATE_FORMAT":
-        amount = with_margin(template_usd(settings, guide_words), settings)
-        lines.append(QuoteLine(label="University template formatting (up to)", amount=amount))
-        ai += amount
+        lines.append(QuoteLine(label="Academic formatting", amount=fixed, service="FORMAT"))
     if selection.latex:
         conversion = latex_ugx(settings, words)
-        lines.append(QuoteLine(label="LaTeX conversion", amount=conversion))
+        lines.append(QuoteLine(label="LaTeX conversion", amount=conversion, service="LATEX"))
         fixed += conversion
-    return Priced(lines=lines, ai_ugx=ai, fixed_ugx=fixed)
+    budget = sum(usd for _, _, usd, _ in services) * (1 + settings.quote_safety_margin)
+    return Priced(lines=lines, ai_ugx=ai, fixed_ugx=fixed, budget_usd=budget)
 
 
 def bound_quote(
@@ -259,17 +295,18 @@ def bound_quote(
     passages: list[Passage] | None = None,
     fee_paid: int = 0,
     estimate_id: str | None = None,
+    scope_words: int | None = None,
 ) -> BoundQuote:
     """A quote bound to the exact files, selection and engine it priced, with the rate and
     multiplier frozen. `fee_paid` is every estimate already charged on the job: it counts toward the
     quote, so accepting holds only the rest."""
-    priced = price(settings, selection, words, guide_words, passages, fee_paid)
+    priced = price(settings, selection, words, guide_words, passages, fee_paid, scope_words)
     return BoundQuote(
         id=f"quote_{secrets.token_hex(6)}",
         lines=priced.lines,
         amount=sum(line.amount for line in priced.lines),
         paid=fee_paid,
-        pricing_version=PRICING_VERSION,
+        pricing_version=FIXED_VERSION if settings.pricing_mode == "fixed" else PRICING_VERSION,
         expires_at=utcnow() + timedelta(minutes=settings.quote_ttl_minutes),
         selection=selection,
         source_sha256=source_sha256,
@@ -280,9 +317,17 @@ def bound_quote(
         multiplier=settings.price_multiplier,
         engine=engine,
         estimate_id=estimate_id,
+        budget_usd=priced.budget_usd if settings.pricing_mode == "fixed" else 0.0,
     )
 
 
-def needs_estimate(selection: ServiceSelection) -> bool:
-    """Refinement and Deep Redraft need a paid AI scan to size the work; everything else is priced from length."""
+def needs_estimate(selection: ServiceSelection, settings: Settings) -> bool:
+    """Under the cost policy, refinement and Deep Redraft are priced from an AI scan. Under fixed
+    prices only Deep Redraft runs one, uncharged, to show how much of the paper it would change."""
+    if settings.pricing_mode == "fixed":
+        return selection.writing == "REDRAFT"
     return selection.writing in ("REFINE", "REDRAFT")
+
+
+def estimate_charged(settings: Settings) -> bool:
+    return settings.credits_enabled and settings.pricing_mode == "cost"

@@ -4,7 +4,9 @@ import type {
   AdminSummary,
   FileMeta,
   FileRole,
+  ImageMeta,
   Job,
+  JobDocument,
   JobStatus,
   Page,
   PublicConfig,
@@ -44,6 +46,9 @@ export interface DataSource {
   watchJob(jobId: string, onChange: (job: Job | null) => void, onBlocked?: (message: string) => void): () => void
   createDraft(): Promise<string>
   uploadFile(draftId: string, role: FileRole, file: File, onProgress: (pct: number) => void): Promise<FileMeta>
+  /** An institution logo (PNG or JPEG) for the title page; replacing it clears the quote. */
+  uploadLogo(draftId: string, file: File): Promise<ImageMeta>
+  removeLogo(draftId: string): Promise<void>
   /** Detaches the formatting guide on the server and clears any quote that priced it. */
   removeGuideline(draftId: string): Promise<void>
   /** A price, or for refinement the estimate that runs first (watch the draft until it is READY). */
@@ -54,6 +59,15 @@ export interface DataSource {
   deleteJob(jobId: string): Promise<void>
   download(jobId: string, outputId: string, fileName: string): Promise<void>
   deleteAccount(): Promise<void>
+  /** The review workspace. */
+  workspace: {
+    document(jobId: string): Promise<JobDocument>
+    setFinding(jobId: string, findingId: string, dismissed: boolean): Promise<Job>
+    setChange(jobId: string, changeId: string, accepted: boolean): Promise<Job>
+    rebuild(jobId: string): Promise<Job>
+    /** A new refinement draft of the same paper for the chosen findings (or every safe one). */
+    fix(jobId: string, findingIds: string[], safeOnly: boolean): Promise<Job>
+  }
   /** Proposal projects: the plan, chapters and evidence live on the server; every paid step is a job. */
   projects: {
     rulebook(): Promise<Rulebook>

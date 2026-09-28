@@ -9,7 +9,7 @@ import { Alert, Badge, Card, PageHeader, Skeleton } from '../../components/ui/pr
 import { DataError, useData } from '../../lib/data'
 import { formatTokens } from '../../lib/format'
 import { AVAILABILITY_BADGE, INVITE_ONLY_REASON, NOT_CONFIGURED_REASON, SERVICES, STYLE_OPTIONS } from '../../lib/services'
-import type { EstimateView, FileMeta, FileRole, Quote, ServiceId, ServiceSelection } from '../../lib/types'
+import type { CustomLayout, EstimateView, FileMeta, FileRole, ImageMeta, Quote, ServiceId, ServiceSelection } from '../../lib/types'
 import { useTitle } from '../../lib/use-title'
 import { useWallet, walletChanged } from '../../lib/use-wallet'
 import { useAuth } from '../auth/auth-context'
@@ -42,6 +42,63 @@ const NO_PRICE: Pricing = { quote: null, feeCap: null, estimate: null, loading: 
 
 function priceError(e: unknown): Pick<Pricing, 'error' | 'needsCredits'> {
   return { error: e instanceof DataError ? e.message : 'We could not price this job.', needsCredits: e instanceof DataError && e.status === 402 }
+}
+
+const FONTS = ['Times New Roman', 'Calibri', 'Arial', 'Trebuchet MS', 'Georgia', 'Cambria', 'Garamond', 'Book Antiqua']
+
+/** The student's own settings over the chosen style; "Style default" keeps the style's value. */
+function CustomLayoutFields({ value, onChange }: { value: CustomLayout | null; onChange: (v: CustomLayout | null) => void }) {
+  const [open, setOpen] = useState(!!value)
+  const set = (patch: Partial<CustomLayout>) => {
+    const next = { ...(value ?? {}), ...patch }
+    onChange(Object.values(next).some((v) => v !== null && v !== undefined) ? next : null)
+  }
+  const num = (v: string) => (v ? Number(v) : null)
+  if (!open)
+    return (
+      <button type="button" className="mt-3 text-sm font-medium text-brand-700 hover:underline" onClick={() => setOpen(true)}>
+        Customise font, size, spacing or margins
+      </button>
+    )
+  return (
+    <div className="mt-3 grid gap-3 rounded-xl bg-surface-subtle p-4 sm:grid-cols-2">
+      <Select label="Font" value={value?.font ?? ''} onChange={(e) => set({ font: e.target.value || null })}>
+        <option value="">Style default</option>
+        {FONTS.map((f) => (
+          <option key={f}>{f}</option>
+        ))}
+      </Select>
+      <Select label="Font size" value={value?.sizePt ?? ''} onChange={(e) => set({ sizePt: num(e.target.value) })}>
+        <option value="">Style default</option>
+        {[10, 11, 12, 13, 14].map((s) => (
+          <option key={s} value={s}>
+            {s} pt
+          </option>
+        ))}
+      </Select>
+      <Select label="Line spacing" value={value?.lineSpacing ?? ''} onChange={(e) => set({ lineSpacing: num(e.target.value) })}>
+        <option value="">Style default</option>
+        {[1, 1.15, 1.5, 2].map((s) => (
+          <option key={s} value={s}>
+            {s === 1 ? 'Single' : s === 2 ? 'Double' : s}
+          </option>
+        ))}
+      </Select>
+      <Select label="Margins" value={value?.marginCm ?? ''} onChange={(e) => set({ marginCm: num(e.target.value) })}>
+        <option value="">Style default</option>
+        {[2, 2.54, 3, 3.5].map((m) => (
+          <option key={m} value={m}>
+            {m === 2.54 ? '2.54 cm (1 inch)' : `${m} cm`}
+          </option>
+        ))}
+      </Select>
+      <Select label="Alignment" value={value?.alignment ?? ''} onChange={(e) => set({ alignment: (e.target.value || null) as CustomLayout['alignment'] })}>
+        <option value="">Style default</option>
+        <option value="left">Left</option>
+        <option value="justify">Justified</option>
+      </Select>
+    </div>
+  )
 }
 
 function Step({ n, title, description, children, disabled }: { n: number; title: string; description?: string; children: ReactNode; disabled?: boolean }) {
@@ -129,8 +186,10 @@ function NewJobForm({ type }: { type: JobType | null }) {
   }
   const [source, setSource] = useState<Upload | null>(null)
   const [guide, setGuide] = useState<Upload | null>(null)
+  const [logo, setLogo] = useState<{ name: string; meta: ImageMeta | null; error: string | null } | null>(null)
   const [selection, setSelection] = useState<ServiceSelection>(type?.selection ? { ...INITIAL, ...type.selection } : INITIAL)
   const review = selection.proposal === 'REVIEW'
+  const fixing = selection.onlyBlocks?.length ?? 0
   const [restoring, setRestoring] = useState(!!resumeId)
   const [resumeError, setResumeError] = useState<string | null>(null)
 
@@ -153,7 +212,8 @@ function NewJobForm({ type }: { type: JobType | null }) {
         setDraftId(job.id)
         if (job.source) setSource({ name: job.source.name, progress: 100, meta: job.source, error: null })
         if (job.guideline) setGuide({ name: job.guideline.name, progress: 100, meta: job.guideline, error: null })
-        if (job.quote || job.estimate) setSelection(job.selection)
+        if (job.logo) setLogo({ name: job.logo.name, meta: job.logo, error: null })
+        if (job.quote || job.estimate || job.selection.onlyBlocks?.length) setSelection(job.selection)
       })
       .catch((e: unknown) => !cancelled && setResumeError(e instanceof DataError ? e.message : 'We could not load your draft. Refresh to try again.'))
       .finally(() => !cancelled && setRestoring(false))
@@ -169,7 +229,8 @@ function NewJobForm({ type }: { type: JobType | null }) {
 
   const meta = source?.meta ?? null
   const guideMeta = guide?.meta ?? null
-  const needsGuide = selection.formatting === 'TEMPLATE_FORMAT' && !guideMeta
+  const logoMeta = logo?.meta ?? null
+  const needsGuide = (selection.formatting === 'TEMPLATE_FORMAT' && !guideMeta) || (selection.logo !== undefined && selection.logo !== 'NONE' && !logoMeta)
   const isPdf = meta?.format === 'PDF'
   const soon = (id: ServiceId) => config.availability[id] !== 'available'
   const badgeFor = (id: ServiceId) => {
@@ -223,8 +284,8 @@ function NewJobForm({ type }: { type: JobType | null }) {
       cancelled = true
       clearTimeout(timer)
     }
-    // guideMeta: a new guide clears the server's quote, so it must be priced again
-  }, [data, draftId, meta, guideMeta, needsGuide, selection])
+    // guideMeta / logoMeta: a new file clears the server's quote, so it must be priced again
+  }, [data, draftId, meta, guideMeta, logoMeta, needsGuide, selection])
 
   // While the estimate runs on the server, watch the draft until it is priced (or fails).
   const estimateRunning = pricing.estimate?.status === 'RUNNING'
@@ -276,6 +337,22 @@ function NewJobForm({ type }: { type: JobType | null }) {
     }
   }
 
+  const uploadLogo = async (file: File) => {
+    const ext = file.name.split('.').pop()?.toLowerCase()
+    if (!['png', 'jpg', 'jpeg'].includes(ext ?? '')) return setLogo({ name: file.name, meta: null, error: 'Upload the logo as a PNG or JPEG image.' })
+    setLogo({ name: file.name, meta: null, error: null })
+    try {
+      const id = await ensureDraft()
+      setLogo({ name: file.name, meta: await data.uploadLogo(id, file), error: null })
+    } catch (e) {
+      setLogo({ name: file.name, meta: null, error: e instanceof DataError ? e.message : 'The logo could not be uploaded. Try again.' })
+    }
+  }
+  const removeLogo = async () => {
+    if (draftId && logo?.meta) await data.removeLogo(draftId).catch(() => undefined)
+    setLogo(null)
+  }
+
   const removeGuide = async () => {
     if (!guide) return
     if (draftId && guide.meta) {
@@ -314,6 +391,7 @@ function NewJobForm({ type }: { type: JobType | null }) {
   ]
   const hold = pricing.quote ? pricing.quote.amount - pricing.quote.paid : 0
   const charging = config.creditsEnabled
+  const fixedPrice = pricing.quote?.pricingVersion === 'fixed-v1'
   const shortOfCredit = charging && !!wallet && !!pricing.quote && wallet.available < hold
   const canSubmit = !!meta && !needsGuide && !!pricing.quote && ownWork && !pricing.loading && !shortOfCredit
 
@@ -431,6 +509,22 @@ function NewJobForm({ type }: { type: JobType | null }) {
                 <OptionCard name="writing" checked={selection.writing === 'NONE'} onSelect={() => set({ writing: 'NONE' })} title="No writing check" body="Formatting only." disabledReason={pdfReason} />
               </div>
 
+              {fixing > 0 && (
+                <Alert tone="info" className="mt-4" title={`Fixing ${fixing} passage${fixing === 1 ? '' : 's'} you chose`}>
+                  PaperAid rewrites only these passages, guided by their findings, in your voice. Everything else stays exactly as you wrote it.
+                </Alert>
+              )}
+
+              {selection.writing !== 'NONE' && (
+                <div className="mt-4 rounded-xl border border-line p-4">
+                  <p className="text-sm font-semibold">Is this academic or research work?</p>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    <OptionCard name="academic" checked={selection.academic !== false} onSelect={() => set({ academic: true })} title="Yes" body="Also checks academic writing, evidence and claims, methods and references." />
+                    <OptionCard name="academic" checked={selection.academic === false} onSelect={() => set({ academic: false })} title="No" body="Focuses on writing patterns, clarity and structure." />
+                  </div>
+                </div>
+              )}
+
               {selection.writing === 'REDRAFT' && (
                 <div className="mt-4 rounded-xl bg-surface-subtle p-4">
                   <p className="text-sm font-semibold">What Deep Redraft changes</p>
@@ -535,13 +629,44 @@ function NewJobForm({ type }: { type: JobType | null }) {
                 </div>
               )}
               {selection.formatting === 'FORMAT' && (
-                <Select label="Formatting style" className="mt-4 max-w-sm" value={selection.preset} onChange={(e) => set({ preset: e.target.value })} hint="Sets page layout, headings, spacing and page numbers. It does not convert your citation style.">
-                  {config.presets.map((p) => (
-                    <option key={p.id} value={p.id} disabled={!p.available}>
-                      {p.label}
-                    </option>
-                  ))}
-                </Select>
+                <>
+                  <Select label="Formatting style" className="mt-4 max-w-sm" value={selection.preset} onChange={(e) => set({ preset: e.target.value })} hint="Sets page layout, headings, spacing and page numbers. It does not convert your citation style.">
+                    {config.presets.map((p) => (
+                      <option key={p.id} value={p.id} disabled={!p.available}>
+                        {p.label}
+                      </option>
+                    ))}
+                  </Select>
+                  <CustomLayoutFields value={selection.custom ?? null} onChange={(custom) => set({ custom })} />
+                </>
+              )}
+              {selection.formatting !== 'NONE' && (
+                <div className="mt-4 rounded-xl border border-line p-4">
+                  <Checkbox
+                    checked={selection.logo !== undefined && selection.logo !== 'NONE'}
+                    onChange={(e) => set({ logo: e.target.checked ? 'CENTER' : 'NONE' })}
+                    label={
+                      <>
+                        <span className="font-semibold text-fg">Add an institution logo</span>
+                        <span className="mt-0.5 block text-xs">Placed at the top of the first page and sized to fit. PNG or JPEG, up to 2 MB.</span>
+                      </>
+                    }
+                  />
+                  {selection.logo !== undefined && selection.logo !== 'NONE' && (
+                    <div className="mt-3 space-y-3">
+                      {logo?.meta ? (
+                        <FileChip name={logo.name} meta={`${logo.meta.format} · ${logo.meta.widthPx}×${logo.meta.heightPx}`} onRemove={removeLogo} />
+                      ) : (
+                        <FileDropzone compact label="Choose your logo" hint="PNG or JPEG · up to 2 MB" accept=".png,.jpg,.jpeg,image/png,image/jpeg" onFile={uploadLogo} />
+                      )}
+                      {logo?.error && <Alert tone="danger">{logo.error}</Alert>}
+                      <Select label="Position" className="max-w-xs" value={selection.logo} onChange={(e) => set({ logo: e.target.value as 'CENTER' | 'LEFT' })}>
+                        <option value="CENTER">Top centre</option>
+                        <option value="LEFT">Top left</option>
+                      </Select>
+                    </div>
+                  )}
+                </div>
               )}
               <div className="mt-4 rounded-xl border border-line p-4">
                 <Checkbox
@@ -580,7 +705,7 @@ function NewJobForm({ type }: { type: JobType | null }) {
               {!meta ? (
                 <p className="text-sm text-fg-muted">Upload your paper to see the price. It depends on the work your paper needs.</p>
               ) : needsGuide ? (
-                <p className="text-sm text-fg-muted">Upload your formatting guide to see the price.</p>
+                <p className="text-sm text-fg-muted">{selection.formatting === 'TEMPLATE_FORMAT' && !guideMeta ? 'Upload your formatting guide to see the price.' : 'Upload your logo to see the price.'}</p>
               ) : pricing.loading ? (
                 <div className="space-y-3" aria-busy="true" aria-label="Calculating quote">
                   <Skeleton className="h-4 w-full" />
@@ -621,11 +746,16 @@ function NewJobForm({ type }: { type: JobType | null }) {
                     ))}
                   </dl>
                   <div className="mt-4 flex items-baseline justify-between border-t border-line pt-4">
-                    <span className="text-sm font-semibold">{charging ? 'Most you’ll pay' : 'Most it would cost'}</span>
+                    <span className="text-sm font-semibold">{fixedPrice ? 'Price' : charging ? 'Most you’ll pay' : 'Most it would cost'}</span>
                     <span className="text-right">
                       <span className="block text-2xl font-bold tracking-tight">{formatTokens(pricing.quote.amount)}</span>
                     </span>
                   </div>
+                  {selection.writing === 'REDRAFT' && pricing.estimate?.intervention != null && (
+                    <p className="mt-3 rounded-lg bg-surface-subtle px-3 py-2 text-sm">
+                      Estimated change: <strong>about {Math.round(pricing.estimate.intervention * 100)}% of your paper</strong> will be rewritten.
+                    </p>
+                  )}
                   {pricing.quote.paid > 0 && (
                     <p className="mt-2 flex justify-between text-sm text-fg-muted">
                       <span>Already paid (estimate)</span> <span>{formatTokens(pricing.quote.paid)}</span>
@@ -637,7 +767,9 @@ function NewJobForm({ type }: { type: JobType | null }) {
                         <span>Held from your tokens now</span> <span>{formatTokens(hold)}</span>
                       </p>
                       <p className="mt-2 text-xs leading-relaxed text-fg-subtle">
-                        You&rsquo;re charged for the work actually done, never more than this, and the rest returns to your balance. Valid for 30 minutes.
+                        {fixedPrice
+                          ? 'This is the price. If part of the job can’t be delivered, you pay only for the part that was. Valid for 30 minutes.'
+                          : 'You’re charged for the work actually done, never more than this, and the rest returns to your balance. Valid for 30 minutes.'}
                       </p>
                     </>
                   ) : (
@@ -682,19 +814,25 @@ function NewJobForm({ type }: { type: JobType | null }) {
                 </Alert>
               ) : pricing.feeCap !== null ? (
                 <div>
-                  <p className="text-sm font-semibold">First, a short AI estimate</p>
+                  <p className="text-sm font-semibold">{pricing.feeCap === 0 ? 'First, a free preview' : 'First, a short AI estimate'}</p>
                   <p className="mt-1.5 text-sm leading-relaxed text-fg-muted">
-                    Refinement is priced from the work your paper actually needs. PaperAid&rsquo;s AI scans it and drafts a plan
-                    {charging ? (
-                      <>
-                        ; the scan costs at most <strong className="text-fg">{formatTokens(pricing.feeCap)}</strong> and counts toward your job if you go ahead.
-                      </>
+                    {pricing.feeCap === 0 ? (
+                      'PaperAid reads your paper and plans the redraft, so you can see how much of it would change and the price before you decide. It takes a minute or two and costs nothing.'
                     ) : (
-                      '. It takes a minute or two and is not charged while PaperAid is in testing.'
+                      <>
+                        Refinement is priced from the work your paper actually needs. PaperAid scans it and drafts a plan
+                        {charging ? (
+                          <>
+                            ; the scan costs at most <strong className="text-fg">{formatTokens(pricing.feeCap)}</strong> and counts toward your job if you go ahead.
+                          </>
+                        ) : (
+                          '. It takes a minute or two and is not charged while PaperAid is in testing.'
+                        )}
+                      </>
                     )}
                   </p>
                   <Button className="mt-4 w-full" onClick={runEstimate} disabled={charging && !!wallet && wallet.available < pricing.feeCap}>
-                    {charging ? <>Get my estimate &middot; up to {formatTokens(pricing.feeCap)}</> : 'Get my estimate'}
+                    {pricing.feeCap === 0 ? 'Preview my redraft' : charging ? <>Get my estimate &middot; up to {formatTokens(pricing.feeCap)}</> : 'Get my estimate'}
                   </Button>
                   {charging && wallet && wallet.available < pricing.feeCap && (
                     <p className="mt-2 text-xs text-amber-800">

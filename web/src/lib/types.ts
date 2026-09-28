@@ -43,6 +43,14 @@ export interface ServiceSelection {
   formatting: 'NONE' | 'FORMAT' | 'TEMPLATE_FORMAT'
   preset: string
   latex: boolean
+  /** Academic or research work: adds the academic, evidence and methodology review. */
+  academic?: boolean
+  /** "Fix selected": refine exactly these passages. */
+  onlyBlocks?: string[]
+  /** The student's own layout choices over the preset (unset: the preset's). */
+  custom?: CustomLayout | null
+  /** An institution logo at the top of the first page. */
+  logo?: 'NONE' | 'CENTER' | 'LEFT'
   /** A proposal project's step, or REVIEW: an uploaded proposal checked against the rulebook. */
   proposal?: 'NONE' | 'PLAN' | 'CHAPTER_1' | 'CHAPTER_2' | 'CHAPTER_3' | 'REVIEW'
   level?: Level
@@ -70,6 +78,8 @@ export interface EstimateView {
   feeCap: number
   fee: number
   message: string | null
+  /** Share of the paper the plan will rewrite (0-1). */
+  intervention?: number | null
 }
 
 export interface QuoteResponse {
@@ -126,6 +136,25 @@ export type ReasonCode =
   | 'UNSUPPORTED_SUMMARY'
   | 'REPETITION'
   | 'STYLE_SHIFT'
+  | 'OVERCLAIMING'
+  | 'EXCESSIVE_HEDGING'
+  | 'VAGUE_WORDING'
+  | 'UNSUPPORTED_INTERPRETATION'
+  | 'TENSE_INCONSISTENCY'
+  | 'WEAK_FLOW'
+  | 'CLAIM_WITHOUT_EVIDENCE'
+  | 'CAUSAL_OVERSTATEMENT'
+  | 'CONFLICTING_NUMBERS'
+  | 'CURRENT_STATISTIC'
+  | 'OBJECTIVE_METHOD_MISMATCH'
+  | 'DESIGN_MISMATCH'
+  | 'SAMPLE_INCONSISTENCY'
+  | 'MISSING_VALIDITY'
+  | 'HEADING_AS_TEXT'
+  | 'HEADING_LEVEL_SKIP'
+  | 'CAPTION_NUMBERING'
+
+export type FindingCategory = 'AI_LIKE' | 'ACADEMIC' | 'EVIDENCE' | 'METHOD' | 'FORMATTING'
 
 export interface Finding {
   id: string
@@ -136,6 +165,9 @@ export interface Finding {
   excerpt: string
   explanation: string
   suggestion: string
+  category: FindingCategory
+  /** PaperAid may fix it without the student's judgement. */
+  safe: boolean
 }
 
 export interface AnalysisResult {
@@ -146,6 +178,58 @@ export interface AnalysisResult {
   findings: Finding[]
   algorithmVersion: string
   method?: string
+  /** Academic, evidence, methodology and formatting findings (not part of the band). */
+  review: Finding[]
+}
+
+export interface CustomLayout {
+  font?: string | null
+  sizePt?: number | null
+  lineSpacing?: number | null
+  marginCm?: number | null
+  alignment?: 'left' | 'justify' | null
+}
+
+export interface ImageMeta {
+  name: string
+  format: 'PNG' | 'JPEG'
+  sizeBytes: number
+  widthPx: number
+  heightPx: number
+}
+
+export interface ReferenceCheck {
+  entry: string
+  status: 'VERIFIED' | 'PROBABLE' | 'MISMATCH' | 'NOT_VERIFIED'
+  doi: string
+  matchedTitle: string
+  matchedYear: string
+  retracted: boolean
+  note: string
+}
+
+export interface ReferenceVerification {
+  items: ReferenceCheck[]
+  checked: number
+  total: number
+  retrievedOn: string
+}
+
+export interface ProtectedSummary {
+  numbers: number
+  citations: number
+  quotations: number
+  links: number
+  wordItems: number
+}
+
+/** The paper as PaperAid read it, for the review workspace. */
+export interface JobDocument {
+  blocks: { id: string; kind: string; level: number | null; section: string; text: string }[]
+  /** Deep Redraft: which paragraphs each redrafted group covers. */
+  groups: Record<string, string[]>
+  /** Every change in full (the job record may shorten long passages). */
+  changes: ChangedBlock[]
 }
 
 export interface ChangedBlock {
@@ -203,6 +287,7 @@ export interface Job {
   pipeline: Stage[]
   source: FileMeta | null // null only on a draft before its upload
   guideline: FileMeta | null
+  logo?: ImageMeta | null
   quote: Quote | null // null on a draft that has not been priced
   estimate: EstimateView | null
   billing: Billing
@@ -210,6 +295,11 @@ export interface Job {
   warnings: string[]
   analysis: AnalysisResult | null
   analysisAfter: AnalysisResult | null
+  protected?: ProtectedSummary | null
+  references?: ReferenceVerification | null
+  dismissed?: string[]
+  rejectedChanges?: string[]
+  sourceJob?: string | null
   paperChecks: PaperChecks | null
   research: ResearchResult | null
   latex: LatexResult | null
@@ -332,6 +422,17 @@ export interface PublicConfig {
   minTopUpUgx: number
   ugxPerUsd: number
   ugxPerToken: number
+  /** Fixed prices by page band (tokens per service; each covers `bandPages` pages, each further band adds `bandStep`). */
+  pricing: {
+    mode: 'fixed' | 'cost'
+    bandPages: number
+    bandStep: number
+    tokens: Record<string, number>
+    formatUgxPer300Words: number
+    formatMinUgx: number
+    latexUgxPer300Words: number
+    latexMinUgx: number
+  }
   retentionDays: number
   presets: { id: string; label: string; available: boolean }[]
 }

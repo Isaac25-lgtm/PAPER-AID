@@ -1,6 +1,6 @@
 import type { LucideIcon } from 'lucide-react'
 import { BookCheck, Braces, FileCheck2, GraduationCap, PenLine, Search, Shuffle } from 'lucide-react'
-import type { Availability, JobStatus, ReasonCode, ServiceId, Stage, WritingStyle } from './types'
+import type { Availability, FindingCategory, JobStatus, ReasonCode, ServiceId, Stage, WritingStyle } from './types'
 
 interface ServiceInfo {
   name: string
@@ -119,6 +119,32 @@ export const REASON_LABELS: Record<ReasonCode, string> = {
   UNSUPPORTED_SUMMARY: 'Unsupported summary',
   REPETITION: 'Repeated phrasing',
   STYLE_SHIFT: 'Style shift',
+  OVERCLAIMING: 'Overclaiming',
+  EXCESSIVE_HEDGING: 'Too much hedging',
+  VAGUE_WORDING: 'Vague wording',
+  UNSUPPORTED_INTERPRETATION: 'Unsupported interpretation',
+  TENSE_INCONSISTENCY: 'Tense',
+  WEAK_FLOW: 'Weak flow',
+  CLAIM_WITHOUT_EVIDENCE: 'Claim needs a source',
+  CAUSAL_OVERSTATEMENT: 'Cause overstated',
+  CONFLICTING_NUMBERS: 'Figures disagree',
+  CURRENT_STATISTIC: 'Statistic needs a current source',
+  OBJECTIVE_METHOD_MISMATCH: 'Objective and method mismatch',
+  DESIGN_MISMATCH: 'Design mismatch',
+  SAMPLE_INCONSISTENCY: 'Sample inconsistency',
+  MISSING_VALIDITY: 'Validity and reliability',
+  HEADING_AS_TEXT: 'Heading typed as text',
+  HEADING_LEVEL_SKIP: 'Heading level skipped',
+  CAPTION_NUMBERING: 'Caption numbering',
+}
+
+export const CATEGORY_LABELS: Record<FindingCategory | 'REFERENCES', string> = {
+  AI_LIKE: 'AI-like writing',
+  ACADEMIC: 'Academic writing',
+  EVIDENCE: 'Evidence and claims',
+  REFERENCES: 'References',
+  METHOD: 'Methodology',
+  FORMATTING: 'Formatting',
 }
 
 export const STYLE_OPTIONS: { id: WritingStyle; title: string; body: string }[] = [

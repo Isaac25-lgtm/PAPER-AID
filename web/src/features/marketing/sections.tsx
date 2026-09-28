@@ -37,8 +37,7 @@ export function ServiceGrid() {
   )
 }
 
-// How PaperAid is paid for. There is no price list: every paper is priced from the work it
-// actually needs, so the site explains the model and never shows made-up amounts.
+// How PaperAid is paid for: fixed token prices by paper length (owner decision 2026-09-28).
 const PRICING_STEPS = [
   {
     icon: Wallet,
@@ -47,13 +46,13 @@ const PRICING_STEPS = [
   },
   {
     icon: ScanSearch,
-    title: 'See your estimate first',
-    body: 'After upload, PaperAid sizes the work your paper needs and shows the price before anything runs.',
+    title: 'See the price first',
+    body: 'Every service has a fixed price in tokens for your paper’s length. You see it before anything runs.',
   },
   {
     icon: Scale,
-    title: 'Pay for the work done',
-    body: 'You are charged for the work your paper actually needed, never more than your estimate. Unused tokens return to your balance.',
+    title: 'Pay only for what you get',
+    body: 'If part of a job can’t be delivered, you pay only for the part that was. A job that fails costs nothing.',
   },
 ]
 

@@ -68,6 +68,8 @@ class FakeModels:
         self.works: list[dict[str, str]] = [dict(WORK)]  # what the scholarly index returns for any query
         self.crossref: dict[str, dict[str, str]] = {WORK["doi"]: dict(CROSSREF)}  # registered details by DOI
         self.searched: list[str] = []  # queries sent to the scholarly index
+        self.crossref_found: list[dict[str, str]] = []  # what a bibliographic search of any reference returns
+        self.retracted: set[str] = set()  # DOIs OpenAlex reports as retracted
         self.dois: dict[str, str] = {}  # DOIs looked up for PubMed/PMC pages
 
     def json(self, task: str, model: str, system: str, payload: dict[str, Any], schema: dict[str, Any], max_tokens: int) -> ModelResult:
@@ -103,6 +105,13 @@ class FakeModels:
                     if b["signals"]
                 ]
             }
+        if task == "academic":  # one rewordable finding on the first passage of each batch
+            first = payload["passages"][0] if payload["passages"] else None
+            findings = []
+            if first:
+                excerpt = " ".join(first["text"].split()[:8])
+                findings.append({"id": first["id"], "category": "ACADEMIC", "code": "VAGUE_WORDING", "severity": "minor", "excerpt": excerpt, "explanation": "The claim is too general to check.", "suggestion": "Say what, where and when."})
+            return {"findings": findings}
         if task == "plan":
             return {"blocks": [{"id": p["id"], "action": "rewrite", "instruction": INSTRUCTION, "preserve": "the student's claims"} for p in payload["passages"]]}
         if task == "critique":

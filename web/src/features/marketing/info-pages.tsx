@@ -2,6 +2,8 @@ import { Check, Lock } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { Badge, Card, Eyebrow } from '../../components/ui/primitives'
 import { useData } from '../../lib/data'
+import { formatTokenNumber } from '../../lib/format'
+import type { ServiceId } from '../../lib/types'
 import { AVAILABILITY_BADGE, SERVICES, SERVICE_ORDER } from '../../lib/services'
 import { useTitle } from '../../lib/use-title'
 import { FinalCta, PricingModel } from './sections'
@@ -95,20 +97,16 @@ export function FeaturesPage() {
 
 const FAQ = [
   {
-    q: 'Why is there no fixed price list?',
-    a: 'Every paper needs different work. A clean two-page essay and a 60-page dissertation full of generic passages cost very different amounts to process, so PaperAid prices each paper from the work it actually needs instead of charging everyone the same.',
+    q: 'How is the price worked out?',
+    a: 'Each service has a fixed price in tokens that covers a paper of up to 10 pages (about 2,500 words). Longer papers cost more in steps of 10 pages. You always see the exact price before anything runs.',
   },
   {
-    q: 'What does the estimate cost?',
-    a: 'Refinement needs a short AI scan to size the work: which passages need attention and how. The most the scan can cost is shown before you start it, you pay only what it actually costs, and it counts toward your job if you go ahead. If the scan fails, it is not charged. AI Check, University templates and APA or Harvard formatting are priced from the length of your paper (and guide) with no scan.',
+    q: 'Can I be charged more than the price I saw?',
+    a: 'No. The tokens are held from your balance when you start, and the price you saw is the most you pay.',
   },
   {
-    q: 'Can the final price be higher than the estimate?',
-    a: 'No. Your estimate is the most you will pay. The tokens are held from your balance when you approve it, you are charged for the work actually done, and anything unused goes back to your balance.',
-  },
-  {
-    q: 'What if my job fails?',
-    a: "You get everything back, including the estimate charge. If our accuracy check can't verify a change, we keep your original wording rather than deliver something altered, and if only part of your paper could be improved, you pay only for that part.",
+    q: 'What if my job fails, or only part of it works?',
+    a: "A job that fails costs nothing. If only part of a job can be delivered, for example some passages keep your wording because a change couldn't be verified, you pay only for the part you received, and the rest returns to your balance.",
   },
   { q: 'Do tokens expire?', a: 'No. Tokens stay in your account until you use them. They can’t be exchanged for cash.' },
   {
@@ -121,53 +119,72 @@ const FAQ = [
   },
 ]
 
+const PRICE_ROWS: { key: string; name: string; note?: string; service: ServiceId }[] = [
+  { key: 'AI_CHECK', name: 'AI Check', service: 'AI_CHECK' },
+  { key: 'ACADEMIC', name: 'Academic, evidence and method review', note: 'added to a check of academic work', service: 'AI_CHECK' },
+  { key: 'REFINE_LIGHT', name: 'Check + Refine, light', service: 'REFINE' },
+  { key: 'REFINE', name: 'Check + Refine, standard', service: 'REFINE' },
+  { key: 'REDRAFT', name: 'Deep redraft', service: 'REDRAFT' },
+  { key: 'SOURCE_CHECK', name: 'Source check', service: 'SOURCE_CHECK' },
+  { key: 'TEMPLATE_FORMAT', name: 'University template formatting', service: 'TEMPLATE_FORMAT' },
+  { key: 'REVIEW', name: 'Proposal review', service: 'PROPOSAL' },
+  { key: 'PLAN', name: 'Proposal plan', note: 'any length', service: 'PROPOSAL' },
+  { key: 'CHAPTER_1', name: 'Proposal Chapter One', note: 'any length', service: 'PROPOSAL' },
+  { key: 'CHAPTER_2', name: 'Proposal Chapter Two', note: 'any length', service: 'PROPOSAL' },
+  { key: 'CHAPTER_3', name: 'Proposal Chapter Three', note: 'any length', service: 'PROPOSAL' },
+]
+
+function PriceTable() {
+  const { config } = useData()
+  const p = config.pricing
+  const perPage = (ugx: number) => `${formatTokenNumber(ugx)} tokens`
+  return (
+    <ul className="mt-4 divide-y divide-line rounded-xl border border-line bg-white text-sm">
+      {PRICE_ROWS.filter((r) => p.tokens[r.key] !== undefined && config.availability[r.service] !== 'soon').map((r) => (
+        <li key={r.key} className="flex items-center justify-between gap-3 px-4 py-2.5">
+          <span>
+            {r.name}
+            {r.note && <span className="block text-xs text-fg-subtle">{r.note}</span>}
+          </span>
+          <span className="font-semibold whitespace-nowrap">{p.tokens[r.key]} tokens</span>
+        </li>
+      ))}
+      <li className="flex items-center justify-between gap-3 px-4 py-2.5">
+        <span>
+          Academic formatting (APA or Harvard)
+          <span className="block text-xs text-fg-subtle">per 300 words, at least {perPage(p.formatMinUgx)}</span>
+        </span>
+        <span className="font-semibold whitespace-nowrap">{perPage(p.formatUgxPer300Words)}</span>
+      </li>
+      <li className="flex items-center justify-between gap-3 px-4 py-2.5">
+        <span>
+          LaTeX conversion
+          <span className="block text-xs text-fg-subtle">per 300 words, at least {perPage(p.latexMinUgx)}</span>
+        </span>
+        <span className="font-semibold whitespace-nowrap">{perPage(p.latexUgxPer300Words)}</span>
+      </li>
+    </ul>
+  )
+}
+
 export function PricingPage() {
   useTitle('Pricing')
   const { config } = useData()
   return (
     <>
-      <PageHero eyebrow="Pricing" title="Pay for the work your paper needs.">
-        No subscription. Buy tokens, see an estimate for your paper before anything runs, and pay for the work it actually needs,
-        never more than the estimate.
+      <PageHero eyebrow="Pricing" title="Simple prices in tokens.">
+        No subscription. Buy tokens, see the price for your paper before anything runs, and pay only for what you get. One token is UGX{' '}
+        {config.ugxPerToken.toLocaleString('en')}.
       </PageHero>
       <div className="mx-auto max-w-6xl px-4 py-14 sm:px-6">
         <PricingModel />
         <div className="mt-14 grid gap-10 lg:grid-cols-2">
           <div>
-            <h2 className="text-2xl font-bold">How your price is worked out</h2>
-            <ol className="mt-5 space-y-4 text-sm leading-relaxed text-fg-muted">
-              <li>
-                <span className="font-semibold text-fg">1. We read your paper.</span> After upload, PaperAid checks the file and measures how much text
-                there is to work on.
-              </li>
-              <li>
-                <span className="font-semibold text-fg">2. We size the work.</span> For refinement, a short AI scan finds the passages that need
-                attention; you start it yourself and see its most before it runs. Everything else is priced from length alone.
-              </li>
-              <li>
-                <span className="font-semibold text-fg">3. You approve the estimate.</span> It is the most you will pay, and it is held from your tokens
-                while the work runs.
-              </li>
-              <li>
-                <span className="font-semibold text-fg">4. You pay for what was done.</span> The final charge reflects the work your paper actually
-                needed; the rest of the hold returns to your balance straight away.
-              </li>
-            </ol>
-            <div className="mt-6 rounded-xl border border-line bg-surface-subtle p-4 text-sm">
-              <p className="font-semibold">Services</p>
-              <ul className="mt-2 space-y-1.5 text-fg-muted">
-                {SERVICE_ORDER.map((id) => (
-                  <li key={id} className="flex items-center justify-between gap-3">
-                    <span>{SERVICES[id].name}</span>
-                    {config.availability[id] === 'available' ? (
-                      <span className="text-xs font-medium text-brand-700">Priced per paper</span>
-                    ) : (
-                      <Badge>{AVAILABILITY_BADGE[config.availability[id] as 'soon']}</Badge>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </div>
+            <h2 className="text-2xl font-bold">Prices</h2>
+            <p className="mt-2 text-sm text-fg-muted">
+              For a paper of up to {config.pricing.bandPages} pages. Each further {config.pricing.bandPages} pages adds {Math.round(config.pricing.bandStep * 100)}% of the price.
+            </p>
+            <PriceTable />
           </div>
           <div>
             <h2 className="text-2xl font-bold">Questions</h2>
@@ -192,7 +209,7 @@ export function PrivacyPage() {
   const { config } = useData()
   const sections = [
     { title: 'What we store', body: 'Your email address, the files you upload, the files we produce for you, and basic job details such as dates and what each job cost. For a research proposal, also the study details, plan, chapters and sources you work on, and the title-page details you choose to add. Nothing else is required to use PaperAid.' },
-    { title: 'Who processes your paper', body: 'Your text is processed by PaperAid and by the AI providers we use for analysis and editing (OpenAI and Anthropic). They process it only to run your job. For research proposals, short search queries about your topic are also sent to web search and to the OpenAlex and Crossref scholarly indexes, never your name or registration number. PaperAid never uses your papers to train AI models.' },
+    { title: 'Who processes your paper', body: 'Your text is processed by PaperAid and by the AI providers we use for analysis and editing (OpenAI and Anthropic). They process it only to run your job. For research proposals, short search queries about your topic are also sent to web search and to the OpenAlex and Crossref scholarly indexes, never your name or registration number. For academic work, the entries of your reference list are looked up in the same indexes to check the works exist. PaperAid never uses your papers to train AI models.' },
     { title: 'How long we keep it', body: `Files are deleted automatically ${config.retentionDays} days after your job. A research proposal is kept while you work on it and deleted ${config.retentionDays} days after your last change to it; its page shows the date. You can delete a job, a proposal, or your whole account, at any time.` },
     { title: 'Who can see it', body: 'Only you. Our support team can see job details such as status and errors, but not your paper, unless you ask us to look at it.' },
     { title: 'Where it is processed', body: 'PaperAid runs on Google Cloud in Europe. Our AI providers may process text in other countries. By using PaperAid you consent to this transfer.' },

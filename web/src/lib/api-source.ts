@@ -2,7 +2,7 @@
 // supplies (a Firebase ID token in production, a local developer identity when running locally).
 import { DataError, type DataSource, type JobQuery } from './data'
 import type { ChapterView, EvidenceItem, Project, Rulebook, StepQuote } from './proposal-types'
-import type { AdminJob, AdminSummary, FileMeta, Job, Page, PublicConfig, QuoteResponse, Wallet, WalletSummary } from './types'
+import type { AdminJob, AdminSummary, FileMeta, ImageMeta, Job, JobDocument, Page, PublicConfig, QuoteResponse, Wallet, WalletSummary } from './types'
 
 interface Options {
   config: PublicConfig
@@ -137,6 +137,14 @@ export function createApiSource({ config, getAuthHeaders }: Options): DataSource
 
     removeGuideline: (draftId) => request<void>(`/api/jobs/${draftId}/files/guideline`, { method: 'DELETE' }),
 
+    async uploadLogo(draftId, file) {
+      const form = new FormData()
+      form.append('file', file)
+      return request<ImageMeta>(`/api/jobs/${draftId}/files/logo`, { method: 'POST', body: form })
+    },
+
+    removeLogo: (draftId) => request<void>(`/api/jobs/${draftId}/files/logo`, { method: 'DELETE' }),
+
     deleteJob: (jobId) => request<void>(`/api/jobs/${jobId}`, { method: 'DELETE' }),
 
     deleteAccount: () => request<void>('/api/me', { method: 'DELETE' }),
@@ -160,6 +168,14 @@ export function createApiSource({ config, getAuthHeaders }: Options): DataSource
       document.body.appendChild(link)
       link.click()
       link.remove()
+    },
+
+    workspace: {
+      document: (jobId) => request<JobDocument>(`/api/jobs/${jobId}/document`),
+      setFinding: (jobId, findingId, dismissed) => request<Job>(`/api/jobs/${jobId}/findings/${findingId}`, { method: 'POST', body: JSON.stringify({ dismissed }) }),
+      setChange: (jobId, changeId, accepted) => request<Job>(`/api/jobs/${jobId}/changes/${changeId}`, { method: 'POST', body: JSON.stringify({ accepted }) }),
+      rebuild: (jobId) => request<Job>(`/api/jobs/${jobId}/rebuild`, { method: 'POST' }),
+      fix: (jobId, findingIds, safeOnly) => request<Job>(`/api/jobs/${jobId}/fix`, { method: 'POST', body: JSON.stringify({ findingIds, safeOnly }) }),
     },
 
     projects: {

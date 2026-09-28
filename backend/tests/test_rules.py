@@ -68,7 +68,7 @@ def test_formulaic_text_scores_higher_than_plain_text():
     assert formulaic.algorithm_version == "signals-v2"
 
 
-PRICING = Settings(openai_api_key="sk-test", anthropic_api_key="sk-test")
+PRICING = Settings(openai_api_key="sk-test", anthropic_api_key="sk-test", pricing_mode="cost")
 
 
 def test_price_is_ai_cost_times_the_multiplier_in_ugx():

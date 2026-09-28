@@ -26,7 +26,19 @@ def manifest() -> list[dict]:
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     """A fresh app on an isolated data directory with the local queue. Both AI roles are answered
-    by tests.fake_models (dummy keys, no network); `client.models` lets a test script any step."""
+    by tests.fake_models (dummy keys, no network); `client.models` lets a test script any step.
+    Prices follow the cost policy (actual AI spend, quoted as a ceiling after an estimate), which
+    most tests exercise; `fixed_client` runs the fixed prices production uses."""
+    yield from _client(tmp_path, monkeypatch, "cost")
+
+
+@pytest.fixture
+def fixed_client(tmp_path, monkeypatch):
+    """Like `client`, with fixed prices by page band (production's policy since 2026-09-28)."""
+    yield from _client(tmp_path, monkeypatch, "fixed")
+
+
+def _client(tmp_path, monkeypatch, pricing: str):
     from app.ai import costs, orchestration
     from app.analysis import fetch
     from tests.fake_models import FakeModels
@@ -39,6 +51,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     monkeypatch.setenv("MODEL_PRICES", '{"fake:gpt-6-sol":[0,0,0],"fake:claude-opus-5-5":[0,0,0]}')
     monkeypatch.setenv("ADMIN_EMAILS", '["demo@paperaid.app"]')
+    monkeypatch.setenv("PRICING_MODE", pricing)
     monkeypatch.setattr(orchestration, "provider_for", lambda ref, settings: (models, ref.split(":")[-1]))
     monkeypatch.setitem(costs.SEARCH_FEE_USD, "fake", 0.01)  # the stand-in "searches" like the real lead
     monkeypatch.setattr(fetch, "page_text", lambda url: fetch_html_text(models.pages.get(url)))  # no network in tests
@@ -50,6 +63,8 @@ def client(tmp_path, monkeypatch):
 
     monkeypatch.setattr(fetch, "openalex_search", openalex_search)
     monkeypatch.setattr(fetch, "crossref_work", lambda doi: models.crossref.get(doi))
+    monkeypatch.setattr(fetch, "crossref_search", lambda text, rows=3: [dict(r) for r in models.crossref_found])
+    monkeypatch.setattr(fetch, "openalex_retracted", lambda doi: doi in models.retracted)
     monkeypatch.setattr(fetch, "resolve_doi", lambda url: models.dois.get(url, fetch.doi_in(url)))
     for c in _app_client(tmp_path, monkeypatch):
         c.models = models

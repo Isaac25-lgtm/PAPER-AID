@@ -3,6 +3,7 @@ user, so ownership, pricing and state rules can be unit-tested directly."""
 
 import hashlib
 import logging
+import re
 import secrets
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -27,6 +28,7 @@ from app.jobs.models import (
     EstimateRun,
     FileMeta,
     Finding,
+    ImageMeta,
     Job,
     JobEvent,
     JobStatus,
@@ -39,6 +41,7 @@ from app.jobs.models import (
     ServiceSelection,
     Stage,
     StoredFile,
+    StoredImage,
     Wallet,
     WalletSummary,
     WalletView,
@@ -46,7 +49,7 @@ from app.jobs.models import (
 )
 from app.pricing import credits
 from app.pricing.billing import hold_for_job, refund_job, release_hold
-from app.pricing.quote import ai_cap_usd, bound_quote, estimate_scan_usd, needs_estimate, with_margin
+from app.pricing.quote import ai_cap_usd, bound_quote, estimate_charged, estimate_scan_usd, needs_estimate, with_margin
 from app.proposals.models import Project
 from app.runtime import Runtime
 
@@ -97,6 +100,16 @@ def public_config(rt: Runtime, user: "User | None" = None) -> dict:
         "minTopUpUgx": rt.settings.min_top_up_ugx,
         "ugxPerUsd": rt.settings.ugx_per_usd,
         "ugxPerToken": rt.settings.ugx_per_token,
+        "pricing": {
+            "mode": rt.settings.pricing_mode,
+            "bandPages": rt.settings.band_pages,
+            "bandStep": rt.settings.band_step,
+            "tokens": rt.settings.fixed_tokens,
+            "formatUgxPer300Words": rt.settings.format_ugx_per_300_words,
+            "formatMinUgx": rt.settings.format_min_ugx,
+            "latexUgxPer300Words": rt.settings.latex_ugx_per_300_words,
+            "latexMinUgx": rt.settings.latex_min_ugx,
+        },
         "retentionDays": rt.settings.retention_days,
         "presets": PUBLIC_PRESETS,
     }
@@ -255,6 +268,72 @@ def upload_file(rt: Runtime, user: User, job_id: str, role: FileRole, filename: 
 
 
 
+MAX_LOGO_BYTES = 2_000_000
+
+
+def upload_logo(rt: Runtime, user: User, job_id: str, filename: str, data: bytes) -> ImageMeta:
+    """An institution logo for the title page (PNG or JPEG, up to 2 MB). Replacing it clears the
+    quote, like any file."""
+    from docx.image.exceptions import UnrecognizedImageError
+    from docx.image.image import Image
+
+    job = _owned(rt, user, job_id)
+    if not _open_draft(job):
+        raise Conflict("This job has already been submitted. Start a new job to use another logo.", code="ALREADY_SUBMITTED")
+    if len(data) > MAX_LOGO_BYTES:
+        raise InvalidDocument("This logo is larger than 2 MB. Upload a smaller PNG or JPEG.", code="LOGO_TOO_LARGE")
+    kind = "PNG" if data[:8] == b"\x89PNG\r\n\x1a\n" else "JPEG" if data[:3] == b"\xff\xd8\xff" else None
+    try:
+        image = Image.from_blob(data) if kind else None
+    except (UnrecognizedImageError, ValueError, KeyError, IndexError) as exc:
+        raise InvalidDocument("We could not read this image. Upload the logo as a PNG or JPEG.", code="LOGO_UNREADABLE") from exc
+    if image is None or not image.px_width or not image.px_height:
+        raise InvalidDocument("Upload the logo as a PNG or JPEG image.", code="LOGO_UNREADABLE")
+    digest = hashlib.sha256(data).hexdigest()
+    path = f"{job.storage_prefix()}/input/logo-{digest[:12]}-{secrets.token_hex(4)}.{'png' if kind == 'PNG' else 'jpg'}"
+    rt.files.put(path, data, "image/png" if kind == "PNG" else "image/jpeg")
+    name = PurePosixPath(filename.replace("\\", "/")).name[:180] or "logo"
+    stored = StoredImage(name=name, format=kind, size_bytes=len(data), width_px=image.px_width, height_px=image.px_height, path=path, sha256=digest)  # type: ignore[arg-type]
+    previous: list[str] = []
+
+    def attach(j: Job) -> Job | None:
+        if not _open_draft(j):
+            return None
+        if j.logo and j.logo.path != path:
+            previous.append(j.logo.path)
+        j.logo, j.quote = stored, None
+        if j.status == JobStatus.QUOTED:
+            state.transition(j, JobStatus.DRAFT, "Logo replaced; quote cleared")
+        return j
+
+    if rt.store.update(job.id, attach) is None:
+        rt.files.delete(path)
+        raise Conflict("This job was submitted before the logo arrived.", code="ALREADY_SUBMITTED")
+    for old in previous:
+        rt.files.delete(old)
+    return ImageMeta.model_validate(stored.model_dump())
+
+
+def remove_logo(rt: Runtime, user: User, job_id: str) -> None:
+    job = _owned(rt, user, job_id)
+    removed: list[str] = []
+
+    def detach(j: Job) -> Job | None:
+        if not _open_draft(j):
+            return None
+        if j.logo:
+            removed.append(j.logo.path)
+            j.logo, j.quote = None, None
+            if j.status == JobStatus.QUOTED:
+                state.transition(j, JobStatus.DRAFT, "Logo removed; quote cleared")
+        return j
+
+    if rt.store.update(job.id, detach) is None:
+        raise Conflict("This job has already been submitted.", code="ALREADY_SUBMITTED")
+    for path in removed:
+        rt.files.delete(path)
+
+
 def remove_guideline(rt: Runtime, user: User, job_id: str) -> None:
     """Detach the formatting guide from a draft. Idempotent; clears any quote that priced it."""
     job = _owned(rt, user, job_id)
@@ -300,6 +379,8 @@ def request_quote(rt: Runtime, user: User, job_id: str, selection: ServiceSelect
         raise AppError("A proposal review runs on its own. Start another job for other services.", code="REVIEW_ALONE")
     if selection.proposal == "REVIEW" and job.source.word_count > rt.settings.proposal_review_max_words:
         raise AppError(f"Proposal review accepts up to {rt.settings.proposal_review_max_words:,} words.", code="DOCUMENT_TOO_LONG")
+    if selection.only_blocks and (selection.writing != "REFINE" or not all(re.fullmatch(r"b\d{5}", b) for b in selection.only_blocks)):
+        raise AppError("Choose the passages to fix from your AI Check.", code="INVALID_SELECTION")
     if selection.source_check and selection.writing not in ("AI_CHECK", "REFINE", "REDRAFT"):
         raise AppError("Source check comes with AI Check, Check + Refine or Deep Redraft.", code="SOURCE_CHECK_NEEDS_CHECK")
     if job.source.format == "PDF" and any(s.value not in ("AI_CHECK", "SOURCE_CHECK", "PROPOSAL") for s in services):
@@ -307,6 +388,8 @@ def request_quote(rt: Runtime, user: User, job_id: str, selection: ServiceSelect
     if selection.formatting == "TEMPLATE_FORMAT" and job.guideline is None:
         raise AppError("Upload your university's formatting guide to use University templates.", code="NO_GUIDELINE")
     guideline_sha = job.guideline.sha256 if selection.formatting == "TEMPLATE_FORMAT" and job.guideline else None
+    if selection.logo != "NONE" and (selection.formatting == "NONE" or job.logo is None):
+        raise AppError("Upload your logo, and choose a formatting option, to place it on the title page.", code="NO_LOGO")
     if selection.formatting == "FORMAT" and selection.preset not in PRESETS:
         raise AppError("Choose an available formatting style.", code="INVALID_PRESET")
     if _estimating(job):
@@ -325,12 +408,13 @@ def request_quote(rt: Runtime, user: User, job_id: str, selection: ServiceSelect
         return QuoteResponse(quote=Quote.model_validate(existing.model_dump()), estimate=job.estimate)
     settings = rt.settings
     source_sha, words = job.source.sha256, job.source.word_count
-    finished = _finished_estimate(job, selection, guideline_sha)
-    if needs_estimate(selection) and finished is None:
+    finished = _finished_estimate(job, selection, guideline_sha, rt.settings)
+    if needs_estimate(selection, settings) and finished is None:
         if not start_estimate:
-            return QuoteResponse(estimate_fee_cap=_estimate_fee_cap(rt, job, selection), estimate=job.estimate)
+            cap = _estimate_fee_cap(rt, job, selection) if estimate_charged(settings) else 0
+            return QuoteResponse(estimate_fee_cap=cap, estimate=job.estimate)
         return _start_estimate(rt, user, job, selection, guideline_sha)
-    if finished is None and settings.credits_enabled:
+    if finished is None and settings.credits_enabled and settings.pricing_mode == "cost":
         wallet = rt.store.get_wallet(user.uid)
         available = wallet.available if wallet else 0
         if available <= 0:
@@ -343,8 +427,8 @@ def request_quote(rt: Runtime, user: User, job_id: str, selection: ServiceSelect
             return None
         if guideline_sha is not None and (j.guideline is None or j.guideline.sha256 != guideline_sha):
             return None
-        run = _finished_estimate(j, selection, guideline_sha)
-        if needs_estimate(selection) and run is None:
+        run = _finished_estimate(j, selection, guideline_sha, settings)
+        if needs_estimate(selection, settings) and run is None:
             return None
         # A finished estimate is repriced from its saved result: no new scan, no new fee. Any
         # estimate already charged on this job counts toward whichever quote follows it.
@@ -359,6 +443,7 @@ def request_quote(rt: Runtime, user: User, job_id: str, selection: ServiceSelect
             run.passages if run else None,
             fee_paid=j.billing.fee_paid,
             estimate_id=run.id if run else None,
+            scope_words=j.scope_words if selection.only_blocks else None,
         )
         issued.append(quote)
         j.quote = quote
@@ -375,10 +460,10 @@ def _open_draft(j: Job) -> bool:
     return j.status in (JobStatus.DRAFT, JobStatus.QUOTED) and not _estimating(j) and not j.deleting and not j.retiring and not j.files_deleted
 
 
-def _finished_estimate(j: Job, selection: ServiceSelection, guideline_sha: str | None) -> EstimateRun | None:
+def _finished_estimate(j: Job, selection: ServiceSelection, guideline_sha: str | None, settings: Settings) -> EstimateRun | None:
     """The job's finished estimate, if it sized exactly these files and this selection."""
     run = j.estimate
-    if run is None or run.status != "READY" or j.source is None or not needs_estimate(selection):
+    if run is None or run.status != "READY" or j.source is None or not needs_estimate(selection, settings):
         return None
     if run.selection != selection or run.source_sha256 != j.source.sha256 or run.guideline_sha256 != guideline_sha:
         return None
@@ -412,16 +497,17 @@ def _start_estimate(rt: Runtime, user: User, job: Job, selection: ServiceSelecti
             return None
         if guideline_sha is not None and (j.guideline is None or j.guideline.sha256 != guideline_sha):
             return None
-        if settings.credits_enabled:
+        charged = estimate_charged(settings)  # under fixed prices the Deep Redraft preview is free
+        if charged:
             credits.hold(w, fee_cap, j.id, "AI estimate (the most it can cost)")
-        run.held = settings.credits_enabled
+        run.held = charged
         run.cost_base_usd = j.estimate_cost_usd
         j.estimate = run
         j.selection = selection
         j.quote = None  # earlier estimate fees stay on j.billing and count toward the next quote
         if j.status == JobStatus.QUOTED:
             state.transition(j, JobStatus.DRAFT, "New estimate requested; previous quote cleared")
-        j.events.append(JobEvent(label=f"Estimate started (up to {credits.tokens(fee_cap)} held)"))
+        j.events.append(JobEvent(label=f"Estimate started (up to {credits.tokens(fee_cap)} held)" if charged else "Preview started (not charged)"))
         return j, w
 
     result = rt.store.update_job_and_wallet(job.id, start)
@@ -482,7 +568,10 @@ def submit(rt: Runtime, user: User, job_id: str, quote_id: str, project_gate: Pr
         j.services = q.selection.services()
         j.pipeline = pipeline_for(q.selection)
         # The provider-spend cap keeps the margin: the quote's AI part at its frozen rate and multiplier.
-        j.budget_usd = max(0, q.amount - q.paid - q.fixed_ugx) / q.ugx_per_usd / q.multiplier if q.ugx_per_usd and q.multiplier else 0.0
+        if q.budget_usd:  # fixed prices: the cap is the worst-case projection, not the price
+            j.budget_usd = q.budget_usd
+        else:
+            j.budget_usd = max(0, q.amount - q.paid - q.fixed_ugx) / q.ugx_per_usd / q.multiplier if q.ugx_per_usd and q.multiplier else 0.0
         if settings.credits_enabled:
             held = hold_for_job(j, w)  # raises InsufficientCredits, which aborts the whole transaction
             state.transition(j, JobStatus.QUEUED, f"Queued ({credits.tokens(held)} held)")
@@ -745,14 +834,19 @@ def without_paper_text[T: JobView](job: T) -> T:
     for name in ("analysis", "analysis_after"):
         result = getattr(job, name)
         if result is not None:
-            findings = [Finding(id=f.id, block_id=f.block_id, reason=f.reason, severity=f.severity, section="", excerpt="", explanation="", suggestion="") for f in result.findings]
-            update[name] = result.model_copy(update={"findings": findings})
+            def bare(fs: list[Finding]) -> list[Finding]:
+                return [f.model_copy(update={"section": "", "excerpt": "", "explanation": "", "suggestion": ""}) for f in fs]
+
+            update[name] = result.model_copy(update={"findings": bare(result.findings), "review": bare(result.review)})
     if job.refinement is not None:
         changes = [ChangedBlock(block_id=c.block_id, kept=c.kept, section="", before="", after="") for c in job.refinement.changes]
         update["refinement"] = job.refinement.model_copy(update={"changes": changes})
     if job.research is not None:
         claims = [c.model_copy(update={"section": "", "claim": "", "note": ""}) for c in job.research.claims]
         update["research"] = job.research.model_copy(update={"claims": claims})
+    if job.references is not None:
+        items = [r.model_copy(update={"entry": "", "matched_title": "", "note": ""}) for r in job.references.items]
+        update["references"] = job.references.model_copy(update={"items": items})
     if job.paper_checks is not None:
         items = [PaperCheck(kind=i.kind, certainty=i.certainty, item="", detail="") for i in job.paper_checks.items]
         update["paper_checks"] = job.paper_checks.model_copy(update={"items": items})

@@ -7,6 +7,7 @@ import { chromium } from 'playwright-core'
 const out = process.argv[2] ?? 'e2e-output'
 const base = 'http://localhost:5000'
 const fixtures = '../backend/tests/fixtures/generated/'
+const LOGO_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
 const jobsDir = '../backend/.data_e2e/jobs' // local store: one JSON file per job, drafts included
 const jobCount = () => (existsSync(jobsDir) ? readdirSync(jobsDir).filter((f) => f.endsWith('.json')).length : 0)
 const executablePath = process.env.CHROME_PATH ?? 'C:/Program Files/Google/Chrome/Application/chrome.exe'
@@ -83,16 +84,24 @@ try {
   await page.getByText('Readable text found').waitFor({ timeout: 20000 })
   await page.getByText('Academic formatting').first().click()
   await page.getByRole('combobox', { name: 'Formatting style' }).selectOption('harvard')
+  // The student's own settings over the style, and an institution logo on the first page.
+  await page.getByRole('button', { name: /Customise font/ }).click()
+  await page.getByRole('combobox', { name: 'Font', exact: true }).selectOption('Arial')
+  await page.getByText('Add an institution logo').click()
+  await page.getByText('Upload your logo to see the price', { exact: false }).or(page.getByText('Choose your logo')).first().waitFor()
+  await page.locator('input[type=file]').last().setInputFiles({ name: 'crest.png', mimeType: 'image/png', buffer: Buffer.from(LOGO_PNG, 'base64') })
+  await page.getByText('crest.png').waitFor({ timeout: 20000 })
+  await page.getByRole('combobox', { name: 'Position' }).selectOption('LEFT')
+  step('own font chosen and a logo uploaded for the first page')
   await page.getByText('Concise academic').click() // the writing style is part of what is priced
   await page.getByText('Check my claims against live sources').click()
   await page.getByText('Also convert to LaTeX').click()
-  await page.getByText('First, a short AI estimate').waitFor()
-  await shot('1a-estimate-offer')
-  await page.getByRole('button', { name: /Get my estimate/ }).click() // the paid scan only runs on the student's click
+  // Fixed prices: refinement is priced at once, no estimate step.
   await page.locator('aside dl').getByText('Academic formatting').waitFor({ timeout: 60000 })
+  await page.getByText('This is the price.', { exact: false }).waitFor()
   const quoteText = await page.locator('aside dl').innerText()
   await shot('1-quote')
-  step(`quote: ${quoteText.replace(/\n/g, ' ')}`)
+  step(`fixed-price quote: ${quoteText.replace(/\n/g, ' ')}`)
   // A refresh keeps the draft: the file, the chosen services and the quote come back from the server.
   if (!/[?&]draft=job_/.test(page.url())) throw new Error(`the draft is not in the address: ${page.url()}`)
   await page.reload()
@@ -110,22 +119,35 @@ try {
   // Live progress, then results.
   await page.getByRole('heading', { name: /working on your paper|in the queue/ }).waitFor()
   await shot('2-processing')
-  await page.getByRole('tab', { name: 'Overview' }).waitFor({ timeout: 120000 })
-  await shot('3-overview')
-  step('job completed')
+  await page.getByRole('tab', { name: 'Your paper' }).waitFor({ timeout: 120000 })
+  await page.getByText('Your document is ready').waitFor()
+  await page.getByText('Protected in your paper').waitFor()
+  await shot('3-workspace')
+  step('job completed: the workspace shows the paper, the outcome and what was protected')
   await page.getByText('Concise academic · standard refinement').waitFor()
-  for (const tab of ['Writing report', 'Source check', 'Changes', 'Formatting', 'LaTeX']) {
+  // Keep one passage in the student's own words, then download a file with those choices.
+  await page.getByRole('button', { name: 'Keep my wording' }).first().click()
+  await page.getByText('Your wording', { exact: true }).first().waitFor()
+  const [chosen] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Download with my choices' }).click()])
+  if (!chosen.suggestedFilename().includes('your choices')) throw new Error(`unexpected file: ${chosen.suggestedFilename()}`)
+  step('a change undone in the workspace; the Word file is rebuilt with the student\'s choices')
+  await page.getByRole('tab', { name: /Findings/ }).click()
+  await page.getByRole('button', { name: /^All \(/ }).waitFor()
+  for (const tab of ['Source check', 'Formatting', 'LaTeX']) {
     await page.getByRole('tab', { name: tab }).click()
     await page.waitForTimeout(300)
     await shot(`4-${tab.toLowerCase().replace(' ', '-')}`)
-    if (tab === 'Writing report') await page.getByRole('heading', { name: 'Citations and consistency' }).waitFor()
     if (tab === 'Source check') await page.getByText('not that no evidence exists', { exact: false }).waitFor()
+    if (tab === 'Formatting') {
+      await page.getByText('Arial', { exact: false }).first().waitFor()
+      await page.getByText('Logo', { exact: true }).first().waitFor()
+    }
     if (tab === 'LaTeX') await page.getByText(/Compiled to PDF by PaperAid|Not compiled/).waitFor()
   }
-  step('result tabs render, with the chosen style and the citation checks')
+  step('result tabs render, with the chosen style and the findings')
 
   // Real download of the refined + formatted Word file.
-  await page.getByRole('tab', { name: 'Overview' }).click()
+  await page.getByRole('tab', { name: 'Your paper' }).click()
   const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: /Download Refined and formatted paper/ }).click()])
   const path = `${out}/${download.suggestedFilename()}`
   await download.saveAs(path)
@@ -142,16 +164,40 @@ try {
   await page.getByText('Readable text found').waitFor({ timeout: 20000 })
   await page.getByText('Deep redraft', { exact: true }).first().click()
   await page.getByText('What Deep Redraft changes').waitFor()
-  await page.getByRole('button', { name: /Get my estimate/ }).click()
-  await page.locator('aside dl').getByText('Deep redraft (up to)').waitFor({ timeout: 60000 })
+  await page.getByText('First, a free preview').waitFor()
+  await page.getByRole('button', { name: 'Preview my redraft' }).click()
+  await page.locator('aside dl').getByText('Deep redraft', { exact: true }).waitFor({ timeout: 60000 })
+  await page.getByText(/Estimated change: about \d+% of your paper/).waitFor()
   await page.getByLabel(/This is my own work/).check()
   await page.getByRole('button', { name: /Start job/ }).click()
   await page.waitForURL(/\/app\/jobs\/job_/)
-  await page.getByRole('tab', { name: 'Overview' }).waitFor({ timeout: 120000 })
-  await page.getByRole('tab', { name: 'Changes' }).click()
+  await page.getByRole('tab', { name: 'Your paper' }).waitFor({ timeout: 120000 })
   await page.getByText('Passages redrafted').waitFor()
   await page.getByText('Preserve my voice · deep redraft').waitFor()
   step('Deep Redraft job: estimate, quote, redraft and change report')
+
+  // AI Check workspace: findings by type, dismiss and restore, then fix the chosen ones.
+  await page.goto(`${base}/app/new?service=AI_CHECK`)
+  await upload('simple_essay.docx', 'Checked essay.docx')
+  await page.getByText('Readable text found').waitFor({ timeout: 20000 })
+  await page.getByText('Is this academic or research work?').waitFor()
+  await page.locator('aside dl').getByText('Academic, evidence and method review', { exact: true }).waitFor({ timeout: 20000 })
+  await page.getByLabel(/This is my own work/).check()
+  await page.getByRole('button', { name: /Start job/ }).click()
+  await page.waitForURL(/\/app\/jobs\/job_/)
+  await page.getByRole('tab', { name: 'Your paper' }).waitFor({ timeout: 120000 })
+  await page.getByRole('button', { name: /^Academic writing \(/ }).click()
+  await page.getByRole('button', { name: 'Dismiss' }).first().click()
+  await page.getByRole('button', { name: /Show 1 dismissed/ }).click()
+  await page.getByRole('button', { name: 'Restore' }).first().click()
+  await page.getByRole('button', { name: /^All \(/ }).click()
+  await page.getByRole('checkbox').first().check()
+  await shot('5-ai-check-workspace')
+  await page.getByRole('button', { name: 'Fix selected (1)' }).click()
+  await page.waitForURL(/\/app\/new\?draft=job_\w+&service=REFINE/)
+  await page.getByText(/Fixing 1 passage you chose/).waitFor()
+  await page.locator('aside dl').getByText('Check + Refine, standard').waitFor({ timeout: 30000 })
+  step('AI Check workspace: findings by type, dismiss and restore, fix selected opens a priced refinement')
 
   // Regression (external review): a PDF uploaded the instant the page opens must quote on the
   // same draft it was uploaded to, and a visit must create exactly one draft.
@@ -170,7 +216,7 @@ try {
   before = jobCount()
   await page.goto(`${base}/app/new?service=REFINE`)
   await upload('simple_essay.docx', 'essay.docx')
-  await page.getByText('First, a short AI estimate').waitFor({ timeout: 20000 })
+  await page.locator('aside dl').getByText('Check + Refine, standard').waitFor({ timeout: 20000 })
   await page.getByRole('button', { name: 'Remove essay.docx' }).click()
   await upload('text_based.pdf', 'essay.pdf')
   await page.locator('aside dl').getByText('AI Check').waitFor({ timeout: 20000 })
@@ -185,23 +231,20 @@ try {
   await page.locator('label', { hasText: 'University templates' }).click()
   await page.getByText('Upload your formatting guide to see the price').waitFor()
   await upload('guideline_university.docx', 'Old guide.docx')
-  await page.getByText('First, a short AI estimate').waitFor({ timeout: 20000 })
+  await page.locator('aside dl').getByText('University template formatting').waitFor({ timeout: 20000 })
   await page.getByRole('button', { name: 'Remove Old guide.docx' }).click() // removed on the server too
   await page.getByText('Upload your formatting guide to see the price').waitFor()
   await upload('guideline_university.docx', 'Department guide.docx')
-  await page.getByRole('button', { name: /Get my estimate/ }).click()
   await page.locator('aside dl').getByText('University template formatting').waitFor({ timeout: 60000 })
   await page.getByLabel(/This is my own work/).check()
   await page.getByRole('button', { name: /Start job/ }).click()
   await page.waitForURL(/\/app\/jobs\/job_/)
-  await page.getByRole('tab', { name: 'Overview' }).waitFor({ timeout: 120000 })
+  await page.getByRole('tab', { name: 'Your paper' }).waitFor({ timeout: 120000 })
+  await page.getByText('Why:').first().waitFor()
   await page.getByRole('tab', { name: 'Formatting' }).click()
   await page.getByText('Where each rule came from in your guide').waitFor()
   await page.getByText('3.0 cm left').first().waitFor()
   await shot('7-template-formatting')
-  await page.getByRole('tab', { name: 'Changes' }).click()
-  await page.locator('details summary').first().click()
-  await page.getByText('Why:').first().waitFor()
   step('university template job applies the guide with sources; changes say why')
 
   // Credits: every job settled, nothing left held, and the history explains each movement.

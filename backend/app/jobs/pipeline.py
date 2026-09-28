@@ -12,13 +12,14 @@ being saved; the job's spend ceiling bounds even that."""
 import hashlib
 import json
 import logging
+import re
 from datetime import timedelta
 from pathlib import PurePosixPath
 from typing import Any, Literal
 
 from app.ai.orchestration import NOT_RETURNED, AIRunner, ClaimCandidate, FoundSource, PlanItem, ResearchAnswer, ReviewOutcome, Revision, Target, current_engine
 from app.ai.styles import writing_brief
-from app.analysis import fetch, paper_checks, research, signals
+from app.analysis import fetch, paper_checks, references, research, signals, structure
 from app.core.errors import InvalidDocument, PermanentStageError, StageError
 from app.core.logging import job_id as job_id_var
 from app.core.logging import log
@@ -27,9 +28,9 @@ from app.documents import protect
 from app.documents.docx_io import apply_group_rewrites, apply_revisions, read_docx
 from app.documents.intake import inspect_upload
 from app.documents.model import DocumentModel
-from app.formatting.apply import apply_formatting
+from app.formatting.apply import add_logo, apply_formatting
 from app.formatting.guideline import MAX_GUIDE_WORDS, to_spec
-from app.formatting.presets import PRESETS
+from app.formatting.presets import PRESETS, with_custom
 from app.jobs import state
 from app.jobs.models import (
     AnalysisResult,
@@ -37,6 +38,7 @@ from app.jobs.models import (
     CheckedClaim,
     Finding,
     FormattingResult,
+    FormattingRule,
     Job,
     JobEvent,
     JobFailure,
@@ -236,16 +238,63 @@ def stage_analysing(ctx: StageContext) -> None:
     else:
         result, coverage_warning = _analyse(ctx, model)
     checks = paper_checks.check(model)  # the paper's integrity, reported apart from AI-likeness
+    review, review_warning = _academic_review(ctx, model) if ctx.job.selection.academic else ([], None)
+    result = result.model_copy(update={"review": review + structure.formatting_findings(model)})
+    protected = structure.protected_summary(model)
+    verified = references.verify_all(model) if ctx.job.selection.academic else None
 
     def save(j: Job) -> Job:
         j.analysis = result
         j.paper_checks = checks
+        j.protected = protected
+        j.references = verified
+        if review_warning:
+            _add_warnings(j, [review_warning])
         if coverage_warning:
             j.outcome = "PARTIAL"
             _add_warnings(j, [coverage_warning])
         return j
 
     ctx.update(save)
+
+
+ANCHOR = re.compile(r"objective|question|hypothes|\baims?\b|purpose", re.I)
+SAFE_ACADEMIC = {"OVERCLAIMING", "EXCESSIVE_HEDGING", "VAGUE_WORDING", "TENSE_INCONSISTENCY", "WEAK_FLOW"}
+
+
+def _academic_review(ctx: StageContext, model: DocumentModel) -> tuple[list[Finding], str | None]:
+    """Academic, evidence and methodology findings from the lead, with the study's objectives as
+    context. Rewording findings (overclaiming, vague wording, tense) are safe to fix; evidence and
+    methodology need the student's judgement."""
+    prose = signals.analysable(model)
+    if not prose:
+        return [], None
+    anchors, words = [], 0
+    for block in model.blocks:
+        if block.kind in ("paragraph", "list_item") and ANCHOR.search(block.section or "") and words < 600:
+            anchors.append(block.text)
+            words += block.words
+    passages = [{"id": b.id, "section": b.section or "Body", "text": b.text} for b in prose]
+    runner = ctx.ai()
+    items = runner.academic_review(passages, model.outline(), anchors)
+    blocks = model.by_id()
+    findings = [
+        Finding(
+            id=f"{i.id}-a{n}",
+            block_id=i.id,
+            section=blocks[i.id].section or "Body",
+            reason=i.code,  # type: ignore[arg-type]
+            severity=i.severity,
+            excerpt=i.excerpt[:280],
+            explanation=i.explanation,
+            suggestion=i.suggestion,
+            category=i.category,
+            safe=i.category == "ACADEMIC" and i.code in SAFE_ACADEMIC,
+        )
+        for n, i in enumerate(items, start=1)
+    ]
+    warning = "The academic review reached this job's spending limit before it covered the whole paper, so some sections were not reviewed." if runner.budget_reached else None
+    return findings, warning
 
 
 def _analyse(ctx: StageContext, model: DocumentModel) -> tuple[AnalysisResult, str | None]:
@@ -533,6 +582,8 @@ def _finish_estimate(rt: Runtime, job_id: str, run_id: str, passages: list[Passa
             credits.settle(w, held=run.fee_cap, charge=fee, job_id=j.id, note="AI estimate")
         run.status, run.fee, run.lease_until = "READY", fee, None
         run.passages, run.guide_words = passages, guide_words
+        rewrite_words = sum(p.words for p in passages if p.rewrite)
+        run.intervention = round(min(1.0, rewrite_words / j.source.word_count), 3) if j.source.word_count else None
         j.billing.fee_paid += fee  # earlier estimates on this job stay counted (and refundable)
         j.quote = bound_quote(
             settings,
@@ -603,8 +654,15 @@ def _select_targets(ctx: StageContext, model: DocumentModel) -> list[Target]:
     def priority(b) -> float:
         return -(0.5 * scores.get(b.id, 0) + 0.5 * model_scores.get(b.id, scores.get(b.id, 0)))
 
-    candidates = sorted((b for b in prose if b.editable and b.id in flagged and b.id not in preserve), key=priority)
-    share = 0.25 if ctx.job.selection.intensity == "LIGHT" else 0.5
+    chosen = set(ctx.job.selection.only_blocks)
+    if chosen:  # "Fix selected": the student chose these passages; the AI Check's findings on them guide the rewrite
+        for bid, notes in ctx.job.fix_notes.items():
+            if bid in chosen:
+                findings.setdefault(bid, []).extend(n for n in notes if n not in findings.get(bid, []))
+        candidates = [b for b in prose if b.editable and b.id in chosen]
+    else:
+        candidates = sorted((b for b in prose if b.editable and b.id in flagged and b.id not in preserve), key=priority)
+    share = 1.0 if chosen else 0.25 if ctx.job.selection.intensity == "LIGHT" else 0.5
     cap = max(150, share * result.analysed_words)
     targets, used = [], 0
     for block in candidates:
@@ -808,6 +866,7 @@ def stage_auditing(ctx: StageContext) -> None:
     ]
     prose = [b for b in model.blocks if b.kind in ("paragraph", "list_item")]
     ctx.put_json("changes_full.json", [c.model_dump() for c in changes])  # every word, for the change report
+    ctx.put_json("accepted.json", {"deep": deep, "revised": {r.id: r.revised for r in accepted}})  # for the student's own choices
     changes, trimmed = _fit_record(changes)
     refinement = RefinementResult(
         trimmed=trimmed,
@@ -848,8 +907,12 @@ def stage_formatting(ctx: StageContext) -> None:
     if job.selection.formatting == "TEMPLATE_FORMAT":
         formatted, result, partial = _format_from_guide(ctx, base)
     else:
-        formatted, result = apply_formatting(base, PRESETS[job.selection.preset], read_docx(base))
+        formatted, result = apply_formatting(base, with_custom(PRESETS[job.selection.preset], job.selection.custom), read_docx(base))
         partial = False
+    if job.selection.logo != "NONE" and job.logo is not None:
+        formatted = add_logo(formatted, ctx.rt.files.get(job.logo.path), job.selection.logo)
+        where = "top left" if job.selection.logo == "LEFT" else "top centre"
+        result = result.model_copy(update={"rules": [*result.rules, FormattingRule(label="Logo", value=f"{job.logo.name}, {where} of the first page")]})
     ctx.put_bytes("formatted.docx", formatted)
 
     def save(j: Job) -> Job:
@@ -946,6 +1009,11 @@ def stage_exporting(ctx: StageContext) -> None:
         if ctx.has("changes_full.json"):  # the record may hold shortened passages; the report has every word
             full = job.refinement.model_copy(update={"changes": [ChangedBlock.model_validate(c) for c in ctx.get_json("changes_full.json")]})
         output("change-report", "Change report (Word)", "changes", change_report(job.source.name if job.source else "", utcnow(), full))
+    if final is not None and job.refinement is not None and job.formatting is None:
+        # The same paper with Academic formatting applied, so the student can choose at download.
+        done = "Redrafted" if job.refinement.mode == "REDRAFT" else "Refined"
+        formatted, _ = apply_formatting(final, PRESETS["apa7"], read_docx(final))
+        output("paper-apa", f"{done} paper with academic formatting, APA 7 (Word)", f"{done.lower()}, APA 7", formatted)
     if job.latex is not None and ctx.has("latex.zip"):
         label = "LaTeX project with PDF (.zip)" if job.latex.compiled else "LaTeX project (.zip)"
         output("latex", label, "LaTeX", ctx.get_bytes("latex.zip"), "zip", "application/zip")

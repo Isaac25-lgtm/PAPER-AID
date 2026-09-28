@@ -5,8 +5,8 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 
 from app.core.auth import current_user, optional_user, require_admin
 from app.core.errors import AppError, Forbidden
-from app.jobs import service
-from app.jobs.models import AdminJob, AdminSummary, FileMeta, JobView, Page, QuoteResponse, ServiceSelection, WalletSummary, WalletView
+from app.jobs import service, workspace
+from app.jobs.models import AdminJob, AdminSummary, FileMeta, ImageMeta, JobView, Page, QuoteResponse, ServiceSelection, WalletSummary, WalletView
 from app.jobs.pipeline import run_step
 from app.jobs.service import User
 from app.runtime import Runtime, get_runtime
@@ -51,6 +51,12 @@ def create_job(user: User = Depends(current_user), rt: Runtime = Depends(get_run
     return service.create_draft(rt, user)
 
 
+@api.post("/jobs/{job_id}/files/logo", response_model=ImageMeta)
+async def upload_logo(job_id: str, file: UploadFile = File(...), user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> ImageMeta:
+    data = await file.read(service.MAX_LOGO_BYTES + 1)
+    return service.upload_logo(rt, user, job_id, file.filename or "logo", data)
+
+
 @api.post("/jobs/{job_id}/files/{role}", response_model=FileMeta)
 async def upload(job_id: str, role: str, file: UploadFile = File(...), user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> FileMeta:
     if role not in ("source", "guideline"):
@@ -58,6 +64,11 @@ async def upload(job_id: str, role: str, file: UploadFile = File(...), user: Use
     service.ensure_valid_upload_name(file.filename or "")
     data = await file.read(rt.settings.max_upload_bytes + 1)
     return service.upload_file(rt, user, job_id, role, file.filename or role, data)  # type: ignore[arg-type]
+
+
+@api.delete("/jobs/{job_id}/files/logo", status_code=204)
+def remove_logo(job_id: str, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> None:
+    service.remove_logo(rt, user, job_id)
 
 
 @api.delete("/jobs/{job_id}/files/guideline", status_code=204)
@@ -126,6 +137,40 @@ def download(job_id: str, output_id: str, user: User = Depends(current_user), rt
     if url is None:
         raise AppError("That file is not available.", code="NOT_FOUND", status=404)
     return JSONResponse({"url": url}, headers={"Cache-Control": "no-store"})
+
+
+# --- the review workspace ----------------------------------------------------------------
+
+
+@api.get("/jobs/{job_id}/document")
+def job_document(job_id: str, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> dict:
+    return workspace.document(rt, user, job_id)
+
+
+@api.post("/jobs/{job_id}/findings/{finding_id}", response_model=JobView)
+def job_finding(job_id: str, finding_id: str, dismissed: bool = Body(..., embed=True), user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> JobView:
+    return workspace.set_finding(rt, user, job_id, finding_id, dismissed)
+
+
+@api.post("/jobs/{job_id}/changes/{change_id}", response_model=JobView)
+def job_change(job_id: str, change_id: str, accepted: bool = Body(..., embed=True), user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> JobView:
+    return workspace.set_change(rt, user, job_id, change_id, accepted)
+
+
+@api.post("/jobs/{job_id}/rebuild", response_model=JobView)
+def job_rebuild(job_id: str, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> JobView:
+    return workspace.rebuild(rt, user, job_id)
+
+
+@api.post("/jobs/{job_id}/fix", response_model=JobView)
+def job_fix(
+    job_id: str,
+    finding_ids: list[str] = Body(default=[], embed=True, alias="findingIds", max_length=500),
+    safe_only: bool = Body(default=False, embed=True, alias="safeOnly"),
+    user: User = Depends(current_user),
+    rt: Runtime = Depends(get_runtime),
+) -> JobView:
+    return workspace.fix_draft(rt, user, job_id, finding_ids, safe_only)
 
 
 # --- admin -------------------------------------------------------------------------------

@@ -106,7 +106,7 @@ try {
   if (reviewFile) {
     await page.goto(`${base}/app/new?review=1`)
     await page.locator('input[type=file]').setInputFiles({ name: 'proposal.docx', mimeType: 'application/octet-stream', buffer: readFileSync(reviewFile) })
-    await page.getByText('Proposal review (up to)').waitFor({ timeout: 30_000 })
+    await page.locator('aside dl').getByText('Proposal review', { exact: true }).waitFor({ timeout: 30_000 })
     await page.getByLabel(/This is my own work/).check()
     await page.getByRole('button', { name: /Start job/ }).click()
     await page.waitForURL(/\/app\/jobs\//)

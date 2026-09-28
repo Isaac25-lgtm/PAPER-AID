@@ -89,6 +89,7 @@ class Step:
 # The algorithm, in one place: which role performs each step.
 STEPS: dict[str, Step] = {
     "analyse": Step("lead", Stage.ANALYSING, "analyse-v2", 12000),
+    "academic": Step("lead", Stage.ANALYSING, "academic-v1", 8000),
     "plan": Step("lead", Stage.PLANNING, "plan-v2", 12000),
     "critique": Step("writer", Stage.PLANNING, "critique-v2", 8000),
     "finalise": Step("lead", Stage.PLANNING, "finalise-v2", 12000),
@@ -185,6 +186,28 @@ _REVIEW = _obj(
         )
     }
 )
+ACADEMIC_CODES = {
+    "ACADEMIC": ["OVERCLAIMING", "EXCESSIVE_HEDGING", "VAGUE_WORDING", "UNSUPPORTED_INTERPRETATION", "TENSE_INCONSISTENCY", "WEAK_FLOW"],
+    "EVIDENCE": ["CLAIM_WITHOUT_EVIDENCE", "CAUSAL_OVERSTATEMENT", "CONFLICTING_NUMBERS", "CURRENT_STATISTIC"],
+    "METHOD": ["OBJECTIVE_METHOD_MISMATCH", "DESIGN_MISMATCH", "SAMPLE_INCONSISTENCY", "MISSING_VALIDITY"],
+}
+_ACADEMIC = _obj(
+    {
+        "findings": _list_of(
+            _obj(
+                {
+                    "id": _STR,
+                    "category": {"type": "string", "enum": list(ACADEMIC_CODES)},
+                    "code": {"type": "string", "enum": [c for codes in ACADEMIC_CODES.values() for c in codes]},
+                    "severity": {"type": "string", "enum": ["minor", "moderate", "major"]},
+                    "excerpt": _STR,
+                    "explanation": _STR,
+                    "suggestion": _STR,
+                }
+            )
+        )
+    }
+)
 SUPPORT = ["SUPPORTED", "PARTLY_SUPPORTED", "CONTRADICTED", "NOT_FOUND"]
 _CLAIMS = _obj(
     {
@@ -251,6 +274,20 @@ class _AnalysisBlock(BaseModel):
 
 class _Analysis(BaseModel):
     blocks: list[_AnalysisBlock]
+
+
+class AcademicItem(BaseModel):
+    id: str
+    category: Literal["ACADEMIC", "EVIDENCE", "METHOD"]
+    code: str
+    severity: Literal["minor", "moderate", "major"]
+    excerpt: str
+    explanation: str
+    suggestion: str
+
+
+class _AcademicAnswer(BaseModel):
+    findings: list[AcademicItem]
 
 
 class PlanItem(BaseModel):
@@ -600,6 +637,20 @@ class AIRunner:
                 if item.id in known:  # unknown IDs from a model are discarded, never trusted
                     results[item.id] = item
         return results, seen
+
+    # --- 1b. academic review (lead): problems other than writing style --------------------
+
+    def academic_review(self, passages: list[dict[str, Any]], outline: list[str], anchors: list[str]) -> list[AcademicItem]:
+        """Academic, evidence and methodology findings, each tied to a known passage and a code
+        valid for its category. The objectives travel with every batch, so methods are judged
+        against them. Stops at the job's spend cap and returns what it has."""
+        known = {p["id"] for p in passages}
+        items = [{**p, "_words": p["text"]} for p in passages]
+        found: list[AcademicItem] = []
+        wrap = lambda b: {"outline": outline, "anchors": anchors, "passages": b}  # noqa: E731
+        for answer in self._batched("academic", items, wrap, _ACADEMIC, _AcademicAnswer, stop_on_budget=True):
+            found += [f for f in answer.findings if f.id in known and f.code in ACADEMIC_CODES[f.category]]
+        return found
 
     # --- 2–4. plan: lead drafts, writer critiques, lead finalises -----------------------
 

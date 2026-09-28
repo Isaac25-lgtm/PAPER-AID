@@ -7,6 +7,8 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
+from app.formatting.presets import CustomLayout
+
 
 def utcnow() -> datetime:
     return datetime.now(UTC)
@@ -63,8 +65,18 @@ class PaymentStatus(StrEnum):
 Band = Literal["LOW", "MODERATE", "HIGH"]
 Confidence = Literal["LOW", "MEDIUM", "HIGH"]
 ReasonCode = Literal[
-    "GENERIC_PHRASING", "UNIFORM_STRUCTURE", "LOW_SPECIFICITY", "FORMULAIC_TRANSITIONS", "OVER_HEDGING", "UNSUPPORTED_SUMMARY", "REPETITION", "STYLE_SHIFT"
+    # AI-like writing (the band is computed from these alone)
+    "GENERIC_PHRASING", "UNIFORM_STRUCTURE", "LOW_SPECIFICITY", "FORMULAIC_TRANSITIONS", "OVER_HEDGING", "UNSUPPORTED_SUMMARY", "REPETITION", "STYLE_SHIFT",
+    # academic writing
+    "OVERCLAIMING", "EXCESSIVE_HEDGING", "VAGUE_WORDING", "UNSUPPORTED_INTERPRETATION", "TENSE_INCONSISTENCY", "WEAK_FLOW",
+    # evidence and claims
+    "CLAIM_WITHOUT_EVIDENCE", "CAUSAL_OVERSTATEMENT", "CONFLICTING_NUMBERS", "CURRENT_STATISTIC",
+    # methodology
+    "OBJECTIVE_METHOD_MISMATCH", "DESIGN_MISMATCH", "SAMPLE_INCONSISTENCY", "MISSING_VALIDITY",
+    # formatting (found by code)
+    "HEADING_AS_TEXT", "HEADING_LEVEL_SKIP", "CAPTION_NUMBERING",
 ]
+FindingCategory = Literal["AI_LIKE", "ACADEMIC", "EVIDENCE", "METHOD", "FORMATTING"]
 
 
 WritingStyle = Literal["PRESERVE_VOICE", "STANDARD_ACADEMIC", "CONCISE_ACADEMIC", "TECHNICAL"]
@@ -78,6 +90,10 @@ class ServiceSelection(Camel):
     formatting: Literal["NONE", "FORMAT", "TEMPLATE_FORMAT"] = "NONE"
     preset: str = "apa7"
     latex: bool = False
+    academic: bool = True  # academic or research work: adds the academic, evidence and methodology review
+    custom: CustomLayout | None = None  # the student's own font, size, spacing, margins or alignment over the preset
+    logo: Literal["NONE", "CENTER", "LEFT"] = "NONE"  # an institution logo at the top of the first page
+    only_blocks: list[str] = Field(default=[], max_length=300)  # "Fix selected": refine exactly these passages
     # A step of a proposal project, or REVIEW: an uploaded proposal checked against the rulebook.
     proposal: Literal["NONE", "PLAN", "CHAPTER_1", "CHAPTER_2", "CHAPTER_3", "REVIEW"] = "NONE"
     level: Literal["BACHELORS", "PGD", "MASTERS", "PHD"] = "MASTERS"  # the proposal's level (REVIEW only)
@@ -97,6 +113,21 @@ class ServiceSelection(Camel):
         return ids
 
 
+class ImageMeta(Camel):
+    """An uploaded logo: a layout asset only, never proof of affiliation (master context §17)."""
+
+    name: str
+    format: Literal["PNG", "JPEG"]
+    size_bytes: int
+    width_px: int
+    height_px: int
+
+
+class StoredImage(ImageMeta):
+    path: str
+    sha256: str
+
+
 class FileMeta(Camel):
     name: str
     format: Literal["DOCX", "PDF"]
@@ -114,6 +145,7 @@ class StoredFile(FileMeta):
 class QuoteLine(Camel):
     label: str
     amount: int
+    service: str = ""  # which service the line prices (settlement charges each line for what was delivered)
 
 
 class Quote(Camel):
@@ -162,6 +194,7 @@ class BoundQuote(Quote):
     multiplier: float = 0.0
     engine: Engine | None = None  # None only on quotes issued before engines were recorded
     estimate_id: str | None = None  # the estimate this quote was priced from; the job reuses its saved analysis and draft plan
+    budget_usd: float = 0.0  # fixed prices: the job's provider-spend cap (the worst-case projection)
 
 
 # --- credits ---------------------------------------------------------------------------------
@@ -174,6 +207,7 @@ class EstimateView(Camel):
     fee_cap: int  # held while the scan runs; the most it can cost
     fee: int = 0  # what it actually cost, charged when it finishes
     message: str | None = None
+    intervention: float | None = None  # share of the paper's words the plan will rewrite (0-1)
 
 
 class EstimateRun(EstimateView):
@@ -259,6 +293,8 @@ class Finding(Camel):
     excerpt: str
     explanation: str
     suggestion: str
+    category: FindingCategory = "AI_LIKE"
+    safe: bool = True  # PaperAid may fix it without the student's judgement (never figures, citations, methods or facts)
 
 
 class AnalysisResult(Camel):
@@ -269,6 +305,36 @@ class AnalysisResult(Camel):
     findings: list[Finding]
     algorithm_version: str
     method: str = ""
+    review: list[Finding] = []  # academic, evidence, methodology and formatting findings (not in the band)
+
+
+class ReferenceCheck(Camel):
+    """One reference-list entry matched against registered bibliographic records."""
+
+    entry: str  # as written in the paper
+    status: Literal["VERIFIED", "PROBABLE", "MISMATCH", "NOT_VERIFIED"]
+    doi: str = ""
+    matched_title: str = ""
+    matched_year: str = ""
+    retracted: bool = False
+    note: str = ""
+
+
+class ReferenceVerification(Camel):
+    items: list[ReferenceCheck]
+    checked: int
+    total: int  # entries in the list; more than `checked` when the list was very long
+    retrieved_on: str
+
+
+class ProtectedSummary(Camel):
+    """What refinement locks in this paper, counted by PaperAid."""
+
+    numbers: int
+    citations: int
+    quotations: int
+    links: int
+    word_items: int  # fields, footnotes, equations and other Word elements
 
 
 class PaperCheck(Camel):
@@ -473,6 +539,7 @@ class JobView(Camel):
     pipeline: list[Stage] = []
     source: FileMeta | None = None
     guideline: FileMeta | None = None
+    logo: ImageMeta | None = None
     quote: Quote | None = None
     estimate: EstimateView | None = None
     billing: Billing = Field(default_factory=Billing)
@@ -480,12 +547,19 @@ class JobView(Camel):
     warnings: list[str] = []
     analysis: AnalysisResult | None = None
     analysis_after: AnalysisResult | None = None
+    protected: ProtectedSummary | None = None
+    references: ReferenceVerification | None = None
+    dismissed: list[str] = []  # finding ids the student dismissed in the workspace
+    rejected_changes: list[str] = []  # refined passages the student chose to keep in their own words
+    source_job: str | None = None  # "Fix selected": the AI Check this job fixes
     paper_checks: PaperChecks | None = None
     research: ResearchResult | None = None
     latex: LatexResult | None = None
     refinement: RefinementResult | None = None
     formatting: FormattingResult | None = None
     proposal_review: ProposalReview | None = None
+    scope_words: int | None = None  # "Fix selected": the words in the chosen passages (priced by these)
+    fix_notes: dict[str, list[str]] = {}  # "Fix selected": the AI Check's findings on each chosen passage
     project_id: str | None = None  # a step of a proposal project: its result is saved to the project
     outputs: list[OutputFile] = []
     failure: JobFailure | None = None
@@ -502,6 +576,7 @@ class Job(JobView):
     owner_email: str
     source: StoredFile | None = None  # type: ignore[assignment]  # narrower stored variant of FileMeta
     guideline: StoredFile | None = None  # type: ignore[assignment]
+    logo: StoredImage | None = None  # type: ignore[assignment]
     quote: BoundQuote | None = None  # type: ignore[assignment]
     estimate: EstimateRun | None = None  # type: ignore[assignment]
     outputs: list[StoredOutput] = []  # type: ignore[assignment]

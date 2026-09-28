@@ -22,7 +22,7 @@ from app.core.logging import log
 from app.jobs import state
 from app.jobs.models import Job, JobEvent, JobStatus, JobView, Quote, QuoteLine, ReadinessItem, ServiceSelection, utcnow
 from app.jobs.service import ACCOUNT_CLOSING, User, _erase_project, _rate_limit, availability, current_engine, step_running, submit
-from app.pricing.quote import bound_quote, proposal_usd, with_margin
+from app.pricing.quote import bound_quote, fixed_price, proposal_usd, with_margin
 from app.proposals import decisions, evidence, rulebook, sampling
 from app.proposals import export as proposal_export
 from app.proposals.models import (
@@ -341,8 +341,10 @@ class StepQuote(BaseModel):
 
 def chapter_one_estimate(settings, level: str) -> QuoteLine:
     """What Chapter One can cost for this level, shown with the plan before any plan exists."""
+    if settings.pricing_mode == "fixed":
+        return QuoteLine(label="Chapter 1, started when you approve the plan", amount=fixed_price(settings, "CHAPTER_1", None), service="CHAPTER_1")
     words = round(rulebook.target_words(rulebook.DEFAULT, level) * rulebook.chapter_spec(rulebook.DEFAULT, 1)["share"])
-    return QuoteLine(label="Chapter 1, started when you approve the plan (up to)", amount=with_margin(proposal_usd(settings, "CHAPTER_1", words), settings))
+    return QuoteLine(label="Chapter 1, started when you approve the plan (up to)", amount=with_margin(proposal_usd(settings, "CHAPTER_1", words), settings), service="CHAPTER_1")
 
 
 def quote_step(rt: Runtime, user: User, project_id: str, step: Step, note: str) -> StepQuote:

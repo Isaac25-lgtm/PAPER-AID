@@ -9,7 +9,8 @@ import { formatDate, formatDateTime, formatTokens } from '../../lib/format'
 import type { Job, Quote } from '../../lib/types'
 import { STYLE_OPTIONS } from '../../lib/services'
 import { useTitle } from '../../lib/use-title'
-import { BandChange, ChangesPanel, DownloadList, FindingsList, FormattingPanel, LatexPanel, PaperChecksPanel, ScoreCard, SourceCheckPanel } from '../results/report'
+import { BandChange, DownloadList, FormattingPanel, LatexPanel, SourceCheckPanel } from '../results/report'
+import { Workspace } from '../results/workspace'
 import { ProposalReviewPanel } from '../proposals/review-panel'
 import { useJob } from './hooks'
 import { jobLink, jobTitle, serviceNames, StageTimeline, StatusBadge } from './job-bits'
@@ -61,14 +62,24 @@ export function JobPage() {
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_20rem]">
-        <div className="min-w-0 space-y-6">
+      {job.status === 'COMPLETED' && job.analysis ? (
+        // The review workspace needs the full width; the job's details follow it.
+        <div className="space-y-6">
           <JobBody job={job} />
+          <div className="grid gap-4 md:grid-cols-2">
+            <JobDetails job={job} />
+          </div>
         </div>
-        <aside className="space-y-4">
-          <JobDetails job={job} />
-        </aside>
-      </div>
+      ) : (
+        <div className="grid gap-6 lg:grid-cols-[1fr_20rem]">
+          <div className="min-w-0 space-y-6">
+            <JobBody job={job} />
+          </div>
+          <aside className="space-y-4">
+            <JobDetails job={job} />
+          </aside>
+        </div>
+      )}
     </>
   )
 }
@@ -175,10 +186,9 @@ function InProgress({ job }: { job: Job }) {
 
 function Completed({ job }: { job: Job }) {
   const tabs = [
-    { id: 'overview', label: 'Overview', show: true },
-    { id: 'report', label: 'Writing report', show: !!job.analysis },
+    { id: 'paper', label: 'Your paper', show: !!job.analysis },
+    { id: 'overview', label: 'Overview', show: !job.analysis },
     { id: 'sources', label: 'Source check', show: !!job.research },
-    { id: 'changes', label: 'Changes', show: !!job.refinement },
     { id: 'formatting', label: 'Formatting', show: !!job.formatting },
     { id: 'latex', label: 'LaTeX', show: !!job.latex },
     { id: 'proposal', label: 'Proposal review', show: !!job.proposalReview },
@@ -198,7 +208,7 @@ function Completed({ job }: { job: Job }) {
           </ul>
         </Alert>
       )}
-      <Tabs defaultValue="overview">
+      <Tabs defaultValue={job.analysis ? 'paper' : 'overview'}>
         <TabsList aria-label="Job results">
           {tabs.map((t) => (
             <TabsTrigger key={t.id} value={t.id}>
@@ -210,23 +220,13 @@ function Completed({ job }: { job: Job }) {
           <Overview job={job} />
         </TabsContent>
         {job.analysis && (
-          <TabsContent value="report" className="space-y-6">
-            <ScoreCard before={job.analysis} after={job.analysisAfter} />
-            <div>
-              <h3 className="mb-3 text-base font-semibold">{job.analysisAfter ? 'Findings in your original draft' : 'Findings'}</h3>
-              <FindingsList findings={job.analysis.findings} />
-            </div>
-            {job.paperChecks && <PaperChecksPanel checks={job.paperChecks} />}
+          <TabsContent value="paper">
+            <Workspace job={job} />
           </TabsContent>
         )}
         {job.research && (
           <TabsContent value="sources">
             <SourceCheckPanel research={job.research} />
-          </TabsContent>
-        )}
-        {job.refinement && (
-          <TabsContent value="changes">
-            <ChangesPanel refinement={job.refinement} />
           </TabsContent>
         )}
         {job.formatting && (

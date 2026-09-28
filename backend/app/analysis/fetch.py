@@ -218,10 +218,19 @@ def crossref_work(doi: str) -> dict[str, str] | None:
     message = (data or {}).get("message")
     if not isinstance(message, dict):
         return None
+    return _crossref_record(message, doi)
+
+
+RETRACTION = {"retraction", "withdrawal", "removal"}
+
+
+def _crossref_record(message: dict, doi: str = "") -> dict[str, str]:
     authors = [_surname_initials(a.get("family", ""), a.get("given", "")) if a.get("family") else a.get("name", "") for a in message.get("author") or []]
     parts = ((message.get("issued") or {}).get("date-parts") or [[None]])[0]
+    # A retraction or withdrawal notice registered against this work (Crossref, with Retraction Watch data).
+    updates = [u.get("type", "").lower() for u in message.get("updated-by") or [] if isinstance(u, dict)]
     return {
-        "doi": doi.lower(),
+        "doi": (doi or message.get("DOI") or "").lower(),
         "title": " ".join((message.get("title") or [""])[0].split()),
         "authors": "; ".join(a for a in authors if a),
         "year": str(parts[0]) if parts and parts[0] else "",
@@ -230,4 +239,19 @@ def crossref_work(doi: str) -> dict[str, str] | None:
         "issue": str(message.get("issue") or ""),
         "pages": str(message.get("page") or "").replace("-", "–"),
         "type": message.get("type") or "",
+        "retracted": "yes" if RETRACTION & set(updates) else "",
     }
+
+
+def crossref_search(bibliographic: str, rows: int = 3) -> list[dict[str, str]]:
+    """Registered works matching a reference as written (Crossref's bibliographic search). Only
+    the reference text is sent: public bibliographic data, never the paper."""
+    data = _json(f"https://api.crossref.org/works?query.bibliographic={quote(bibliographic[:300])}&rows={rows}")
+    items = ((data or {}).get("message") or {}).get("items") or []
+    return [_crossref_record(i) for i in items if isinstance(i, dict)]
+
+
+def openalex_retracted(doi: str) -> bool | None:
+    """OpenAlex's retraction flag for a DOI; None when the work is unknown to it."""
+    data = _json(f"https://api.openalex.org/works/doi:{quote(doi, safe='/')}")
+    return None if data is None else bool(data.get("is_retracted"))

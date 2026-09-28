@@ -110,6 +110,28 @@ def _page_break_only(p) -> bool:
     ) and any(br.get(W + "type") == "page" for r in runs for br in r.findall(W + "br"))
 
 
+LOGO_WIDTH_CM = 3.5
+
+
+def add_logo(data: bytes, image: bytes, align: str) -> bytes:
+    """Place an institution logo at the top of the first page, sized proportionally (master
+    context §17). A picture paragraph only: no text changes, so the wording check still holds."""
+    doc = Document(io.BytesIO(data))
+    body = doc.element.body
+    first = body[0] if len(body) else None
+    paragraph = doc.add_paragraph()
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT if align == "LEFT" else WD_ALIGN_PARAGRAPH.CENTER
+    paragraph.add_run().add_picture(io.BytesIO(image), width=Cm(LOGO_WIDTH_CM))
+    if first is not None:
+        first.addprevious(paragraph._p)  # move it to the very top
+    out = io.BytesIO()
+    doc.save(out)
+    result = out.getvalue()
+    if body_text_fingerprint(result) != body_text_fingerprint(data):
+        raise PermanentStageError("FORMAT_CHANGED_TEXT", "The logo could not be added without changing your text, so we stopped.")
+    return result
+
+
 def apply_formatting(data: bytes, spec: FormattingSpec, model: DocumentModel) -> tuple[bytes, FormattingResult]:
     before = body_text_fingerprint(data)
     doc = Document(io.BytesIO(data))

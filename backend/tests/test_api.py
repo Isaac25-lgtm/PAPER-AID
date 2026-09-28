@@ -515,7 +515,8 @@ def test_real_mode_runs_every_step_of_the_algorithm_in_order(real_client):
     _, job = _submit(real_client, REFINE_FORMAT)
     assert job["status"] == "COMPLETED", job
     tasks = list(dict.fromkeys(real_client.models.tasks))
-    assert tasks == ["analyse", "plan", "critique", "finalise", "refine", "review"]
+    # the free estimate analyses and drafts the plan; the paid job adds the academic review, replays both from the cache, then refines
+    assert tasks == ["analyse", "plan", "academic", "critique", "finalise", "refine", "review"]
 
 
 def test_a_long_stage_continues_in_a_new_delivery_without_paying_twice(real_client, monkeypatch):

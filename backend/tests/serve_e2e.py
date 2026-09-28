@@ -24,6 +24,8 @@ def main() -> None:
             "ADMIN_EMAILS": '["demo@paperaid.app"]',
             "ENV": "local",
             "CREDITS_ENABLED": "true",  # the browser journey covers credits, whatever the local .env says
+            "QUOTES_PER_HOUR": "500",  # several journeys run against one server within the hour
+            "SUBMITS_PER_HOUR": "500",
         }
     )
     from app.ai import costs, orchestration
@@ -39,6 +41,8 @@ def main() -> None:
     fetch.abstract_text = lambda url: models.abstracts.get(url)
     fetch.openalex_search = lambda query, from_year, limit: [dict(w) for w in models.works][:limit]
     fetch.crossref_work = lambda doi: models.crossref.get(doi)
+    fetch.crossref_search = lambda text, rows=3: [dict(r) for r in models.crossref_found]
+    fetch.openalex_retracted = lambda doi: doi in models.retracted
     fetch.resolve_doi = lambda url: models.dois.get(url, fetch.doi_in(url))
     uvicorn.run(create_app(), host="127.0.0.1", port=8000)
 

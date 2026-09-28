@@ -79,6 +79,18 @@ class Settings(BaseSettings):
     min_top_up_ugx: int = 10000  # 10 tokens (owner's master context)
     # Students see tokens, not money (owner decision 2026-09-28); the ledger stays in UGX.
     ugx_per_token: int = 1000
+    # Fixed prices by page band (owner decision 2026-09-28, from the master context's table). Each
+    # price covers up to `band_pages` pages; each further band adds `band_step` of it. "cost" is
+    # the earlier policy (actual AI spend × multiplier, quoted as a ceiling after an estimate).
+    pricing_mode: Literal["fixed", "cost"] = "fixed"
+    fixed_tokens: dict[str, float] = {
+        "AI_CHECK": 2, "ACADEMIC": 1, "REFINE_LIGHT": 3, "REFINE": 4, "REDRAFT": 7,
+        "SOURCE_CHECK": 3,  # not in the owner's table: to be confirmed
+        "TEMPLATE_FORMAT": 3, "PLAN": 2, "CHAPTER_1": 5, "CHAPTER_2": 7, "CHAPTER_3": 5, "REVIEW": 2,
+    }
+    band_pages: int = 10
+    band_step: float = 0.75
+    words_per_page: int = 250
 
     # Google Cloud (production only)
     gcp_project: str | None = None
