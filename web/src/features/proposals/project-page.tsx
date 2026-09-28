@@ -47,10 +47,14 @@ function ChapterPanel({ project, number, running, onStarted, onChanged }: { proj
   const [error, setError] = useState<string | null>(null)
   const [against, setAgainst] = useState(0)
   const [comparison, setComparison] = useState<Comparison | null>(null)
+  const [attempt, setAttempt] = useState(0)
 
   useEffect(() => setVersion(state.current), [state.current])
   useEffect(() => {
-    if (!version) return setChapter(null)
+    // A version's content is shown only once it has loaded; never the previous one under its name (Codex audit M26).
+    setChapter(null)
+    setError(null)
+    if (!version) return
     let cancelled = false
     data.projects
       .chapter(project.id, number, version)
@@ -59,7 +63,8 @@ function ChapterPanel({ project, number, running, onStarted, onChanged }: { proj
     return () => {
       cancelled = true
     }
-  }, [data, project.id, number, version, project.citation, project.planVersion])
+  }, [data, project.id, number, version, project.citation, project.planVersion, attempt])
+  const loaded = chapter?.version === version
 
   useEffect(() => {
     setComparison(null)
@@ -152,16 +157,29 @@ function ChapterPanel({ project, number, running, onStarted, onChanged }: { proj
             </Button>
           )}
           {version !== state.current ? (
-            <Button variant="secondary" onClick={() => choose(false)}>
+            <Button variant="secondary" disabled={!loaded} onClick={() => choose(false)}>
               Use this version
             </Button>
           ) : state.approved ? (
             <Badge tone="brand">Approved</Badge>
           ) : (
-            <Button onClick={() => choose(true)}>{concept ? 'Approve the concept paper' : 'Approve this chapter'}</Button>
+            <Button disabled={!loaded} onClick={() => choose(true)}>
+              {concept ? 'Approve the concept paper' : 'Approve this chapter'}
+            </Button>
           )}
         </div>
-        {error && <Alert tone="danger">{error}</Alert>}
+        {error && (
+          <Alert
+            tone="danger"
+            action={
+              <Button size="sm" variant="secondary" onClick={() => setAttempt((n) => n + 1)}>
+                Try again
+              </Button>
+            }
+          >
+            {error}
+          </Alert>
+        )}
         {version === state.current && state.needsReview.length > 0 && (
           <Alert tone="warning" title="Written from decisions you have since changed">
             These sections no longer match your plan: {state.needsReview.join('; ')}. Write a new version to bring them in line.
@@ -175,7 +193,7 @@ function ChapterPanel({ project, number, running, onStarted, onChanged }: { proj
         {comparison ? (
           <CompareView comparison={comparison} />
         ) : !chapter ? (
-          <Skeleton className="h-96 rounded-2xl" />
+          error ? null : <Skeleton className="h-96 rounded-2xl" />
         ) : (
           <Card className="p-5 sm:p-8">
             {!concept && <p className="text-center text-xs font-semibold tracking-wide text-fg-subtle uppercase">Chapter {number}</p>}

@@ -75,12 +75,14 @@ export function Workspace({ job: initial }: { job: Job }) {
 
   // Refined text shown in place: a change covers one paragraph, or (Deep Redraft) a group of them.
   const changes = doc?.changes ?? job.refinement?.changes ?? []
+  // Every paragraph of a group carries the group's change: while the rewrite is kept it replaces them
+  // all; when the student keeps their own wording, every original paragraph shows (Codex audit M25).
   const changeFor = useMemo(() => {
-    const map: Record<string, ChangedBlock> = {}
+    const map: Record<string, { change: ChangedBlock; first: boolean }> = {}
     for (const c of changes) {
       if (c.kept) continue
       const ids = doc?.groups[c.blockId] ?? [c.blockId]
-      ids.forEach((id, i) => (map[id] = i === 0 ? c : { ...c, blockId: '' }))
+      ids.forEach((id, i) => (map[id] = { change: c, first: i === 0 }))
     }
     return map
   }, [changes, doc])
@@ -148,9 +150,10 @@ export function Workspace({ job: initial }: { job: Job }) {
           ) : (
             <article className="space-y-3 font-serif text-[0.97rem] leading-relaxed text-fg">
               {doc.blocks.map((b) => {
-                const change = changeFor[b.id]
-                if (change && change.blockId === '') return null // the rest of a redrafted group
-                const own = change && rejected.has(change.blockId)
+                const member = changeFor[b.id]
+                const own = !!member && rejected.has(member.change.blockId)
+                if (member && !member.first && !own) return null // the rest of a redrafted group, replaced by its rewrite
+                const change = member?.first ? member.change : undefined
                 const text = change && !own ? change.after : b.text
                 const marks = byBlock[b.id] ?? []
                 const top = marks.reduce<Finding | null>((best, f) => (!best || RANK[f.severity] > RANK[best.severity] ? f : best), null)
