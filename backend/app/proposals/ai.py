@@ -75,6 +75,13 @@ PLAN_SCHEMA = _obj(
         "questionsForStudent": _STRS,
     }
 )
+# p-plan-v2 (the research-gap builder): the plan with its research gap.
+PLAN_SCHEMA_V2 = _obj(
+    {
+        **PLAN_SCHEMA["properties"],
+        "researchGap": _obj({"known": _S, "missing": _S, "contribution": _S, "evidence": _STRS}),
+    }
+)
 CRITIQUE_SCHEMA = _obj({"items": _list(_obj({"field": _S, "problem": _S, "proposal": _S})), "overall": _S})
 BRIEFS_SCHEMA = _obj({"sections": _list(_obj({"key": _S, "points": _STRS, "evidence": _STRS}))})
 SECTIONS_SCHEMA = _obj({"sections": _list(_obj({"key": _S, "paragraphs": _STRS, "table": _obj({"caption": _S, "rows": _list(_STRS)})}))})
@@ -246,7 +253,8 @@ class ProposalRunner(AIRunner):
 
     def negotiate(self, kind: Literal["plan", "briefs"], payload: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], Critique]:
         """Returns (final, draft, critique) as plain data; code validates the final version."""
-        task, schema, shape = ("p_plan", PLAN_SCHEMA, None) if kind == "plan" else ("p_brief", BRIEFS_SCHEMA, _Briefs)
+        plan_schema = PLAN_SCHEMA if self._prompt_for("p_plan") == "p-plan-v1" else PLAN_SCHEMA_V2  # the schema of the engine it was priced with
+        task, schema, shape = ("p_plan", plan_schema, None) if kind == "plan" else ("p_brief", BRIEFS_SCHEMA, _Briefs)
         draft = self._raw(task, payload, schema, shape)
         critique = _whole(self._call("p_critique", {**payload, "kind": kind, "draft": draft}, CRITIQUE_SCHEMA, Critique), "p_critique")
         assert isinstance(critique, Critique)

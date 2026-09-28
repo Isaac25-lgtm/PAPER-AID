@@ -4,7 +4,7 @@ import { Button } from '../../components/ui/button'
 import { Input, Select, TextArea } from '../../components/ui/field'
 import { Alert, Card } from '../../components/ui/primitives'
 import { DataError, useData } from '../../lib/data'
-import type { AlignmentRow, Project, ProposalPlan, SampleMethod, SampleSize, StudyType } from '../../lib/proposal-types'
+import type { AlignmentRow, EvidenceItem, Project, ProposalPlan, ResearchGap, SampleMethod, SampleSize, StudyType } from '../../lib/proposal-types'
 import { PlanStatusBadge, STUDY_TYPES } from './shared'
 
 const METHODS: Record<SampleMethod, string> = {
@@ -44,6 +44,40 @@ function ListEditor({ label, items, onChange, add }: { label: string; items: str
         <Button size="sm" variant="ghost" className="mt-2" onClick={() => onChange([...items, ''])}>
           <Plus className="size-4" aria-hidden /> {add}
         </Button>
+      )}
+    </div>
+  )
+}
+
+/** The research gap, built from the evidence: each part editable, with the sources it rests on. */
+function GapEditor({ projectId, gap, onChange }: { projectId: string; gap: ResearchGap; onChange: (gap: ResearchGap) => void }) {
+  const data = useData()
+  const [library, setLibrary] = useState<EvidenceItem[]>([])
+  const ids = gap.evidence.join(' ')
+  useEffect(() => {
+    if (!ids) return
+    data.projects.evidence(projectId).then(setLibrary).catch(() => setLibrary([]))
+  }, [data, projectId, ids])
+  const sources = library.filter((item) => gap.evidence.includes(item.id))
+  return (
+    <div className="space-y-3 rounded-xl border border-line p-4">
+      <p className="text-sm font-semibold">The research gap</p>
+      <TextArea label="What is already known" rows={3} value={gap.known} onChange={(e) => onChange({ ...gap, known: e.target.value })} />
+      <TextArea label="What is still missing here" rows={2} value={gap.missing} onChange={(e) => onChange({ ...gap, missing: e.target.value })} />
+      <TextArea label="What your study adds" rows={2} value={gap.contribution} onChange={(e) => onChange({ ...gap, contribution: e.target.value })} />
+      {gap.evidence.length ? (
+        <div className="text-sm text-fg-muted">
+          <p>Rests on {gap.evidence.length === 1 ? 'one confirmed source' : `${gap.evidence.length} confirmed sources`}:</p>
+          <ul className="mt-1 list-disc pl-5">
+            {sources.map((s) => (
+              <li key={s.id}>
+                {s.statement} <span className="text-fg-subtle">({s.source.title})</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        <Alert tone="warning">No confirmed source supports this gap yet. Add what you know from your own reading, or draft a new plan once more evidence is found.</Alert>
       )}
     </div>
   )
@@ -176,6 +210,7 @@ export function PlanEditor({ project, onSaved }: { project: Project; onSaved: (p
       <Card className="space-y-4 p-5">
         <TextArea label="Title" rows={2} value={plan.title} onChange={(e) => set({ title: e.target.value })} />
         <TextArea label="Problem (the core of your problem statement)" rows={4} value={plan.problem} onChange={(e) => set({ problem: e.target.value })} />
+        <GapEditor projectId={project.id} gap={plan.researchGap} onChange={(researchGap) => set({ researchGap })} />
         <TextArea label="Purpose (general objective)" rows={2} value={plan.purpose} onChange={(e) => set({ purpose: e.target.value })} />
         <ListEditor label="Specific objectives" items={plan.specificObjectives} onChange={setObjectives} add="Add objective" />
         <Select label="Research questions, hypotheses or propositions" value={plan.questionsKind} onChange={(e) => set({ questionsKind: e.target.value as ProposalPlan['questionsKind'] })} hint="Hypotheses only when you will test them statistically.">

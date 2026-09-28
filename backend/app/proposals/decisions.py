@@ -30,6 +30,7 @@ def decisions(plan: ProposalPlan) -> dict[str, Any]:
         "scope": plan.scope,
         "timeline": plan.timeline_months,
         "questions_kind": plan.questions_kind,
+        "gap": plan.research_gap.model_dump(),
     }
     # The whole sets: a section covering every objective changes when one is added or removed, not
     # only when an existing one is edited (Codex audit 2026-09-28 #12).
@@ -58,18 +59,18 @@ def depends_on(chapter: int, key: str, plan: ProposalPlan) -> list[str]:
     table: dict[tuple[int, str], list[str]] = {
         (1, "intro"): ["title"],
         (1, "background"): ["title", "problem", "area"],
-        (1, "problem"): ["title", "problem", "area", "population"],
+        (1, "problem"): ["title", "problem", "area", "population", "gap"],
         (1, "purpose"): ["purpose"],
         (1, "objectives"): ["purpose", *objectives],
         (1, "questions"): ["questions_kind", *questions],
         (1, "scope"): ["scope", "area", "population"],
-        (1, "justification"): ["problem", "purpose"],
+        (1, "justification"): ["problem", "purpose", "gap"],
         (1, "significance"): ["problem", "purpose"],
         (1, "framework"): ["theory", "variables", *objectives],
         (1, "synopsis"): ["title"],
         (2, "intro"): ["title", *objectives],
         (2, "theory"): ["theory", "variables"],
-        (2, "gap"): ["problem", *objectives],
+        (2, "gap"): ["problem", "gap", *objectives],
         (3, "intro"): ["title"],
         (3, "design"): ["study_type", "design", *objectives],
         (3, "area"): ["area"],

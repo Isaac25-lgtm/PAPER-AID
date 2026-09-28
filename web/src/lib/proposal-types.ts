@@ -48,6 +48,15 @@ export interface AlignmentRow {
   analysis: string
 }
 
+/** The gap the study fills: what confirmed evidence shows, what it leaves open, what the study adds. */
+export interface ResearchGap {
+  known: string
+  missing: string
+  contribution: string
+  /** Ids of the confirmed evidence "known" rests on. */
+  evidence: string[]
+}
+
 export interface ProposalPlan {
   title: string
   problem: string
@@ -67,6 +76,7 @@ export interface ProposalPlan {
   theory: string
   scope: string
   timelineMonths: number
+  researchGap: ResearchGap
   gaps: string[]
   questionsForStudent: string[]
 }

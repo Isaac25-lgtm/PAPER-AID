@@ -89,6 +89,17 @@ class SampleSize(Camel):
     rationale: str = Field(default="", max_length=600)
 
 
+class ResearchGap(Camel):
+    """The gap the study fills (Proposal V2, the research-gap builder): what the confirmed evidence
+    shows, what it leaves unanswered here, and how the objectives answer it. `evidence` holds only
+    ids of confirmed evidence; code removes any other."""
+
+    known: str = Field(default="", max_length=1000)
+    missing: str = Field(default="", max_length=800)
+    contribution: str = Field(default="", max_length=600)
+    evidence: list[str] = []
+
+
 class ProposalPlan(Camel):
     """The research logic every chapter is written from. Drafted by the AI, then edited and
     approved by the student; chapters are only written from an approved plan. Each decision has a
@@ -112,6 +123,7 @@ class ProposalPlan(Camel):
     theory: str = Field(default="", max_length=800)  # the theory or framework and why it fits
     scope: str = Field(max_length=800)  # geographical, time and content scope
     timeline_months: int = Field(default=6, ge=1, le=48)  # the work plan's length, the student's choice
+    research_gap: ResearchGap = Field(default_factory=ResearchGap)
     gaps: list[str] = []  # where the evidence found so far is thin
     questions_for_student: list[str] = []  # what the student should confirm or decide
 

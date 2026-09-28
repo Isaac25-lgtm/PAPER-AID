@@ -58,6 +58,7 @@ class FakeModels:
         self.overrides: dict[str, Any] = {}
         self.tasks: list[str] = []
         self.requests: list[str] = []
+        self.schemas: dict[str, dict[str, Any]] = {}  # the last schema each task was asked to answer in
         self.tokens = (0, 0)  # (input, output) reported per call; set with real prices to create costs
         self.refuse: set[str] = set()  # tasks answered with a refusal
         self.truncate: set[str] = set()  # tasks whose answers are always cut off by the output limit
@@ -74,6 +75,7 @@ class FakeModels:
 
     def json(self, task: str, model: str, system: str, payload: dict[str, Any], schema: dict[str, Any], max_tokens: int) -> ModelResult:
         self.tasks.append(task)
+        self.schemas[task] = schema
         self.requests.append(task + json.dumps(payload, sort_keys=True))
         usage = Usage(self.tokens[0], self.tokens[1], 0, 1)
         if task in self.refuse:
@@ -177,7 +179,14 @@ class FakeModels:
         if task == "p_search":
             return {"findings": [{"url": SOURCE_URL, "title": "Annual report", "publisher": "Statistics office", "published": "2022", "access": "FULL_TEXT", "statement": "The report gives the national figure for 2022.", "passage": "The report gives the figure for 2022.", "scope": "Uganda, 2022"}]}
         if task in ("p_plan",):
-            return dict(PLAN)
+            cited = [e["id"] for e in payload["evidence"][:1]]
+            gap = {
+                "known": "Distance is associated with lower uptake among rural caregivers.",
+                "missing": "No study has examined caregivers in Mukono since the vaccine was introduced.",
+                "contribution": "The objectives measure each determinant among Mukono caregivers.",
+                "evidence": [*cited, "Enot0found"],  # one id that was never given: code must drop it
+            }
+            return {**PLAN, "researchGap": gap}
         if task == "p_critique":
             return {"items": [], "overall": "Sound."}
         if task == "p_finalise":

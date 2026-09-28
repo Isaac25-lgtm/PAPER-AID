@@ -119,3 +119,16 @@ def test_the_conceptual_framework_is_drawn_from_the_plan(client):
     assert "Figure 1.1: Conceptual framework" in texts and "List of Figures" in texts
     figure = next(t for t in doc.tables if "Independent variables" in t.cell(0, 0).text)
     assert "vaccine uptake" in figure.cell(0, 2).text and figure.cell(0, 1).text == "→"
+
+
+def test_the_research_gap_rests_only_on_confirmed_evidence_and_changing_it_flags_its_sections(client):
+    project_id = _with_chapter_one(client)
+    project = client.get(f"/api/projects/{project_id}", headers=STUDENT).json()
+    gap = project["plan"]["researchGap"]
+    confirmed = {i["id"] for i in client.get(f"/api/projects/{project_id}/evidence", headers=STUDENT).json() if i["verified"]}
+    assert gap["missing"] and gap["evidence"] and set(gap["evidence"]) <= confirmed  # the unknown id was dropped
+    assert "Enot0found" not in gap["evidence"]
+    assert "researchGap" in client.models.schemas["p_plan"]["properties"]  # p-plan-v2's schema
+    _approved(client, project_id, researchGap={**gap, "missing": "Nothing is known about fathers as caregivers in Mukono."})
+    review = next(c for c in client.get(f"/api/projects/{project_id}", headers=STUDENT).json()["chapters"] if c["number"] == 1)["needsReview"]
+    assert review == ["1.2 Statement of the Problem", "1.7 Justification of the Study"]

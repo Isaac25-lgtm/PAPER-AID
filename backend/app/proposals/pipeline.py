@@ -241,7 +241,7 @@ def stage_planning(ctx: "StageContext") -> None:
     if inp.step == "PLAN":
         payload = {"study": _study(inp), "level": inp.inputs.level, "rules": rules, "evidence": _for_model(usable), "note": inp.note}
         final, draft, critique = runner.negotiate("plan", payload)
-        plan = _student_figures_only(_plan_from_model(final), inp)
+        plan = _confirmed_gap(_student_figures_only(_plan_from_model(final), inp), {i.id for i in usable})
         ctx.put_json("plan.json", {"plan": plan.model_dump(by_alias=True), "draft": draft, "critique": critique.model_dump()})
         return
     assert inp.plan is not None
@@ -281,6 +281,13 @@ def _plan_from_model(data: dict[str, Any]) -> ProposalPlan:
                 limit = error["ctx"]["max_length"]
                 target[last] = target[last][: limit - 1].rsplit(" ", 1)[0] + "…"
     return ProposalPlan.model_validate(data)
+
+
+def _confirmed_gap(plan: ProposalPlan, usable: set[str]) -> ProposalPlan:
+    """The research gap rests only on confirmed evidence: any other id is removed."""
+    gap = plan.research_gap
+    kept = [e for e in dict.fromkeys(gap.evidence) if e in usable]
+    return plan if kept == gap.evidence else plan.model_copy(update={"research_gap": gap.model_copy(update={"evidence": kept})})
 
 
 def _student_figures_only(plan: ProposalPlan, inp: StepInput) -> ProposalPlan:
