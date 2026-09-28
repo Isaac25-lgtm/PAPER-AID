@@ -160,9 +160,9 @@ def _box_borders(cell) -> None:
     tcpr.append(parse_xml(f'<w:tcBorders {nsdecls("w")}>' + "".join(f'<w:{side} w:val="single" w:sz="8" w:color="000000"/>' for side in ("top", "left", "bottom", "right")) + "</w:tcBorders>"))
 
 
-def _framework(doc, columns: list[tuple[str, list[str]]]) -> None:
+def _framework(doc, columns: list[tuple[str, list[str]]], figure: str = "Figure 1.1") -> None:
     caption = doc.add_paragraph()
-    caption.add_run("Figure 1.1: Conceptual framework").bold = True
+    caption.add_run(f"{figure}: Conceptual framework").bold = True
     grid = doc.add_table(rows=1, cols=len(columns) * 2 - 1)
     for i, (label, items) in enumerate(columns):
         cell = grid.cell(0, i * 2)
@@ -264,6 +264,49 @@ def build(project: Project, chapters: dict[int, ChapterDocument], library: dict[
             p = doc.add_paragraph(entry)
             p.paragraph_format.left_indent = Inches(0.5)
             p.paragraph_format.first_line_indent = Inches(-0.5)
+    out = io.BytesIO()
+    doc.save(out)
+    return out.getvalue()
+
+
+def concept(project: Project, paper: ChapterDocument, library: dict[str, EvidenceItem]) -> bytes:
+    """The concept paper (manual §1.4): the student's details, the sections, and 5-8 references,
+    each annotated with what the confirmed evidence from it shows."""
+    doc = Document()
+    _setup(doc)
+    plan, page, inputs = project.plan, project.title_page, project.inputs
+    doc.add_heading("CONCEPT PAPER", level=1)
+    _centered(doc, (plan.title if plan else inputs.topic), bold=True, space_after=12)
+    level = rulebook.load(project.rulebook)["levels"][inputs.level]["label"]
+    for label, value in (("Name", page.student_name), ("Registration number", page.reg_number), ("Programme", inputs.programme or level), ("Supervisor", page.supervisor), ("Date", page.submission_date)):
+        if value.strip():
+            doc.add_paragraph(f"{label}: {value}")
+    citer = evidence.Citer(library, project.citation)
+    cited: list[str] = []
+    columns = framework_columns(plan)
+    for s in paper.sections:
+        doc.add_heading(f"{s.number}. {s.heading}", level=2)
+        for paragraph in s.paragraphs:
+            cited += [i for i in evidence.cited_ids(paragraph) if i not in cited]
+            doc.add_paragraph(citer.render(paragraph)).alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        if s.key == "framework" and columns:
+            _framework(doc, columns, "Figure 1")
+    sources = [library[i] for i in cited if i in library]
+    if sources:
+        doc.add_heading("Annotated References", level=2)
+        by_source: dict[str, list[str]] = {}
+        for item in sources:
+            key = evidence.reference_list([item.source], project.citation)[0]
+            by_source.setdefault(key, []).append(item.statement)
+        for entry in evidence.reference_list([i.source for i in sources], project.citation):
+            p = doc.add_paragraph(entry)
+            p.paragraph_format.left_indent = Inches(0.5)
+            p.paragraph_format.first_line_indent = Inches(-0.5)
+            annotation = " ".join(dict.fromkeys(by_source.get(entry, [])))
+            if annotation:
+                note = doc.add_paragraph()
+                note.paragraph_format.left_indent = Inches(0.5)
+                note.add_run(annotation).italic = True
     out = io.BytesIO()
     doc.save(out)
     return out.getvalue()

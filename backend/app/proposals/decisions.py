@@ -86,6 +86,10 @@ def depends_on(chapter: int, key: str, plan: ProposalPlan) -> list[str]:
         (3, "constraints"): ["design", "sampling", "sample_size"],
         (3, "workplan"): ["timeline", "design"],
     }
+    # The concept paper summarises the plan: its sections share Chapter One's, plus two of its own.
+    table |= {(4, k): v for (c, k), v in table.items() if c == 1}
+    table[(4, "literature")] = ["title", "problem", "gap", "theory", *objectives]
+    table[(4, "methodology")] = ["study_type", "design", "area", "population", "sampling", "sample_size", *rows]
     return table.get((chapter, key), list(decisions(plan)))
 
 

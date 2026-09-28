@@ -132,3 +132,37 @@ def test_the_research_gap_rests_only_on_confirmed_evidence_and_changing_it_flags
     _approved(client, project_id, researchGap={**gap, "missing": "Nothing is known about fathers as caregivers in Mukono."})
     review = next(c for c in client.get(f"/api/projects/{project_id}", headers=STUDENT).json()["chapters"] if c["number"] == 1)["needsReview"]
     assert review == ["1.2 Statement of the Problem", "1.7 Justification of the Study"]
+
+
+def test_the_concept_paper_is_written_from_the_plan_within_the_manuals_limits(client):
+    project_id = _with_chapter_one(client)
+    quoted = client.post(f"/api/projects/{project_id}/steps", headers=STUDENT, json={"step": "CONCEPT"}).json()
+    assert quoted["quote"]["lines"][0]["label"].startswith("Concept paper")
+    job = _run(client, project_id, "CONCEPT")
+    assert job["status"] == "COMPLETED", job
+    project = client.get(f"/api/projects/{project_id}", headers=STUDENT).json()
+    assert next(c for c in project["chapters"] if c["number"] == 4)["current"] == 1
+    assert all(w["chapter"] != 4 for w in project["written"])  # comments are placed on the proposal's chapters
+    paper = client.get(f"/api/projects/{project_id}/chapters/4", headers=STUDENT).json()
+    assert paper["title"] == "Concept Paper"
+    assert [s["number"] for s in paper["sections"]][:3] == ["1", "2", "3"] and paper["sections"][-1]["heading"] == "Methodology"
+    assert {"C4-LENGTH", "C4-REFS"} <= {r["id"] for r in paper["readiness"]}
+    exported = client.get(f"/api/projects/{project_id}/concept/export", headers=STUDENT)
+    assert exported.status_code == 200
+    texts = [p.text for p in Document(io.BytesIO(exported.content)).paragraphs]
+    assert "CONCEPT PAPER" in texts and "1. Background" in texts and "Annotated References" in texts
+    assert "Name: Grace Namukasa" in texts and not any("⟦" in t for t in texts)
+    assert any(t.startswith("Distance was associated with lower uptake") for t in texts)  # the annotation is the confirmed finding
+
+
+def test_projects_from_before_the_concept_paper_gain_its_record():
+    from datetime import UTC, datetime
+
+    from app.proposals.models import Project, StoredChapterState
+
+    now = datetime.now(UTC)
+    old = Project(
+        id="prj_old", owner_uid="u", owner_email="e@x", rulebook="ucu-2018-v1", inputs={"topic": "A topic long enough", "level": "MASTERS"},
+        chapters=[StoredChapterState(number=n) for n in (1, 2, 3)], expires_at=now,
+    )
+    assert [c.number for c in old.chapters] == [1, 2, 3, 4]

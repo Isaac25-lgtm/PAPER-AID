@@ -39,7 +39,7 @@ INPUT = "proposal_input.json"
 YEAR = re.compile(r"\b(?:19|20)\d{2}\b")  # "8 December 2025" gives 2025
 LITERATURE_YEARS = 15  # scholarly search window; foundational theory comes through the web search
 NOT_REVIEWED = "The section was not reviewed."
-TENSE_SECTIONS = {1: {"purpose", "objectives", "questions", "scope", "synopsis"}}  # chapter 3: every section
+TENSE_SECTIONS = {1: {"purpose", "objectives", "questions", "scope", "synopsis"}, 4: {"purpose", "objectives", "questions", "scope", "methodology"}}  # chapter 3: every section
 
 
 def step_input(ctx: "StageContext") -> StepInput:
@@ -605,6 +605,21 @@ def _readiness(
             ReadinessItem(
                 id="C2-REFS30", question="Are there a minimum of 30 quality references?", basis="CODE", chapter=2, status="PASS" if count >= 30 else "NEEDS_REVIEW",
                 note=f"{count} distinct confirmed sources cited in this chapter. Many programmes expect at least 30; check yours.",
+            )
+        )
+    if n == 4:  # the manual's limits for a concept paper (§1.4)
+        pages = document.words / 250
+        items.append(
+            ReadinessItem(
+                id="C4-LENGTH", question="Is the concept paper at most five pages?", basis="CODE", chapter=4, status="PASS" if pages <= 5 else "NEEDS_REVIEW",
+                note=f"About {pages:.1f} pages at double spacing.",
+            )
+        )
+        count = len(sources)
+        items.append(
+            ReadinessItem(
+                id="C4-REFS", question="Does it cite five to eight sources?", basis="CODE", chapter=4, status="PASS" if 5 <= count <= 8 else "NEEDS_REVIEW",
+                note=f"{count} confirmed sources cited; the annotated list is built from them.",
             )
         )
     if n == 3:

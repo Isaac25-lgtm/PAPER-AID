@@ -150,7 +150,7 @@ def proposal_usd(settings: Settings, step: str, words: int) -> float:
     also searched on the web, every finding checked, the plan or briefs negotiated, and (for a
     chapter) drafting, every review and fix round, and the readiness assessment. `words` is the
     chapter's target length."""
-    chapter = 0 if step == "PLAN" else int(step[-1])
+    chapter = 0 if step == "PLAN" else 4 if step == "CONCEPT" else int(step[-1])
     needs = settings.proposal_needs.get(chapter, 6)
     searches = settings.research_max_searches
     provider, _, model = settings.lead_model.partition(":")
@@ -274,7 +274,7 @@ def price(
         banded = scope_words or words
         services.append(("REVISE", f"Chapter {selection.proposal[-1]} revised from your supervisor's comments", revise_usd(settings, banded), banded))
     elif selection.proposal != "NONE":
-        label = "Proposal plan" if selection.proposal == "PLAN" else f"Chapter {selection.proposal[-1]}"
+        label = {"PLAN": "Proposal plan", "CONCEPT": "Concept paper"}.get(selection.proposal, f"Chapter {selection.proposal[-1]}")
         services.append((selection.proposal, label, proposal_usd(settings, selection.proposal, words), None))
     if selection.formatting == "TEMPLATE_FORMAT":
         services.append(("TEMPLATE_FORMAT", "University template formatting", template_usd(settings, guide_words), words))

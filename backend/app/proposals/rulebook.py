@@ -49,14 +49,15 @@ def sections(rulebook_id: str, number: int, level: Level, plan: ProposalPlan) ->
     """The chapter's sections in order, with word targets. The empirical review gets one
     sub-section per specific objective, as the manual asks the review to follow the objectives."""
     spec = chapter_spec(rulebook_id, number)
-    chapter_words = target_words(rulebook_id, level) * spec["share"]
+    concept = spec.get("kind") == "CONCEPT"  # the concept paper: fixed lengths from the manual, sections numbered 1, 2, 3…
+    chapter_words = spec["words"] if concept else target_words(rulebook_id, level) * spec["share"]
     out: list[SectionPlan] = []
     for section in spec["sections"]:
         if plan.study_type in section.get("skip_for", []):
             continue  # e.g. no independent/dependent variables in a qualitative study (manual §2.1 note, §7.4)
-        words = max(60, round(chapter_words * section["share"] / 10) * 10)
+        words = section["words"] if "words" in section else max(60, round(chapter_words * section["share"] / 10) * 10)
         heading = section["heading"]
-        if number == 1 and section["key"] == "questions" and plan.questions_kind != "QUESTIONS":
+        if number in (1, 4) and section["key"] == "questions" and plan.questions_kind != "QUESTIONS":
             heading = "Research Hypotheses" if plan.questions_kind == "HYPOTHESES" else "Research Propositions"
         if section.get("per_objective"):
             count = max(1, len(plan.specific_objectives))
@@ -64,7 +65,7 @@ def sections(rulebook_id: str, number: int, level: Level, plan: ProposalPlan) ->
                 out.append(SectionPlan(f"{section['key']}{i}", "", _objective_heading(objective), section["brief"], max(120, round(words / count / 10) * 10), objective=objective))
             continue
         out.append(SectionPlan(section["key"], "", heading, section["brief"], words, bool(section.get("table"))))
-    return [SectionPlan(s.key, f"{number}.{i}", s.heading, s.brief, s.words, s.table, s.objective) for i, s in enumerate(out)]
+    return [SectionPlan(s.key, str(i + 1) if concept else f"{number}.{i}", s.heading, s.brief, s.words, s.table, s.objective) for i, s in enumerate(out)]
 
 
 def _objective_heading(objective: str) -> str:

@@ -16,12 +16,13 @@ import { PlanEditor } from './plan-editor'
 import { DetailsForm } from './projects-page'
 import { LEVELS, ReadinessList, StepProgress, StepRunner } from './shared'
 
-const CHAPTERS = { 1: 'General Introduction', 2: 'Literature Review', 3: 'Methodology' } as const
+const CHAPTERS = { 1: 'General Introduction', 2: 'Literature Review', 3: 'Methodology', 4: 'Concept Paper' } as const
+const CONCEPT = 4
 
 function Progress({ project }: { project: Project }) {
   const steps = [
     { label: 'Plan', done: project.planStatus === 'APPROVED', started: project.planStatus !== 'NONE' },
-    ...project.chapters.map((c) => ({ label: `Chapter ${c.number}`, done: c.approved, started: c.current > 0 })),
+    ...project.chapters.filter((c) => c.number !== CONCEPT).map((c) => ({ label: `Chapter ${c.number}`, done: c.approved, started: c.current > 0 })),
   ]
   return (
     <ol className="mb-6 grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -36,7 +37,8 @@ function Progress({ project }: { project: Project }) {
   )
 }
 
-function ChapterPanel({ project, number, running, onStarted, onChanged }: { project: Project; number: 1 | 2 | 3; running: boolean; onStarted: (id: string) => void; onChanged: (p: Project) => void }) {
+function ChapterPanel({ project, number, running, onStarted, onChanged }: { project: Project; number: 1 | 2 | 3 | 4; running: boolean; onStarted: (id: string) => void; onChanged: (p: Project) => void }) {
+  const concept = number === CONCEPT
   const data = useData()
   const state = project.chapters.find((c) => c.number === number)!
   const [version, setVersion] = useState(state.current)
@@ -83,19 +85,31 @@ function ChapterPanel({ project, number, running, onStarted, onChanged }: { proj
   const runner = (
     <StepRunner
       projectId={project.id}
-      step={`CHAPTER_${number}`}
-      label={state.current ? `Write a new version of Chapter ${number}` : `Write Chapter ${number}: ${CHAPTERS[number]}`}
-      description="PaperAid researches what the chapter needs, writes it from your approved plan and checks it thoroughly before you see it. Earlier versions are kept."
-      disabledReason={running ? 'A step is running for this proposal. Wait for it to finish.' : planReady ? undefined : 'Approve your plan first: chapters are written from it.'}
+      step={concept ? 'CONCEPT' : `CHAPTER_${number as 1 | 2 | 3}`}
+      label={
+        concept
+          ? state.current
+            ? 'Write a new version of the concept paper'
+            : 'Write my concept paper'
+          : state.current
+            ? `Write a new version of Chapter ${number}`
+            : `Write Chapter ${number}: ${CHAPTERS[number]}`
+      }
+      description={
+        concept
+          ? 'A summary of your study of at most five pages, for your supervisor to approve before the proposal: written from your approved plan, with five to eight annotated references.'
+          : 'PaperAid researches what the chapter needs, writes it from your approved plan and checks it thoroughly before you see it. Earlier versions are kept.'
+      }
+      disabledReason={running ? 'A step is running for this proposal. Wait for it to finish.' : planReady ? undefined : 'Approve your plan first: it is written from it.'}
       onStarted={onStarted}
     />
   )
   if (!state.current) return runner
   const comments = project.feedback.filter((c) => c.status === 'OPEN' && c.chapter === number && c.sections.length)
-  const reviser = comments.length > 0 && (
+  const reviser = !concept && comments.length > 0 && (
     <StepRunner
       projectId={project.id}
-      step={`REVISE_${number}`}
+      step={`REVISE_${number as 1 | 2 | 3}`}
       label={`Revise from your supervisor's comments (${comments.length})`}
       description="PaperAid revises only the sections these comments are on and checks them again. Every other section stays exactly as it is, and the current version is kept."
       disabledReason={running ? 'A step is running for this proposal. Wait for it to finish.' : planReady ? undefined : 'Approve your plan first.'}
@@ -124,6 +138,18 @@ function ChapterPanel({ project, number, running, onStarted, onChanged }: { proj
               ))}
             </Select>
           )}
+          {concept && (
+            <Button
+              variant="secondary"
+              onClick={() =>
+                data.projects
+                  .downloadConcept(project.id, `${(project.plan?.title ?? 'Proposal').slice(0, 70)} – concept paper.docx`)
+                  .catch((e: unknown) => setError(e instanceof DataError ? e.message : 'We could not prepare the concept paper.'))
+              }
+            >
+              <Download className="size-4" aria-hidden /> Concept paper (Word)
+            </Button>
+          )}
           {version !== state.current ? (
             <Button variant="secondary" onClick={() => choose(false)}>
               Use this version
@@ -131,7 +157,7 @@ function ChapterPanel({ project, number, running, onStarted, onChanged }: { proj
           ) : state.approved ? (
             <Badge tone="brand">Approved</Badge>
           ) : (
-            <Button onClick={() => choose(true)}>Approve this chapter</Button>
+            <Button onClick={() => choose(true)}>{concept ? 'Approve the concept paper' : 'Approve this chapter'}</Button>
           )}
         </div>
         {error && <Alert tone="danger">{error}</Alert>}
@@ -151,7 +177,7 @@ function ChapterPanel({ project, number, running, onStarted, onChanged }: { proj
           <Skeleton className="h-96 rounded-2xl" />
         ) : (
           <Card className="p-5 sm:p-8">
-            <p className="text-center text-xs font-semibold tracking-wide text-fg-subtle uppercase">Chapter {number}</p>
+            {!concept && <p className="text-center text-xs font-semibold tracking-wide text-fg-subtle uppercase">Chapter {number}</p>}
             <h2 className="text-center text-xl font-bold">{chapter.title}</h2>
             <p className="mt-1 text-center text-xs text-fg-subtle">{chapter.words.toLocaleString()} words · written from plan version {chapter.planVersion}</p>
             {chapter.sections.map((s) => (
@@ -165,7 +191,7 @@ function ChapterPanel({ project, number, running, onStarted, onChanged }: { proj
                     {p}
                   </p>
                 ))}
-                {s.key === 'framework' && chapter.framework.length > 0 && <Framework columns={chapter.framework} />}
+                {s.key === 'framework' && chapter.framework.length > 0 && <Framework columns={chapter.framework} figure={concept ? 'Figure 1' : 'Figure 1.1'} />}
                 {s.table && (
                   <div className="mt-3 overflow-x-auto">
                     {s.tableCaption && <p className="mb-1 text-sm font-semibold">{s.tableCaption}</p>}
@@ -188,7 +214,7 @@ function ChapterPanel({ project, number, running, onStarted, onChanged }: { proj
             ))}
             {chapter.references.length > 0 && (
               <section className="mt-8 border-t border-line pt-4">
-                <h3 className="font-semibold">References in this chapter</h3>
+                <h3 className="font-semibold">{concept ? 'References' : 'References in this chapter'}</h3>
                 <ul className="mt-2 space-y-1.5">
                   {chapter.references.map((r) => (
                     <li key={r} className="pl-6 -indent-6 text-sm text-fg-muted">
@@ -216,10 +242,10 @@ function ChapterPanel({ project, number, running, onStarted, onChanged }: { proj
 }
 
 /** Chapter One's conceptual framework, drawn from the plan's variables (the Word file has the same figure). */
-function Framework({ columns }: { columns: { label: string; items: string[] }[] }) {
+function Framework({ columns, figure }: { columns: { label: string; items: string[] }[]; figure: string }) {
   return (
     <figure className="mt-4">
-      <figcaption className="mb-2 text-sm font-semibold">Figure 1.1: Conceptual framework</figcaption>
+      <figcaption className="mb-2 text-sm font-semibold">{figure}: Conceptual framework</figcaption>
       <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
         {columns.map((c, i) => (
           <div key={c.label} className="contents">
@@ -309,7 +335,7 @@ function ReadyPanel({ project, onDownload }: { project: Project; onDownload: (fi
         <Button disabled={!ready} onClick={() => onDownload(true)}>
           <Download className="size-4" aria-hidden /> Complete proposal (Word)
         </Button>
-        <Button variant="secondary" disabled={!project.chapters.some((c) => c.current)} onClick={() => onDownload(false)}>
+        <Button variant="secondary" disabled={!project.chapters.some((c) => c.number !== CONCEPT && c.current)} onClick={() => onDownload(false)}>
           <Download className="size-4" aria-hidden /> Draft (Word)
         </Button>
         {project.feedback.length > 0 && (
@@ -425,7 +451,7 @@ export function ProjectPage() {
       <Skeleton className="h-96 rounded-2xl" />
     )
   if (project === null) return <Alert tone="warning">This proposal no longer exists.</Alert>
-  const hasChapter = project.chapters.some((c) => c.current)
+  const hasChapter = project.chapters.some((c) => c.number !== CONCEPT && c.current)
 
   return (
     <>
@@ -475,7 +501,8 @@ export function ProjectPage() {
       <Tabs defaultValue="plan">
         <TabsList className="mb-5">
           <TabsTrigger value="plan">Plan</TabsTrigger>
-          {project.chapters.map((c) => (
+          <TabsTrigger value="concept">Concept paper</TabsTrigger>
+          {project.chapters.filter((c) => c.number !== CONCEPT).map((c) => (
             <TabsTrigger key={c.number} value={`c${c.number}`}>
               Chapter {c.number}
               {c.needsReview.length > 0 && <TriangleAlert className="ml-1 size-3.5 text-amber-600" aria-label="needs review" />}
@@ -525,8 +552,8 @@ export function ProjectPage() {
             onStarted={setRunning}
           />
         </TabsContent>
-        {([1, 2, 3] as const).map((n) => (
-          <TabsContent key={n} value={`c${n}`}>
+        {([1, 2, 3, 4] as const).map((n) => (
+          <TabsContent key={n} value={n === CONCEPT ? 'concept' : `c${n}`}>
             <ChapterPanel project={project} number={n} running={!!running} onStarted={setRunning} onChanged={setProject} />
           </TabsContent>
         ))}

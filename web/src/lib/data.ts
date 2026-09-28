@@ -94,6 +94,7 @@ export interface DataSource {
     editFeedback(id: string, commentId: string, edit: { chapter: number | null; sections: string[]; status: FeedbackStatus; response: string }): Promise<Project>
     deleteFeedback(id: string, commentId: string): Promise<Project>
     downloadResponse(id: string): Promise<void>
+    downloadConcept(id: string, fileName: string): Promise<void>
   }
   admin: {
     summary(): Promise<AdminSummary>

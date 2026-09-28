@@ -31,7 +31,7 @@ def delivered_share(j: Job, service: str) -> float:
         return research.checked / research.candidates if research and research.candidates else 1.0
     if service == "ACADEMIC":
         return 0.5 if any("academic review reached" in w for w in j.warnings) else 1.0
-    if service in ("PLAN", "CHAPTER_1", "CHAPTER_2", "CHAPTER_3", "REVISE"):
+    if service in ("PLAN", "CHAPTER_1", "CHAPTER_2", "CHAPTER_3", "CONCEPT", "REVISE"):
         return 1.0 if j.outcome != "PARTIAL" else 0.75
     return 1.0
 

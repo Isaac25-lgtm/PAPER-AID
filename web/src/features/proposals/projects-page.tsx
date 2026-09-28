@@ -96,7 +96,7 @@ export function ProjectsPage() {
                   <PlanStatusBadge status={p.planStatus} />
                 </div>
                 <p className="mt-1 text-sm text-fg-muted">
-                  {LEVELS[p.inputs.level]} · {p.chapters.filter((c) => c.current).length} of 3 chapters written · {p.evidenceCount} confirmed sources
+                  {LEVELS[p.inputs.level]} · {p.chapters.filter((c) => c.number <= 3 && c.current).length} of 3 chapters written · {p.evidenceCount} confirmed sources
                 </p>
                 <p className="mt-1 text-xs text-fg-subtle">Kept until {formatDate(p.expiresAt)} unless you work on it again.</p>
               </Link>

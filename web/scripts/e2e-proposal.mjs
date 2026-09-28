@@ -138,6 +138,16 @@ try {
   await shot('p7-ready')
   step('the ready screen lists what is left; the response report downloads')
 
+  await page.getByRole('tab', { name: 'Concept paper' }).click()
+  await runStep(page.getByRole('tabpanel'))
+  const conceptButton = page.getByRole('button', { name: 'Concept paper (Word)' })
+  await conceptButton.waitFor({ timeout: 90_000 })
+  await page.getByText('Is the concept paper at most five pages?').waitFor()
+  const [concept] = await Promise.all([page.waitForEvent('download'), conceptButton.click()])
+  if (!concept.suggestedFilename().endsWith('concept paper.docx')) throw new Error(`unexpected concept file: ${concept.suggestedFilename()}`)
+  await shot('p8-concept')
+  step('concept paper written from the plan, checked against its limits and downloaded')
+
   if (reviewFile) {
     await page.goto(`${base}/app/new?review=1`)
     await page.locator('input[type=file]').setInputFiles({ name: 'proposal.docx', mimeType: 'application/octet-stream', buffer: readFileSync(reviewFile) })

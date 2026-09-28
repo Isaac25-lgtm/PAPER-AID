@@ -4,7 +4,7 @@
   "short": "UCU",
   "source": "Uganda Christian University Academic Research Manual, revised April 2018",
   "source_sha256": "35b3d43a19e8981ae343e92c3f96d0489e8fd432acf0f07b998e0a7df4735ed4",
-  "note": "The manual is a general guide: faculties may document their own variations (manual, About this manual and §1.1). Pages cited are the manual's printed page numbers (add seven for the PDF page). Only proposal rules are here: concept-paper (§1.4) and final-report rules (§4-§5.8) do not apply to a proposal.",
+  "note": "The manual is a general guide: faculties may document their own variations (manual, About this manual and §1.1). Pages cited are the manual's printed page numbers (add seven for the PDF page). Only proposal rules are here: the concept paper (§1.4) is its own document (number 4); final-report rules (§4-§5.8) do not apply to a proposal.",
   "citation_profiles": {
     "APA6": {"label": "APA 6th edition (the UCU 2018 manual's appendix)", "source": "§1.6, p. 5; Appendix B §7.2, p. 44"},
     "APA7": {"label": "APA 7th edition (if your faculty uses it)", "source": "§1.6, p. 5: faculties may communicate their own style"}
@@ -101,6 +101,27 @@
         {"key": "constraints", "heading": "Anticipated Methodological Constraints", "brief": "Expected limits of the methods and how they will be handled.", "share": 0.05, "source": "§5.5.12, p. 26"},
         {"key": "workplan", "heading": "Work Plan", "brief": "A timeline of the study's activities, month by month, as a table.", "share": 0.04, "table": true, "source": "§2.1(iii), p. 9"}
       ]
+    },
+    {
+      "number": 4,
+      "kind": "CONCEPT",
+      "title": "Concept Paper",
+      "words": 1250,
+      "purpose": "A summary of the proposal, at most five pages, for the supervisor to approve before the proposal is written.",
+      "source": "§1.4, pp. 3-4",
+      "sections": [
+        {"key": "background", "heading": "Background", "brief": "The background to the topic from broad to narrow, in about half a page.", "words": 125, "source": "§1.4, pp. 3-4"},
+        {"key": "problem", "heading": "Problem Statement", "brief": "One paragraph: what is, what should be, why it matters and what is not yet known.", "words": 120, "source": "§1.4, pp. 3-4"},
+        {"key": "purpose", "heading": "Purpose", "brief": "The general objective in one or two sentences.", "words": 40, "source": "§1.4, pp. 3-4"},
+        {"key": "objectives", "heading": "Objectives", "brief": "The specific objectives from the plan, as a numbered list (three to five are expected).", "words": 60, "source": "§1.4, pp. 3-4"},
+        {"key": "questions", "heading": "Research Questions", "brief": "One research question per objective, in the same order.", "words": 60, "source": "§1.4, pp. 3-4"},
+        {"key": "scope", "heading": "Scope of the Study", "brief": "Geographical, time and content scope in one or two paragraphs.", "words": 120, "source": "§1.4, pp. 3-4"},
+        {"key": "justification", "heading": "Justification", "brief": "One paragraph on why the study is needed now.", "words": 100, "source": "§1.4, pp. 3-4"},
+        {"key": "significance", "heading": "Significance", "brief": "One paragraph on who will benefit and how.", "words": 100, "source": "§1.4, pp. 3-4"},
+        {"key": "framework", "heading": "Theoretical and Conceptual Framework", "brief": "The theory and how the variables relate, in about half a page.", "words": 125, "source": "§1.4, pp. 3-4"},
+        {"key": "literature", "heading": "Literature Review", "brief": "About one page synthesising what is known on the objectives and leading to the research gap.", "words": 250, "source": "§1.4, pp. 3-4"},
+        {"key": "methodology", "heading": "Methodology", "brief": "About half a page: design, area, population, sampling, data collection and analysis, showing how each objective will be answered.", "words": 125, "source": "§1.4, pp. 3-4"}
+      ]
     }
   ],
   "vetting": {
@@ -155,6 +176,12 @@
         {"id": "C3-ANALYSIS", "question": "Is the data analysis process clearly described?"},
         {"id": "C3-CONSISTENT", "question": "Is the methodology described consistently?"},
         {"id": "C3-LANGUAGE", "question": "Are grammar and punctuation accurate?"}
+      ],
+      "4": [
+        {"id": "C4-PROBLEM", "question": "Does the problem statement fit in one paragraph and say what is not yet known?"},
+        {"id": "C4-ALIGN", "question": "Does each objective have a matching research question, and does the methodology say how each will be answered?"},
+        {"id": "C4-LIT", "question": "Does the literature review summarise what is known and lead to the research gap?"},
+        {"id": "C4-SUMMARY", "question": "Does the concept paper read as a faithful summary of the planned study?"}
       ]
     }
   }

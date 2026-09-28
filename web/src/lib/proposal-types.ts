@@ -5,7 +5,7 @@ export type Level = 'BACHELORS' | 'PGD' | 'MASTERS' | 'PHD'
 export type StudyType = 'QUANTITATIVE' | 'QUALITATIVE' | 'MIXED' | 'SECONDARY' | 'NON_EMPIRICAL'
 export type CitationStyle = 'APA6' | 'APA7'
 export type SampleMethod = 'YAMANE' | 'COCHRAN' | 'KREJCIE_MORGAN' | 'CENSUS' | 'SATURATION' | 'AUTHOR_STATED' | 'NOT_APPLICABLE'
-export type StepId = 'PLAN' | 'CHAPTER_1' | 'CHAPTER_2' | 'CHAPTER_3' | 'REVISE_1' | 'REVISE_2' | 'REVISE_3'
+export type StepId = 'PLAN' | 'CHAPTER_1' | 'CHAPTER_2' | 'CHAPTER_3' | 'CONCEPT' | 'REVISE_1' | 'REVISE_2' | 'REVISE_3'
 export type ReadinessStatus = 'PASS' | 'NEEDS_REVIEW' | 'MISSING' | 'NOT_APPLICABLE' | 'BLOCKED'
 
 export interface ProposalInputs {
@@ -93,7 +93,8 @@ export interface ChapterVersion {
 }
 
 export interface ChapterState {
-  number: 1 | 2 | 3
+  /** 1-3: the proposal's chapters; 4: the concept paper, a separate document. */
+  number: 1 | 2 | 3 | 4
   current: number
   approved: boolean
   versions: ChapterVersion[]

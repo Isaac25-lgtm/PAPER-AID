@@ -10,7 +10,7 @@ other: the record only gains the new file's path, inside a transaction."""
 from datetime import datetime
 from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 from app.jobs.models import Camel, ReadinessItem, utcnow
 
@@ -263,6 +263,13 @@ class Project(ProjectView):
     evidence_files: list[str] = []  # one file per job that gathered evidence
     published: list[str] = []  # jobs whose results were published here (a retried publish adds nothing)
     deleting: bool = False  # claimed for deletion (by the student, account deletion or expiry): nothing new may start
+
+    @model_validator(mode="after")
+    def _has_concept(self) -> "Project":
+        """Projects from before the concept paper gain its (empty) record: number 4."""
+        if not any(c.number == 4 for c in self.chapters):
+            self.chapters.append(StoredChapterState(number=4))
+        return self
 
     def view(self) -> ProjectView:
         return ProjectView.model_validate(self.model_dump())

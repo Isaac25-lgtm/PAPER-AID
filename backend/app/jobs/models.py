@@ -95,7 +95,7 @@ class ServiceSelection(Camel):
     logo: Literal["NONE", "CENTER", "LEFT"] = "NONE"  # an institution logo at the top of the first page
     only_blocks: list[str] = Field(default=[], max_length=300)  # "Fix selected": refine exactly these passages
     # A step of a proposal project, or REVIEW: an uploaded proposal checked against the rulebook.
-    proposal: Literal["NONE", "PLAN", "CHAPTER_1", "CHAPTER_2", "CHAPTER_3", "REVISE_1", "REVISE_2", "REVISE_3", "REVIEW"] = "NONE"
+    proposal: Literal["NONE", "PLAN", "CHAPTER_1", "CHAPTER_2", "CHAPTER_3", "CONCEPT", "REVISE_1", "REVISE_2", "REVISE_3", "REVIEW"] = "NONE"
     level: Literal["BACHELORS", "PGD", "MASTERS", "PHD"] = "MASTERS"  # the proposal's level (REVIEW only)
 
     def services(self) -> list[ServiceId]:

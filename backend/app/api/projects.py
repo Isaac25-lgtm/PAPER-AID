@@ -31,7 +31,7 @@ class PlanEdit(Camel):
 
 
 class StepRequest(Camel):
-    step: Literal["PLAN", "CHAPTER_1", "CHAPTER_2", "CHAPTER_3", "REVISE_1", "REVISE_2", "REVISE_3"]
+    step: Literal["PLAN", "CHAPTER_1", "CHAPTER_2", "CHAPTER_3", "CONCEPT", "REVISE_1", "REVISE_2", "REVISE_3"]
     note: str = ""
 
 
@@ -148,6 +148,11 @@ def _docx(data: bytes, name: str) -> Response:
     ascii_name = name.encode("ascii", "ignore").decode() or "proposal.docx"
     disposition = f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(name)}"
     return Response(data, media_type=DOCX, headers={"Content-Disposition": disposition, "Cache-Control": "no-store"})
+
+
+@router.get("/{project_id}/concept/export")
+def export_concept(project_id: str, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> Response:
+    return _docx(*projects.export_concept(rt, user, project_id))
 
 
 @router.get("/{project_id}/chapters/{number}/compare", response_model=projects.Comparison)

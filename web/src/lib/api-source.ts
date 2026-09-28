@@ -230,6 +230,7 @@ export function createApiSource({ config, getAuthHeaders }: Options): DataSource
       editFeedback: (id, commentId, edit) => request<Project>(`/api/projects/${id}/feedback/${commentId}`, { method: 'POST', body: JSON.stringify(edit) }),
       deleteFeedback: (id, commentId) => request<Project>(`/api/projects/${id}/feedback/${commentId}`, { method: 'DELETE' }),
       downloadResponse: (id) => saveFile(`/api/projects/${id}/feedback/report`, 'Response to supervisor comments.docx'),
+      downloadConcept: (id, fileName) => saveFile(`/api/projects/${id}/concept/export`, fileName),
     },
 
     admin: {

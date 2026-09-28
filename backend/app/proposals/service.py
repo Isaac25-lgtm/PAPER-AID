@@ -46,7 +46,8 @@ from app.proposals.pipeline import INPUT, load_library
 from app.runtime import Runtime
 
 logger = logging.getLogger("paperaid.proposals")
-Step = Literal["PLAN", "CHAPTER_1", "CHAPTER_2", "CHAPTER_3", "REVISE_1", "REVISE_2", "REVISE_3"]
+Step = Literal["PLAN", "CHAPTER_1", "CHAPTER_2", "CHAPTER_3", "CONCEPT", "REVISE_1", "REVISE_2", "REVISE_3"]
+CONCEPT = 4  # the concept paper is stored like a chapter, as number 4
 
 
 def _valid_id(project_id: str) -> bool:
@@ -110,7 +111,7 @@ def view(rt: Runtime, p: Project) -> ProjectView:
     which written sections were built on decisions that have since changed."""
     out = p.view()
     docs = {c.number: doc for c in p.chapters if c.current and (doc := _chapter_doc(rt, c)) is not None}
-    out.written = [WrittenSection(chapter=n, key=s.key, number=s.number, heading=s.heading) for n, doc in sorted(docs.items()) for s in doc.sections]
+    out.written = [WrittenSection(chapter=n, key=s.key, number=s.number, heading=s.heading) for n, doc in sorted(docs.items()) if n != CONCEPT for s in doc.sections]
     out.blockers = proposal_export.final_blockers(p, docs)
     if p.plan is not None:
         out.plan_problems = rulebook.plan_problems(p.rulebook, p.plan)
@@ -249,7 +250,7 @@ def set_chapter(rt: Runtime, user: User, project_id: str, number: int, version: 
         chapter.current, chapter.approved = version, approved
         return p
 
-    if number not in (1, 2, 3):
+    if number not in (1, 2, 3, CONCEPT):
         raise NotFound("That chapter doesn't exist.")
     return view(rt, _change(rt, user, project_id, apply))
 
@@ -300,7 +301,7 @@ def _render(doc: ChapterDocument, citer: evidence.Citer, plan: ProposalPlan | No
 
 def chapter(rt: Runtime, user: User, project_id: str, number: int, version: int | None = None) -> ChapterView:
     p = _owned(rt, user, project_id)
-    if number not in (1, 2, 3):
+    if number not in (1, 2, 3, CONCEPT):
         raise NotFound("That chapter doesn't exist.")
     stored = p.chapter(number)
     doc = _chapter_doc(rt, stored, version)
@@ -308,7 +309,7 @@ def chapter(rt: Runtime, user: User, project_id: str, number: int, version: int 
         raise NotFound("This chapter hasn't been written yet.")
     citer = _citer(rt, p)
     for earlier in (1, 2):  # APA 6 names three to five authors in full at their first citation in the proposal
-        if earlier < number and (prior := _chapter_doc(rt, p.chapter(earlier))):
+        if earlier < number != CONCEPT and (prior := _chapter_doc(rt, p.chapter(earlier))):
             _render(prior, citer, None)
     sources = [citer.library[i].source for i in doc.cited if i in citer.library]
     return ChapterView(
@@ -316,7 +317,7 @@ def chapter(rt: Runtime, user: User, project_id: str, number: int, version: int 
         readiness=doc.readiness, warnings=doc.warnings, words=doc.words,
         references=evidence.reference_list(sources, p.citation),
         framework=[FrameworkColumn(label=label, items=items) for label, items in proposal_export.framework_columns(p.plan)]
-        if number == 1 and any(s.key == "framework" for s in doc.sections) else [],
+        if number in (1, CONCEPT) and any(s.key == "framework" for s in doc.sections) else [],
     )
 
 
@@ -336,6 +337,19 @@ def export_docx(rt: Runtime, user: User, project_id: str, final: bool) -> tuple[
     title = (p.plan.title if p.plan else p.inputs.topic)[:80]
     safe = "".join(c for c in title if c.isalnum() or c in " -_").strip() or "Proposal"
     return data, f"{safe}{'' if final else ' – draft'}.docx"
+
+
+def export_concept(rt: Runtime, user: User, project_id: str) -> tuple[bytes, str]:
+    """The concept paper as its own Word file, with its annotated references."""
+    p = _owned(rt, user, project_id)
+    doc = _chapter_doc(rt, p.chapter(CONCEPT))
+    if doc is None:
+        raise AppError("Write the concept paper first.", code="NOTHING_TO_EXPORT")
+    data = proposal_export.concept(p, doc, load_library(rt.files, p.evidence_files))
+    _change(rt, user, project_id, lambda q: q)
+    title = (p.plan.title if p.plan else p.inputs.topic)[:70]
+    safe = "".join(c for c in title if c.isalnum() or c in " -_").strip() or "Proposal"
+    return data, f"{safe} – concept paper.docx"
 
 
 def library(rt: Runtime, user: User, project_id: str) -> list[EvidenceItem]:
@@ -371,7 +385,7 @@ def quote_step(rt: Runtime, user: User, project_id: str, step: Step, note: str) 
     if step_running(rt, p):
         raise Conflict("A step is already running for this proposal. Wait for it to finish.", code="STEP_RUNNING")
     note = note.strip()[:1000]
-    chapter = 0 if step == "PLAN" else int(step[-1])
+    chapter = 0 if step == "PLAN" else CONCEPT if step == "CONCEPT" else int(step[-1])
     revising = step.startswith("REVISE_")
     base, revise, comment_ids, revised_words = "", {}, [], 0
     if revising:
@@ -407,7 +421,8 @@ def quote_step(rt: Runtime, user: User, project_id: str, step: Step, note: str) 
         plan=p.plan if chapter else None,
         plan_version=p.plan_version,
         evidence_files=list(p.evidence_files),
-        chapters={c.number: next(v.path for v in c.versions if v.version == c.current) for c in p.chapters if c.current and c.number != chapter},
+        # the other proposal chapters, for consistency checks (the concept paper is a separate document)
+        chapters={c.number: next(v.path for v in c.versions if v.version == c.current) for c in p.chapters if c.current and c.number not in (chapter, CONCEPT) and chapter != CONCEPT},
         private=[w for w in " ".join([p.title_page.student_name, p.title_page.reg_number, p.title_page.supervisor]).split() if len(w) > 2],
         step="REVISE" if revising else "PLAN" if chapter == 0 else "CHAPTER",
         base=base,
@@ -432,7 +447,7 @@ def quote_step(rt: Runtime, user: User, project_id: str, step: Step, note: str) 
         selection=selection,
         created_at=now,
         expires_at=now + timedelta(days=rt.settings.retention_days),
-        events=[JobEvent(at=now, label=f"{'Plan' if chapter == 0 else f'Chapter {chapter} revision' if revising else f'Chapter {chapter}'} step priced for proposal {p.id}")],
+        events=[JobEvent(at=now, label=f"{'Plan' if chapter == 0 else 'Concept paper' if chapter == CONCEPT else f'Chapter {chapter} revision' if revising else f'Chapter {chapter}'} step priced for proposal {p.id}")],
     )
     rt.files.put(f"{job.storage_prefix()}/internal/{INPUT}", data, "application/json")
     job.quote = bound_quote(rt.settings, selection, sha, words, current_engine(rt.settings))
@@ -615,7 +630,7 @@ def _pieces(old: list[str], new: list[str]) -> list[DiffPiece]:
 def compare(rt: Runtime, user: User, project_id: str, number: int, older: int, newer: int) -> Comparison:
     """Two versions of a chapter, section by section and word by word, citations as they print."""
     p = _owned(rt, user, project_id)
-    if number not in (1, 2, 3):
+    if number not in (1, 2, 3, CONCEPT):
         raise NotFound("That chapter doesn't exist.")
     stored = p.chapter(number)
     a, b = _chapter_doc(rt, stored, older), _chapter_doc(rt, stored, newer)

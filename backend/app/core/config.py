@@ -55,7 +55,7 @@ class Settings(BaseSettings):
     research_max_searches: int = 2  # source check: most web searches per claim
     # Proposal projects: research needs planned per step (0 = the plan, then each chapter), scholarly
     # works read per need, and the longest proposal the review service accepts.
-    proposal_needs: dict[int, int] = {0: 6, 1: 8, 2: 12, 3: 5}
+    proposal_needs: dict[int, int] = {0: 6, 1: 8, 2: 12, 3: 5, 4: 4}  # 4: the concept paper
     proposal_works_per_need: int = 6
     proposal_review_max_words: int = 20000
 
@@ -88,6 +88,7 @@ class Settings(BaseSettings):
         "SOURCE_CHECK": 3,  # not in the owner's table: to be confirmed
         "TEMPLATE_FORMAT": 3, "PLAN": 2, "CHAPTER_1": 5, "CHAPTER_2": 7, "CHAPTER_3": 5, "REVIEW": 2,
         "REVISE": 2,  # a chapter revised from supervisor comments, per band of revised text: to be confirmed
+        "CONCEPT": 2,  # the concept paper (at most five pages): to be confirmed
     }
     band_pages: int = 10
     band_step: float = 0.75
