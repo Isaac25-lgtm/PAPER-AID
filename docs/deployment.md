@@ -155,6 +155,7 @@ firebase deploy --only hosting,firestore:rules,firestore:indexes --project PROJE
 
 | Date | Commit | Image | API revision | Worker revision | Hosting release |
 |---|---|---|---|---|---|
+| 2026-09-29 | `6f39072` | `backend:v16` (`sha256:c6fec6d7673b8bfa562f85d0fdb39007cffe8696aff59b450fbf7ef140fe9c79`) | `paperaid-api-00016-w25` | `paperaid-worker-00016-4h7` | live channel, 2026-09-29 02:4x EAT; one screen from upload to final draft, AI-likeness percentage |
 | 2026-09-29 | `c60cece` | `backend:v15` (`sha256:1740fd5137aa8e8132fbddc7097cdd5282e6b770e05778e4719eec6f156a4741`) | `paperaid-api-00015-5zv` | `paperaid-worker-00015-7c9` | live channel, 2026-09-29 00:1x EAT; firestore rules and indexes (new `ledger` at/id); cleanup run by hand: 200, no legacy projects to migrate |
 | 2026-09-28 | `748ccd8` | `backend:v14` (`sha256:213c3499ad414f85e1db932f97bd66637fc47f0f70f09ece91aabb2be5adc7e6`) | `paperaid-api-00014-t7v` | `paperaid-worker-00014-fvd` | live channel, 2026-09-28 16:5x EAT |
 | 2026-09-28 | `7cd6a5a` | `backend:v13` (`sha256:7f7a7296a6d438805fce0f2d37a90bd0734c8886f066e97fab725f3c999fdb86`) | `paperaid-api-00013-zh5` | `paperaid-worker-00013-rbq` | live channel, 2026-09-28 14:57:56 EAT; bucket lifecycle scoped to `users/` |
