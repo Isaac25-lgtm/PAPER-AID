@@ -40,3 +40,5 @@ Students upload a paper, choose a service, see a server-calculated quote, and la
 - Backend tests: `cd backend && .venv/Scripts/python -m pytest -q`; lint: `.venv/Scripts/python -m ruff check app tests`.
 - Web: `cd web && npm test` (unit tests), `npm run build` (typecheck + build); `node scripts/e2e.mjs out` (and `node scripts/e2e-proposal.mjs out [proposal.docx]`) runs the browser journey against web on :5000 and the browser-test backend (`cd backend && .venv/Scripts/python -m tests.serve_e2e`).
 - Test documents: `backend/tests/fixtures/generate.py` regenerates the 28 fixtures; `manifest.json` records what each must do.
+- Load test: `cd backend && .venv/Scripts/python -m tests.load_test --students 40` against a dev-auth backend (no AI is called).
+- On Windows, give pytest a short `--basetemp` (for example `C:/Users/USER/AppData/Local/Temp/pt`): long temp paths pass the 260-character limit.
