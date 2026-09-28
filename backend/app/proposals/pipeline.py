@@ -445,17 +445,17 @@ def stage_auditing(ctx: "StageContext") -> None:
         warnings.append(f"PaperAid removed sentences it could not trace to confirmed evidence or your plan in: {', '.join(stripped)}.")
     unreviewed = [f"{items[k]['number']} {items[k]['heading']}" for k in current if k not in grades]
     if unreviewed:
-        warnings.append(f"These sections could not be reviewed within this step's limits, so treat them as unchecked: {', '.join(unreviewed)}.")
+        warnings.append(f"PaperAid could not fully check these sections this time, so read them carefully: {', '.join(unreviewed)}.")
     concerns = []
     for key, issues in unresolved.items():
         raised = [i for i in issues if i != NOT_REVIEWED][:3]
         if raised:
             concerns.append(f"{items[key]['number']} {items[key]['heading']}: " + "; ".join(raised))
     if concerns:
-        warnings.append("The reviewer still had concerns after the fix rounds: " + " | ".join(concerns))
+        warnings.append("Some points still need your attention: " + " | ".join(concerns))
     for key, grade in grades.items():  # Codex audit #16: reviewer notes are delivered, never dropped
         if key in items and grade.grade == "PASS_WITH_WARNINGS" and grade.note.strip():
-            warnings.append(f"Reviewer note, {items[key]['number']} {items[key]['heading']}: {grade.note.strip()}")
+            warnings.append(f"Note on {items[key]['number']} {items[key]['heading']}: {grade.note.strip()}")
 
     document = _document(inp, current, items, library)
     document.readiness = _readiness(ctx, runner, inp, document, library, bool(stripped), unreviewed)
@@ -548,7 +548,7 @@ def _readiness(
         items.append(
             ReadinessItem(
                 id="C2-REFS30", question="Are there a minimum of 30 quality references?", basis="CODE", chapter=2, status="PASS" if count >= 30 else "NEEDS_REVIEW",
-                note=f"{count} distinct confirmed sources cited in this chapter. From the SRPGS vetting guidelines; check whether your programme applies it.",
+                note=f"{count} distinct confirmed sources cited in this chapter. Many programmes expect at least 30; check yours.",
             )
         )
     if n == 3:

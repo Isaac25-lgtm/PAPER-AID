@@ -76,7 +76,9 @@ class Settings(BaseSettings):
     format_min_ugx: int = 2000
     latex_ugx_per_300_words: int = 150  # LaTeX conversion uses no AI (owner decision 2026-09-27)
     latex_min_ugx: int = 3000
-    min_top_up_ugx: int = 5000
+    min_top_up_ugx: int = 10000  # 10 tokens (owner's master context)
+    # Students see tokens, not money (owner decision 2026-09-28); the ledger stays in UGX.
+    ugx_per_token: int = 1000
 
     # Google Cloud (production only)
     gcp_project: str | None = None

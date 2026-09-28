@@ -127,7 +127,7 @@ def plan_advice(rulebook_id: str, plan: ProposalPlan) -> list[str]:
     low, high = book["objectives"]["min"], book["objectives"]["max"]
     count = len([o for o in plan.specific_objectives if o.strip()])
     if not low <= count <= high:
-        return [f"The manual says {low} to {high} specific objectives are generally sufficient ({book['objectives']['source']}); this plan has {count}."]
+        return [f"{low} to {high} specific objectives are generally expected; this plan has {count}."]
     return []
 
 

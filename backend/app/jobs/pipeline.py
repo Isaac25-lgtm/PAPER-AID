@@ -547,7 +547,7 @@ def _finish_estimate(rt: Runtime, job_id: str, run_id: str, passages: list[Passa
             estimate_id=run.id,
         )
         j.selection = run.selection
-        state.transition(j, JobStatus.QUOTED, f"Estimate ready (UGX {fee:,} charged)")
+        state.transition(j, JobStatus.QUOTED, f"Estimate ready ({credits.tokens(fee)} charged)")
         return j, w
 
     rt.store.update_job_and_wallet(job_id, finish)

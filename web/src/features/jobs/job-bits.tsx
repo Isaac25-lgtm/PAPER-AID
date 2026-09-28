@@ -2,7 +2,7 @@ import { clsx } from 'clsx'
 import { AlertTriangle, Check, ChevronRight, Circle, FileText, Loader2 } from 'lucide-react'
 import { Link } from 'react-router'
 import { Badge, type Tone } from '../../components/ui/primitives'
-import { formatRelative, formatUGX } from '../../lib/format'
+import { formatRelative, formatTokens } from '../../lib/format'
 import { SERVICES, STAGE_LABELS, STATUS_LABELS } from '../../lib/services'
 import type { Job } from '../../lib/types'
 
@@ -62,7 +62,7 @@ export function JobRow({ job }: { job: Job }) {
             <StatusBadge job={job} />
           </div>
         </div>
-        <div className="hidden text-right text-sm text-fg-muted sm:block">{job.quote ? formatUGX(job.quote.amount) : 'Not priced'}</div>
+        <div className="hidden text-right text-sm text-fg-muted sm:block">{job.quote ? formatTokens(job.quote.amount) : 'Not priced'}</div>
         <div className="hidden sm:block">
           <StatusBadge job={job} />
         </div>

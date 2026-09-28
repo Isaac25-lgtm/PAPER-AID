@@ -1,11 +1,11 @@
 import { clsx } from 'clsx'
-import { ArrowRight, Bot, CheckCircle2, CircleDashed, Loader2, MinusCircle, ShieldCheck, TriangleAlert, User, XCircle } from 'lucide-react'
+import { ArrowRight, CheckCircle2, CircleDashed, Loader2, MinusCircle, TriangleAlert, User, XCircle } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Button } from '../../components/ui/button'
 import { TextArea } from '../../components/ui/field'
 import { Alert, Badge } from '../../components/ui/primitives'
 import { DataError, useData } from '../../lib/data'
-import { formatUGX } from '../../lib/format'
+import { formatTokens } from '../../lib/format'
 import type { ReadinessItem, ReadinessStatus, StepId, StepQuote } from '../../lib/proposal-types'
 import type { Job, Stage } from '../../lib/types'
 import { walletChanged } from '../../lib/use-wallet'
@@ -26,11 +26,7 @@ const STATUS: Record<ReadinessStatus, { label: string; icon: typeof CheckCircle2
   NOT_APPLICABLE: { label: 'Not applicable', icon: MinusCircle, className: 'text-fg-subtle' },
   BLOCKED: { label: 'Blocked', icon: CircleDashed, className: 'text-red-600' },
 }
-const BASIS = {
-  CODE: { label: 'PaperAid check', icon: ShieldCheck },
-  AI: { label: 'AI judgement', icon: Bot },
-  AUTHOR: { label: 'Your information', icon: User },
-} as const
+const BASIS = { AUTHOR: { label: 'From your details', icon: User } } as const
 
 /** A checklist, never a mark: each item says who settled it (a code check, the AI, or the student). */
 export function ReadinessList({ items }: { items: ReadinessItem[] }) {
@@ -38,12 +34,12 @@ export function ReadinessList({ items }: { items: ReadinessItem[] }) {
   return (
     <div>
       <p className="text-sm text-fg-muted">
-        {passed} of {items.length} checks pass. This follows the UCU manual&rsquo;s vetting questions; it is not a mark, and PaperAid does not check plagiarism.
+        {passed} of {items.length} checks pass. This is a guide to what examiners look for, not a mark. PaperAid does not check plagiarism.
       </p>
       <ul className="mt-3 divide-y divide-line rounded-xl border border-line">
         {items.map((item) => {
           const status = STATUS[item.status]
-          const basis = BASIS[item.basis]
+          const basis = item.basis === 'AUTHOR' ? BASIS.AUTHOR : null
           return (
             <li key={item.id} className="flex gap-3 p-3">
               <status.icon className={clsx('mt-0.5 size-4 shrink-0', status.className)} aria-hidden />
@@ -54,9 +50,11 @@ export function ReadinessList({ items }: { items: ReadinessItem[] }) {
               </div>
               <div className="flex shrink-0 flex-col items-end gap-1 text-right">
                 <span className={clsx('text-xs font-semibold', status.className)}>{status.label}</span>
-                <span className="flex items-center gap-1 text-[11px] text-fg-subtle">
-                  <basis.icon className="size-3" aria-hidden /> {basis.label}
-                </span>
+                {basis && (
+                  <span className="flex items-center gap-1 text-[11px] text-fg-subtle">
+                    <basis.icon className="size-3" aria-hidden /> {basis.label}
+                  </span>
+                )}
               </div>
             </li>
           )
@@ -67,10 +65,10 @@ export function ReadinessList({ items }: { items: ReadinessItem[] }) {
 }
 
 const STEP_STAGES: Partial<Record<Stage, string>> = {
-  RESEARCHING: 'Researching: planning what evidence is needed, then reading sources',
-  PLANNING: 'Planning: the lead adviser drafts, a second adviser critiques, the lead finalises',
-  DRAFTING: 'Writing the sections from your plan and the confirmed evidence',
-  AUDITING: 'Checking every citation and figure, reviewing and fixing',
+  RESEARCHING: 'Researching your topic',
+  PLANNING: 'Planning',
+  DRAFTING: 'Writing',
+  AUDITING: 'Checking and polishing',
   EXPORTING: 'Saving to your proposal',
 }
 
@@ -198,11 +196,17 @@ export function StepRunner({
           )}
           {quote ? (
             <div className="mt-3 rounded-lg bg-surface-subtle p-3 text-sm">
-              {quote.quote.lines.map((l) => (
+              {[...quote.quote.lines, ...quote.then].map((l) => (
                 <p key={l.label} className="flex justify-between gap-3">
-                  <span className="text-fg-muted">{l.label}</span> <span className="font-medium whitespace-nowrap">{formatUGX(l.amount)}</span>
+                  <span className="text-fg-muted">{l.label}</span> <span className="font-medium whitespace-nowrap">{formatTokens(l.amount)}</span>
                 </p>
               ))}
+              {quote.then.length > 0 && (
+                <p className="mt-2 flex justify-between gap-3 border-t border-line pt-2 font-semibold">
+                  <span>Plan and Chapter One together</span>
+                  <span className="whitespace-nowrap">{formatTokens(quote.quote.amount + quote.then.reduce((sum, l) => sum + l.amount, 0))}</span>
+                </p>
+              )}
               <p className="mt-2 text-xs text-fg-subtle">
                 {charging ? 'You are charged for the work actually done, never more than this.' : 'Not charged while PaperAid is in testing.'}
               </p>

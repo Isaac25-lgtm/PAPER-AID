@@ -54,12 +54,12 @@ export const SERVICES: Record<ServiceId, ServiceInfo> = {
     short: 'Restructure your own draft section by section, with a full change report.',
     icon: Shuffle,
     accepts: 'DOCX',
-    youGet: ['Redrafted Word file', 'Every reworked passage shown before and after', 'Independent accuracy review of each change'],
+    youGet: ['Redrafted Word file', 'Every reworked passage shown before and after', 'Every change checked for accuracy'],
     untouched: ['Citations, quotations, numbers and your findings', 'Headings, lists and tables', 'What each section covers'],
   },
   SOURCE_CHECK: {
     name: 'Source check',
-    short: 'Your key factual claims checked against live sources, each source checked again by a second AI.',
+    short: 'Your key factual claims checked against current sources.',
     icon: BookCheck,
     accepts: 'Added to AI Check or Check + Refine (DOCX or PDF)',
     youGet: ['Each claim marked supported, partly supported, contradicted or not found', 'The sources, with the passage quoted and the date read', 'Sources you could cite for uncited claims'],
@@ -67,10 +67,10 @@ export const SERVICES: Record<ServiceId, ServiceInfo> = {
   },
   PROPOSAL: {
     name: 'Research proposals',
-    short: 'Plan, research and write a UCU research proposal chapter by chapter, or review one you have written.',
+    short: 'Plan, research and write a research proposal chapter by chapter, or review one you have written.',
     icon: GraduationCap,
     accepts: 'Your topic and study details, or your proposal as DOCX or PDF',
-    youGet: ['A readiness checklist against the UCU manual', 'Every claim traced to a source PaperAid confirmed', 'A Word file in the UCU layout'],
+    youGet: ['A readiness checklist of what examiners look for', 'Every claim traced to a source PaperAid confirmed', 'A properly formatted Word file'],
     untouched: ['Facts only you can give: population sizes, instruments and approvals are asked for, never invented'],
   },
   LATEX: {

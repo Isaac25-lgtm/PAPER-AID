@@ -331,6 +331,7 @@ export interface PublicConfig {
   creditsEnabled: boolean
   minTopUpUgx: number
   ugxPerUsd: number
+  ugxPerToken: number
   retentionDays: number
   presets: { id: string; label: string; available: boolean }[]
 }

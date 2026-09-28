@@ -43,9 +43,9 @@ try {
   step('signed in')
   await page.goto(`${base}/admin/credits`) // payments aren't live: an admin adds test credits
   await page.getByLabel('Student email').fill('demo@paperaid.app')
-  await page.getByLabel('Amount (UGX)').fill('1000000')
+  await page.getByLabel('Amount (tokens)').fill('1000')
   await page.getByRole('button', { name: 'Add credits' }).click()
-  await page.getByText(/1,000,000|1000000/).first().waitFor()
+  await page.getByText(/Their balance is now/).first().waitFor()
   await page.goto(`${base}/app`)
 
   await page.getByRole('link', { name: 'Proposals' }).first().click()
@@ -59,7 +59,10 @@ try {
   await page.waitForURL(/\/app\/projects\/prj_/)
   step('project created')
 
-  await runStep(page)
+  await page.getByRole('button', { name: 'See the price' }).click()
+  await page.getByText('Plan and Chapter One together').waitFor()
+  await page.getByRole('button', { name: 'Start' }).click()
+  await page.getByText('Step finished').waitFor({ timeout: 90_000 })
   await page.getByLabel('Title', { exact: true }).waitFor()
   await page.getByText('Only you can answer these').waitFor()
   step('plan drafted, with questions only the student can answer')
@@ -73,12 +76,12 @@ try {
   await shot('p2-plan-approved')
   step('plan saved and approved')
 
+  await page.getByText('Step finished').waitFor({ timeout: 90_000 }) // Chapter One started on approval
   await page.getByRole('tab', { name: /Chapter 1/ }).click()
-  await runStep(page.getByRole('tabpanel'))
   await page.getByRole('heading', { name: 'General Introduction' }).waitFor()
   await page.getByText('Readiness', { exact: true }).waitFor()
   await shot('p3-chapter-one')
-  step('chapter one written, with its readiness checklist')
+  step('chapter one started by itself when the plan was approved, with its readiness checklist')
 
   await page.getByRole('tab', { name: /Chapter 3/ }).click()
   await runStep(page.getByRole('tabpanel'))
@@ -103,7 +106,7 @@ try {
   if (reviewFile) {
     await page.goto(`${base}/app/new?review=1`)
     await page.locator('input[type=file]').setInputFiles({ name: 'proposal.docx', mimeType: 'application/octet-stream', buffer: readFileSync(reviewFile) })
-    await page.getByText(/Proposal review against the UCU manual/).waitFor({ timeout: 30_000 })
+    await page.getByText('Proposal review (up to)').waitFor({ timeout: 30_000 })
     await page.getByLabel(/This is my own work/).check()
     await page.getByRole('button', { name: /Start job/ }).click()
     await page.waitForURL(/\/app\/jobs\//)

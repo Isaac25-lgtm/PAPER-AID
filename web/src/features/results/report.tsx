@@ -331,7 +331,7 @@ export function SourceCheckPanel({ research }: { research: ResearchResult }) {
     <div className="space-y-4">
       <p className="flex gap-2 rounded-lg bg-surface-subtle p-3 text-xs leading-relaxed text-fg-muted">
         <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-        We searched the web on {formatDate(research.retrievedOn)} for the key factual claims in your paper, and a second AI checked each source against the claim.
+        We checked the key factual claims in your paper against current sources on {formatDate(research.retrievedOn)}.
         &ldquo;Not found&rdquo; means this limited search found nothing, not that no evidence exists. Read every source yourself before you cite it.
       </p>
       {research.checked < research.candidates && (

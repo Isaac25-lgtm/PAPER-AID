@@ -10,12 +10,12 @@ const CHAPTERS = [
 ] as const
 const KIND = { ALIGNMENT: 'Alignment', EVIDENCE: 'Evidence', METHOD: 'Method', STRUCTURE: 'Structure', TENSE: 'Tense', WRITING: 'Writing' } as const
 
-/** An uploaded proposal checked against the UCU manual. Nothing in the proposal was changed. */
+/** An uploaded proposal checked against proposal requirements. Nothing in the proposal was changed. */
 export function ProposalReviewPanel({ review }: { review: ProposalReview }) {
   return (
     <div className="space-y-6">
       <p className="text-sm text-fg-muted">
-        Checked as a {LEVELS[review.level]} proposal against the UCU Academic Research Manual (2018), {review.words.toLocaleString()} words of main text. Faculties may set their
+        Checked as a {LEVELS[review.level]} proposal, {review.words.toLocaleString()} words of main text. Faculties may set their
         own variations; check anything marked for review with your supervisor.
       </p>
       {CHAPTERS.map(([n, title]) => {

@@ -200,6 +200,8 @@ class ProjectView(Camel):
     plan_version: int = 0  # rises with every change to the plan; edits must name the version they started from
     plan_problems: list[str] = []  # what must be fixed before the plan can be approved (computed for the view)
     candidate_plan: ProposalPlan | None = None  # a plan PaperAid produced while the student was editing theirs
+    auto_chapter_one: bool = False  # the student started the plan with Chapter One to follow on approval
+    notice: str | None = None  # a one-off message for the student (not stored meaningfully; set on a response)
     chapters: list[ChapterState]
     evidence_count: int = 0
     active_job: str | None = None  # the step running now, if any

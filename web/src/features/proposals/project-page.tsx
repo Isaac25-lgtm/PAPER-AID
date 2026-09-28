@@ -69,7 +69,7 @@ function ChapterPanel({ project, number, running, onStarted, onChanged }: { proj
       projectId={project.id}
       step={`CHAPTER_${number}`}
       label={state.current ? `Write a new version of Chapter ${number}` : `Write Chapter ${number}: ${CHAPTERS[number]}`}
-      description="PaperAid researches what the chapter needs, briefs each section, writes it from your approved plan, checks every citation and figure, reviews and fixes it, then assesses it against the UCU vetting questions. Earlier versions are kept."
+      description="PaperAid researches what the chapter needs, writes it from your approved plan and checks it thoroughly before you see it. Earlier versions are kept."
       disabledReason={running ? 'A step is running for this proposal. Wait for it to finish.' : planReady ? undefined : 'Approve your plan first: chapters are written from it.'}
       onStarted={onStarted}
     />
@@ -185,7 +185,7 @@ function EvidencePanel({ projectId, count }: { projectId: string; count: number 
   return (
     <div className="space-y-3">
       <p className="text-sm text-fg-muted">
-        Chapters cite only confirmed evidence: PaperAid found the quoted words in the source itself and a second AI agreed they support the statement. References are built from the
+        Chapters cite only sources PaperAid has confirmed say what they are cited for. References are built from the
         source&rsquo;s registered details.
       </p>
       {items.map((item) => {
@@ -218,6 +218,10 @@ export function ProjectPage() {
   const [rulebook, setRulebook] = useState<Rulebook | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [running, setRunning] = useState<string | null>(null)
+  // A step started by an action (Chapter One after the plan is approved) appears as it starts.
+  useEffect(() => {
+    if (project?.activeJob && !running) setRunning(project.activeJob)
+  }, [project?.activeJob, running])
   const [finished, setFinished] = useState<Job | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
   useTitle(project?.plan?.title ?? project?.inputs.topic ?? 'Proposal')
@@ -281,7 +285,7 @@ export function ProjectPage() {
         title={project.plan?.title ?? project.inputs.topic}
         description={
           <>
-            {LEVELS[project.inputs.level]} · UCU Academic Research Manual (2018) · {project.citation === 'APA6' ? 'APA 6' : 'APA 7'} · kept until {formatDate(project.expiresAt)} unless you
+            {LEVELS[project.inputs.level]} · {project.citation === 'APA6' ? 'APA 6' : 'APA 7'} · kept until {formatDate(project.expiresAt)} unless you
             work on it again
           </>
         }
@@ -312,6 +316,11 @@ export function ProjectPage() {
       {finished && !running && (
         <Alert tone={finished.status === 'COMPLETED' ? (finished.outcome === 'PARTIAL' ? 'warning' : 'success') : 'danger'} className="mb-5" title={finished.status === 'COMPLETED' ? 'Step finished' : 'The step did not finish'}>
           {finished.status === 'COMPLETED' ? (finished.warnings.length ? finished.warnings.join(' ') : 'Saved to your proposal.') : (finished.failure?.userMessage ?? 'Nothing was charged.')}
+        </Alert>
+      )}
+      {project.notice && (
+        <Alert tone="warning" className="mb-5">
+          {project.notice}
         </Alert>
       )}
       <Progress project={project} />
@@ -350,8 +359,12 @@ export function ProjectPage() {
           <StepRunner
             projectId={project.id}
             step="PLAN"
-            label={project.plan ? 'Draft a new plan' : 'Draft my plan'}
-            description="PaperAid plans what evidence your study needs, reads scholarly abstracts and official sources, and has a second AI check each finding. The lead adviser then drafts the plan, a second adviser critiques it and the lead finalises it. You edit and approve it before any chapter is written."
+            label={project.plan ? 'Draft a new plan' : 'Draft my plan, then Chapter One'}
+            description={
+              project.plan
+                ? 'PaperAid researches your topic again and drafts a fresh plan. You edit and approve it before any chapter is written.'
+                : 'PaperAid researches your topic and drafts a plan for your study: problem, objectives, questions, design and methods. You edit and approve it, and Chapter One starts as soon as you do.'
+            }
             disabledReason={running ? 'A step is running for this proposal. Wait for it to finish.' : undefined}
             onStarted={setRunning}
           />

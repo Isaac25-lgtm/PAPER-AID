@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { Button, ButtonLink } from '../../components/ui/button'
 import { Input, Select, TextArea } from '../../components/ui/field'
-import { Alert, Badge, Card, EmptyState, PageHeader, Skeleton } from '../../components/ui/primitives'
+import { Alert, Card, EmptyState, PageHeader, Skeleton } from '../../components/ui/primitives'
 import { DataError, useData } from '../../lib/data'
 import { formatDate } from '../../lib/format'
 import type { CitationStyle, Level, Project, ProposalInputs, Rulebook, StudyType, TitlePage } from '../../lib/proposal-types'
@@ -36,7 +36,7 @@ export function ProjectsPage() {
     <>
       <PageHeader
         title="Research proposals"
-        description="Plan, research and write a UCU research proposal chapter by chapter, or check one you have already written."
+        description="Plan, research and write your research proposal chapter by chapter, or check one you have already written."
         actions={
           !blocked && (
             <ButtonLink to="/app/projects/new">
@@ -60,7 +60,7 @@ export function ProjectsPage() {
           <FileSearch className="mt-0.5 size-5 shrink-0 text-brand-700" aria-hidden />
           <div>
             <p className="text-sm font-semibold">Already written a proposal?</p>
-            <p className="text-sm text-fg-muted">Check it against the UCU manual: missing sections, alignment, tense, references and what a supervisor is likely to raise.</p>
+            <p className="text-sm text-fg-muted">PaperAid checks it for missing sections, alignment, tense, references and what a supervisor is likely to raise.</p>
           </div>
         </div>
         <ButtonLink to="/app/new?review=1" variant="secondary" size="sm">
@@ -227,9 +227,9 @@ export function DetailsForm({
           label="Citation style"
           value={style}
           onChange={(e) => setStyle(e.target.value as CitationStyle)}
-          hint="The UCU 2018 manual's example uses APA 6. Choose APA 7 if your faculty uses it. You can switch at any time; no rewriting is needed."
+          hint="Choose the edition your faculty uses. You can switch at any time."
         >
-          {Object.entries(rulebook?.citationProfiles ?? { APA6: 'APA 6th edition', APA7: 'APA 7th edition' }).map(([id, label]) => (
+          {Object.entries({ APA6: 'APA 6th edition', APA7: 'APA 7th edition' }).map(([id, label]) => (
             <option key={id} value={id}>
               {label}
             </option>
@@ -258,8 +258,7 @@ export function NewProjectPage() {
         title="New research proposal"
         description={
           <>
-            Tell PaperAid about your study. It researches the evidence and drafts a plan for you to edit and approve before any chapter is written.{' '}
-            <Badge tone="info">UCU Academic Research Manual (2018)</Badge>
+            Tell PaperAid about your study. It researches the evidence and drafts a plan for you to edit and approve before any chapter is written.
           </>
         }
       />

@@ -68,7 +68,7 @@ export function DashboardPage() {
 
   return (
     <>
-      <PageHeader title={`${greeting()}, ${firstName}`} description="Upload a paper or pick up where you left off." />
+      <PageHeader title={`${greeting()}, ${firstName}`} description="Start a new job or pick up where you left off." />
 
       <div className="grid gap-4 lg:grid-cols-[2fr_1fr]">
         <Link
@@ -81,10 +81,10 @@ export function DashboardPage() {
               <FileUp className="size-6" aria-hidden />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-white">New paper job</h2>
-              <p className="mt-1 max-w-md text-sm text-brand-100">Upload a Word file or PDF, choose what you need, and see your price before you start.</p>
+              <h2 className="text-xl font-bold text-white">Start a new job</h2>
+              <p className="mt-1 max-w-md text-sm text-brand-100">Choose what you need (a check, refinement, formatting or a research proposal), then upload and see your price before you start.</p>
               <span className="mt-5 inline-flex items-center gap-2 text-sm font-semibold">
-                Upload your paper <ArrowRight className="size-4 transition-transform group-hover:translate-x-1" aria-hidden />
+                Choose a job <ArrowRight className="size-4 transition-transform group-hover:translate-x-1" aria-hidden />
               </span>
             </div>
           </div>
@@ -124,8 +124,8 @@ export function DashboardPage() {
             <ListSkeleton />
           </Card>
         ) : jobs.length === 0 ? (
-          <EmptyState icon={<Inbox className="size-5" />} title="No papers yet" action={<ButtonLink to="/app/new">Upload your first paper</ButtonLink>}>
-            Upload a paper, choose a service and see your price. Your finished files will appear here.
+          <EmptyState icon={<Inbox className="size-5" />} title="No papers yet" action={<ButtonLink to="/app/new">Start your first job</ButtonLink>}>
+            Choose a job, upload your paper and see your price. Your finished files will appear here.
           </EmptyState>
         ) : (
           <Card className="p-1.5">
@@ -194,7 +194,7 @@ export function HistoryPage() {
             Try a different status or service.
           </EmptyState>
         ) : (
-          <EmptyState icon={<Inbox className="size-5" />} title="No papers yet" action={<ButtonLink to="/app/new">Upload a paper</ButtonLink>}>
+          <EmptyState icon={<Inbox className="size-5" />} title="No papers yet" action={<ButtonLink to="/app/new">Start a job</ButtonLink>}>
             Your paper jobs will be listed here.
           </EmptyState>
         )

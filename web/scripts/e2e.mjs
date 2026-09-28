@@ -48,20 +48,28 @@ try {
   await page.getByRole('button', { name: 'Sign in', exact: true }).click()
   await page.waitForURL(/\/app\/new/)
   step('sign-in returns to the new-job page')
+  await page.getByRole('heading', { name: 'What would you like PaperAid to do?' }).waitFor()
+  await page.getByRole('link', { name: /Check \+ Refine/ }).click()
+  await page.waitForURL(/\/app\/new\?service=REFINE/)
+  await page.getByRole('heading', { name: 'Check + Refine' }).waitFor()
+  await page.getByRole('link', { name: 'AI Check' }).first().click() // the top bar switches job from anywhere
+  await page.waitForURL(/service=AI_CHECK/)
+  await page.getByRole('heading', { name: 'AI Check' }).waitFor()
+  step('new job starts by choosing the job; the top bar switches between services')
 
   // Payments aren't live: an admin adds test credits, as the owner will while testing.
-  const chip = page.getByRole('link', { name: /^Credits: UGX / })
+  const chip = page.getByRole('link', { name: /^Tokens: / })
   await chip.waitFor()
-  const startBalance = Number((await chip.getAttribute('aria-label')).replace(/[^0-9]/g, ''))
+  const startTokens = Number((await chip.getAttribute('aria-label')).replace(/[^0-9.]/g, ''))
   await page.goto(`${base}/admin/credits`)
   await page.getByLabel('Student email').fill('demo@paperaid.app')
-  await page.getByLabel('Amount (UGX)').fill('500000')
+  await page.getByLabel('Amount (tokens)').fill('500')
   await page.getByRole('button', { name: 'Add credits' }).click()
-  const expected = (startBalance + 500000).toLocaleString('en')
-  await page.getByText(`Their balance is now UGX ${expected}`).waitFor()
-  await page.getByRole('link', { name: `Credits: UGX ${expected}` }).waitFor()
-  step('admin added test credits; the header balance updated')
-  await page.goto(`${base}/app/new`)
+  const expected = `${(startTokens + 500).toLocaleString('en', { maximumFractionDigits: 1 })} tokens`
+  await page.getByText(`Their balance is now ${expected}`).waitFor()
+  await page.getByRole('link', { name: `Tokens: ${expected}` }).waitFor()
+  step('admin added test tokens; the header balance shows tokens')
+  await page.goto(`${base}/app/new?service=REFINE`)
 
   // A bad file is rejected with the server's message.
   expect({ status: 422, path: /^\/api\/jobs\/job_\w+\/files\/source$/ })
@@ -129,7 +137,7 @@ try {
   step(`downloaded "${zip.suggestedFilename()}"`)
 
   // Deep Redraft: a separate job the student chooses, with the style picker and a full change report.
-  await page.goto(`${base}/app/new`)
+  await page.goto(`${base}/app/new?service=REFINE`)
   await upload('citation_fields.docx', 'Chapter two.docx')
   await page.getByText('Readable text found').waitFor({ timeout: 20000 })
   await page.getByText('Deep redraft', { exact: true }).first().click()
@@ -148,7 +156,7 @@ try {
   // Regression (external review): a PDF uploaded the instant the page opens must quote on the
   // same draft it was uploaded to, and a visit must create exactly one draft.
   let before = jobCount()
-  await page.goto(`${base}/app/new`)
+  await page.goto(`${base}/app/new?service=REFINE`)
   await page.waitForTimeout(600)
   if (jobCount() !== before) throw new Error('opening the new-job page created a draft before any upload')
   await upload('text_based.pdf', 'proposal.pdf')
@@ -160,7 +168,7 @@ try {
 
   // Replacing a Word file with a PDF in the same visit re-quotes on the same draft.
   before = jobCount()
-  await page.goto(`${base}/app/new`)
+  await page.goto(`${base}/app/new?service=REFINE`)
   await upload('simple_essay.docx', 'essay.docx')
   await page.getByText('First, a short AI estimate').waitFor({ timeout: 20000 })
   await page.getByRole('button', { name: 'Remove essay.docx' }).click()
@@ -171,7 +179,7 @@ try {
   step('replacing the file keeps one draft and re-quotes correctly')
 
   // University templates: the guide is required before pricing, then its rules are applied with sources.
-  await page.goto(`${base}/app/new`)
+  await page.goto(`${base}/app/new?service=REFINE`)
   await upload('simple_essay.docx', 'Template essay.docx')
   await page.getByText('Readable text found').waitFor({ timeout: 20000 })
   await page.locator('label', { hasText: 'University templates' }).click()
@@ -198,7 +206,7 @@ try {
 
   // Credits: every job settled, nothing left held, and the history explains each movement.
   await page.goto(`${base}/app/credits`)
-  await page.getByText('Credits added').first().waitFor()
+  await page.getByText('Tokens added').first().waitFor()
   await page.getByText(/Held · Held for your job/).first().waitFor()
   if (await page.getByText('held for work in progress').count()) throw new Error('credits still held after every job finished')
   await shot('8-credits')

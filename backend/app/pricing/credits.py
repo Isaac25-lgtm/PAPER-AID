@@ -13,10 +13,19 @@ MAX_ENTRIES = 300
 Kind = Literal["TOP_UP", "HOLD", "CHARGE", "RELEASE", "REFUND"]
 
 
+def tokens(ugx: int) -> str:
+    """A UGX amount as students see it: tokens, to one decimal (owner decision 2026-09-28)."""
+    from app.core.config import get_settings
+
+    value = ugx / get_settings().ugx_per_token
+    text = f"{value:,.1f}".rstrip("0").rstrip(".")
+    return f"{text} token" if text == "1" else f"{text} tokens"
+
+
 class InsufficientCredits(AppError):
     def __init__(self, needed: int, available: int):
         super().__init__(
-            f"You need UGX {needed:,} of credit for this, and your balance is UGX {available:,}. Top up to continue.",
+            f"You need {tokens(needed)} for this, and your balance is {tokens(available)}. Buy tokens to continue.",
             code="INSUFFICIENT_CREDITS",
             status=402,
         )

@@ -124,7 +124,7 @@ def code_checks(model: "DocumentModel", level: str, rulebook_id: str) -> tuple[l
     low, high = book["objectives"]["min"], book["objectives"]["max"]
     if objectives:
         ok = low <= len(objectives) <= high
-        note = f"{len(objectives)} specific objectives found." + ("" if ok else f" The manual says {low} to {high} are generally sufficient ({book['objectives']['source']}).")
+        note = f"{len(objectives)} specific objectives found." + ("" if ok else f" {low} to {high} are generally expected.")
         items.append(ReadinessItem(id="N-objectives", question="Number of specific objectives", status="PASS" if ok else "NEEDS_REVIEW", basis="CODE", note=note, chapter=1))
     if objectives and questions:
         same = len(objectives) == len(questions)
@@ -137,7 +137,7 @@ def code_checks(model: "DocumentModel", level: str, rulebook_id: str) -> tuple[l
     past = [(b, m.group(0)) for b in model.blocks if chapters.get(b.id) == 3 and b.kind in ("paragraph", "list_item") for m in evidence.PAST_TENSE.finditer(b.text)]
     items.append(
         ReadinessItem(
-            id="N-tense", question="Planned work in the future tense (§2.2, p. 10)", status="NEEDS_REVIEW" if past else "PASS", basis="CODE", chapter=3,
+            id="N-tense", question="Planned work in the future tense", status="NEEDS_REVIEW" if past else "PASS", basis="CODE", chapter=3,
             note=(f"{len(past)} place(s) in the methodology describe the planned study as done, for example “{past[0][1]}”." if past else "No past-tense description of the planned study was found in the methodology."),
             where=past[0][0].id if past else "",
         )
@@ -148,7 +148,7 @@ def code_checks(model: "DocumentModel", level: str, rulebook_id: str) -> tuple[l
     no_list = any(c.kind == "NO_REFERENCE_LIST" for c in checks.items)
     items.append(
         ReadinessItem(
-            id="N-references", question="Every work cited is in the reference list (§2.2, pp. 9-10)", basis="CODE", chapter=0,
+            id="N-references", question="Every work cited is in the reference list", basis="CODE", chapter=0,
             status="MISSING" if no_list else "NEEDS_REVIEW" if missing or unused else "PASS",
             note="No reference list was found." if no_list else f"{len(missing)} citation(s) not in the list; {len(unused)} reference(s) never cited." if missing or unused else f"{checks.citations_found} citations match the {checks.references_found} references.",
         )
@@ -156,7 +156,7 @@ def code_checks(model: "DocumentModel", level: str, rulebook_id: str) -> tuple[l
     items.append(
         ReadinessItem(
             id="C2-REFS30", question="Are there a minimum of 30 quality references?", basis="CODE", chapter=2, status="PASS" if checks.references_found >= 30 else "NEEDS_REVIEW",
-            note=f"{checks.references_found} references found. From the SRPGS vetting guidelines; check whether your programme applies it. PaperAid counted them; it did not judge their quality.",
+            note=f"{checks.references_found} references found. Many programmes expect at least 30; check yours.",
         )
     )
     body = sum(b.words for b in model.blocks if chapters.get(b.id) in (1, 2, 3) and b.kind in ("paragraph", "list_item", "heading", "quote", "caption", "table_cell"))
@@ -164,9 +164,9 @@ def code_checks(model: "DocumentModel", level: str, rulebook_id: str) -> tuple[l
     low_p, high_p = book["levels"][level]["pages"]
     items.append(
         ReadinessItem(
-            id="N-length", question=f"Length for a {book['levels'][level]['label']} proposal: {low_p}-{high_p} pages (§2.2(iii), p. 10)", basis="CODE", chapter=0,
+            id="N-length", question=f"Length for a {book['levels'][level]['label']} proposal: {low_p}-{high_p} pages", basis="CODE", chapter=0,
             status="PASS" if low_p <= pages <= high_p else "NEEDS_REVIEW",
-            note=f"About {pages} pages of main text ({body:,} words at the manual's 250 words a page). Word's own layout decides the real count.",
+            note=f"About {pages} pages of main text ({body:,} words, at about 250 words a page).",
         )
     )
     return items, {"words": body, "references": checks.references_found}
@@ -247,7 +247,7 @@ def report(name: str, when: datetime, review: ProposalReview) -> bytes:
     meta = doc.add_paragraph().add_run(f"{name} · {book['levels'][review.level]['label']} · {when:%d %B %Y}")
     meta.font.color.rgb = MUTED
     doc.add_paragraph(
-        f"Checked against the {book['source']}. This is a readiness checklist, not a mark: it follows the manual's vetting questions, and "
+        "This is a readiness checklist of what examiners look for, not a mark, and "
         "faculties may set their own variations. PaperAid does not check plagiarism."
     )
     for n, title in ((0, "Whole proposal"), (1, "Chapter One: General Introduction"), (2, "Chapter Two: Literature Review"), (3, "Chapter Three: Methodology")):

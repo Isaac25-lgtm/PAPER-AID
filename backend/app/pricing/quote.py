@@ -226,10 +226,10 @@ def price(
         ai += amount
     if selection.proposal == "REVIEW":
         amount = with_margin(proposal_review_usd(settings, words), settings)
-        lines.append(QuoteLine(label="Proposal review against the UCU manual (up to)", amount=amount))
+        lines.append(QuoteLine(label="Proposal review (up to)", amount=amount))
         ai += amount
     elif selection.proposal != "NONE":
-        label = "Proposal plan with research (up to)" if selection.proposal == "PLAN" else f"Chapter {selection.proposal[-1]} with research, review and readiness check (up to)"
+        label = "Proposal plan (up to)" if selection.proposal == "PLAN" else f"Chapter {selection.proposal[-1]} (up to)"
         amount = with_margin(proposal_usd(settings, selection.proposal, words), settings)
         lines.append(QuoteLine(label=label, amount=amount))
         ai += amount

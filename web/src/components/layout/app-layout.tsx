@@ -1,11 +1,12 @@
 import * as Menu from '@radix-ui/react-dropdown-menu'
 import { clsx } from 'clsx'
-import { GraduationCap, History, LayoutDashboard, LogOut, Menu as MenuIcon, Plus, Settings, ShieldCheck, Wallet } from 'lucide-react'
+import { FileCheck2, GraduationCap, History, LayoutDashboard, LogOut, Menu as MenuIcon, PenLine, Plus, Search, Settings, ShieldCheck, Wallet } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router'
+import { Link, Outlet, useLocation, useNavigate } from 'react-router'
 import { useAuth } from '../../features/auth/auth-context'
 import { useData } from '../../lib/data'
-import { formatUGX } from '../../lib/format'
+import { formatTokens } from '../../lib/format'
+import type { ServiceId } from '../../lib/types'
 import { useWallet } from '../../lib/use-wallet'
 import { ButtonLink } from '../ui/button'
 import { Drawer } from '../ui/overlays'
@@ -19,14 +20,23 @@ export function AppLayout() {
   const { config } = useData()
   const { wallet } = useWallet()
 
-  useEffect(() => setMenuOpen(false), [location.pathname])
+  useEffect(() => setMenuOpen(false), [location.pathname, location.search])
 
-  const nav = [
-    { to: '/app', label: 'Dashboard', icon: LayoutDashboard, end: true },
-    { to: '/app/history', label: 'History', icon: History, end: false },
-    ...(config.availability.PROPOSAL !== 'soon' ? [{ to: '/app/projects', label: 'Proposals', icon: GraduationCap, end: false }] : []),
-    ...(config.creditsEnabled ? [{ to: '/app/credits', label: 'Credits', icon: Wallet, end: false }] : []),
-    ...(user?.isAdmin ? [{ to: '/admin', label: 'Admin', icon: ShieldCheck, end: false }] : []),
+  // Each service is one click away from anywhere; New job still lists every option.
+  const service = new URLSearchParams(location.search).get('service') ?? (new URLSearchParams(location.search).get('review') ? 'PROPOSAL_REVIEW' : '')
+  const onNew = (...ids: string[]) => location.pathname === '/app/new' && ids.includes(service)
+  const offered = (id: ServiceId) => config.availability[id] !== 'soon'
+  const nav: { to: string; label: string; icon: typeof History; active: boolean; mobileOnly?: boolean }[] = [
+    { to: '/app', label: 'Dashboard', icon: LayoutDashboard, active: location.pathname === '/app' },
+    ...(offered('AI_CHECK') ? [{ to: '/app/new?service=AI_CHECK', label: 'AI Check', icon: Search, active: onNew('AI_CHECK', 'SOURCE_CHECK') }] : []),
+    ...(offered('REFINE') ? [{ to: '/app/new?service=REFINE', label: 'Refine', icon: PenLine, active: onNew('REFINE', 'REDRAFT') }] : []),
+    ...(offered('FORMAT') ? [{ to: '/app/new?service=FORMAT', label: 'Formatting', icon: FileCheck2, active: onNew('FORMAT', 'TEMPLATE_FORMAT', 'LATEX') }] : []),
+    ...(offered('PROPOSAL')
+      ? [{ to: '/app/projects', label: 'Proposals', icon: GraduationCap, active: location.pathname.startsWith('/app/projects') || onNew('PROPOSAL_REVIEW') }]
+      : []),
+    { to: '/app/history', label: 'History', icon: History, active: location.pathname.startsWith('/app/history') || location.pathname.startsWith('/app/jobs') },
+    ...(config.creditsEnabled ? [{ to: '/app/credits', label: 'Tokens', icon: Wallet, active: location.pathname.startsWith('/app/credits'), mobileOnly: true }] : []),
+    ...(user?.isAdmin ? [{ to: '/admin', label: 'Admin', icon: ShieldCheck, active: location.pathname.startsWith('/admin') }] : []),
   ]
 
   const handleSignOut = async () => {
@@ -41,32 +51,30 @@ export function AppLayout() {
       <header className="sticky top-0 z-40 border-b border-line bg-white">
         <div className="mx-auto flex h-16 max-w-6xl items-center gap-6 px-4 sm:px-6">
           <Logo to="/app" />
-          <nav aria-label="App" className="hidden items-center gap-1 md:flex">
-            {nav.map((item) => (
-              <NavLink
+          <nav aria-label="App" className="hidden items-center gap-0.5 lg:flex">
+            {nav.filter((item) => !item.mobileOnly).map((item) => (
+              <Link
                 key={item.to}
                 to={item.to}
-                end={item.end}
-                className={({ isActive }) =>
-                  clsx(
-                    'inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors',
-                    isActive ? 'bg-brand-50 text-brand-800' : 'text-fg-muted hover:bg-surface-muted hover:text-fg',
-                  )
-                }
+                aria-current={item.active ? 'page' : undefined}
+                className={clsx(
+                  'inline-flex items-center gap-1.5 rounded-md px-2.5 py-2 text-sm font-medium whitespace-nowrap transition-colors',
+                  item.active ? 'bg-brand-50 text-brand-800' : 'text-fg-muted hover:bg-surface-muted hover:text-fg',
+                )}
               >
                 <item.icon className="size-4" aria-hidden />
                 {item.label}
-              </NavLink>
+              </Link>
             ))}
           </nav>
           <div className="ml-auto flex items-center gap-2">
             {config.creditsEnabled && wallet && (
               <Link
                 to="/app/credits"
-                className="inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-800 ring-1 ring-brand-200 hover:bg-brand-100"
-                aria-label={`Credits: ${formatUGX(wallet.available)}`}
+                className="inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-3 py-1.5 text-xs font-semibold whitespace-nowrap text-brand-800 ring-1 ring-brand-200 hover:bg-brand-100"
+                aria-label={`Tokens: ${formatTokens(wallet.available)}`}
               >
-                <Wallet className="size-3.5" aria-hidden /> {formatUGX(wallet.available)}
+                <Wallet className="size-3.5" aria-hidden /> {formatTokens(wallet.available)}
               </Link>
             )}
             <ButtonLink to="/app/new" size="sm" className="hidden sm:inline-flex">
@@ -75,7 +83,7 @@ export function AppLayout() {
             </ButtonLink>
             <Menu.Root>
               <Menu.Trigger
-                className="hidden size-9 place-items-center rounded-full bg-brand-100 text-xs font-bold text-brand-800 ring-brand-300 hover:ring-2 md:grid"
+                className="hidden size-9 place-items-center rounded-full bg-brand-100 text-xs font-bold text-brand-800 ring-brand-300 hover:ring-2 lg:grid"
                 aria-label="Account menu"
               >
                 {initials}
@@ -101,7 +109,7 @@ export function AppLayout() {
                 </Menu.Content>
               </Menu.Portal>
             </Menu.Root>
-            <button className="rounded-md p-2 text-fg-muted hover:bg-surface-muted md:hidden" onClick={() => setMenuOpen(true)} aria-label="Open menu">
+            <button className="rounded-md p-2 text-fg-muted hover:bg-surface-muted lg:hidden" onClick={() => setMenuOpen(true)} aria-label="Open menu">
               <MenuIcon className="size-5" />
             </button>
           </div>
@@ -110,20 +118,18 @@ export function AppLayout() {
 
       <Drawer open={menuOpen} onOpenChange={setMenuOpen} title={user?.email ?? 'Menu'}>
         <ButtonLink to="/app/new" className="mb-4 w-full">
-          <Plus className="size-4" aria-hidden /> New paper job
+          <Plus className="size-4" aria-hidden /> New job
         </ButtonLink>
         <nav aria-label="App mobile" className="flex flex-col gap-1">
-          {[...nav, { to: '/app/settings', label: 'Settings', icon: Settings, end: false }].map((item) => (
-            <NavLink
+          {[...nav, { to: '/app/settings', label: 'Settings', icon: Settings, active: location.pathname.startsWith('/app/settings') }].map((item) => (
+            <Link
               key={item.to}
               to={item.to}
-              end={item.end}
-              className={({ isActive }) =>
-                clsx('flex items-center gap-3 rounded-lg px-3 py-3 text-base font-medium', isActive ? 'bg-brand-50 text-brand-800' : 'text-fg hover:bg-surface-muted')
-              }
+              aria-current={item.active ? 'page' : undefined}
+              className={clsx('flex items-center gap-3 rounded-lg px-3 py-3 text-base font-medium', item.active ? 'bg-brand-50 text-brand-800' : 'text-fg hover:bg-surface-muted')}
             >
               <item.icon className="size-5" aria-hidden /> {item.label}
-            </NavLink>
+            </Link>
           ))}
           <button onClick={handleSignOut} className="flex items-center gap-3 rounded-lg px-3 py-3 text-left text-base font-medium text-fg hover:bg-surface-muted">
             <LogOut className="size-5" aria-hidden /> Sign out

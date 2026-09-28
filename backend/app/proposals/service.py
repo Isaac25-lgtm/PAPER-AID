@@ -20,9 +20,9 @@ from pydantic import BaseModel
 from app.core.errors import AppError, Conflict, Forbidden, NotFound
 from app.core.logging import log
 from app.jobs import state
-from app.jobs.models import Job, JobEvent, JobStatus, JobView, Quote, ReadinessItem, ServiceSelection, utcnow
+from app.jobs.models import Job, JobEvent, JobStatus, JobView, Quote, QuoteLine, ReadinessItem, ServiceSelection, utcnow
 from app.jobs.service import ACCOUNT_CLOSING, User, _erase_project, _rate_limit, availability, current_engine, step_running, submit
-from app.pricing.quote import bound_quote
+from app.pricing.quote import bound_quote, proposal_usd, with_margin
 from app.proposals import decisions, evidence, rulebook, sampling
 from app.proposals import export as proposal_export
 from app.proposals.models import (
@@ -190,7 +190,32 @@ def approve_plan(rt: Runtime, user: User, project_id: str, base_version: int) ->
         p.plan_status = "APPROVED"
         return p
 
-    return view(rt, _change(rt, user, project_id, apply))
+    approved = _change(rt, user, project_id, apply)
+    if not approved.auto_chapter_one:
+        return view(rt, approved)
+    return _start_chapter_one(rt, user, approved)
+
+
+def _start_chapter_one(rt: Runtime, user: User, project: Project) -> ProjectView:
+    """Start Chapter One right after the plan is approved, as agreed when the plan was started.
+    Tried once: if it cannot start (not enough tokens, a figure only the student can give), the
+    student sees why and starts it themselves."""
+
+    def done(q: Project) -> Project:
+        q.auto_chapter_one = False
+        return q
+
+    rt.store.update_project(project.id, done)
+    notice = None
+    try:
+        quoted = quote_step(rt, user, project.id, "CHAPTER_1", "")
+        submit_step(rt, user, project.id, quoted.job.id, quoted.quote.id)
+    except AppError as exc:
+        notice = f"Chapter One could not start automatically: {exc.message}"
+    current = _owned(rt, user, project.id)
+    out = view(rt, current)
+    out.notice = notice
+    return out
 
 
 def take_candidate(rt: Runtime, user: User, project_id: str, accept: bool) -> ProjectView:
@@ -309,6 +334,15 @@ class StepQuote(BaseModel):
     job: JobView
     quote: Quote
     blockers: list[str] = []
+    # The plan's price is shown with Chapter One, which starts automatically when the plan is
+    # approved (owner request 2026-09-28): its own quote is issued then, from the approved plan.
+    then: list[QuoteLine] = []
+
+
+def chapter_one_estimate(settings, level: str) -> QuoteLine:
+    """What Chapter One can cost for this level, shown with the plan before any plan exists."""
+    words = round(rulebook.target_words(rulebook.DEFAULT, level) * rulebook.chapter_spec(rulebook.DEFAULT, 1)["share"])
+    return QuoteLine(label="Chapter 1, started when you approve the plan (up to)", amount=with_margin(proposal_usd(settings, "CHAPTER_1", words), settings))
 
 
 def quote_step(rt: Runtime, user: User, project_id: str, step: Step, note: str) -> StepQuote:
@@ -371,7 +405,8 @@ def quote_step(rt: Runtime, user: User, project_id: str, step: Step, note: str) 
         rt.files.delete_prefix(job.storage_prefix())
         rt.store.delete(job.id)
         raise NotFound("We couldn't find this proposal.")
-    return StepQuote(job=job.view(), quote=Quote.model_validate(job.quote.model_dump()))
+    then = [chapter_one_estimate(rt.settings, p.inputs.level)] if chapter == 0 and not p.chapter(1).versions else []
+    return StepQuote(job=job.view(), quote=Quote.model_validate(job.quote.model_dump()), then=then)
 
 
 def submit_step(rt: Runtime, user: User, project_id: str, job_id: str, quote_id: str) -> JobView:
@@ -397,6 +432,8 @@ def submit_step(rt: Runtime, user: User, project_id: str, job_id: str, quote_id:
             return None  # another step was claimed after we looked
         q.active_job = j.id
         q.jobs = q.jobs if j.id in q.jobs else (q.jobs + [j.id])[-100:]
+        if inp.step == "PLAN" and not q.chapter(1).versions:
+            q.auto_chapter_one = True  # agreed with the plan's price: starts when the plan is approved
         return _renew(rt, q)
 
     return submit(rt, user, job_id, quote_id, project_gate=gate)

@@ -7,13 +7,14 @@ import { Checkbox, Select } from '../../components/ui/field'
 import { FileChip, FileDropzone, fileMetaLine } from '../../components/ui/file-dropzone'
 import { Alert, Badge, Card, PageHeader, Skeleton } from '../../components/ui/primitives'
 import { DataError, useData } from '../../lib/data'
-import { formatUGX, formatUSDFromUGX } from '../../lib/format'
+import { formatTokens } from '../../lib/format'
 import { AVAILABILITY_BADGE, INVITE_ONLY_REASON, NOT_CONFIGURED_REASON, SERVICES, STYLE_OPTIONS } from '../../lib/services'
 import type { EstimateView, FileMeta, FileRole, Quote, ServiceId, ServiceSelection } from '../../lib/types'
 import { useTitle } from '../../lib/use-title'
 import { useWallet, walletChanged } from '../../lib/use-wallet'
 import { useAuth } from '../auth/auth-context'
 import { DISCLAIMER } from '../results/report'
+import { jobType, ServiceChooser, type JobType } from './service-chooser'
 
 interface Upload {
   name: string
@@ -95,14 +96,24 @@ function OptionCard({ name, checked, onSelect, title, body, badge, disabledReaso
   )
 }
 
+/** New job: first choose what PaperAid will do (the chooser), then upload for that job. A draft
+ *  being resumed goes straight to the form. The chosen job stays in the address. */
 export function NewJobPage() {
-  useTitle('New paper job')
+  const [params] = useSearchParams()
+  const type = jobType(params.get('service') ?? (params.get('review') ? 'PROPOSAL_REVIEW' : null))
+  if (!type && !params.get('draft')) return <ServiceChooser />
+  return <NewJobForm key={type?.id ?? 'draft'} type={type} />
+}
+
+function NewJobForm({ type }: { type: JobType | null }) {
+  useTitle(type ? `New job: ${type.name}` : 'New paper job')
   const data = useData()
   const { user } = useAuth()
   const navigate = useNavigate()
   const { config } = data
   const [params, setParams] = useSearchParams()
   const resumeId = params.get('draft')
+  const keep: Record<string, string> = type ? { service: type.id } : {} // the chosen job stays in the address
   const [draftId, setDraftId] = useState<string | null>(null)
   // One draft per visit, created on the first upload and shared by concurrent uploads. Creating it
   // on mount let React (and token refreshes) create several, so an upload and its quote could land
@@ -111,14 +122,14 @@ export function NewJobPage() {
   const ensureDraft = () => {
     draftPromise.current ??= data.createDraft().then((id) => {
       setDraftId(id)
-      setParams({ draft: id }, { replace: true })
+      setParams({ draft: id, ...keep }, { replace: true })
       return id
     })
     return draftPromise.current
   }
   const [source, setSource] = useState<Upload | null>(null)
   const [guide, setGuide] = useState<Upload | null>(null)
-  const [selection, setSelection] = useState<ServiceSelection>(params.get('review') ? REVIEW : INITIAL)
+  const [selection, setSelection] = useState<ServiceSelection>(type?.selection ? { ...INITIAL, ...type.selection } : INITIAL)
   const review = selection.proposal === 'REVIEW'
   const [restoring, setRestoring] = useState(!!resumeId)
   const [resumeError, setResumeError] = useState<string | null>(null)
@@ -134,7 +145,7 @@ export function NewJobPage() {
         if (cancelled) return
         if (!job) {
           setResumeError('That draft is no longer available. Upload your paper to start again.')
-          setParams({}, { replace: true })
+          setParams(keep, { replace: true })
           return
         }
         if (job.status !== 'DRAFT' && job.status !== 'QUOTED') return navigate(`/app/jobs/${job.id}`, { replace: true })
@@ -305,7 +316,6 @@ export function NewJobPage() {
   const charging = config.creditsEnabled
   const shortOfCredit = charging && !!wallet && !!pricing.quote && wallet.available < hold
   const canSubmit = !!meta && !needsGuide && !!pricing.quote && ownWork && !pricing.loading && !shortOfCredit
-  const rate = wallet?.ugxPerUsd ?? config.ugxPerUsd
 
   if (restoring)
     return (
@@ -317,7 +327,21 @@ export function NewJobPage() {
 
   return (
     <>
-      <PageHeader title="New paper job" description="Upload your paper, choose the work, and see your price before anything starts." />
+      <PageHeader
+        title={type ? type.name : 'New paper job'}
+        description={
+          type ? (
+            <>
+              {type.short}{' '}
+              <Link to="/app/new" className="font-semibold text-brand-700 hover:underline">
+                Choose a different job
+              </Link>
+            </>
+          ) : (
+            'Upload your paper, choose the work, and see your price before anything starts.'
+          )
+        }
+      />
       {resumeError && (
         <Alert tone="warning" className="mb-5">
           {resumeError}
@@ -365,7 +389,7 @@ export function NewJobPage() {
                 onChange={(e) => setSelection(e.target.checked ? { ...REVIEW, level: selection.level } : INITIAL)}
                 label={
                   <>
-                    <span className="font-semibold text-fg">This is a research proposal: review it against the UCU manual</span> {badgeFor('PROPOSAL')}
+                    <span className="font-semibold text-fg">This is a research proposal: review it</span> {badgeFor('PROPOSAL')}
                     <span className="mt-0.5 block text-xs">
                       {reasonFor('PROPOSAL') ??
                         'Missing sections, objective and question alignment, tense, references, length for your level, and what a supervisor is likely to raise. Your proposal is not changed.'}
@@ -460,7 +484,7 @@ export function NewJobPage() {
                         <span className="font-semibold text-fg">Check my claims against live sources</span> {badgeFor('SOURCE_CHECK')}
                         <span className="mt-0.5 block text-xs">
                           {reasonFor('SOURCE_CHECK') ??
-                            'We find the key factual claims in your paper, search for current sources, and a second AI checks each source. Your paper is not changed.'}
+                            'We find the key factual claims in your paper and check each against current sources. Your paper is not changed.'}
                         </span>
                       </>
                     }
@@ -547,9 +571,9 @@ export function NewJobPage() {
             <div className="p-5">
               {charging && meta && wallet && (
                 <p className="mb-4 flex items-center justify-between rounded-lg bg-surface-subtle px-3 py-2 text-xs text-fg-muted">
-                  <span>Your credits{wallet.testCredits && ' (test)'}</span>
+                  <span>Your tokens{wallet.testCredits && ' (test)'}</span>
                   <Link to="/app/credits" className="font-semibold text-fg hover:underline">
-                    {formatUGX(wallet.available)}
+                    {formatTokens(wallet.available)}
                   </Link>
                 </p>
               )}
@@ -569,7 +593,7 @@ export function NewJobPage() {
                   action={
                     pricing.needsCredits ? (
                       <ButtonLink to="/app/credits" size="sm" variant="secondary">
-                        Your credits
+                        Your tokens
                       </ButtonLink>
                     ) : undefined
                   }
@@ -583,7 +607,7 @@ export function NewJobPage() {
                   </p>
                   <p className="mt-1.5 leading-relaxed text-brand-800">
                     PaperAid&rsquo;s AI is reading your paper and drafting its plan. This takes a minute or two.
-                    {charging && ` Up to ${formatUGX(pricing.estimate.feeCap)} is held; you pay only what the scan actually costs.`}
+                    {charging && ` Up to ${formatTokens(pricing.estimate.feeCap)} is held; you pay only what the scan actually costs.`}
                   </p>
                 </div>
               ) : pricing.quote ? (
@@ -592,26 +616,25 @@ export function NewJobPage() {
                     {pricing.quote.lines.map((l) => (
                       <div key={l.label} className="flex justify-between gap-4">
                         <dt className="text-fg-muted">{l.label}</dt>
-                        <dd className="font-medium whitespace-nowrap">{formatUGX(l.amount)}</dd>
+                        <dd className="font-medium whitespace-nowrap">{formatTokens(l.amount)}</dd>
                       </div>
                     ))}
                   </dl>
                   <div className="mt-4 flex items-baseline justify-between border-t border-line pt-4">
                     <span className="text-sm font-semibold">{charging ? 'Most you’ll pay' : 'Most it would cost'}</span>
                     <span className="text-right">
-                      <span className="block text-2xl font-bold tracking-tight">{formatUGX(pricing.quote.amount)}</span>
-                      <span className="text-xs text-fg-subtle">{formatUSDFromUGX(pricing.quote.amount, rate)}</span>
+                      <span className="block text-2xl font-bold tracking-tight">{formatTokens(pricing.quote.amount)}</span>
                     </span>
                   </div>
                   {pricing.quote.paid > 0 && (
                     <p className="mt-2 flex justify-between text-sm text-fg-muted">
-                      <span>Already paid (estimate)</span> <span>{formatUGX(pricing.quote.paid)}</span>
+                      <span>Already paid (estimate)</span> <span>{formatTokens(pricing.quote.paid)}</span>
                     </p>
                   )}
                   {charging ? (
                     <>
                       <p className="mt-1 flex justify-between text-sm font-semibold">
-                        <span>Held from your credits now</span> <span>{formatUGX(hold)}</span>
+                        <span>Held from your tokens now</span> <span>{formatTokens(hold)}</span>
                       </p>
                       <p className="mt-2 text-xs leading-relaxed text-fg-subtle">
                         You&rsquo;re charged for the work actually done, never more than this, and the rest returns to your balance. Valid for 30 minutes.
@@ -626,11 +649,11 @@ export function NewJobPage() {
                       className="mt-3"
                       action={
                         <ButtonLink to="/app/credits" size="sm" variant="secondary">
-                          Your credits
+                          Your tokens
                         </ButtonLink>
                       }
                     >
-                      This needs {formatUGX(hold)} of credit and your balance is {formatUGX(wallet.available)}.
+                      This needs {formatTokens(hold)} and your balance is {formatTokens(wallet.available)}.
                     </Alert>
                   )}
 
@@ -664,20 +687,20 @@ export function NewJobPage() {
                     Refinement is priced from the work your paper actually needs. PaperAid&rsquo;s AI scans it and drafts a plan
                     {charging ? (
                       <>
-                        ; the scan costs at most <strong className="text-fg">{formatUGX(pricing.feeCap)}</strong> and counts toward your job if you go ahead.
+                        ; the scan costs at most <strong className="text-fg">{formatTokens(pricing.feeCap)}</strong> and counts toward your job if you go ahead.
                       </>
                     ) : (
                       '. It takes a minute or two and is not charged while PaperAid is in testing.'
                     )}
                   </p>
                   <Button className="mt-4 w-full" onClick={runEstimate} disabled={charging && !!wallet && wallet.available < pricing.feeCap}>
-                    {charging ? <>Get my estimate &middot; up to {formatUGX(pricing.feeCap)}</> : 'Get my estimate'}
+                    {charging ? <>Get my estimate &middot; up to {formatTokens(pricing.feeCap)}</> : 'Get my estimate'}
                   </Button>
                   {charging && wallet && wallet.available < pricing.feeCap && (
                     <p className="mt-2 text-xs text-amber-800">
-                      Your balance is {formatUGX(wallet.available)}.{' '}
+                      Your balance is {formatTokens(wallet.available)}.{' '}
                       <Link to="/app/credits" className="font-semibold underline">
-                        See your credits
+                        See your tokens
                       </Link>
                     </p>
                   )}
@@ -703,7 +726,7 @@ export function NewJobPage() {
                 </Alert>
               )}
               <Button size="lg" className="mt-5 w-full" disabled={!canSubmit} loading={submitting} onClick={submit}>
-                {pricing.quote && charging ? `Start job · hold ${formatUGX(hold)}` : 'Start job'} <ArrowRight className="size-4" aria-hidden />
+                {pricing.quote && charging ? `Start job · hold ${formatTokens(hold)}` : 'Start job'} <ArrowRight className="size-4" aria-hidden />
               </Button>
             </div>
           </Card>

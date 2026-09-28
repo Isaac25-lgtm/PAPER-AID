@@ -42,8 +42,8 @@ export function ServiceGrid() {
 const PRICING_STEPS = [
   {
     icon: Wallet,
-    title: 'Top up credits',
-    body: 'Add credits from UGX 5,000 with mobile money, with the dollar equivalent shown. Credits never expire.',
+    title: 'Buy tokens',
+    body: 'Buy tokens with mobile money, from 10 tokens (UGX 10,000). Tokens never expire.',
   },
   {
     icon: ScanSearch,
@@ -53,7 +53,7 @@ const PRICING_STEPS = [
   {
     icon: Scale,
     title: 'Pay for the work done',
-    body: 'You are charged for the work your paper actually needed, never more than your estimate. Unused credit returns to your balance.',
+    body: 'You are charged for the work your paper actually needed, never more than your estimate. Unused tokens return to your balance.',
   },
 ]
 

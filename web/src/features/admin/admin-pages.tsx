@@ -7,7 +7,7 @@ import { Input, Select } from '../../components/ui/field'
 import { Dialog } from '../../components/ui/overlays'
 import { Alert, Card, EmptyState, PageHeader, Skeleton } from '../../components/ui/primitives'
 import { DataError, useData, type JobQuery } from '../../lib/data'
-import { formatDateTime, formatDuration, formatNumber, formatRelative, formatUGX } from '../../lib/format'
+import { formatDateTime, formatDuration, formatNumber, formatRelative, formatTokens, formatUGX } from '../../lib/format'
 import { SERVICES, SERVICE_ORDER, STAGE_LABELS, STATUS_LABELS } from '../../lib/services'
 import type { AdminJob, AdminSummary, JobStatus, ServiceId, WalletSummary } from '../../lib/types'
 import { useTitle } from '../../lib/use-title'
@@ -333,7 +333,7 @@ export function AdminJobPage() {
           <Card className="p-5 text-sm">
             <h2 className="font-semibold">Quote &amp; payment</h2>
             <p className="mt-2 text-fg-muted">
-              {job.quote ? `${formatUGX(job.quote.amount)} · pricing ${job.quote.pricingVersion}` : 'Not priced'}
+              {job.quote ? `${formatTokens(job.quote.amount)} (${formatUGX(job.quote.amount)}) · pricing ${job.quote.pricingVersion}` : 'Not priced'}
             </p>
             <p className="text-fg-muted">Payment: {job.paymentStatus.replace('_', ' ').toLowerCase()}</p>
           </Card>
@@ -423,15 +423,16 @@ export function AdminCreditsPage() {
   const grant = async (event: FormEvent) => {
     event.preventDefault()
     const value = Number(amount)
-    if (!Number.isInteger(value) || value <= 0) return setResult({ tone: 'danger', text: 'Enter a whole number of UGX above zero.' })
+    if (!Number.isInteger(value) || value <= 0) return setResult({ tone: 'danger', text: 'Enter a whole number of tokens above zero.' })
     setBusy(true)
     setResult(null)
+    const ugxValue = value * data.config.ugxPerToken // the ledger is in UGX; admins grant tokens
     const key = `${email.trim().toLowerCase()}|${value}|${note}`
     if (operation.current?.key !== key) operation.current = { key, id: crypto.randomUUID() }
     try {
-      const updated = await data.admin.grantCredits(email.trim(), value, note, operation.current.id)
+      const updated = await data.admin.grantCredits(email.trim(), ugxValue, note, operation.current.id)
       operation.current = null
-      setResult({ tone: 'success', text: `Added ${formatUGX(value)} to ${updated.email}. Their balance is now ${formatUGX(updated.available)}.` })
+      setResult({ tone: 'success', text: `Added ${formatTokens(ugxValue)} to ${updated.email}. Their balance is now ${formatTokens(updated.available)}.` })
       walletChanged() // the admin may have credited their own account
       setAmount('')
       setNote('')
@@ -454,7 +455,7 @@ export function AdminCreditsPage() {
           <h2 className="text-sm font-semibold">Add credits</h2>
           <form className="mt-4 space-y-4" onSubmit={grant}>
             <Input label="Student email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} hint="They must have signed in once." />
-            <Input label="Amount (UGX)" inputMode="numeric" required value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9]/g, ''))} />
+            <Input label="Amount (tokens)" inputMode="numeric" required value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9]/g, ''))} />
             <Input label="Note (optional)" value={note} maxLength={120} onChange={(e) => setNote(e.target.value)} hint="Shown in the student's credit history." />
             {result && <Alert tone={result.tone}>{result.text}</Alert>}
             <Button type="submit" className="w-full" loading={busy}>
@@ -484,8 +485,8 @@ export function AdminCreditsPage() {
                 {wallets.map((w) => (
                   <tr key={w.email} className="cursor-pointer hover:bg-surface-subtle" onClick={() => setEmail(w.email)}>
                     <td className="px-4 py-2.5">{w.email}</td>
-                    <td className="px-4 py-2.5 text-right font-medium">{formatUGX(w.available)}</td>
-                    <td className="px-4 py-2.5 text-right text-fg-muted">{formatUGX(w.held)}</td>
+                    <td className="px-4 py-2.5 text-right font-medium">{formatTokens(w.available)}</td>
+                    <td className="px-4 py-2.5 text-right text-fg-muted">{formatTokens(w.held)}</td>
                     <td className="hidden px-4 py-2.5 text-right text-fg-subtle sm:table-cell">{formatRelative(w.updatedAt)}</td>
                   </tr>
                 ))}

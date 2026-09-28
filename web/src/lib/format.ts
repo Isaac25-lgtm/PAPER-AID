@@ -2,6 +2,20 @@ const ugx = new Intl.NumberFormat('en-UG', { maximumFractionDigits: 0 })
 
 export const formatUGX = (amount: number) => `UGX ${ugx.format(amount)}`
 
+// Students see tokens, not money (owner decision 2026-09-28). The ledger is in UGX; the rate comes
+// from the server's public config and is set once when it loads.
+let ugxPerToken = 1000
+export const setTokenRate = (rate: number) => {
+  if (rate > 0) ugxPerToken = rate
+}
+const tokenNumber = new Intl.NumberFormat('en', { maximumFractionDigits: 1 })
+export const toTokens = (ugxAmount: number) => ugxAmount / ugxPerToken
+export const formatTokenNumber = (ugxAmount: number) => tokenNumber.format(toTokens(ugxAmount))
+export const formatTokens = (ugxAmount: number) => {
+  const text = formatTokenNumber(ugxAmount)
+  return `${text} ${text === '1' ? 'token' : 'tokens'}`
+}
+
 /** The dollar equivalent shown next to UGX amounts, at the server's configured rate. */
 export const formatUSDFromUGX = (amount: number, ugxPerUsd: number) => (ugxPerUsd > 0 ? `≈ $${(amount / ugxPerUsd).toFixed(2)}` : '')
 

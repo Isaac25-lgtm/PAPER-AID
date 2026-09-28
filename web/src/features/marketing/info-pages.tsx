@@ -104,20 +104,20 @@ const FAQ = [
   },
   {
     q: 'Can the final price be higher than the estimate?',
-    a: 'No. Your estimate is the most you will pay. The amount is held from your credits when you approve it, you are charged for the work actually done, and anything unused goes back to your balance.',
+    a: 'No. Your estimate is the most you will pay. The tokens are held from your balance when you approve it, you are charged for the work actually done, and anything unused goes back to your balance.',
   },
   {
     q: 'What if my job fails?',
     a: "You get everything back, including the estimate charge. If our accuracy check can't verify a change, we keep your original wording rather than deliver something altered, and if only part of your paper could be improved, you pay only for that part.",
   },
-  { q: 'Do credits expire?', a: 'No. Credits stay in your account until you use them. They can’t be withdrawn as cash.' },
+  { q: 'Do tokens expire?', a: 'No. Tokens stay in your account until you use them. They can’t be exchanged for cash.' },
   {
-    q: 'Can I buy credits now?',
-    a: 'Not yet. Top-ups open when mobile-money payments launch. Until then, beta jobs run without charge.',
+    q: 'Can I buy tokens now?',
+    a: 'Not yet. Buying tokens opens when mobile-money payments launch. Until then, beta jobs run without charge.',
   },
   {
     q: 'Do I need an account?',
-    a: 'Yes, so your papers and credits stay private to you. We only ask for what we need to run your jobs.',
+    a: 'Yes, so your papers and tokens stay private to you. We only ask for what we need to run your jobs.',
   },
 ]
 
@@ -127,7 +127,7 @@ export function PricingPage() {
   return (
     <>
       <PageHero eyebrow="Pricing" title="Pay for the work your paper needs.">
-        No price list and no subscription. Top up credits, see an estimate for your paper before anything runs, and pay for the work it actually needs,
+        No subscription. Buy tokens, see an estimate for your paper before anything runs, and pay for the work it actually needs,
         never more than the estimate.
       </PageHero>
       <div className="mx-auto max-w-6xl px-4 py-14 sm:px-6">
@@ -145,7 +145,7 @@ export function PricingPage() {
                 attention; you start it yourself and see its most before it runs. Everything else is priced from length alone.
               </li>
               <li>
-                <span className="font-semibold text-fg">3. You approve the estimate.</span> It is the most you will pay, and it is held from your credits
+                <span className="font-semibold text-fg">3. You approve the estimate.</span> It is the most you will pay, and it is held from your tokens
                 while the work runs.
               </li>
               <li>

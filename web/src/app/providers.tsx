@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { LogoMark } from '../components/layout/logo'
 import { AuthProvider, useAuth } from '../features/auth/auth-context'
 import { createApiSource, fetchPublicConfig } from '../lib/api-source'
+import { setTokenRate } from '../lib/format'
 import { DataContext } from '../lib/data'
 import type { PublicConfig } from '../lib/types'
 
@@ -39,7 +40,11 @@ function DataProvider({ children }: { children: ReactNode }) {
     setFailed(false)
     getAuthHeaders(false) // the services list needs only the sign-in token, never a reCAPTCHA wait
       .then((headers) => fetchPublicConfig(uid ? headers : {}))
-      .then((c) => !cancelled && setConfig(c))
+      .then((c) => {
+        if (cancelled) return
+        setTokenRate(c.ugxPerToken)
+        setConfig(c)
+      })
       .catch(() => !cancelled && setFailed(true))
     return () => {
       cancelled = true

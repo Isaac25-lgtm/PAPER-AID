@@ -140,7 +140,10 @@ def _approved(client, project_id, **plan_changes):
     assert saved.status_code == 200, saved.json()
     approved = client.post(f"/api/projects/{project_id}/plan/approve", headers=STUDENT, json={"baseVersion": saved.json()["planVersion"]})
     assert approved.status_code == 200, approved.json()
-    return approved.json()
+    body = approved.json()
+    if body["activeJob"]:  # Chapter One starts on the first approval (owner request 2026-09-28)
+        wait(client, body["activeJob"])
+    return body
 
 
 def test_a_plan_is_researched_negotiated_and_never_invents_the_students_figures(client):
@@ -169,6 +172,32 @@ def test_an_over_long_field_from_the_model_is_shortened_not_fatal(client):
     assert job["status"] == "COMPLETED", job
     analysis = client.get(f"/api/projects/{project['id']}", headers=STUDENT).json()["plan"]["alignment"][0]["analysis"]
     assert len(analysis) <= 1000 and analysis.endswith("…")
+
+
+def test_the_plans_price_includes_chapter_one_which_starts_on_approval_once(client):
+    project = _create(client)
+    quoted = client.post(f"/api/projects/{project['id']}/steps", headers=STUDENT, json={"step": "PLAN"}).json()
+    assert [line["label"] for line in quoted["then"]] == ["Chapter 1, started when you approve the plan (up to)"] and quoted["then"][0]["amount"] > 0
+    assert client.post(f"/api/projects/{project['id']}/steps/{quoted['job']['id']}/submit", headers=STUDENT, json={"quoteId": quoted["quote"]["id"]}).status_code == 200
+    wait(client, quoted["job"]["id"])
+    approved = _approved(client, project["id"], sampleSize={**PLAN["sampleSize"], "populationSource": "DHO records"})
+    assert approved["activeJob"] and approved["notice"] is None
+    chapters = {c["number"]: c for c in client.get(f"/api/projects/{project['id']}", headers=STUDENT).json()["chapters"]}
+    assert chapters[1]["current"] == 1
+    again = _approved(client, project["id"], title="A refined title")  # a later approval starts nothing
+    assert again["activeJob"] is None
+
+
+def test_chapter_one_that_cannot_start_says_why(client):
+    from app.runtime import get_runtime
+
+    rt = get_runtime()
+    project = _create(client)
+    _run(client, project["id"], "PLAN")
+    owner = rt.store.get_project(project["id"]).owner_uid
+    rt.store.update_wallet(owner, "student@example.com", lambda w: w.model_copy(update={"available": 1}))  # almost nothing left
+    approved = _approved(client, project["id"])
+    assert approved["activeJob"] is None and "could not start automatically" in approved["notice"] and "tokens" in approved["notice"]
 
 
 def test_a_stale_plan_edit_is_refused_and_approval_needs_a_complete_plan(client):
@@ -214,7 +243,8 @@ def test_a_chapter_cites_only_confirmed_evidence_and_shows_what_needs_review_aft
     assert job["status"] == "COMPLETED" and job["outcome"] == "FULL", job
     chapter = client.get(f"/api/projects/{project['id']}/chapters/2", headers=STUDENT).json()
     text = " ".join(p for s in chapter["sections"] for p in s["paragraphs"])
-    assert "(Okello, Namara, & Kato, 2022)" in text and "⟦" not in text  # rendered in APA 6 from Crossref's details
+    # APA 6 from Crossref's details. Chapter One (started on approval) cited the work first, so here it is "et al."
+    assert "(Okello et al., 2022)" in text and "⟦" not in text
     assert chapter["references"] == ["Okello, J., Namara, A., & Kato, P. (2022). Vaccine Uptake Among Caregivers in Central Uganda. Malaria Journal, 21(3), 1–10. doi:10.1186/s12936-022-0001"]
     refs = next(r for r in chapter["readiness"] if r["id"] == "C2-REFS30")
     assert refs["basis"] == "CODE" and refs["status"] == "NEEDS_REVIEW"

@@ -262,7 +262,7 @@ def test_10_an_unreviewed_chapter_is_partial_and_says_so(client, monkeypatch):
 
     monkeypatch.setattr(ProposalRunner, "grade", no_review)
     job = _run(client, pid, "CHAPTER_1")
-    assert job["outcome"] == "PARTIAL" and any("could not be reviewed" in w for w in job["warnings"])
+    assert job["outcome"] == "PARTIAL" and any("could not fully check" in w for w in job["warnings"])
     chapter = client.get(f"/api/projects/{pid}/chapters/1", headers=STUDENT).json()
     assert next(r for r in chapter["readiness"] if r["id"] == "C1-REVIEWED")["status"] == "NEEDS_REVIEW"
 
@@ -276,7 +276,7 @@ def test_11_there_are_at_most_two_fixes_and_the_last_text_is_reviewed(client, mo
     monkeypatch.setattr(ProposalRunner, "fix", lambda self, *a, **k: (sequence.append("fix"), fix(self, *a, **k))[1])
     job = _run(client, pid, "CHAPTER_1")
     assert sequence == ["review", "fix", "review", "fix", "review"]
-    assert job["outcome"] == "PARTIAL" and any("still had concerns" in w for w in job["warnings"])
+    assert job["outcome"] == "PARTIAL" and any("still need your attention" in w for w in job["warnings"])
 
 
 def test_16_reviewer_notes_reach_the_student(client):

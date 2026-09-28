@@ -3,13 +3,13 @@ import { ArrowDownLeft, ArrowUpRight, Lock, Smartphone, Wallet as WalletIcon } f
 import { Link } from 'react-router'
 import { Alert, Badge, Card, EmptyState, PageHeader, Skeleton } from '../../components/ui/primitives'
 import { useData } from '../../lib/data'
-import { formatDateTime, formatUGX, formatUSDFromUGX } from '../../lib/format'
+import { formatDateTime, formatTokens, formatUGX } from '../../lib/format'
 import type { LedgerEntry } from '../../lib/types'
 import { useTitle } from '../../lib/use-title'
 import { useWallet } from '../../lib/use-wallet'
 
 const KIND_LABELS: Record<LedgerEntry['kind'], string> = {
-  TOP_UP: 'Credits added',
+  TOP_UP: 'Tokens added',
   HOLD: 'Held',
   CHARGE: 'Charged',
   RELEASE: 'Returned',
@@ -20,22 +20,21 @@ const KIND_LABELS: Record<LedgerEntry['kind'], string> = {
 const SIGN: Record<LedgerEntry['kind'], 1 | -1 | 0> = { TOP_UP: 1, HOLD: -1, CHARGE: 0, RELEASE: 1, REFUND: 1 }
 
 export function CreditsPage() {
-  useTitle('Credits')
+  useTitle('Tokens')
   const { config } = useData()
   const { wallet, error } = useWallet()
-  const rate = wallet?.ugxPerUsd ?? config.ugxPerUsd
 
   return (
     <>
-      <PageHeader title="Credits" description="You pay for the work each paper needs, from credits you add in advance. Credits never expire." />
+      <PageHeader title="Tokens" description="You pay for the work each paper needs with tokens you buy in advance. Tokens never expire." />
       {error && (
         <Alert tone="danger" className="mb-5">
           {error}
         </Alert>
       )}
       {wallet?.testCredits && (
-        <Alert tone="warning" className="mb-5" title="Test credits">
-          This is a local test setup. These credits are added by an admin for testing and are not money.
+        <Alert tone="warning" className="mb-5" title="Test tokens">
+          This is a local test setup. These tokens are added by an admin for testing and are not money.
         </Alert>
       )}
 
@@ -46,25 +45,25 @@ export function CreditsPage() {
           </p>
           {wallet ? (
             <p className="mt-2 flex flex-wrap items-baseline gap-x-3 text-4xl font-bold tracking-tight">
-              {formatUGX(wallet.available)} <span className="text-base font-medium text-fg-subtle">{formatUSDFromUGX(wallet.available, rate)}</span>
+              {formatTokens(wallet.available)}
             </p>
           ) : (
             <Skeleton className="mt-3 h-10 w-56" />
           )}
           {wallet && wallet.held > 0 && (
             <p className="mt-3 flex items-center gap-2 text-sm text-fg-muted">
-              <Lock className="size-4 text-amber-600" aria-hidden /> {formatUGX(wallet.held)} held for work in progress. Whatever a job doesn&rsquo;t use comes back here.
+              <Lock className="size-4 text-amber-600" aria-hidden /> {formatTokens(wallet.held)} held for work in progress. Whatever a job doesn&rsquo;t use comes back here.
             </p>
           )}
         </Card>
         <Card className="p-5">
           <p className="flex items-center gap-2 text-sm font-semibold">
-            <Smartphone className="size-4 text-brand-600" aria-hidden /> Add credits
+            <Smartphone className="size-4 text-brand-600" aria-hidden /> Buy tokens
           </p>
           <p className="mt-2 text-sm leading-relaxed text-fg-muted">
-            Top-ups with mobile money open soon, from {formatUGX(config.minTopUpUgx)} ({formatUSDFromUGX(config.minTopUpUgx, rate)}).
+            Buying tokens with mobile money opens soon, from {formatTokens(config.minTopUpUgx)} ({formatUGX(config.minTopUpUgx)}). One token is {formatUGX(config.ugxPerToken)}.
           </p>
-          <p className="mt-3 text-xs text-fg-subtle">Until then, PaperAid adds credits for you. Credits can&rsquo;t be withdrawn as cash.</p>
+          <p className="mt-3 text-xs text-fg-subtle">Until then, PaperAid adds tokens for you. Tokens can&rsquo;t be exchanged for cash.</p>
         </Card>
       </div>
 
@@ -73,7 +72,7 @@ export function CreditsPage() {
         <Skeleton className="h-40 w-full" />
       ) : wallet.entries.length === 0 ? (
         <EmptyState icon={<WalletIcon className="size-5" aria-hidden />} title="No activity yet">
-          Credits you add, estimates and jobs will appear here.
+          Tokens you add, estimates and jobs will appear here.
         </EmptyState>
       ) : (
         <Card className="divide-y divide-line">
@@ -103,9 +102,9 @@ export function CreditsPage() {
                 <div className="text-right">
                   <p className={clsx('font-semibold', sign > 0 && 'text-brand-700')}>
                     {sign > 0 ? '+' : sign < 0 ? '−' : ''}
-                    {formatUGX(e.amount)}
+                    {formatTokens(e.amount)}
                   </p>
-                  <p className="text-xs text-fg-subtle">Balance {formatUGX(e.availableAfter)}</p>
+                  <p className="text-xs text-fg-subtle">Balance {formatTokens(e.availableAfter)}</p>
                 </div>
                 {e.kind === 'CHARGE' && <Badge className="sm:ml-2">from hold</Badge>}
               </div>

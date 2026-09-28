@@ -96,6 +96,7 @@ def public_config(rt: Runtime, user: "User | None" = None) -> dict:
         "creditsEnabled": rt.settings.credits_enabled,
         "minTopUpUgx": rt.settings.min_top_up_ugx,
         "ugxPerUsd": rt.settings.ugx_per_usd,
+        "ugxPerToken": rt.settings.ugx_per_token,
         "retentionDays": rt.settings.retention_days,
         "presets": PUBLIC_PRESETS,
     }
@@ -420,7 +421,7 @@ def _start_estimate(rt: Runtime, user: User, job: Job, selection: ServiceSelecti
         j.quote = None  # earlier estimate fees stay on j.billing and count toward the next quote
         if j.status == JobStatus.QUOTED:
             state.transition(j, JobStatus.DRAFT, "New estimate requested; previous quote cleared")
-        j.events.append(JobEvent(label=f"Estimate started (up to UGX {fee_cap:,} held)"))
+        j.events.append(JobEvent(label=f"Estimate started (up to {credits.tokens(fee_cap)} held)"))
         return j, w
 
     result = rt.store.update_job_and_wallet(job.id, start)
@@ -484,7 +485,7 @@ def submit(rt: Runtime, user: User, job_id: str, quote_id: str, project_gate: Pr
         j.budget_usd = max(0, q.amount - q.paid - q.fixed_ugx) / q.ugx_per_usd / q.multiplier if q.ugx_per_usd and q.multiplier else 0.0
         if settings.credits_enabled:
             held = hold_for_job(j, w)  # raises InsufficientCredits, which aborts the whole transaction
-            state.transition(j, JobStatus.QUEUED, f"Queued (UGX {held:,} held)")
+            state.transition(j, JobStatus.QUEUED, f"Queued ({credits.tokens(held)} held)")
         else:
             j.payment_status = PaymentStatus.NOT_REQUIRED
             state.transition(j, JobStatus.QUEUED, "Queued (testing: not charged)")
@@ -638,7 +639,7 @@ def delete_account(rt: Runtime, user: User) -> int:
             raise Conflict("One of your jobs is being processed. Delete your account when it finishes.", code="JOB_ACTIVE")
         if settings.credits_enabled and w.available > 0:
             raise Conflict(
-                f"Your account still has UGX {w.available:,} of credit. Contact PaperAid to have it refunded before you delete your account.",
+                f"Your account still has {credits.tokens(w.available)}. Contact PaperAid to have them refunded before you delete your account.",
                 code="ACCOUNT_HAS_CREDIT",
             )
         w.closing = True

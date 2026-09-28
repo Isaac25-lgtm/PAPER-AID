@@ -1,5 +1,5 @@
 // Proposal project contracts, mirroring backend/app/proposals/models.py (camelCase on the wire).
-import type { Job, Quote } from './types'
+import type { Job, Quote, QuoteLine } from './types'
 
 export type Level = 'BACHELORS' | 'PGD' | 'MASTERS' | 'PHD'
 export type StudyType = 'QUANTITATIVE' | 'QUALITATIVE' | 'MIXED' | 'SECONDARY' | 'NON_EMPIRICAL'
@@ -102,6 +102,9 @@ export interface Project {
   planVersion: number
   planProblems: string[]
   candidatePlan: ProposalPlan | null
+  autoChapterOne: boolean
+  /** A one-off message returned by an action (for example why Chapter One did not start). */
+  notice: string | null
   chapters: ChapterState[]
   evidenceCount: number
   activeJob: string | null
@@ -150,6 +153,8 @@ export interface EvidenceItem {
 export interface StepQuote {
   job: Job
   quote: Quote
+  /** Shown with the plan: Chapter One, which starts automatically when the plan is approved. */
+  then: QuoteLine[]
 }
 
 export interface Rulebook {
