@@ -207,3 +207,13 @@ Report: `docs/Codex_Full_Code_Audit_20260928_655cda5.md`; regressions in `backen
 
 ## 2026-09-28 — Models stay as they are (owner decision)
 "Go with the original models; we will revise the model politics later." GPT-6 Sol leads and Claude Opus 5.5 writes for every step. The Luna benchmark and any per-step model routing are not pending work until the owner reopens it; this supersedes the Luna line in "Master context adopted".
+
+## 2026-09-28 — Codex's audit of 56c4f83: all 29 findings verified and fixed
+Report: `docs/Codex_Full_Code_Audit_20260928_56c4f83.md`; regressions in `backend/tests/test_audit_56c4f83.py` and `web/scripts/e2e-audit-56c4f83.mjs`. Decisions taken while fixing (owner may revise):
+- **Revision billing:** a revision is charged by the share of its targeted sections that actually got new text; one that changes nothing fails and costs nothing. A comment is marked revised only if its sections were delivered and it was not moved or edited after pricing. A revision quote is bound to the chapter version and comments it priced.
+- **Incomplete academic review** is a partial result, charged at half its line (recorded in the job's `delivery`, no longer read from warning text).
+- **Hourly limits:** feedback, guide uploads, "Download with my choices" and PDFs share `uploads_per_hour` = 20 per student.
+- **PDF:** cached per content (chapter versions, plan, details, citation style, date) and at most 2 compiles at once per API instance; a busy instance says so (503).
+- **Upgrades:** a step missing from a job's priced engine is refused (the job fails without charge, "start it again"); the academic review runs only for jobs priced with it.
+- **Migrations** run in the scheduled cleanup: old projects move out of `users/`, and wallets' earlier entries are copied into the complete history (entries older than the 300-entry display cap were never kept and cannot be recovered).
+- **Every Job field is classified** as paper-bearing (emptied for support and expiry) or support metadata; a test fails until a new field is classified.

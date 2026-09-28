@@ -821,6 +821,8 @@ class LedgerPage(Camel):
 def wallet_history(rt: Runtime, user: User, before: str | None, limit: int = 50) -> LedgerPage:
     """The complete history, newest first, a page at a time (the wallet keeps only recent entries)."""
     limit = max(1, min(limit, 100))
+    if before is None:
+        rt.store.backfill_ledger(user.uid)  # earlier entries are in before the history is first shown (M12); once only
     entries = rt.store.ledger(user.uid, before, limit + 1)
     more = len(entries) > limit
     entries = entries[:limit]

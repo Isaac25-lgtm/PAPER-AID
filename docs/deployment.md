@@ -26,6 +26,8 @@ gcloud storage buckets create gs://PROJECT-papers --location=europe-west1 --unif
 
 Retention backstop: storage deletes any job file (under `users/`) older than 31 days, even if the app's cleanup never ran. Proposal projects live under `projects/` and are deliberately outside this rule: they are kept while the student works on them and deleted by the app 30 days after the student's last action (`cleanup_expired_projects`), which a fixed object-age rule cannot express (object age follows creation time, not renewal).
 
+Projects created before that change kept their files under `users/{uid}/projects/`. The scheduled cleanup (`/tasks/cleanup`) moves them to `projects/` (`migrate_legacy_project_files`, resumable and safe to repeat) and copies wallets' earlier entries into the complete credit history (`backfill_ledgers`). After the first deploy with these, run the cleanup once by hand (or wait for its schedule) and check its response: `projectsMigrated` and `ledgersBackfilled` go to 0 on later runs.
+
 ```bash
 cat > lifecycle.json <<'EOF'
 {"rule": [{"action": {"type": "Delete"}, "condition": {"age": 31, "matchesPrefix": ["users/"]}}]}

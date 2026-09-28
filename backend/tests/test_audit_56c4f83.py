@@ -687,3 +687,16 @@ def test_l29_the_load_test_reports_a_crashed_student(monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["load_test", "--students", "1", "--rounds", "1"])
     assert load_test.main() == 1
     assert "synthetic malformed response" in capsys.readouterr().out
+
+
+def test_m12_the_history_is_complete_the_first_time_it_is_shown(client):
+    from app.jobs.models import Wallet
+    from app.pricing import credits
+
+    rt = get_runtime()
+    legacy = Wallet(uid=UID, email="student@example.com")
+    credits.top_up(legacy, 4000, "before-upgrade")
+    rt.store._wallet_path(UID).write_text(legacy.model_dump_json(by_alias=True), encoding="utf-8")
+    rt.store._ledger_path(UID).unlink(missing_ok=True)
+    notes = [e["note"] for e in client.get("/api/wallet/history", headers=STUDENT).json()["entries"]]
+    assert notes == ["before-upgrade"]
