@@ -497,7 +497,10 @@ class AIRunner:
         return self._engine.lead_model if STEPS[task].role == "lead" else self._engine.writer_model
 
     def _prompt_for(self, task: str) -> str:
-        return self._engine.prompts.get(task, STEPS[task].prompt)  # a step added after pricing uses its current prompt
+        # Every executed step must be in the engine the run was priced with (Codex audit 56c4f83 M28).
+        if task not in self._engine.prompts:
+            raise PermanentStageError("ENGINE_CHANGED", "PaperAid was updated after this job was priced. Nothing was charged; please start it again.", f"task {task} not in engine")
+        return self._engine.prompts[task]
 
     def _call[T: BaseModel](
         self,

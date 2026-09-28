@@ -29,7 +29,7 @@ def get_runtime() -> Runtime:
     runtime = Runtime(settings, store, files)
     from app.proposals import rulebook
 
-    rulebook.use_storage(files.get)  # institution profiles built from students' guides
+    rulebook.use_storage(files.get, files.exists)  # institution profiles built from students' guides
     runtime.queue = (
         CloudTasksQueue(settings)
         if settings.queue_backend == "cloud_tasks"

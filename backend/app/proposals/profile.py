@@ -5,6 +5,7 @@ does not cover from that default and saying so. A profile is data: its chapters,
 and checklist steer the proposal exactly as the default rulebook does."""
 
 import copy
+import math
 import re
 import secrets
 from typing import Any
@@ -60,6 +61,25 @@ def reference() -> dict[str, Any]:
     return {"structure": structure, "knownKeys": known}
 
 
+def _num(value: Any) -> float:
+    """A finite number from a model value, or 0 when it is not one (Codex audit 56c4f83 M16)."""
+    if isinstance(value, bool) or not isinstance(value, int | float | str):
+        return 0.0
+    try:
+        number = float(value)
+    except ValueError:
+        return 0.0
+    return number if math.isfinite(number) else 0.0
+
+
+def _dicts(value: Any) -> list[dict[str, Any]]:
+    return [v for v in value if isinstance(v, dict)] if isinstance(value, list) else []
+
+
+def _texts(value: Any) -> list[str]:
+    return [v.strip() for v in value if isinstance(v, str) and v.strip()] if isinstance(value, list) else []
+
+
 def _key(value: str) -> str:
     return re.sub(r"[^a-z]", "", value.lower())[:24] or "section"
 
@@ -74,18 +94,20 @@ def build(answer: dict[str, Any], guide_name: str) -> dict[str, Any]:
     """A rulebook from the finalised profile. Structure that cannot be used is refused (NotAGuide);
     values the guide did not give come from the default and are listed in `unclear`."""
     default = rulebook.load(rulebook.DEFAULT)
-    chapters_in = {c.get("number"): c for c in answer.get("chapters", []) if isinstance(c, dict)}
-    if sorted(chapters_in) != [1, 2, 3] or any(len(c.get("sections", [])) < 2 for c in chapters_in.values()):
+    if not isinstance(answer, dict):
+        raise NotAGuide("the profile is not an object")
+    chapters_in = {c.get("number"): c for c in _dicts(answer.get("chapters"))}
+    if sorted(chapters_in, key=str) != [1, 2, 3] or any(len(_dicts(c.get("sections"))) < 2 for c in chapters_in.values()):
         raise NotAGuide("the profile needs chapters 1-3 with at least two sections each")
-    unclear = [u.strip() for u in answer.get("unclear", []) if isinstance(u, str) and u.strip()][:20]
+    unclear = _texts(answer.get("unclear"))[:20]
     source = f"{answer.get('institution', '').strip() or 'Institution'} research guide ({guide_name[:80]})"
 
-    shares = _normalised([float(chapters_in[n].get("share") or 0) for n in (1, 2, 3)])
+    shares = _normalised([_num(chapters_in[n].get("share")) for n in (1, 2, 3)])
     chapters = []
     for n, share in zip((1, 2, 3), shares, strict=True):
         spec = chapters_in[n]
-        raw = spec["sections"][:20]
-        section_shares = _normalised([float(s.get("share") or 0) for s in raw])
+        raw = _dicts(spec["sections"])[:20]
+        section_shares = _normalised([_num(s.get("share")) for s in raw])
         seen: set[str] = set()
         sections = []
         per_objective_used = False
@@ -105,37 +127,38 @@ def build(answer: dict[str, Any], guide_name: str) -> dict[str, Any]:
     chapters.append(copy.deepcopy(next(c for c in default["chapters"] if c.get("kind") == "CONCEPT")))  # the concept paper keeps the default layout
 
     levels = copy.deepcopy(default["levels"])
-    given = {entry.get("level"): entry for entry in answer.get("levels", []) if isinstance(entry, dict)}
+    given = {entry.get("level"): entry for entry in _dicts(answer.get("levels"))}
     for level in LEVELS:
         entry = given.get(level)
-        if entry and 0 < int(entry.get("pagesMin") or 0) <= int(entry.get("pagesMax") or 0) <= 200:
-            levels[level] = {"label": levels[level]["label"], "pages": [int(entry["pagesMin"]), int(entry["pagesMax"])], "source": source}
+        low, high = (int(_num(entry.get("pagesMin"))), int(_num(entry.get("pagesMax")))) if entry else (0, 0)
+        if 0 < low <= high <= 200:
+            levels[level] = {"label": levels[level]["label"], "pages": [low, high], "source": source}
     if not given:
         unclear.append("The guide gives no page range for a proposal, so a typical length is used.")
 
-    objectives = answer.get("objectives") or {}
-    low, high = int(objectives.get("min") or 0), int(objectives.get("max") or 0)
+    objectives = answer.get("objectives") if isinstance(answer.get("objectives"), dict) else {}
+    low, high = int(_num(objectives.get("min"))), int(_num(objectives.get("max")))
     counts = {"min": low, "max": high, "source": source} if 0 < low <= high <= 10 else dict(default["objectives"])
 
-    fmt = answer.get("formatting") or {}
+    fmt = answer.get("formatting") if isinstance(answer.get("formatting"), dict) else {}
     formatting = dict(default["formatting"])
-    if str(fmt.get("font", "")).strip():
-        formatting["font"] = str(fmt["font"]).strip()[:60]
-    if 9 <= float(fmt.get("sizePt") or 0) <= 16:
-        formatting["size_pt"] = float(fmt["sizePt"])
-    if 1 <= float(fmt.get("lineSpacing") or 0) <= 3:
-        formatting["line_spacing"] = float(fmt["lineSpacing"])
-    if 0.5 <= float(fmt.get("marginsIn") or 0) <= 2:
-        formatting["margins_in"] = float(fmt["marginsIn"])
+    if isinstance(fmt.get("font"), str) and fmt["font"].strip():
+        formatting["font"] = fmt["font"].strip()[:60]
+    if 9 <= _num(fmt.get("sizePt")) <= 16:
+        formatting["size_pt"] = _num(fmt["sizePt"])
+    if 1 <= _num(fmt.get("lineSpacing")) <= 3:
+        formatting["line_spacing"] = _num(fmt["lineSpacing"])
+    if 0.5 <= _num(fmt.get("marginsIn")) <= 2:
+        formatting["margins_in"] = _num(fmt["marginsIn"])
     formatting["source"] = source
 
     rules = [
         {"id": f"G-{i}", "requirement": str(r).strip()[:400], "interpretation": "", "enforcement": "REQUIRED", "type": "ai", "source": source}
-        for i, r in enumerate([r for r in answer.get("rules", []) if isinstance(r, str) and r.strip()][:25], start=1)
+        for i, r in enumerate(_texts(answer.get("rules"))[:25], start=1)
     ]
     questions: dict[str, list[dict[str, str]]] = {"1": [], "2": [], "3": []}
-    for i, q in enumerate(answer.get("vetting", []), start=1):
-        if isinstance(q, dict) and str(q.get("chapter")) in questions and str(q.get("question", "")).strip():
+    for i, q in enumerate(_dicts(answer.get("vetting")), start=1):
+        if str(q.get("chapter")) in questions and isinstance(q.get("question"), str) and q["question"].strip():
             questions[str(q["chapter"])].append({"id": f"C{q['chapter']}-G{i}", "question": str(q["question"]).strip()[:300]})
     for n, qs in questions.items():
         if not qs:  # no criteria for this chapter in the guide: general proposal questions

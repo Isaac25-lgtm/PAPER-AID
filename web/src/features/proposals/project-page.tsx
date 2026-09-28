@@ -98,7 +98,7 @@ function ChapterPanel({ project, number, running, onStarted, onChanged }: { proj
       }
       description={
         concept
-          ? 'A summary of your study of at most five pages, for your supervisor to approve before the proposal: written from your approved plan, with five to eight annotated references.'
+          ? 'A short summary of your study (about five pages) for your supervisor to approve before the proposal: written from your approved plan, with five to eight annotated references.'
           : 'PaperAid researches what the chapter needs, writes it from your approved plan and checks it thoroughly before you see it. Earlier versions are kept.'
       }
       disabledReason={running ? 'A step is running for this proposal. Wait for it to finish.' : planReady ? undefined : 'Approve your plan first: it is written from it.'}

@@ -10,6 +10,7 @@ from functools import cache
 from pathlib import Path
 from typing import Any
 
+from app.core.errors import AppError
 from app.proposals import sampling
 from app.proposals.models import Level, ProposalPlan
 
@@ -17,13 +18,22 @@ RULEBOOKS = Path(__file__).parent / "rulebooks"
 DEFAULT = "ucu-2018-v1"
 
 
-_stored: Callable[[str], bytes] | None = None  # reads an institution profile saved in storage (set by the runtime)
+_stored: tuple[Callable[[str], bytes], Callable[[str], bool]] | None = None  # (read, exists) for saved profiles, set by the runtime
+PROFILE_MISSING = "Your institution's profile could not be found. Read your guide again, or use the standard structure."
 
 
-def use_storage(reader: Callable[[str], bytes]) -> None:
+def use_storage(reader: Callable[[str], bytes], exists: Callable[[str], bool]) -> None:
     global _stored
-    _stored = reader
+    _stored = (reader, exists)
     load.cache_clear()
+
+
+def available(rulebook_id: str) -> bool:
+    try:
+        load(rulebook_id)
+    except AppError:
+        return False
+    return True
 
 
 def stored_path(rulebook_id: str) -> str:
@@ -41,7 +51,10 @@ def load(rulebook_id: str) -> dict[str, Any]:
         return json.loads(packaged.read_text(encoding="utf-8"))
     if _stored is None or not rulebook_id.startswith("custom-"):
         raise ValueError(f"unknown rulebook {rulebook_id}")
-    return json.loads(_stored(stored_path(rulebook_id)))
+    read, exists = _stored
+    if not exists(stored_path(rulebook_id)):  # Codex audit 56c4f83 M17: refused clearly, never a server error
+        raise AppError(PROFILE_MISSING, code="PROFILE_MISSING", status=409)
+    return json.loads(read(stored_path(rulebook_id)))
 
 
 def chapter_spec(rulebook_id: str, number: int) -> dict[str, Any]:

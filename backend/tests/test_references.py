@@ -17,6 +17,7 @@ ENTRY = "Ojakaa, D. I., & Jarvis, J. D. (2014). Acceptance of a malaria vaccine 
 def lookups(monkeypatch):
     state = {"works": {}, "found": [], "retracted": set()}
     monkeypatch.setattr(fetch, "crossref_work", lambda doi: state["works"].get(doi))
+    monkeypatch.setattr(fetch, "crossref_lookup", lambda doi: ("FOUND", state["works"][doi]) if doi in state["works"] else ("NOT_FOUND", None))
     monkeypatch.setattr(fetch, "crossref_search", lambda text, rows=3: state["found"])
     monkeypatch.setattr(fetch, "openalex_retracted", lambda doi: doi in state["retracted"])
     return state

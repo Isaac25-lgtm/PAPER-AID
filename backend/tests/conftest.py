@@ -63,6 +63,7 @@ def _client(tmp_path, monkeypatch, pricing: str):
 
     monkeypatch.setattr(fetch, "openalex_search", openalex_search)
     monkeypatch.setattr(fetch, "crossref_work", lambda doi: models.crossref.get(doi))
+    monkeypatch.setattr(fetch, "crossref_lookup", lambda doi: ("FOUND", models.crossref[doi]) if doi in models.crossref else ("NOT_FOUND", None))
     monkeypatch.setattr(fetch, "crossref_search", lambda text, rows=3: [dict(r) for r in models.crossref_found])
     monkeypatch.setattr(fetch, "openalex_retracted", lambda doi: doi in models.retracted)
     monkeypatch.setattr(fetch, "resolve_doi", lambda url: models.dois.get(url, fetch.doi_in(url)))

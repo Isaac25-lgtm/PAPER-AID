@@ -11,8 +11,10 @@ user, so ownership, versions and state rules can be tested directly.
 
 import difflib
 import hashlib
+import json
 import logging
 import secrets
+import threading
 from datetime import timedelta
 from pathlib import PurePosixPath
 from typing import Literal
@@ -49,12 +51,13 @@ from app.proposals.models import (
     WrittenSection,
     moved_path,
 )
-from app.proposals.pipeline import INPUT, load_library
+from app.proposals.pipeline import INPUT, _confirmed_gap, load_library
 from app.runtime import Runtime
 
 logger = logging.getLogger("paperaid.proposals")
 Step = Literal["PLAN", "CHAPTER_1", "CHAPTER_2", "CHAPTER_3", "CONCEPT", "REVISE_1", "REVISE_2", "REVISE_3", "PROFILE"]
 CONCEPT = 4  # the concept paper is stored like a chapter, as number 4
+PDF_SLOTS = threading.BoundedSemaphore(2)  # PDF compilations at once on one API instance (Codex audit 56c4f83 M27)
 
 
 def _valid_id(project_id: str) -> bool:
@@ -122,8 +125,16 @@ def view(rt: Runtime, p: Project) -> ProjectView:
     out = p.view()
     docs = {c.number: doc for c in p.chapters if c.current and (doc := _chapter_doc(rt, c)) is not None}
     out.written = [WrittenSection(chapter=n, key=s.key, number=s.number, heading=s.heading) for n, doc in sorted(docs.items()) if n != CONCEPT for s in doc.sections]
+    out.guide_name = p.guide.name if p.guide else None
+    try:
+        book = rulebook.load(p.rulebook)
+    except AppError as exc:
+        if exc.code != "PROFILE_MISSING":
+            raise
+        out.institution_notes, out.blockers = [rulebook.PROFILE_MISSING], [rulebook.PROFILE_MISSING]
+        out.active_job = p.active_job if step_running(rt, p) else None
+        return out
     out.blockers = proposal_export.final_blockers(p, docs)
-    book = rulebook.load(p.rulebook)
     out.institution, out.institution_notes = book["institution"], list(book.get("unclear", []))
     out.guide_name = p.guide.name if p.guide else None
     out.guide_read = p.guide is not None and book.get("guide_sha256") == p.guide.sha256
@@ -188,6 +199,8 @@ def update_details(rt: Runtime, user: User, project_id: str, inputs: ProposalInp
 def save_plan(rt: Runtime, user: User, project_id: str, plan: ProposalPlan, base_version: int) -> ProjectView:
     """The student's edit of the plan. It must start from the current version; it needs approving
     again, and sections written from changed decisions show "needs review"."""
+
+    plan = _confirmed_gap(plan, {i for i, item in load_library(rt.files, _owned(rt, user, project_id).evidence_files).items() if item.usable})
 
     def apply(p: Project) -> Project:
         if p.plan_version != base_version:
@@ -356,12 +369,28 @@ def export_docx(rt: Runtime, user: User, project_id: str, final: bool) -> tuple[
 def export_pdf(rt: Runtime, user: User, project_id: str, final: bool) -> tuple[bytes, str]:
     """The same proposal as a PDF for reading and sharing: the Word export converted to LaTeX and
     compiled offline (no AI). Word stays the file to submit, in the institution's layout."""
-    _rate_limit(rt, user, "pdf", rt.settings.quotes_per_hour)
     data, name = export_docx(rt, user, project_id, final)
-    pdf, problem = compile_pdf(to_latex(data))
+    p = _owned(rt, user, project_id)
+    # The same content always gives the same PDF: kept beside the project, keyed by what the document
+    # is built from (the Word file itself carries its creation time), so a repeat costs nothing (M27).
+    built_from = [
+        final, p.plan_version, p.citation, p.rulebook, p.inputs.model_dump(mode="json"), p.title_page.model_dump(mode="json"),
+        [(c.number, c.current) for c in p.chapters], p.evidence_files, utcnow().date().isoformat(),
+    ]
+    cached = f"{p.storage_prefix()}/pdf/{hashlib.sha256(json.dumps(built_from).encode()).hexdigest()[:24]}.pdf"
+    if rt.files.exists(cached):
+        return rt.files.get(cached), name.removesuffix(".docx") + ".pdf"
+    _rate_limit(rt, user, "pdf", rt.settings.uploads_per_hour)
+    if not PDF_SLOTS.acquire(blocking=False):  # compilers are bounded per instance
+        raise AppError("PaperAid is making other PDFs right now. Try again in a minute, or download the Word file.", code="PDF_BUSY", status=503)
+    try:
+        pdf, problem = compile_pdf(to_latex(data))
+    finally:
+        PDF_SLOTS.release()
     if pdf is None:
         log(logger, logging.WARNING, "proposal pdf failed", projectId=project_id, problem=problem)
         raise AppError("The PDF could not be made this time. Download the Word file instead.", code="PDF_FAILED")
+    rt.files.put(cached, pdf, "application/pdf")
     return pdf, name.removesuffix(".docx") + ".pdf"
 
 
@@ -533,6 +562,7 @@ def upload_guide(rt: Runtime, user: User, project_id: str, filename: str, data: 
     p = _owned(rt, user, project_id)
     if any(c.versions for c in p.chapters):
         raise AppError("Your chapters already follow the current structure. Start a new proposal to use your institution's guide.", code="CHAPTERS_WRITTEN")
+    _rate_limit(rt, user, "guide", rt.settings.uploads_per_hour)
     model = inspect_upload(data, filename, rt.settings.max_upload_bytes, MAX_GUIDE_WORDS, rt.settings.max_pdf_pages, min_words=300)
     text = "\n".join(b.text for b in model.blocks if b.text.strip())
     sha = hashlib.sha256(text.encode()).hexdigest()
@@ -561,7 +591,8 @@ def use_default_rulebook(rt: Runtime, user: User, project_id: str) -> ProjectVie
     """Go back to the default structure (before any chapter is written)."""
 
     def apply(q: Project) -> Project:
-        if any(c.versions for c in q.chapters):
+        # always allowed when the profile is gone: the proposal must stay usable (Codex audit 56c4f83 M17)
+        if any(c.versions for c in q.chapters) and rulebook.available(q.rulebook):
             raise AppError("Your chapters already follow the current structure.", code="CHAPTERS_WRITTEN")
         q.rulebook = rulebook.DEFAULT
         return q
@@ -627,6 +658,7 @@ def _written(rt: Runtime, p: Project) -> list[feedback.Written]:
 def add_feedback(rt: Runtime, user: User, project_id: str, text: str, filename: str = "", data: bytes = b"") -> ProjectView:
     """A round of supervisor comments, pasted or from a file, each placed where code suggests."""
     p = _owned(rt, user, project_id)
+    _rate_limit(rt, user, "feedback", rt.settings.uploads_per_hour)
     read = feedback.read_file(filename, data) if data else feedback.split(text)
     if not read:
         raise AppError("No comments were found. Paste them one per line or paragraph, or upload the marked-up file.", code="NO_FEEDBACK")
@@ -758,8 +790,17 @@ def compare(rt: Runtime, user: User, project_id: str, number: int, older: int, n
     library = load_library(rt.files, p.evidence_files)
 
     def rendered(doc: ChapterDocument) -> dict[str, tuple[str, str, list[str]]]:
+        """What the student sees of each section: its prose, then its table's caption and rows, so a
+        changed schedule or budget is a change (Codex audit 56c4f83 M18)."""
         citer = evidence.Citer(library, p.citation)  # its own: APA 6 names all authors only at a first citation
-        return {s.key: (s.number, s.heading, [citer.render(par) for par in s.paragraphs]) for s in doc.sections}
+        out = {}
+        for s in doc.sections:
+            lines = [citer.render(par) for par in s.paragraphs]
+            if s.table:
+                lines.append(f"Table: {citer.render(s.table_caption)}".rstrip())
+                lines += [" | ".join(citer.render(cell) for cell in row) for row in s.table]
+            out[s.key] = (s.number, s.heading, lines)
+        return out
 
     before, after = rendered(a), rendered(b)
     sections = []
@@ -772,8 +813,11 @@ def compare(rt: Runtime, user: User, project_id: str, number: int, older: int, n
             sections.append(SectionDiff(number=num, heading=heading, status="REMOVED", pieces=[DiffPiece(op="removed", text=BREAK.join(pars))]))
         else:
             num, heading, pars = after[key]
-            same = before[key][2] == pars
+            renamed = before[key][:2] != (num, heading)
+            same = before[key][2] == pars and not renamed
             pieces = [DiffPiece(op="same", text=BREAK.join(pars))] if same else _pieces(_words(before[key][2]), _words(pars))
+            if renamed:
+                pieces.insert(0, DiffPiece(op="removed", text=f"{before[key][0]} {before[key][1]}{BREAK}"))
             sections.append(SectionDiff(number=num, heading=heading, status="SAME" if same else "CHANGED", pieces=pieces))
     return Comparison(number=number, older=older, newer=newer, changed=sum(1 for s in sections if s.status != "SAME"), sections=sections)
 

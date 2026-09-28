@@ -669,8 +669,8 @@ def _readiness(
         pages = document.words / 250
         items.append(
             ReadinessItem(
-                id="C4-LENGTH", question="Is the concept paper at most five pages?", basis="CODE", chapter=4, status="PASS" if pages <= 5 else "NEEDS_REVIEW",
-                note=f"About {pages:.1f} pages at double spacing.",
+                id="C4-LENGTH", question="Is the concept paper about five pages or less (estimated)?", basis="CODE", chapter=4, status="PASS" if pages <= 5 else "NEEDS_REVIEW",
+                note=f"About {pages:.1f} pages of text at double spacing, estimated from its words; check the page count in Word.",
             )
         )
         count = len(sources)

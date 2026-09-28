@@ -473,3 +473,217 @@ def test_m13_a_project_that_cannot_be_erased_does_not_hide_the_next(client):
     rt.store.update_project(first, lambda p: p.model_copy(update={"active_job": blocked.id}))
     assert jobs.cleanup_expired_projects(rt) == 1
     assert rt.store.get_project(first) is not None and rt.store.get_project(second) is None
+
+
+# --- M14-M28, L29 -----------------------------------------------------------------------------------
+
+
+def test_m14_download_with_choices_keeps_the_logo(fixed_client):
+    from tests.test_api import get_quote
+    from tests.test_formatting_options import _png
+
+    rt = get_runtime()
+    job, _ = _paper(rt)
+    assert fixed_client.post(f"/api/jobs/{job.id}/files/logo", headers=STUDENT, files={"file": ("logo.png", _png(), "image/png")}).status_code == 200
+    selection = {"writing": "REFINE", "academic": False, "formatting": "FORMAT", "preset": "apa7", "logo": "LEFT"}
+    quote = get_quote(fixed_client, job.id, selection)
+    assert fixed_client.post(f"/api/jobs/{job.id}/submit", headers=STUDENT, json={"quoteId": quote["id"]}).status_code == 200
+    assert wait(fixed_client, job.id, timeout=120)["status"] == "COMPLETED"
+    assert fixed_client.post(f"/api/jobs/{job.id}/rebuild", headers=STUDENT).status_code == 200
+    rebuilt = Document(io.BytesIO(fixed_client.get(f"/api/jobs/{job.id}/outputs/paper-reviewed", headers=STUDENT).content))
+    assert len(rebuilt.inline_shapes) == 1
+
+
+def test_m15_a_saved_research_gap_keeps_only_confirmed_evidence(client):
+    pid = _create(client)["id"]
+    edited = plan(researchGap={"known": "Established", "missing": "Unknown locally", "contribution": "Measure locally", "evidence": ["E999999", "not-an-id"]})
+    saved = client.post(f"/api/projects/{pid}/plan", headers=STUDENT, json={"plan": edited.model_dump(by_alias=True), "baseVersion": 0})
+    assert saved.status_code == 200 and saved.json()["plan"]["researchGap"]["evidence"] == []
+
+
+def test_m16_malformed_profile_values_never_crash_the_step():
+    import pytest
+
+    from app.proposals import profile
+    from tests.fake_models import profile_answer
+
+    answer = profile_answer({"guide": "research proposal", "reference": profile.reference()})
+    answer["formatting"]["sizePt"] = "twelve"
+    answer["levels"] = [{"level": "MASTERS", "pagesMin": "twenty", "pagesMax": float("nan")}]
+    answer["chapters"][0]["sections"][0]["share"] = float("inf")
+    book = profile.build(answer, "guide.docx")
+    assert book["formatting"]["size_pt"] == rulebook.load(rulebook.DEFAULT)["formatting"]["size_pt"]
+    with pytest.raises(profile.NotAGuide):
+        profile.build({**answer, "chapters": "three chapters"}, "guide.docx")
+    with pytest.raises(profile.NotAGuide):
+        profile.build(["not", "an", "object"], "guide.docx")  # type: ignore[arg-type]
+
+
+def test_m17_a_missing_profile_is_a_clear_state_not_a_crash(client):
+    from app.proposals import profile
+    from tests.fake_models import profile_answer
+
+    rt = get_runtime()
+    pid = _create(client)["id"]
+    other = _create(client)["id"]
+    book = profile.build(profile_answer({"guide": "research proposal", "reference": profile.reference()}), "guide.docx")
+    path = rulebook.stored_path(book["id"])
+    rt.files.put(path, json.dumps(book).encode(), "application/json")
+    rt.store.update_project(pid, lambda p: p.model_copy(update={"rulebook": book["id"]}))
+    rt.files.delete(path)
+    rulebook.load.cache_clear()
+    view = client.get(f"/api/projects/{pid}", headers=STUDENT)
+    assert view.status_code == 200 and view.json()["institutionNotes"] == [rulebook.PROFILE_MISSING]
+    listed = client.get("/api/projects", headers=STUDENT)
+    assert listed.status_code == 200 and {p["id"] for p in listed.json()} >= {pid, other}
+    restored = client.post(f"/api/projects/{pid}/rulebook/default", headers=STUDENT)
+    assert restored.status_code == 200 and restored.json()["rulebook"] == rulebook.DEFAULT
+
+
+def test_m18_a_changed_table_is_a_changed_section(client):
+    rt = get_runtime()
+    pid, base = _project(client, number=3)
+    table = next(s for s in base.sections if s.key == "workplan")
+    table.table, table.table_caption = [["Task", "Month"], ["Pilot", "1"]], "Original schedule"
+    first = rt.store.get_project(pid).chapter(3).versions[0].path
+    rt.files.put(first, base.model_dump_json(by_alias=True).encode(), "application/json")
+    newer = base.model_copy(deep=True)
+    changed = next(s for s in newer.sections if s.key == "workplan")
+    changed.table[1][1], changed.table_caption = "6", "Changed schedule"
+    second = first.replace("seed.json", "second.json")
+    rt.files.put(second, newer.model_dump_json(by_alias=True).encode(), "application/json")
+    rt.store.update_project(pid, lambda q: (q.chapter(3).versions.append(StoredChapterVersion(version=2, job_id="job_second", words=200, plan_version=1, path=second)), q)[1])
+    diff = client.get(f"/api/projects/{pid}/chapters/3/compare?older=1&newer=2", headers=STUDENT).json()
+    assert diff["changed"] == 1
+    pieces = next(s for s in diff["sections"] if s["status"] == "CHANGED")["pieces"]
+    assert any(p["op"] == "added" and "6" in p["text"] for p in pieces) and any(p["op"] == "removed" and "Original" in p["text"] for p in pieces)
+
+
+def test_m19_the_list_of_tables_prints_citations_not_tokens(client):
+    from app.proposals import export
+    from tests.test_proposals import LIB
+
+    pid, chapter = _project(client, number=3)
+    table = next(s for s in chapter.sections if s.key == "workplan")
+    table.table, table.table_caption = [["Task", "Month"], ["Pilot", "1"]], "Schedule informed by ⟦E00000b⟧"
+    data = export.build(get_runtime().store.get_project(pid), {3: chapter}, LIB, draft=True)
+    text = "\n".join(p.text for p in Document(io.BytesIO(data)).paragraphs)
+    assert "⟦" not in text and "Table 3.1: Schedule informed by" in text
+
+
+def test_m20_a_truncated_image_is_refused_cleanly(client):
+    job, _ = _paper(get_runtime())
+    response = client.post(f"/api/jobs/{job.id}/files/logo", headers=STUDENT, files={"file": ("bad.png", b"\x89PNG\r\n\x1a\n", "image/png")})
+    assert response.status_code == 422 and response.json()["code"] == "LOGO_UNREADABLE"
+
+
+def test_m21_feedback_and_guides_have_their_own_hourly_limit(client):
+    rt = get_runtime()
+    rt.settings.uploads_per_hour = 2
+    pid = _create(client)["id"]
+    codes = [client.post(f"/api/projects/{pid}/feedback", headers=STUDENT, json={"text": "Clarify this."}).status_code for _ in range(3)]
+    assert codes == [200, 200, 429]
+
+
+def test_m22_a_later_author_is_not_the_first_author(monkeypatch):
+    from app.analysis import fetch, references
+    from tests.test_references import ENTRY, RECORD
+
+    monkeypatch.setattr(fetch, "crossref_lookup", lambda doi: ("FOUND", RECORD))
+    monkeypatch.setattr(fetch, "openalex_retracted", lambda doi: False)
+    wrong = ENTRY.replace("Ojakaa, D. I., & Jarvis, J. D.", "Jarvis, J. D.") + " https://doi.org/" + RECORD["doi"]
+    check = references.verify(wrong)
+    assert check.status == "MISMATCH" and "registered first author is Ojakaa" in check.note
+    right = references.verify(ENTRY + " https://doi.org/" + RECORD["doi"])
+    assert right.status == "VERIFIED"
+
+
+def test_m23_an_unreachable_registry_is_not_an_unregistered_doi(monkeypatch):
+    from app.analysis import fetch, references
+    from tests.test_references import ENTRY, RECORD
+
+    monkeypatch.setattr(fetch, "crossref_lookup", lambda doi: ("UNAVAILABLE", None))
+    down = references.verify(ENTRY + " https://doi.org/" + RECORD["doi"])
+    assert down.status == "NOT_VERIFIED" and "not registered" not in down.note and "could not reach" in down.note
+    monkeypatch.setattr(fetch, "crossref_search", lambda text, rows=3: None)
+    assert "could not reach" in references.verify(ENTRY).note
+
+
+def test_m23_crossref_lookup_tells_404_from_failure(monkeypatch):
+    from app.analysis import fetch
+
+    monkeypatch.setattr(fetch, "_fetch", lambda url: (404, b"", ""))
+    assert fetch.crossref_lookup("10.1/x") == ("NOT_FOUND", None)
+    monkeypatch.setattr(fetch, "_fetch", lambda url: None)
+    assert fetch.crossref_lookup("10.1/x") == ("UNAVAILABLE", None)
+    monkeypatch.setattr(fetch, "_fetch", lambda url: (503, b"", ""))
+    assert fetch.crossref_lookup("10.1/x") == ("UNAVAILABLE", None)
+
+
+def test_m24_an_incomplete_academic_review_is_partial_and_charged_by_share(fixed_client, monkeypatch):
+    from app.jobs import pipeline
+    from tests.test_api import get_quote
+
+    warning = "The academic review reached this job's spending limit before it covered the whole paper, so some sections were not reviewed."
+    monkeypatch.setattr(pipeline, "_academic_review", lambda ctx, model: ([], warning))
+    job, _ = _paper(get_runtime())
+    quote = get_quote(fixed_client, job.id, {"writing": "AI_CHECK", "academic": True})
+    academic = next(line["amount"] for line in quote["lines"] if line.get("service") == "ACADEMIC")
+    assert fixed_client.post(f"/api/jobs/{job.id}/submit", headers=STUDENT, json={"quoteId": quote["id"]}).status_code == 200
+    result = wait(fixed_client, job.id)
+    assert result["outcome"] == "PARTIAL" and result["billing"]["charged"] == quote["amount"] - academic // 2
+
+
+def test_m27_a_proposal_pdf_is_compiled_once_and_bounded(client, monkeypatch):
+    from app.proposals import service as proposals
+
+    pid, _ = _project(client)
+    compiled = []
+    monkeypatch.setattr(proposals, "compile_pdf", lambda result: (compiled.append(1), (b"%PDF-1.4 test", ""))[1])
+    assert client.get(f"/api/projects/{pid}/export.pdf", headers=STUDENT).content.startswith(b"%PDF")
+    assert client.get(f"/api/projects/{pid}/export.pdf", headers=STUDENT).status_code == 200
+    assert len(compiled) == 1  # the same document is served from the saved PDF
+    get_runtime().store.update_project(pid, lambda p: p.model_copy(update={"title_page": p.title_page.model_copy(update={"student_name": "Changed Name"})}))
+    for _ in range(2):
+        assert proposals.PDF_SLOTS.acquire(blocking=False)
+    try:
+        busy = client.get(f"/api/projects/{pid}/export.pdf", headers=STUDENT)
+    finally:
+        proposals.PDF_SLOTS.release()
+        proposals.PDF_SLOTS.release()
+    assert busy.status_code == 503 and busy.json()["code"] == "PDF_BUSY"
+
+
+def test_m28_a_step_missing_from_the_priced_engine_never_runs():
+    import pytest
+
+    from app.ai.orchestration import AIRunner, current_engine
+    from app.core.config import Settings
+    from app.core.errors import PermanentStageError
+    from app.jobs.models import BoundQuote, Engine, Job, ServiceSelection
+    from app.jobs.pipeline import _runs_academic
+
+    settings = Settings(_env_file=None)
+    old = current_engine(settings)
+    old = Engine(lead_model=old.lead_model, writer_model=old.writer_model, prompts={k: v for k, v in old.prompts.items() if k != "academic"})
+    runner = AIRunner(settings, lambda c: None, lambda: 0.0, 5.0, engine=old)
+    with pytest.raises(PermanentStageError):
+        runner._prompt_for("academic")
+    job = Job(id="job_old", status=JobStatus.QUEUED, owner_uid="u", owner_email="e@x", expires_at=utcnow(), selection=ServiceSelection(writing="AI_CHECK"))
+    job.quote = BoundQuote.model_construct(engine=old)  # a quote from before the academic review existed
+    assert job.selection.academic and not _runs_academic(job)
+
+
+def test_l29_the_load_test_reports_a_crashed_student(monkeypatch, capsys):
+    import sys
+
+    from tests import load_test
+
+    def crashing_student(base, number, rounds, submit, recorder):
+        recorder.times["config"].append(0.01)
+        raise ValueError("synthetic malformed response")
+
+    monkeypatch.setattr(load_test, "student", crashing_student)
+    monkeypatch.setattr(sys, "argv", ["load_test", "--students", "1", "--rounds", "1"])
+    assert load_test.main() == 1
+    assert "synthetic malformed response" in capsys.readouterr().out

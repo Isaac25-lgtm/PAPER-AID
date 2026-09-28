@@ -169,8 +169,9 @@ def compare(project_id: str, number: int, older: int = Query(...), newer: int = 
 
 
 @router.post("/{project_id}/guide", response_model=ProjectView)
-async def upload_guide(project_id: str, file: UploadFile = File(...), user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> ProjectView:
-    data = await file.read(rt.settings.max_upload_bytes + 1)
+def upload_guide(project_id: str, file: UploadFile = File(...), user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> ProjectView:
+    # A plain (threadpool) route: parsing a Word file or PDF must not block the event loop (M21).
+    data = file.file.read(rt.settings.max_upload_bytes + 1)
     return projects.upload_guide(rt, user, project_id, file.filename or "guide", data)
 
 
@@ -185,8 +186,8 @@ def add_feedback(project_id: str, body: FeedbackText, user: User = Depends(curre
 
 
 @router.post("/{project_id}/feedback/file", response_model=ProjectView)
-async def add_feedback_file(project_id: str, file: UploadFile = File(...), user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> ProjectView:
-    data = await file.read(feedback.MAX_FILE_BYTES + 1)
+def add_feedback_file(project_id: str, file: UploadFile = File(...), user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> ProjectView:
+    data = file.file.read(feedback.MAX_FILE_BYTES + 1)
     return projects.add_feedback(rt, user, project_id, "", file.filename or "feedback", data)
 
 

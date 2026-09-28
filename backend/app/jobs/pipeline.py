@@ -238,7 +238,7 @@ def stage_analysing(ctx: StageContext) -> None:
     else:
         result, coverage_warning = _analyse(ctx, model)
     checks = paper_checks.check(model)  # the paper's integrity, reported apart from AI-likeness
-    review, review_warning = _academic_review(ctx, model) if ctx.job.selection.academic else ([], None)
+    review, review_warning = _academic_review(ctx, model) if _runs_academic(ctx.job) else ([], None)
     result = result.model_copy(update={"review": review + structure.formatting_findings(model)})
     protected = structure.protected_summary(model)
     verified = references.verify_all(model) if ctx.job.selection.academic else None
@@ -248,14 +248,23 @@ def stage_analysing(ctx: StageContext) -> None:
         j.paper_checks = checks
         j.protected = protected
         j.references = verified
-        if review_warning:
+        if review_warning:  # part of the paper was not reviewed: a partial result, charged for what was (M24)
             _add_warnings(j, [review_warning])
+            j.outcome = "PARTIAL"
+            j.delivery = {**j.delivery, "ACADEMIC": 0.5}
         if coverage_warning:
             j.outcome = "PARTIAL"
             _add_warnings(j, [coverage_warning])
         return j
 
     ctx.update(save)
+
+
+def _runs_academic(job: Job) -> bool:
+    """The academic review runs only for jobs priced with it (Codex audit 56c4f83 M28): a job priced
+    before the step existed has no frozen prompt for it and never paid for it."""
+    engine = job.quote.engine if job.quote else None
+    return job.selection.academic and (engine is None or "academic" in engine.prompts)
 
 
 ANCHOR = re.compile(r"objective|question|hypothes|\baims?\b|purpose", re.I)
@@ -901,6 +910,15 @@ def stage_auditing(ctx: StageContext) -> None:
     ctx.update(save)
 
 
+def with_logo(rt, job: Job, data: bytes) -> tuple[bytes, FormattingRule | None]:
+    """The student's institution logo on the first page, when they chose one: the same step for the
+    finished file and for "Download with my choices" (Codex audit 56c4f83 M14)."""
+    if job.selection.logo == "NONE" or job.logo is None or job.selection.formatting == "NONE":
+        return data, None
+    where = "top left" if job.selection.logo == "LEFT" else "top centre"
+    return add_logo(data, rt.files.get(job.logo.path), job.selection.logo), FormattingRule(label="Logo", value=f"{job.logo.name}, {where} of the first page")
+
+
 def stage_formatting(ctx: StageContext) -> None:
     job = ctx.job
     base = ctx.get_bytes("refined.docx") if ctx.has("refined.docx") else ctx.rt.files.get(job.source.path)  # type: ignore[union-attr]
@@ -909,10 +927,9 @@ def stage_formatting(ctx: StageContext) -> None:
     else:
         formatted, result = apply_formatting(base, with_custom(PRESETS[job.selection.preset], job.selection.custom), read_docx(base))
         partial = False
-    if job.selection.logo != "NONE" and job.logo is not None:
-        formatted = add_logo(formatted, ctx.rt.files.get(job.logo.path), job.selection.logo)
-        where = "top left" if job.selection.logo == "LEFT" else "top centre"
-        result = result.model_copy(update={"rules": [*result.rules, FormattingRule(label="Logo", value=f"{job.logo.name}, {where} of the first page")]})
+    formatted, logo_rule = with_logo(ctx.rt, job, formatted)
+    if logo_rule is not None:
+        result = result.model_copy(update={"rules": [*result.rules, logo_rule]})
     ctx.put_bytes("formatted.docx", formatted)
 
     def save(j: Job) -> Job:

@@ -22,6 +22,7 @@ from app.formatting.apply import apply_formatting
 from app.formatting.guideline import to_spec
 from app.formatting.presets import PRESETS, with_custom
 from app.jobs.models import ChangedBlock, Job, JobEvent, JobStatus, JobView, ServiceSelection, StoredFile, StoredOutput, utcnow
+from app.jobs.pipeline import with_logo
 from app.jobs.service import ACCOUNT_CLOSING, DOCX_TYPE, User, _owned, _rate_limit
 from app.runtime import Runtime
 
@@ -92,6 +93,7 @@ def rebuild(rt: Runtime, user: User, job_id: str) -> JobView:
     """A Word file with only the changes the student kept: rebuilt from the original file by code
     (the same patching the job used), then formatted again when the job included formatting."""
     job = _readable(rt, _owned(rt, user, job_id))
+    _rate_limit(rt, user, "rebuild", rt.settings.uploads_per_hour)  # each rebuild re-reads and re-formats the paper (M21)
     if job.status != JobStatus.COMPLETED or job.refinement is None or job.source is None:
         raise Conflict("Only a finished refinement can be rebuilt.", code="NOT_REFINED")
     saved = _internal(rt, job, "accepted.json")
@@ -116,6 +118,7 @@ def rebuild(rt: Runtime, user: User, job_id: str) -> JobView:
         if spec_saved and guide:
             spec, _, _, _ = to_spec(spec_saved["final"], "Your guide", guide["text"])
             paper, _ = apply_formatting(paper, spec, read_docx(paper))
+    paper, _ = with_logo(rt, job, paper)
     path = f"{job.storage_prefix()}/output/paper-reviewed.docx"
     rt.files.put(path, paper, DOCX_TYPE)
     stem = job.source.name.rsplit(".", 1)[0][:120]

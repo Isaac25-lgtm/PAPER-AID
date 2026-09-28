@@ -17,6 +17,7 @@ import json
 import logging
 import re
 import socket
+from typing import Literal
 from urllib.parse import quote, urljoin, urlsplit, urlunsplit
 
 import httpx
@@ -80,6 +81,13 @@ def _text(body: bytes, content_type: str) -> str | None:
 
 def _get(url: str) -> tuple[bytes, str] | None:
     """(body, content type) of a public URL, or None when it cannot be read safely."""
+    got = _fetch(url)
+    return (got[1], got[2]) if got and got[0] == 200 else None
+
+
+def _fetch(url: str) -> tuple[int, bytes, str] | None:
+    """(status, body, content type) of a public URL's final response, or None when it could not be
+    reached safely (then nothing is known about it)."""
     current = url
     try:
         # trust_env=False: an environment proxy would resolve the host itself, bypassing the pinning.
@@ -94,13 +102,13 @@ def _get(url: str) -> tuple[bytes, str] | None:
                         current = urljoin(current, response.headers["location"])
                         continue
                     if response.status_code != 200:
-                        return None
+                        return response.status_code, b"", ""
                     body = b""
                     for chunk in response.iter_bytes():
                         body += chunk
                         if len(body) > MAX_BYTES:
                             break
-                    return body[:MAX_BYTES], response.headers.get("content-type", "").lower()
+                    return 200, body[:MAX_BYTES], response.headers.get("content-type", "").lower()
     except httpx.HTTPError as exc:
         logger.info("source page could not be read", extra={"fields": {"error": type(exc).__name__}})
         return None
@@ -221,6 +229,24 @@ def crossref_work(doi: str) -> dict[str, str] | None:
     return _crossref_record(message, doi)
 
 
+Lookup = Literal["FOUND", "NOT_FOUND", "UNAVAILABLE"]
+
+
+def crossref_lookup(doi: str) -> tuple[Lookup, dict[str, str] | None]:
+    """A DOI's registered record, telling "not registered" (Crossref answers 404) apart from "could
+    not be checked" (no answer, an error, or unreadable data) (Codex audit 56c4f83 M23)."""
+    got = _fetch(f"https://api.crossref.org/works/{quote(doi, safe='/')}")
+    if got is None or got[0] not in (200, 404):
+        return "UNAVAILABLE", None
+    if got[0] == 404:
+        return "NOT_FOUND", None
+    try:
+        message = json.loads(got[1]).get("message")
+    except (ValueError, AttributeError):
+        return "UNAVAILABLE", None
+    return ("FOUND", _crossref_record(message, doi)) if isinstance(message, dict) else ("UNAVAILABLE", None)
+
+
 RETRACTION = {"retraction", "withdrawal", "removal"}
 
 
@@ -243,11 +269,13 @@ def _crossref_record(message: dict, doi: str = "") -> dict[str, str]:
     }
 
 
-def crossref_search(bibliographic: str, rows: int = 3) -> list[dict[str, str]]:
-    """Registered works matching a reference as written (Crossref's bibliographic search). Only
-    the reference text is sent: public bibliographic data, never the paper."""
+def crossref_search(bibliographic: str, rows: int = 3) -> list[dict[str, str]] | None:
+    """Registered works matching a reference as written (Crossref's bibliographic search), or None
+    when the search could not run. Only the reference text is sent: public data, never the paper."""
     data = _json(f"https://api.crossref.org/works?query.bibliographic={quote(bibliographic[:300])}&rows={rows}")
-    items = ((data or {}).get("message") or {}).get("items") or []
+    if data is None:
+        return None
+    items = (data.get("message") or {}).get("items") or []
     return [_crossref_record(i) for i in items if isinstance(i, dict)]
 
 

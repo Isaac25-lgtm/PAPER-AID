@@ -41,6 +41,7 @@ def main() -> None:
     fetch.abstract_text = lambda url: models.abstracts.get(url)
     fetch.openalex_search = lambda query, from_year, limit: [dict(w) for w in models.works][:limit]
     fetch.crossref_work = lambda doi: models.crossref.get(doi)
+    fetch.crossref_lookup = lambda doi: ("FOUND", models.crossref[doi]) if doi in models.crossref else ("NOT_FOUND", None)
     fetch.crossref_search = lambda text, rows=3: [dict(r) for r in models.crossref_found]
     fetch.openalex_retracted = lambda doi: doi in models.retracted
     fetch.resolve_doi = lambda url: models.dois.get(url, fetch.doi_in(url))

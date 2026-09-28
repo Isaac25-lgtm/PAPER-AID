@@ -232,7 +232,7 @@ def _where(blocks: dict, block_id: str) -> str:
 # --- EXPORTING -----------------------------------------------------------------------------------
 
 STATUS = {"PASS": "Pass", "NEEDS_REVIEW": "Needs review", "MISSING": "Missing", "NOT_APPLICABLE": "Not applicable", "BLOCKED": "Blocked"}
-BASIS = {"CODE": "PaperAid check", "AI": "AI judgement", "AUTHOR": "Your information"}
+BASIS = {"CODE": "PaperAid check", "AI": "PaperAid review", "AUTHOR": "Your information"}
 GREEN, MUTED = RGBColor(0x0F, 0x63, 0x3E), RGBColor(0x46, 0x55, 0x4D)
 
 

@@ -35,6 +35,18 @@ def _similar(a: str, b: str) -> float:
     return SequenceMatcher(None, a, b).ratio()
 
 
+UNAVAILABLE = "PaperAid could not reach the registry of published works just now, so this reference was not checked. Check it yourself or try again later."
+
+
+def _same_author(surname: str, first: str) -> bool:
+    """The reference's first author is the registered first author (Codex audit 56c4f83 M22): the
+    surname of "Surname, I." or, for an organisation, its whole name. Never a later author, and never
+    the journal's name."""
+    registered = _norm(first.split(",")[0]) if "," in first else _norm(first)
+    given = _norm(surname)
+    return bool(given and registered) and (given == registered or ("," not in first and (given in registered or registered in given)))
+
+
 def _parts(entry: str) -> tuple[str, str, str]:
     """(first author's surname, year, title) as best they can be read from an author-date entry."""
     body = NUMBERING.sub("", entry)
@@ -52,13 +64,17 @@ def verify(entry: str) -> ReferenceCheck:
     doi_match = DOI.search(entry)
     candidates: list[dict[str, str]] = []
     if doi_match:
-        record = fetch.crossref_work(doi_match.group(1).rstrip(".").lower())
-        if record and record.get("title"):
-            candidates = [record]
-        else:
+        found, record = fetch.crossref_lookup(doi_match.group(1).rstrip(".").lower())
+        if found == "UNAVAILABLE":
+            return ReferenceCheck(entry=entry, status="NOT_VERIFIED", doi=doi_match.group(1), note=UNAVAILABLE)
+        if found == "NOT_FOUND" or not record or not record.get("title"):
             return ReferenceCheck(entry=entry, status="NOT_VERIFIED", doi=doi_match.group(1), note="This DOI is not registered. Check it is typed correctly.")
+        candidates = [record]
     if not candidates:
-        candidates = fetch.crossref_search(entry)
+        searched = fetch.crossref_search(entry)
+        if searched is None:
+            return ReferenceCheck(entry=entry, status="NOT_VERIFIED", note=UNAVAILABLE)
+        candidates = searched
     best, best_score = None, 0.0
     for record in candidates:
         score = _similar(title, record["title"]) if title else 0.0
@@ -66,16 +82,18 @@ def verify(entry: str) -> ReferenceCheck:
             best, best_score = record, score
     if best is None or best_score < 0.6:
         return ReferenceCheck(entry=entry, status="NOT_VERIFIED", note="No registered record matches this reference. It may be a book, report or source that is not registered, so check it yourself.")
-    author_ok = not surname or _norm(surname) in _norm(best["authors"]) or _norm(surname) in _norm(best.get("container", ""))
+    first = best["authors"].split(";")[0].strip()
+    author_known = bool(surname and first)  # both sides name a first author: otherwise it cannot be confirmed
+    author_ok = not author_known or _same_author(surname, first)
     year_ok = not year or not best["year"] or year == best["year"]
     differences = []
     if not year_ok:
         differences.append(f"the registered year is {best['year']}, not {year}")
-    if not author_ok and best["authors"]:
-        differences.append(f"the registered first author is {best['authors'].split(';')[0]}")
+    if not author_ok:
+        differences.append(f"the registered first author is {first}")
     if best_score < 0.85:
         differences.append(f"the registered title is “{best['title']}”")
-    if doi_match and not differences:
+    if doi_match and not differences and author_known and year and best["year"]:
         status = "VERIFIED"
     elif not differences:
         status = "PROBABLE"

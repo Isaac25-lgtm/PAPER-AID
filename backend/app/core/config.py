@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     max_active_jobs_per_user: int = 3
     quotes_per_hour: int = 40
     submits_per_hour: int = 10
+    uploads_per_hour: int = 20  # feedback, guides, rebuilt downloads and PDFs, per student (Codex audit 56c4f83 M21)
     max_upload_bytes: int = 20 * 1024 * 1024
     max_words: int = 25_000
     max_pdf_pages: int = 150

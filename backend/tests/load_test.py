@@ -16,7 +16,7 @@ import statistics
 import threading
 import time
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import httpx
 
@@ -76,8 +76,11 @@ def main() -> int:
     rec = Recorder()
     start = time.perf_counter()
     with ThreadPoolExecutor(max_workers=args.students) as pool:
-        for n in range(args.students):
-            pool.submit(student, args.base, n, args.rounds, args.submit, rec)
+        futures = {pool.submit(student, args.base, n, args.rounds, args.submit, rec): n for n in range(args.students)}
+        for future in as_completed(futures):
+            error = future.exception()  # a journey that crashed outside a request is a failure too (Codex audit 56c4f83 L29)
+            if error is not None:
+                rec.failures.append(f"student {futures[future]}: {type(error).__name__}: {error}")
     total = time.perf_counter() - start
     requests = sum(len(t) for t in rec.times.values())
     print(f"{args.students} students x {args.rounds} rounds: {requests} requests in {total:.1f}s ({requests / total:.1f}/s)")

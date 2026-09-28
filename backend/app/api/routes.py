@@ -52,17 +52,18 @@ def create_job(user: User = Depends(current_user), rt: Runtime = Depends(get_run
 
 
 @api.post("/jobs/{job_id}/files/logo", response_model=ImageMeta)
-async def upload_logo(job_id: str, file: UploadFile = File(...), user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> ImageMeta:
-    data = await file.read(service.MAX_LOGO_BYTES + 1)
+def upload_logo(job_id: str, file: UploadFile = File(...), user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> ImageMeta:
+    data = file.file.read(service.MAX_LOGO_BYTES + 1)
     return service.upload_logo(rt, user, job_id, file.filename or "logo", data)
 
 
 @api.post("/jobs/{job_id}/files/{role}", response_model=FileMeta)
-async def upload(job_id: str, role: str, file: UploadFile = File(...), user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> FileMeta:
+def upload(job_id: str, role: str, file: UploadFile = File(...), user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> FileMeta:
+    # Plain (threadpool) routes: parsing a paper must not block the event loop (Codex audit 56c4f83 M21).
     if role not in ("source", "guideline"):
         raise AppError("Unknown file type.", code="NOT_FOUND", status=404)
     service.ensure_valid_upload_name(file.filename or "")
-    data = await file.read(rt.settings.max_upload_bytes + 1)
+    data = file.file.read(rt.settings.max_upload_bytes + 1)
     return service.upload_file(rt, user, job_id, role, file.filename or role, data)  # type: ignore[arg-type]
 
 

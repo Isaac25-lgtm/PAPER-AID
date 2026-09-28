@@ -285,7 +285,7 @@ MAX_LOGO_BYTES = 2_000_000
 def upload_logo(rt: Runtime, user: User, job_id: str, filename: str, data: bytes) -> ImageMeta:
     """An institution logo for the title page (PNG or JPEG, up to 2 MB). Replacing it clears the
     quote, like any file."""
-    from docx.image.exceptions import UnrecognizedImageError
+    from docx.image.exceptions import InvalidImageStreamError, UnexpectedEndOfFileError, UnrecognizedImageError
     from docx.image.image import Image
 
     job = _owned(rt, user, job_id)
@@ -296,7 +296,7 @@ def upload_logo(rt: Runtime, user: User, job_id: str, filename: str, data: bytes
     kind = "PNG" if data[:8] == b"\x89PNG\r\n\x1a\n" else "JPEG" if data[:3] == b"\xff\xd8\xff" else None
     try:
         image = Image.from_blob(data) if kind else None
-    except (UnrecognizedImageError, ValueError, KeyError, IndexError) as exc:
+    except (UnrecognizedImageError, UnexpectedEndOfFileError, InvalidImageStreamError, ValueError, KeyError, IndexError) as exc:
         raise InvalidDocument("We could not read this image. Upload the logo as a PNG or JPEG.", code="LOGO_UNREADABLE") from exc
     if image is None or not image.px_width or not image.px_height:
         raise InvalidDocument("Upload the logo as a PNG or JPEG image.", code="LOGO_UNREADABLE")

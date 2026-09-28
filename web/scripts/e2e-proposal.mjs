@@ -142,7 +142,7 @@ try {
   await runStep(page.getByRole('tabpanel'))
   const conceptButton = page.getByRole('button', { name: 'Concept paper (Word)' })
   await conceptButton.waitFor({ timeout: 90_000 })
-  await page.getByText('Is the concept paper at most five pages?').waitFor()
+  await page.getByText('Is the concept paper about five pages or less (estimated)?').waitFor()
   const [concept] = await Promise.all([page.waitForEvent('download'), conceptButton.click()])
   if (!concept.suggestedFilename().endsWith('concept paper.docx')) throw new Error(`unexpected concept file: ${concept.suggestedFilename()}`)
   await shot('p8-concept')

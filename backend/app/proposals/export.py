@@ -213,8 +213,9 @@ def build(project: Project, chapters: dict[int, ChapterDocument], library: dict[
     if tables:
         doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
         doc.add_heading("List of Tables", level=1)
+        listing = evidence.Citer(library, project.citation)  # its own state: the body's first citations are unaffected (M19)
         for i, (n, s) in enumerate(tables, start=1):
-            doc.add_paragraph(f"Table {n}.{i}: {s.table_caption or s.heading}")
+            doc.add_paragraph(f"Table {n}.{i}: {listing.render(s.table_caption) or s.heading}")
     columns = framework_columns(project.plan)
     has_figure = bool(columns) and 1 in chapters and any(s.key == "framework" for s in chapters[1].sections)
     if has_figure:
