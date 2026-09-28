@@ -88,7 +88,7 @@ def quote(
 
 
 @api.get("/wallet/history", response_model=service.LedgerPage)
-def wallet_history(before: str | None = Query(None, max_length=40), user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> service.LedgerPage:
+def wallet_history(before: str | None = Query(None, max_length=80), user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> service.LedgerPage:
     return service.wallet_history(rt, user, before)
 
 
@@ -278,4 +278,5 @@ def task_cleanup(rt: Runtime = Depends(get_runtime)) -> dict:
         "expired": service.cleanup_expired(rt),
         "projectsExpired": service.cleanup_expired_projects(rt),
         "projectsMigrated": service.migrate_legacy_project_files(rt),
+        "ledgersBackfilled": service.backfill_ledgers(rt),
     }

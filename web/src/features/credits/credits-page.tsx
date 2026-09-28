@@ -36,9 +36,17 @@ export function CreditsPage() {
     setLoading(true)
     setHistoryError(null)
     try {
-      const page = await data.walletHistory(next ?? shown.at(-1)?.at ?? null)
-      setEarlier((prev) => [...prev, ...page.entries])
-      setNext(page.next)
+      // The history starts with the entries already shown; keep reading until older ones appear.
+      const seen = new Set(shown.map((e) => e.id))
+      let cursor = next ?? null
+      const found: LedgerEntry[] = []
+      do {
+        const page = await data.walletHistory(cursor)
+        found.push(...page.entries.filter((e) => !seen.has(e.id)))
+        cursor = page.next
+      } while (found.length === 0 && cursor !== null)
+      setEarlier((prev) => [...prev, ...found])
+      setNext(cursor)
     } catch (e) {
       setHistoryError(e instanceof DataError ? e.message : 'We could not load earlier activity.')
     } finally {

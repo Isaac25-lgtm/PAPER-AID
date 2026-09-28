@@ -381,3 +381,95 @@ def test_h08_replacing_the_file_clears_the_fix_selection(fixed_client):
     assert fixed_client.post(f"/api/jobs/{draft}/files/source", headers=STUDENT, files=other).status_code == 200
     job = get_runtime().store.get(draft)
     assert job.fix_notes == {} and job.scope_words is None and job.selection.only_blocks == []
+
+
+# --- M10-M13: credit history and cleanup ------------------------------------------------------
+
+
+def test_m10_an_interrupted_wallet_write_leaves_balance_and_history_in_agreement(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    import pytest
+
+    from app.integrations.store import LocalJobStore
+    from app.pricing import credits
+
+    store = LocalJobStore(tmp_path)
+    store.update_wallet("u", "u@example.com", lambda w: credits.top_up(w, 1000, "committed"))
+    original = Path.replace
+
+    def fail_wallet_replace(path, target):
+        if Path(target) == store._wallet_path("u"):
+            raise OSError("synthetic interrupted wallet replace")
+        return original(path, target)
+
+    monkeypatch.setattr(Path, "replace", fail_wallet_replace)
+    with pytest.raises(OSError):
+        store.update_wallet("u", "u@example.com", lambda w: credits.top_up(w, 5000, "interrupted"))
+    monkeypatch.undo()
+    wallet = store.get_wallet("u")  # the journal is replayed: the change is whole, never half
+    history = store.ledger("u", None, 50)
+    assert wallet.available == 6000 and [e.note for e in history] == ["interrupted", "committed"]
+    assert history[0].available_after == wallet.available
+
+
+def test_m10_a_torn_last_history_line_is_ignored(tmp_path):
+    from app.integrations.store import LocalJobStore
+    from app.pricing import credits
+
+    store = LocalJobStore(tmp_path)
+    store.update_wallet("u", "u@example.com", lambda w: credits.top_up(w, 1000, "committed"))
+    with store._ledger_path("u").open("a", encoding="utf-8") as ledger:
+        ledger.write('{"id": "le_torn", "at": "2026-')
+    assert [e.note for e in store.ledger("u", None, 50)] == ["committed"]
+
+
+def test_m11_entries_sharing_a_time_are_all_paged(client):
+    from app.jobs.models import LedgerEntry
+
+    rt = get_runtime()
+    at = utcnow()
+
+    def add(w):
+        w.entries += [LedgerEntry(id=f"le_same{i:03}", kind="TOP_UP", amount=1000, at=at, note="same-time", available_after=1000, held_after=0) for i in range(60)]
+        return w
+
+    rt.store.update_wallet(UID, "student@example.com", add)
+    seen, before = [], None
+    while True:
+        page = client.get("/api/wallet/history", headers=STUDENT, params={"before": before} if before else {}).json()
+        seen += [e["id"] for e in page["entries"] if e["note"] == "same-time"]
+        before = page["next"]
+        if not before:
+            break
+    assert len(seen) == 60 == len(set(seen))
+
+
+def test_m12_entries_from_before_the_complete_history_are_copied_in_once(client):
+    from app.jobs import service as jobs
+    from app.jobs.models import Wallet
+    from app.pricing import credits
+
+    rt = get_runtime()
+    legacy = Wallet(uid="u_legacy", email="legacy@example.com")
+    credits.top_up(legacy, 4000, "before-upgrade")
+    rt.store._wallet_path(legacy.uid).write_text(legacy.model_dump_json(by_alias=True), encoding="utf-8")
+    assert rt.store.ledger(legacy.uid, None, 50) == []
+    assert jobs.backfill_ledgers(rt) >= 1
+    assert [e.note for e in rt.store.ledger(legacy.uid, None, 50)] == ["before-upgrade"]
+    assert jobs.backfill_ledgers(rt) == 0  # once per wallet
+    assert [e.note for e in rt.store.ledger(legacy.uid, None, 50)] == ["before-upgrade"]
+
+
+def test_m13_a_project_that_cannot_be_erased_does_not_hide_the_next(client):
+    from app.jobs import service as jobs
+
+    rt = get_runtime()
+    first, second = _create(client)["id"], _create(client)["id"]
+    for pid, days in ((first, 3), (second, 2)):
+        rt.store.update_project(pid, lambda p, days=days: p.model_copy(update={"expires_at": utcnow() - timedelta(days=days)}))
+    blocked = Job(id="job_blockcleanup", owner_uid=UID, owner_email="student@example.com", project_id=first, status=JobStatus.QUEUED, expires_at=utcnow() + timedelta(days=30))
+    rt.store.create(blocked)
+    rt.store.update_project(first, lambda p: p.model_copy(update={"active_job": blocked.id}))
+    assert jobs.cleanup_expired_projects(rt) == 1
+    assert rt.store.get_project(first) is not None and rt.store.get_project(second) is None

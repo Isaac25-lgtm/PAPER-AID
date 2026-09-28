@@ -13,6 +13,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
+from pydantic import ValidationError
+
 from app.core.errors import PermanentStageError
 from app.jobs.models import Job, JobStatus, LedgerEntry, Wallet
 from app.proposals.models import Project
@@ -44,6 +46,8 @@ class JobStore(Protocol):
     def find_wallets(self, email_contains: str | None, limit: int) -> list[Wallet]: ...
     def delete_wallet(self, uid: str) -> None: ...
     def ledger(self, uid: str, before: str | None, limit: int) -> list[LedgerEntry]: ...
+    def backfill_ledger(self, uid: str) -> bool: ...
+    def all_wallet_ids(self) -> list[str]: ...
     def delete_ledger(self, uid: str) -> None: ...
     # proposal projects: one record each, changed only by atomic read-modify-write
     def create_project_if_open(self, project: Project) -> bool: ...
@@ -51,7 +55,7 @@ class JobStore(Protocol):
     def update_project(self, project_id: str, mutate: ProjectMutator) -> Project | None: ...
     def update_job_wallet_and_project(self, job_id: str, project_id: str, mutate: TripleMutator) -> tuple[Job, Wallet, Project] | None: ...
     def list_projects(self, owner_uid: str) -> list[Project]: ...
-    def expired_projects(self, before: datetime, limit: int) -> list[Project]: ...
+    def expired_project_ids(self, before: datetime) -> list[str]: ...
     def delete_project(self, project_id: str) -> None: ...
     def all_projects(self) -> list[Project]: ...
 
@@ -70,6 +74,20 @@ def _new_entries(seen: set[str], wallet: Wallet) -> list[LedgerEntry]:
 
 def _entry_json(entry: LedgerEntry) -> dict:
     return json.loads(entry.model_dump_json(by_alias=True))
+
+
+def cursor_of(entry: LedgerEntry) -> str:
+    """A history page cursor: the entry's time and id, so entries sharing a time are never skipped
+    (Codex audit 56c4f83 M11)."""
+    return f"{_entry_json(entry)['at']}|{entry.id}"
+
+
+def _after_cursor(entry: LedgerEntry, before: str | None) -> bool:
+    if before is None:
+        return True
+    at, _, entry_id = before.partition("|")
+    key = (_entry_json(entry)["at"], entry.id)
+    return key < (at, entry_id or "\uffff")
 
 
 def _dump(job: Job | Project) -> str:
@@ -104,7 +122,8 @@ class LocalJobStore:
             return
         pending = json.loads(self._journal.read_text(encoding="utf-8"))
         self._write_wallet(Wallet.model_validate(pending["wallet"]))
-        self._write(Job.model_validate(pending["job"]))
+        if pending.get("job"):  # a wallet-only change has no job (Codex audit 56c4f83 M10)
+            self._write(Job.model_validate(pending["job"]))
         if pending.get("project"):
             self._write_project(Project.model_validate(pending["project"]))
         self._journal.unlink()
@@ -225,8 +244,11 @@ class LocalJobStore:
         with self._lock:
             wallet = self.get_wallet(uid) or Wallet(uid=uid, email=email)
             result = mutate(wallet)
-            if result is not None:
-                self._write_wallet(result)
+            if result is not None:  # through the journal, like paired changes: a crash replays it whole
+                tmp = self._journal.with_suffix(".tmp")
+                tmp.write_text(json.dumps({"wallet": json.loads(result.model_dump_json(by_alias=True))}), encoding="utf-8")
+                tmp.replace(self._journal)
+                self._recover()
             return result
 
     def update_job_and_wallet(self, job_id: str, mutate: PairMutator) -> tuple[Job, Wallet] | None:
@@ -265,9 +287,32 @@ class LocalJobStore:
         with self._lock:
             path = self._ledger_path(uid)
             lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
-        entries = {e.id: e for e in (LedgerEntry.model_validate_json(line) for line in lines if line.strip())}
-        ordered = sorted(entries.values(), key=lambda e: (e.at, e.id), reverse=True)
-        return [e for e in ordered if before is None or _entry_json(e)["at"] < before][:limit]
+        entries: dict[str, LedgerEntry] = {}
+        for line in lines:
+            try:
+                entry = LedgerEntry.model_validate_json(line)
+            except ValidationError:
+                continue  # a line torn by a crash mid-append; its change was replayed from the journal
+            entries[entry.id] = entry
+        ordered = sorted(entries.values(), key=lambda e: (_entry_json(e)["at"], e.id), reverse=True)
+        return [e for e in ordered if _after_cursor(e, before)][:limit]
+
+    def backfill_ledger(self, uid: str) -> bool:
+        with self._lock:
+            wallet = self.get_wallet(uid)
+            if wallet is None or wallet.ledger_backfilled:
+                return False
+            path = self._ledger_path(uid)
+            known = {LedgerEntry.model_validate_json(line).id for line in path.read_text(encoding="utf-8").splitlines() if line.strip()} if path.exists() else set()
+            with path.open("a", encoding="utf-8") as ledger:
+                ledger.writelines(json.dumps(_entry_json(e)) + "\n" for e in wallet.entries if e.id not in known)
+            wallet.ledger_backfilled = True
+            self._write_wallet(wallet)
+            return True
+
+    def all_wallet_ids(self) -> list[str]:
+        with self._lock:
+            return [p.stem for p in self._wallets.glob("*.json")]
 
     # projects: one file each, replaced atomically under the same lock
     def _project_path(self, project_id: str) -> Path:
@@ -328,10 +373,10 @@ class LocalJobStore:
             found = [Project.model_validate_json(p.read_text(encoding="utf-8")) for p in self._projects.glob("*.json")]
         return sorted((p for p in found if p.owner_uid == owner_uid), key=lambda p: p.updated_at, reverse=True)
 
-    def expired_projects(self, before: datetime, limit: int) -> list[Project]:
+    def expired_project_ids(self, before: datetime) -> list[str]:
         with self._lock:
             found = [Project.model_validate_json(p.read_text(encoding="utf-8")) for p in self._projects.glob("*.json")]
-        return sorted((p for p in found if p.expires_at < before), key=lambda p: p.expires_at)[:limit]
+        return [p.id for p in sorted((p for p in found if p.expires_at < before), key=lambda p: (p.expires_at, p.id))]
 
     def delete_project(self, project_id: str) -> None:
         with self._lock:
@@ -496,10 +541,33 @@ class FirestoreJobStore:
             batch.commit()
 
     def ledger(self, uid: str, before: str | None, limit: int) -> list[LedgerEntry]:
-        query = self._wallets.document(uid).collection("ledger").order_by("at", direction=self._fs.Query.DESCENDING)
+        descending = self._fs.Query.DESCENDING
+        query = self._wallets.document(uid).collection("ledger").order_by("at", direction=descending).order_by("id", direction=descending)
         if before:
-            query = query.where(filter=self._fs.FieldFilter("at", "<", before))
+            at, _, entry_id = before.partition("|")
+            query = query.start_after({"at": at, "id": entry_id})
         return [LedgerEntry.model_validate(d.to_dict()) for d in query.limit(limit).stream()]
+
+    def backfill_ledger(self, uid: str) -> bool:
+        ref = self._wallets.document(uid)
+
+        @self._fs.transactional
+        def run(transaction) -> bool:
+            snap = ref.get(transaction=transaction)
+            if not snap.exists:
+                return False
+            wallet = Wallet.model_validate(snap.to_dict())
+            if wallet.ledger_backfilled:
+                return False
+            for entry in wallet.entries:  # set by id: repeating it changes nothing
+                transaction.set(ref.collection("ledger").document(entry.id), _entry_json(entry))
+            transaction.update(ref, {"ledgerBackfilled": True})
+            return True
+
+        return run(self._db.transaction())
+
+    def all_wallet_ids(self) -> list[str]:
+        return [d.id for d in self._wallets.select([]).stream()]
 
     def create_project_if_open(self, project: Project) -> bool:
         """Like `create_if_open`: the account check and the write are one transaction."""
@@ -569,12 +637,11 @@ class FirestoreJobStore:
         docs = self._projects.where(filter=self._fs.FieldFilter("ownerUid", "==", owner_uid)).stream()
         return sorted((Project.model_validate(d.to_dict()) for d in docs), key=lambda p: p.updated_at, reverse=True)
 
-    def expired_projects(self, before: datetime, limit: int) -> list[Project]:
+    def expired_project_ids(self, before: datetime) -> list[str]:
         # A single-field range filter uses Firestore's automatic index. Timestamps are stored as
-        # UTC ISO strings of one format, so string order is time order.
-        iso =before.isoformat().replace("+00:00", "Z")
-        docs = self._projects.where(filter=self._fs.FieldFilter("expiresAt", "<", iso)).limit(limit).stream()
-        return [Project.model_validate(d.to_dict()) for d in docs]
+        # UTC ISO strings of one format, so string order is time order. The stream pages itself.
+        iso = before.isoformat().replace("+00:00", "Z")
+        return [d.id for d in self._projects.where(filter=self._fs.FieldFilter("expiresAt", "<", iso)).select([]).stream()]
 
     def delete_project(self, project_id: str) -> None:
         self._projects.document(project_id).delete()

@@ -170,14 +170,14 @@ def test_05_a_project_renewed_after_listing_survives_cleanup(client, monkeypatch
     rt = get_runtime()
     pid = _create(client)["id"]
     rt.store.update_project(pid, lambda p: p.model_copy(update={"expires_at": utcnow() - timedelta(seconds=1)}))
-    original = rt.store.expired_projects
+    original = rt.store.expired_project_ids
 
-    def renew_meanwhile(cutoff, limit):
-        listed = original(cutoff, limit)
+    def renew_meanwhile(cutoff):
+        listed = original(cutoff)
         assert client.post(f"/api/projects/{pid}/details", headers=STUDENT, json=DETAILS).status_code == 200
         return listed
 
-    monkeypatch.setattr(rt.store, "expired_projects", renew_meanwhile)
+    monkeypatch.setattr(rt.store, "expired_project_ids", renew_meanwhile)
     assert cleanup_expired_projects(rt) == 0 and rt.store.get_project(pid) is not None
 
 

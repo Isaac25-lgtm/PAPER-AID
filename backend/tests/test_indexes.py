@@ -50,6 +50,9 @@ class _Store(FirestoreJobStore):
     def delete_wallet(self, uid: str) -> None:
         pass
 
+    def delete_ledger(self, uid: str) -> None:
+        pass
+
     def get_flag(self, name: str, default: bool) -> bool:
         return default
 

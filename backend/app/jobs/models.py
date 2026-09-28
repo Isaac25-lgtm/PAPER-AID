@@ -267,6 +267,7 @@ class Wallet(Camel):
     updated_at: datetime = Field(default_factory=utcnow)
     grant_ops: list[str] = []  # every manual grant's operation id, kept for good (not trimmed like entries)
     closing: bool = False  # the account is being deleted: nothing new may start or move credits
+    ledger_backfilled: bool = False  # entries from before the complete history was kept were copied into it
 
 
 class QuoteResponse(Camel):

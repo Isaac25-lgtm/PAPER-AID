@@ -2,7 +2,6 @@
 user, so ownership, pricing and state rules can be unit-tested directly."""
 
 import hashlib
-import json
 import logging
 import re
 import secrets
@@ -20,6 +19,7 @@ from app.documents.docx_io import read_docx
 from app.documents.intake import inspect_upload
 from app.formatting.guideline import MAX_GUIDE_WORDS
 from app.formatting.presets import PRESETS, PUBLIC_PRESETS
+from app.integrations.store import cursor_of
 from app.jobs import state
 from app.jobs.models import (
     AdminAction,
@@ -824,7 +824,14 @@ def wallet_history(rt: Runtime, user: User, before: str | None, limit: int = 50)
     entries = rt.store.ledger(user.uid, before, limit + 1)
     more = len(entries) > limit
     entries = entries[:limit]
-    return LedgerPage(entries=entries, next=json.loads(entries[-1].model_dump_json())["at"] if more else None)
+    return LedgerPage(entries=entries, next=cursor_of(entries[-1]) if more else None)
+
+
+def backfill_ledgers(rt: Runtime) -> int:
+    """Copy the entries wallets kept from before the complete history existed into it, once per
+    wallet (Codex audit 56c4f83 M12). Entries older than the wallet's display cap were not kept
+    anywhere and cannot be recovered."""
+    return sum(rt.store.backfill_ledger(uid) for uid in rt.store.all_wallet_ids())
 
 
 def my_wallet(rt: Runtime, user: User) -> WalletView:
@@ -1170,14 +1177,14 @@ def cleanup_expired_projects(rt: Runtime) -> int:
     """Delete proposal projects 30 days after the student's last action (owner decision
     2026-09-28). The expiry is shown on the project, so it is never a surprise. Pages through every
     expired project; one that is refused (renewed, or a step running) is skipped this time."""
-    cutoff, seen, erased = utcnow(), set(), 0
-    while True:
-        batch = [p for p in rt.store.expired_projects(cutoff, PAGE_SIZE) if p.id not in seen]
-        if not batch:
-            return erased
-        for project in batch:
-            seen.add(project.id)
+    cutoff, erased = utcnow(), 0
+    # Every expired id is listed first, so projects that cannot be erased yet never hide the ones
+    # after them (Codex audit 56c4f83 M13).
+    for project_id in rt.store.expired_project_ids(cutoff):
+        project = rt.store.get_project(project_id)
+        if project is not None:
             erased += _erase_project(rt, project, expired_before=cutoff)
+    return erased
 
 
 def ensure_valid_upload_name(filename: str) -> None:
