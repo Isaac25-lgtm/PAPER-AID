@@ -46,19 +46,20 @@ from app.jobs.models import (
 from app.pricing import credits
 from app.pricing.billing import hold_for_job, refund_job, release_hold
 from app.pricing.quote import ai_cap_usd, bound_quote, estimate_scan_usd, needs_estimate, with_margin
+from app.proposals.models import Project
 from app.runtime import Runtime
 
 logger = logging.getLogger("paperaid.jobs")
 
-BUILT = ("AI_CHECK", "REFINE", "FORMAT", "TEMPLATE_FORMAT", "SOURCE_CHECK", "REDRAFT", "LATEX")
-NEEDS_AI = ("AI_CHECK", "REFINE", "TEMPLATE_FORMAT", "SOURCE_CHECK", "REDRAFT")
+BUILT = ("AI_CHECK", "REFINE", "FORMAT", "TEMPLATE_FORMAT", "SOURCE_CHECK", "REDRAFT", "LATEX", "PROPOSAL")
+NEEDS_AI = ("AI_CHECK", "REFINE", "TEMPLATE_FORMAT", "SOURCE_CHECK", "REDRAFT", "PROPOSAL")
 
 
 def availability(settings: Settings, user: "User | None" = None) -> dict[str, str]:
     """"soon" = not built yet; "not_configured" = built, but the AI keys are not set;
     "invite_only" = testing is limited to invited testers and this user isn't one."""
     result = {}
-    for service in ("AI_CHECK", "REFINE", "FORMAT", "TEMPLATE_FORMAT", "REDRAFT", "LATEX", "SOURCE_CHECK"):
+    for service in ("AI_CHECK", "REFINE", "FORMAT", "TEMPLATE_FORMAT", "REDRAFT", "LATEX", "SOURCE_CHECK", "PROPOSAL"):
         if service not in BUILT:
             result[service] = "soon"
         elif service in NEEDS_AI and not settings.ai_configured:
@@ -100,6 +101,12 @@ def public_config(rt: Runtime, user: "User | None" = None) -> dict:
 
 
 def pipeline_for(selection: ServiceSelection) -> list[Stage]:
+    if selection.proposal == "REVIEW":
+        return [Stage.EXTRACTING, Stage.ANALYSING, Stage.EXPORTING]
+    if selection.proposal == "PLAN":
+        return [Stage.RESEARCHING, Stage.PLANNING, Stage.EXPORTING]
+    if selection.proposal != "NONE":
+        return [Stage.RESEARCHING, Stage.PLANNING, Stage.DRAFTING, Stage.AUDITING, Stage.EXPORTING]
     stages = [Stage.EXTRACTING]
     if selection.writing != "NONE":
         stages.append(Stage.ANALYSING)
@@ -285,9 +292,15 @@ def request_quote(rt: Runtime, user: User, job_id: str, selection: ServiceSelect
     offered = availability(rt.settings, user)
     if any(offered.get(s.value) != "available" for s in services):
         raise AppError("That service is not available right now.", code="SERVICE_UNAVAILABLE")
+    if selection.proposal not in ("NONE", "REVIEW") or job.project_id:
+        raise AppError("Proposal steps are started from the proposal's page.", code="PROPOSAL_STEP")
+    if selection.proposal == "REVIEW" and (len(services) > 1 or selection.writing != "NONE"):
+        raise AppError("A proposal review runs on its own. Start another job for other services.", code="REVIEW_ALONE")
+    if selection.proposal == "REVIEW" and job.source.word_count > rt.settings.proposal_review_max_words:
+        raise AppError(f"Proposal review accepts up to {rt.settings.proposal_review_max_words:,} words.", code="DOCUMENT_TOO_LONG")
     if selection.source_check and selection.writing not in ("AI_CHECK", "REFINE", "REDRAFT"):
         raise AppError("Source check comes with AI Check, Check + Refine or Deep Redraft.", code="SOURCE_CHECK_NEEDS_CHECK")
-    if job.source.format == "PDF" and any(s.value not in ("AI_CHECK", "SOURCE_CHECK") for s in services):
+    if job.source.format == "PDF" and any(s.value not in ("AI_CHECK", "SOURCE_CHECK", "PROPOSAL") for s in services):
         raise AppError("PDF files can use AI Check (and Source check) only. Upload the Word file to refine or format it.", code="PDF_AI_CHECK_ONLY")
     if selection.formatting == "TEMPLATE_FORMAT" and job.guideline is None:
         raise AppError("Upload your university's formatting guide to use University templates.", code="NO_GUIDELINE")
@@ -416,15 +429,29 @@ def _start_estimate(rt: Runtime, user: User, job: Job, selection: ServiceSelecti
     return QuoteResponse(estimate=run)
 
 
-def submit(rt: Runtime, user: User, job_id: str, quote_id: str) -> JobView:
+def _priced_input_intact(j: Job) -> bool:
+    """The job still has exactly what its quote priced: the uploaded file, or for a proposal step
+    the project input frozen when it was priced."""
+    if j.quote is None:
+        return False
+    if j.project_id:
+        return j.input_sha256 is not None and j.quote.source_sha256 == j.input_sha256
+    return j.source is not None and j.quote.source_sha256 == j.source.sha256
+
+
+def submit(rt: Runtime, user: User, job_id: str, quote_id: str, from_project: bool = False) -> JobView:
+    """Accept a quote. A proposal step is submitted through its project (app.proposals.service),
+    which first checks that the plan it was priced on is still the student's."""
     job = _owned(rt, user, job_id)
+    if job.project_id and not from_project:
+        raise AppError("Start this step from the proposal's page.", code="PROPOSAL_STEP")
     if job.status in state.SUBMITTED and job.quote and job.quote.id == quote_id:
         return job.view()  # double click or retried request: the same submission, nothing new
     if job.status != JobStatus.QUOTED or job.quote is None or job.quote.id != quote_id:
         raise Conflict("Your quote changed. Review the new price and submit again.", code="QUOTE_MISMATCH")
     if job.quote.expires_at < utcnow():
         raise Conflict("Your quote expired. Request a new one.", code="QUOTE_EXPIRED")
-    if job.source is None or job.quote.source_sha256 != job.source.sha256:
+    if not _priced_input_intact(job):
         raise Conflict("Your file changed after it was priced. Request a new quote.", code="QUOTE_MISMATCH")
     if any(availability(rt.settings, user).get(service.value) != "available" for service in job.quote.selection.services()):
         raise AppError("That service is not available right now.", code="SERVICE_UNAVAILABLE")
@@ -438,7 +465,7 @@ def submit(rt: Runtime, user: User, job_id: str, quote_id: str) -> JobView:
 
     def accept(j: Job, w: Wallet) -> tuple[Job, Wallet] | None:
         # Re-checked inside the transaction: a concurrent upload or submit may have changed the job.
-        if w.closing or j.status != JobStatus.QUOTED or j.deleting or j.retiring or j.files_deleted or j.quote is None or j.quote.id != quote_id or j.source is None or j.quote.source_sha256 != j.source.sha256:
+        if w.closing or j.status != JobStatus.QUOTED or j.deleting or j.retiring or j.files_deleted or j.quote is None or j.quote.id != quote_id or not _priced_input_intact(j):
             return None
         if any(availability(settings, user).get(service.value) != "available" for service in j.quote.selection.services()):
             return None
@@ -482,6 +509,7 @@ def list_jobs(rt: Runtime, user: User, status: str | None, service: str | None, 
     else:
         statuses = {JobStatus(status)} if status and status != "ALL" else state.SUBMITTED
     jobs, next_cursor = rt.store.list(user.uid, statuses, service if service and service != "ALL" else None, cursor, min(limit, 50))
+    jobs = [j for j in jobs if not j.project_id]  # proposal steps are shown on their project
     if status == "DRAFT":
         jobs = [j for j in jobs if j.source is not None and not j.deleting and not j.files_deleted]
     return Page[JobView](items=[j.view() for j in jobs], next_cursor=next_cursor)
@@ -623,6 +651,11 @@ def delete_account(rt: Runtime, user: User) -> int:
         for job in leftover:
             _erase(rt, job)
         claimed += leftover
+    # Proposal projects: no step can be running (every job was claimed above) and none can be
+    # created (the account is closing), so each is claimed and erased with its chapters and evidence.
+    for project in rt.store.list_projects(user.uid):
+        _erase_project(rt, project)
+
     def tombstone(w: Wallet) -> Wallet:
         return Wallet(uid=w.uid, email="", closing=True, grant_ops=w.grant_ops)
 
@@ -705,6 +738,14 @@ def without_paper_text[T: JobView](job: T) -> T:
     if job.paper_checks is not None:
         items = [PaperCheck(kind=i.kind, certainty=i.certainty, item="", detail="") for i in job.paper_checks.items]
         update["paper_checks"] = job.paper_checks.model_copy(update={"items": items})
+    if job.proposal_review is not None:  # notes, locations and findings can quote the proposal
+        review = job.proposal_review
+        update["proposal_review"] = review.model_copy(
+            update={
+                "items": [i.model_copy(update={"note": "", "where": ""}) for i in review.items],
+                "findings": [f.model_copy(update={"where": "", "issue": "", "suggestion": ""}) for f in review.findings],
+            }
+        )
     return job.model_copy(update=update)
 
 
@@ -850,6 +891,30 @@ def cleanup_expired(rt: Runtime) -> int:
         rt.store.update(job.id, strip_files)
         cleaned += 1
     return cleaned
+
+
+def _erase_project(rt: Runtime, project: Project) -> bool:
+    """Claim a proposal project (refused while one of its steps is queued or running), then delete
+    its files and record. An interrupted erase leaves the claim, and the next call finishes it."""
+
+    def mark(p: Project) -> Project | None:
+        running = p.active_job and (step := rt.store.get(p.active_job)) is not None and step.status in ACTIVE
+        if running:
+            return None
+        p.deleting = True
+        return p
+
+    if rt.store.update_project(project.id, mark) is None:
+        return False
+    rt.files.delete_prefix(project.storage_prefix())
+    rt.store.delete_project(project.id)
+    return True
+
+
+def cleanup_expired_projects(rt: Runtime) -> int:
+    """Delete proposal projects 30 days after the student's last action (owner decision
+    2026-09-28). The expiry is shown on the project, so it is never a surprise."""
+    return sum(1 for p in rt.store.expired_projects(utcnow(), PAGE_SIZE) if _erase_project(rt, p))
 
 
 def ensure_valid_upload_name(filename: str) -> None:

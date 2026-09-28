@@ -24,6 +24,7 @@ class ServiceId(StrEnum):
     REDRAFT = "REDRAFT"
     LATEX = "LATEX"
     SOURCE_CHECK = "SOURCE_CHECK"
+    PROPOSAL = "PROPOSAL"
 
 
 class JobStatus(StrEnum):
@@ -46,6 +47,7 @@ class Stage(StrEnum):
     REDRAFTING = "REDRAFTING"
     FORMATTING = "FORMATTING"
     CONVERTING = "CONVERTING"
+    DRAFTING = "DRAFTING"
     AUDITING = "AUDITING"
     EXPORTING = "EXPORTING"
 
@@ -76,6 +78,9 @@ class ServiceSelection(Camel):
     formatting: Literal["NONE", "FORMAT", "TEMPLATE_FORMAT"] = "NONE"
     preset: str = "apa7"
     latex: bool = False
+    # A step of a proposal project, or REVIEW: an uploaded proposal checked against the rulebook.
+    proposal: Literal["NONE", "PLAN", "CHAPTER_1", "CHAPTER_2", "CHAPTER_3", "REVIEW"] = "NONE"
+    level: Literal["BACHELORS", "PGD", "MASTERS", "PHD"] = "MASTERS"  # the proposal's level (REVIEW only)
 
     def services(self) -> list[ServiceId]:
         ids = []
@@ -87,6 +92,8 @@ class ServiceSelection(Camel):
             ids.append(ServiceId.LATEX)
         if self.source_check:
             ids.append(ServiceId.SOURCE_CHECK)
+        if self.proposal != "NONE":
+            ids.append(ServiceId.PROPOSAL)
         return ids
 
 
@@ -374,6 +381,41 @@ class LatexResult(Camel):
     warnings: list[str] = []
 
 
+ReadinessStatus = Literal["PASS", "NEEDS_REVIEW", "MISSING", "NOT_APPLICABLE", "BLOCKED"]
+
+
+class ReadinessItem(Camel):
+    """One proposal requirement, answered. `basis` says who settled it: a PaperAid check, the AI's
+    judgement, or a fact the student confirmed (Codex review, milestone 5)."""
+
+    id: str
+    question: str
+    status: ReadinessStatus
+    basis: Literal["CODE", "AI", "AUTHOR"]
+    note: str = ""
+    where: str = ""  # the section it concerns, when there is one
+    chapter: int = 0
+
+
+class ReviewFinding(Camel):
+    where: str  # the section heading, or the start of the paragraph
+    kind: Literal["ALIGNMENT", "EVIDENCE", "METHOD", "STRUCTURE", "TENSE", "WRITING"]
+    severity: Literal["major", "moderate", "minor"]
+    issue: str
+    suggestion: str
+
+
+class ProposalReview(Camel):
+    """An uploaded proposal checked against the institution's rulebook. Nothing in it is changed."""
+
+    rulebook: str
+    level: str
+    words: int
+    items: list[ReadinessItem]
+    findings: list[ReviewFinding]
+    method: str = ""
+
+
 class OutputFile(Camel):
     id: str
     label: str
@@ -443,6 +485,8 @@ class JobView(Camel):
     latex: LatexResult | None = None
     refinement: RefinementResult | None = None
     formatting: FormattingResult | None = None
+    proposal_review: ProposalReview | None = None
+    project_id: str | None = None  # a step of a proposal project: its result is saved to the project
     outputs: list[OutputFile] = []
     failure: JobFailure | None = None
     created_at: datetime = Field(default_factory=utcnow)
@@ -476,6 +520,7 @@ class Job(JobView):
     files_deleted: bool = False
     deleting: bool = False  # set atomically before deletion: no new work may start on the job
     retiring: bool = False  # claimed by retention cleanup: its files are being deleted, nothing new may start
+    input_sha256: str | None = None  # a proposal step: the frozen project input it was priced on
 
     def view(self) -> JobView:
         return JobView.model_validate(self.model_dump())

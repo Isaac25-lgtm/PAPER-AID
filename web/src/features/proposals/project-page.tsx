@@ -1,0 +1,392 @@
+import { clsx } from 'clsx'
+import { CheckCircle2, Circle, Download, ExternalLink, Trash2, TriangleAlert } from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
+import { useNavigate, useParams } from 'react-router'
+import { Button } from '../../components/ui/button'
+import { Select } from '../../components/ui/field'
+import { Dialog, Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/overlays'
+import { Alert, Badge, Card, PageHeader, Skeleton } from '../../components/ui/primitives'
+import { DataError, useData } from '../../lib/data'
+import { formatDate } from '../../lib/format'
+import type { ChapterView, EvidenceItem, Project, Rulebook } from '../../lib/proposal-types'
+import type { Job } from '../../lib/types'
+import { useTitle } from '../../lib/use-title'
+import { PlanEditor } from './plan-editor'
+import { DetailsForm } from './projects-page'
+import { LEVELS, ReadinessList, StepProgress, StepRunner } from './shared'
+
+const CHAPTERS = { 1: 'General Introduction', 2: 'Literature Review', 3: 'Methodology' } as const
+
+function Progress({ project }: { project: Project }) {
+  const steps = [
+    { label: 'Plan', done: project.planStatus === 'APPROVED', started: project.planStatus !== 'NONE' },
+    ...project.chapters.map((c) => ({ label: `Chapter ${c.number}`, done: c.approved, started: c.current > 0 })),
+  ]
+  return (
+    <ol className="mb-6 grid grid-cols-2 gap-2 sm:grid-cols-4">
+      {steps.map((s) => (
+        <li key={s.label} className={clsx('flex items-center gap-2 rounded-xl border p-3 text-sm', s.done ? 'border-brand-300 bg-brand-50' : 'border-line bg-white')}>
+          {s.done ? <CheckCircle2 className="size-4 text-brand-700" aria-hidden /> : <Circle className={clsx('size-4', s.started ? 'text-amber-600' : 'text-fg-subtle')} aria-hidden />}
+          <span className="font-medium">{s.label}</span>
+          <span className="ml-auto text-xs text-fg-subtle">{s.done ? 'Approved' : s.started ? 'Drafted' : ''}</span>
+        </li>
+      ))}
+    </ol>
+  )
+}
+
+function ChapterPanel({ project, number, running, onStarted, onChanged }: { project: Project; number: 1 | 2 | 3; running: boolean; onStarted: (id: string) => void; onChanged: (p: Project) => void }) {
+  const data = useData()
+  const state = project.chapters.find((c) => c.number === number)!
+  const [version, setVersion] = useState(state.current)
+  const [chapter, setChapter] = useState<ChapterView | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => setVersion(state.current), [state.current])
+  useEffect(() => {
+    if (!version) return setChapter(null)
+    let cancelled = false
+    data.projects
+      .chapter(project.id, number, version)
+      .then((c) => !cancelled && setChapter(c))
+      .catch((e: unknown) => !cancelled && setError(e instanceof DataError ? e.message : 'We could not load this chapter.'))
+    return () => {
+      cancelled = true
+    }
+  }, [data, project.id, number, version, project.citation, project.planVersion])
+
+  const choose = async (approved: boolean) => {
+    try {
+      onChanged(await data.projects.setChapter(project.id, number, version, approved))
+    } catch (e) {
+      setError(e instanceof DataError ? e.message : 'We could not save that.')
+    }
+  }
+
+  const planReady = project.planStatus === 'APPROVED'
+  const runner = (
+    <StepRunner
+      projectId={project.id}
+      step={`CHAPTER_${number}`}
+      label={state.current ? `Write a new version of Chapter ${number}` : `Write Chapter ${number}: ${CHAPTERS[number]}`}
+      description="PaperAid researches what the chapter needs, briefs each section, writes it from your approved plan, checks every citation and figure, reviews and fixes it, then assesses it against the UCU vetting questions. Earlier versions are kept."
+      disabledReason={running ? 'A step is running for this proposal. Wait for it to finish.' : planReady ? undefined : 'Approve your plan first: chapters are written from it.'}
+      onStarted={onStarted}
+    />
+  )
+  if (!state.current) return runner
+  return (
+    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
+      <div className="min-w-0 space-y-4">
+        <div className="flex flex-wrap items-end gap-3">
+          <Select label="Version" className="w-72" value={version} onChange={(e) => setVersion(Number(e.target.value))}>
+            {[...state.versions].reverse().map((v) => (
+              <option key={v.version} value={v.version}>
+                Version {v.version} · {formatDate(v.createdAt)}
+                {v.version === state.current ? ' (current)' : ''}
+              </option>
+            ))}
+          </Select>
+          {version !== state.current ? (
+            <Button variant="secondary" onClick={() => choose(false)}>
+              Use this version
+            </Button>
+          ) : state.approved ? (
+            <Badge tone="brand">Approved</Badge>
+          ) : (
+            <Button onClick={() => choose(true)}>Approve this chapter</Button>
+          )}
+        </div>
+        {error && <Alert tone="danger">{error}</Alert>}
+        {version === state.current && state.needsReview.length > 0 && (
+          <Alert tone="warning" title="Written from decisions you have since changed">
+            These sections no longer match your plan: {state.needsReview.join('; ')}. Write a new version to bring them in line.
+          </Alert>
+        )}
+        {chapter?.warnings.map((w) => (
+          <Alert key={w} tone="warning">
+            {w}
+          </Alert>
+        ))}
+        {!chapter ? (
+          <Skeleton className="h-96 rounded-2xl" />
+        ) : (
+          <Card className="p-5 sm:p-8">
+            <p className="text-center text-xs font-semibold tracking-wide text-fg-subtle uppercase">Chapter {number}</p>
+            <h2 className="text-center text-xl font-bold">{chapter.title}</h2>
+            <p className="mt-1 text-center text-xs text-fg-subtle">{chapter.words.toLocaleString()} words · written from plan version {chapter.planVersion}</p>
+            {chapter.sections.map((s) => (
+              <section key={s.number} className="mt-6">
+                <h3 className="flex items-center gap-2 font-semibold">
+                  {s.number} {s.heading}
+                  {s.needsReview && <Badge tone="warning">Needs review</Badge>}
+                </h3>
+                {s.paragraphs.map((p, i) => (
+                  <p key={i} className="mt-2 text-[15px] leading-relaxed text-fg">
+                    {p}
+                  </p>
+                ))}
+                {s.table && (
+                  <div className="mt-3 overflow-x-auto">
+                    {s.tableCaption && <p className="mb-1 text-sm font-semibold">{s.tableCaption}</p>}
+                    <table className="w-full border-collapse text-sm">
+                      <tbody>
+                        {s.table.map((row, r) => (
+                          <tr key={r} className={r === 0 ? 'font-semibold' : ''}>
+                            {row.map((cell, c) => (
+                              <td key={c} className="border border-line px-2 py-1">
+                                {cell}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
+            ))}
+            {chapter.references.length > 0 && (
+              <section className="mt-8 border-t border-line pt-4">
+                <h3 className="font-semibold">References in this chapter</h3>
+                <ul className="mt-2 space-y-1.5">
+                  {chapter.references.map((r) => (
+                    <li key={r} className="pl-6 -indent-6 text-sm text-fg-muted">
+                      {r}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+          </Card>
+        )}
+      </div>
+      <aside className="space-y-4">
+        {chapter && (
+          <Card className="p-4">
+            <p className="mb-2 text-sm font-semibold">Readiness</p>
+            <ReadinessList items={chapter.readiness} />
+          </Card>
+        )}
+        {runner}
+      </aside>
+    </div>
+  )
+}
+
+function EvidencePanel({ projectId, count }: { projectId: string; count: number }) {
+  const data = useData()
+  const [items, setItems] = useState<EvidenceItem[] | null>(null)
+  useEffect(() => {
+    data.projects.evidence(projectId).then(setItems).catch(() => setItems([]))
+  }, [data, projectId, count])
+  if (!items) return <Skeleton className="h-48 rounded-2xl" />
+  if (!items.length) return <p className="text-sm text-fg-muted">Evidence appears here once PaperAid has researched your plan or a chapter.</p>
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-fg-muted">
+        Chapters cite only confirmed evidence: PaperAid found the quoted words in the source itself and a second AI agreed they support the statement. References are built from the
+        source&rsquo;s registered details.
+      </p>
+      {items.map((item) => {
+        const usable = item.verified && (item.support === 'SUPPORTED' || item.support === 'PARTLY_SUPPORTED')
+        return (
+          <Card key={item.id} className="p-4">
+            <div className="flex flex-wrap items-center gap-2">
+              {usable ? <Badge tone="brand">Confirmed</Badge> : item.verified ? <Badge tone="warning">Does not support the statement</Badge> : <Badge>Found, not confirmed</Badge>}
+              <span className="text-xs text-fg-subtle">
+                {item.access === 'ABSTRACT' ? 'Abstract read' : item.access === 'FULL_TEXT' ? 'Page read' : 'Search snippet'} · retrieved {item.retrievedOn}
+              </span>
+            </div>
+            <p className="mt-2 text-sm font-medium">{item.statement}</p>
+            <blockquote className="mt-1 border-l-2 border-line pl-3 text-sm text-fg-muted italic">&ldquo;{item.passage}&rdquo;</blockquote>
+            <a href={item.source.url} target="_blank" rel="noreferrer noopener" className="mt-2 inline-flex items-center gap-1 text-sm text-brand-700 hover:underline">
+              {item.source.title} {item.source.year && `(${item.source.year})`} <ExternalLink className="size-3" aria-hidden />
+            </a>
+          </Card>
+        )
+      })}
+    </div>
+  )
+}
+
+export function ProjectPage() {
+  const { projectId = '' } = useParams()
+  const data = useData()
+  const navigate = useNavigate()
+  const [project, setProject] = useState<Project | null | undefined>(undefined)
+  const [rulebook, setRulebook] = useState<Rulebook | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [running, setRunning] = useState<string | null>(null)
+  const [finished, setFinished] = useState<Job | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  useTitle(project?.plan?.title ?? project?.inputs.topic ?? 'Proposal')
+
+  const load = useCallback(() => {
+    data.projects
+      .get(projectId)
+      .then((p) => {
+        setProject(p)
+        setRunning(p?.activeJob ?? null)
+      })
+      .catch((e: unknown) => setError(e instanceof DataError ? e.message : 'We could not load this proposal.'))
+  }, [data, projectId])
+  useEffect(load, [load])
+  useEffect(() => {
+    data.projects.rulebook().then(setRulebook).catch(() => setRulebook(null))
+  }, [data])
+
+  const onDone = useCallback(
+    (job: Job | null) => {
+      setRunning(null)
+      setFinished(job)
+      load()
+    },
+    [load],
+  )
+
+  const download = async (final: boolean) => {
+    if (!project) return
+    setError(null)
+    try {
+      const name = `${(project.plan?.title ?? 'Proposal').slice(0, 80)}${final ? '' : ' – draft'}.docx`
+      await data.projects.download(project.id, final, name)
+    } catch (e) {
+      setError(e instanceof DataError ? e.message : 'We could not prepare the document.')
+    }
+  }
+
+  if (project === undefined) return <Skeleton className="h-96 rounded-2xl" />
+  if (project === null) return <Alert tone="warning">This proposal no longer exists.</Alert>
+  const hasChapter = project.chapters.some((c) => c.current)
+
+  return (
+    <>
+      <PageHeader
+        title={project.plan?.title ?? project.inputs.topic}
+        description={
+          <>
+            {LEVELS[project.inputs.level]} · UCU Academic Research Manual (2018) · {project.citation === 'APA6' ? 'APA 6' : 'APA 7'} · kept until {formatDate(project.expiresAt)} unless you
+            work on it again
+          </>
+        }
+        actions={
+          <div className="flex flex-wrap gap-2">
+            <Button variant="secondary" disabled={!hasChapter} onClick={() => download(false)}>
+              <Download className="size-4" aria-hidden /> Draft (Word)
+            </Button>
+            <Button disabled={!hasChapter} onClick={() => download(true)}>
+              <Download className="size-4" aria-hidden /> Complete proposal
+            </Button>
+            <Button variant="ghost" aria-label="Delete proposal" onClick={() => setConfirmDelete(true)}>
+              <Trash2 className="size-4" aria-hidden />
+            </Button>
+          </div>
+        }
+      />
+      {error && (
+        <Alert tone="danger" className="mb-5">
+          {error}
+        </Alert>
+      )}
+      {running && (
+        <div className="mb-5">
+          <StepProgress jobId={running} onDone={onDone} />
+        </div>
+      )}
+      {finished && !running && (
+        <Alert tone={finished.status === 'COMPLETED' ? (finished.outcome === 'PARTIAL' ? 'warning' : 'success') : 'danger'} className="mb-5" title={finished.status === 'COMPLETED' ? 'Step finished' : 'The step did not finish'}>
+          {finished.status === 'COMPLETED' ? (finished.warnings.length ? finished.warnings.join(' ') : 'Saved to your proposal.') : (finished.failure?.userMessage ?? 'Nothing was charged.')}
+        </Alert>
+      )}
+      <Progress project={project} />
+      <Tabs defaultValue="plan">
+        <TabsList className="mb-5">
+          <TabsTrigger value="plan">Plan</TabsTrigger>
+          {project.chapters.map((c) => (
+            <TabsTrigger key={c.number} value={`c${c.number}`}>
+              Chapter {c.number}
+              {c.needsReview.length > 0 && <TriangleAlert className="ml-1 size-3.5 text-amber-600" aria-label="needs review" />}
+            </TabsTrigger>
+          ))}
+          <TabsTrigger value="evidence">Evidence ({project.evidenceCount})</TabsTrigger>
+          <TabsTrigger value="details">Details</TabsTrigger>
+        </TabsList>
+        <TabsContent value="plan" className="space-y-5">
+          {project.candidatePlan && (
+            <Alert
+              tone="info"
+              title="PaperAid finished a plan while you were editing yours"
+              action={
+                <div className="flex gap-2">
+                  <Button size="sm" onClick={async () => setProject(await data.projects.takeCandidate(project.id, true))}>
+                    Use the new plan
+                  </Button>
+                  <Button size="sm" variant="secondary" onClick={async () => setProject(await data.projects.takeCandidate(project.id, false))}>
+                    Keep mine
+                  </Button>
+                </div>
+              }
+            >
+              Its title: &ldquo;{project.candidatePlan.title}&rdquo;. Your own edits were kept.
+            </Alert>
+          )}
+          {project.plan && <PlanEditor project={project} onSaved={setProject} />}
+          <StepRunner
+            projectId={project.id}
+            step="PLAN"
+            label={project.plan ? 'Draft a new plan' : 'Draft my plan'}
+            description="PaperAid plans what evidence your study needs, reads scholarly abstracts and official sources, and has a second AI check each finding. The lead adviser then drafts the plan, a second adviser critiques it and the lead finalises it. You edit and approve it before any chapter is written."
+            disabledReason={running ? 'A step is running for this proposal. Wait for it to finish.' : undefined}
+            onStarted={setRunning}
+          />
+        </TabsContent>
+        {([1, 2, 3] as const).map((n) => (
+          <TabsContent key={n} value={`c${n}`}>
+            <ChapterPanel project={project} number={n} running={!!running} onStarted={setRunning} onChanged={setProject} />
+          </TabsContent>
+        ))}
+        <TabsContent value="evidence">
+          <EvidencePanel projectId={project.id} count={project.evidenceCount} />
+        </TabsContent>
+        <TabsContent value="details" className="max-w-3xl">
+          <DetailsForm
+            initial={project.inputs}
+            titlePage={project.titlePage}
+            citation={project.citation}
+            rulebook={rulebook}
+            submitLabel="Save details"
+            onSubmit={async (inputs, titlePage, citation) => setProject(await data.projects.updateDetails(project.id, inputs, titlePage, citation))}
+          />
+        </TabsContent>
+      </Tabs>
+      <Dialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title="Delete this proposal?"
+        description="Its plan, every chapter version and its evidence are deleted for good."
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setConfirmDelete(false)}>
+              Keep it
+            </Button>
+            <Button
+              variant="danger"
+              onClick={async () => {
+                try {
+                  await data.projects.remove(project.id)
+                  navigate('/app/projects')
+                } catch (e) {
+                  setConfirmDelete(false)
+                  setError(e instanceof DataError ? e.message : 'We could not delete this proposal.')
+                }
+              }}
+            >
+              Delete
+            </Button>
+          </>
+        }
+      />
+    </>
+  )
+}

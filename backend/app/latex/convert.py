@@ -258,7 +258,7 @@ class _Converter:
 
             valign = rpr.find(W + "vertAlign")
             if r.find(W + "footnoteReference") is not None:
-                valign = None  # ootnote sets its own mark
+                valign = None  # \footnote sets its own mark
             if valign is not None and valign.get(W + "val") == "superscript":
                 text = r"\textsuperscript{%s}" % text
             elif valign is not None and valign.get(W + "val") == "subscript":

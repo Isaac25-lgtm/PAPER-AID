@@ -1,6 +1,6 @@
 import * as Menu from '@radix-ui/react-dropdown-menu'
 import { clsx } from 'clsx'
-import { History, LayoutDashboard, LogOut, Menu as MenuIcon, Plus, Settings, ShieldCheck, Wallet } from 'lucide-react'
+import { GraduationCap, History, LayoutDashboard, LogOut, Menu as MenuIcon, Plus, Settings, ShieldCheck, Wallet } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router'
 import { useAuth } from '../../features/auth/auth-context'
@@ -24,6 +24,7 @@ export function AppLayout() {
   const nav = [
     { to: '/app', label: 'Dashboard', icon: LayoutDashboard, end: true },
     { to: '/app/history', label: 'History', icon: History, end: false },
+    ...(config.availability.PROPOSAL !== 'soon' ? [{ to: '/app/projects', label: 'Proposals', icon: GraduationCap, end: false }] : []),
     ...(config.creditsEnabled ? [{ to: '/app/credits', label: 'Credits', icon: Wallet, end: false }] : []),
     ...(user?.isAdmin ? [{ to: '/admin', label: 'Admin', icon: ShieldCheck, end: false }] : []),
   ]

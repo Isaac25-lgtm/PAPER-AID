@@ -1,6 +1,7 @@
 // DataSource backed by the PaperAid API. Identity comes from `getAuthHeader`, which the auth layer
 // supplies (a Firebase ID token in production, a local developer identity when running locally).
 import { DataError, type DataSource, type JobQuery } from './data'
+import type { ChapterView, EvidenceItem, Project, Rulebook, StepQuote } from './proposal-types'
 import type { AdminJob, AdminSummary, FileMeta, Job, Page, PublicConfig, QuoteResponse, Wallet, WalletSummary } from './types'
 
 interface Options {
@@ -159,6 +160,47 @@ export function createApiSource({ config, getAuthHeaders }: Options): DataSource
       document.body.appendChild(link)
       link.click()
       link.remove()
+    },
+
+    projects: {
+      rulebook: () => request<Rulebook>('/api/projects/rulebook'),
+      list: () => request<Project[]>('/api/projects'),
+      get: (id) =>
+        request<Project>(`/api/projects/${encodeURIComponent(id)}`).catch((err: unknown) => {
+          if (err instanceof DataError && err.status === 404) return null
+          throw err
+        }),
+      create: (inputs, titlePage, citation) => request<Project>('/api/projects', { method: 'POST', body: JSON.stringify({ inputs, titlePage, citation }) }),
+      updateDetails: (id, inputs, titlePage, citation) =>
+        request<Project>(`/api/projects/${id}/details`, { method: 'POST', body: JSON.stringify({ inputs, titlePage, citation }) }),
+      savePlan: (id, plan, baseVersion) => request<Project>(`/api/projects/${id}/plan`, { method: 'POST', body: JSON.stringify({ plan, baseVersion }) }),
+      approvePlan: (id, baseVersion) => request<Project>(`/api/projects/${id}/plan/approve`, { method: 'POST', body: JSON.stringify({ baseVersion }) }),
+      takeCandidate: (id, accept) => request<Project>(`/api/projects/${id}/plan/candidate`, { method: 'POST', body: JSON.stringify({ accept }) }),
+      sampleSize: (id, sample) => request<{ size: number | null; steps: string; missing: string }>(`/api/projects/${id}/sample-size`, { method: 'POST', body: JSON.stringify(sample) }),
+      quoteStep: (id, step, note) => request<StepQuote>(`/api/projects/${id}/steps`, { method: 'POST', body: JSON.stringify({ step, note }) }),
+      submitStep: async (id, jobId, quoteId) => {
+        await request<Job>(`/api/projects/${id}/steps/${jobId}/submit`, { method: 'POST', body: JSON.stringify({ quoteId }) })
+      },
+      chapter: (id, number, version) => request<ChapterView>(`/api/projects/${id}/chapters/${number}${query({ version })}`),
+      setChapter: (id, number, version, approved) =>
+        request<Project>(`/api/projects/${id}/chapters/${number}`, { method: 'POST', body: JSON.stringify({ version, approved }) }),
+      evidence: (id) => request<EvidenceItem[]>(`/api/projects/${id}/evidence`),
+      async download(id, final, fileName) {
+        const res = await fetch(`/api/projects/${id}/export${query({ final: final ? 'true' : null })}`, { headers: await getAuthHeaders() })
+        if (!res.ok) {
+          const body = (await res.json().catch(() => null)) as { message?: string } | null
+          throw new DataError(body?.message ?? 'The proposal could not be prepared.', res.status)
+        }
+        const url = URL.createObjectURL(await res.blob())
+        const link = document.createElement('a')
+        link.href = url
+        link.download = fileName
+        document.body.appendChild(link)
+        link.click()
+        link.remove()
+        setTimeout(() => URL.revokeObjectURL(url), 5000)
+      },
+      remove: (id) => request<void>(`/api/projects/${id}`, { method: 'DELETE' }),
     },
 
     admin: {

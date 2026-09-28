@@ -14,6 +14,7 @@ import type {
   Wallet,
   WalletSummary,
 } from './types'
+import type { ChapterView, CitationStyle, EvidenceItem, Project, ProposalInputs, ProposalPlan, Rulebook, SampleSize, StepId, StepQuote, TitlePage } from './proposal-types'
 
 export interface JobQuery {
   cursor?: string | null
@@ -53,6 +54,26 @@ export interface DataSource {
   deleteJob(jobId: string): Promise<void>
   download(jobId: string, outputId: string, fileName: string): Promise<void>
   deleteAccount(): Promise<void>
+  /** Proposal projects: the plan, chapters and evidence live on the server; every paid step is a job. */
+  projects: {
+    rulebook(): Promise<Rulebook>
+    list(): Promise<Project[]>
+    get(id: string): Promise<Project | null>
+    create(inputs: ProposalInputs, titlePage: TitlePage, citation: CitationStyle): Promise<Project>
+    updateDetails(id: string, inputs: ProposalInputs, titlePage: TitlePage, citation: CitationStyle): Promise<Project>
+    /** `baseVersion` is the plan version the edit started from; a stale edit is refused (409). */
+    savePlan(id: string, plan: ProposalPlan, baseVersion: number): Promise<Project>
+    approvePlan(id: string, baseVersion: number): Promise<Project>
+    takeCandidate(id: string, accept: boolean): Promise<Project>
+    sampleSize(id: string, sample: SampleSize): Promise<{ size: number | null; steps: string; missing: string }>
+    quoteStep(id: string, step: StepId, note: string): Promise<StepQuote>
+    submitStep(id: string, jobId: string, quoteId: string): Promise<void>
+    chapter(id: string, number: number, version?: number): Promise<ChapterView>
+    setChapter(id: string, number: number, version: number, approved: boolean): Promise<Project>
+    evidence(id: string): Promise<EvidenceItem[]>
+    download(id: string, final: boolean, fileName: string): Promise<void>
+    remove(id: string): Promise<void>
+  }
   admin: {
     summary(): Promise<AdminSummary>
     listJobs(query: JobQuery): Promise<Page<AdminJob>>

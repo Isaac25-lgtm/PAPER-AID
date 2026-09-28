@@ -1,5 +1,5 @@
 import { clsx } from 'clsx'
-import { useId, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes } from 'react'
+import { useId, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react'
 
 const control =
   'w-full rounded-lg border border-line-strong bg-white px-3 text-sm text-fg shadow-sm transition-colors placeholder:text-fg-subtle hover:border-brand-300 focus:border-brand-500 focus:outline-none focus:ring-3 focus:ring-brand-100 disabled:bg-surface-muted aria-invalid:border-red-400 aria-invalid:focus:ring-red-100'
@@ -19,6 +19,29 @@ export function Input({ label, hint, error, className, ...props }: FieldProps & 
         {label}
       </label>
       <input id={id} aria-invalid={error ? true : undefined} aria-describedby={describedBy} className={clsx(control, 'h-11')} {...props} />
+      {hint && !error && (
+        <p id={`${id}-hint`} className="mt-1.5 text-xs text-fg-subtle">
+          {hint}
+        </p>
+      )}
+      {error && (
+        <p id={`${id}-error`} className="mt-1.5 text-xs font-medium text-red-600">
+          {error}
+        </p>
+      )}
+    </div>
+  )
+}
+
+export function TextArea({ label, hint, error, className, rows = 3, ...props }: FieldProps & TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  const id = useId()
+  const describedBy = [hint && `${id}-hint`, error && `${id}-error`].filter(Boolean).join(' ') || undefined
+  return (
+    <div className={className}>
+      <label htmlFor={id} className="mb-1.5 block text-sm font-medium text-fg">
+        {label}
+      </label>
+      <textarea id={id} rows={rows} aria-invalid={error ? true : undefined} aria-describedby={describedBy} className={clsx(control, 'py-2 leading-relaxed')} {...props} />
       {hint && !error && (
         <p id={`${id}-hint`} className="mt-1.5 text-xs text-fg-subtle">
           {hint}

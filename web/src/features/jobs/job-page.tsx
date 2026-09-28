@@ -10,6 +10,7 @@ import type { Job, Quote } from '../../lib/types'
 import { STYLE_OPTIONS } from '../../lib/services'
 import { useTitle } from '../../lib/use-title'
 import { BandChange, ChangesPanel, DownloadList, FindingsList, FormattingPanel, LatexPanel, PaperChecksPanel, ScoreCard, SourceCheckPanel } from '../results/report'
+import { ProposalReviewPanel } from '../proposals/review-panel'
 import { useJob } from './hooks'
 import { jobLink, jobTitle, serviceNames, StageTimeline, StatusBadge } from './job-bits'
 
@@ -180,6 +181,7 @@ function Completed({ job }: { job: Job }) {
     { id: 'changes', label: 'Changes', show: !!job.refinement },
     { id: 'formatting', label: 'Formatting', show: !!job.formatting },
     { id: 'latex', label: 'LaTeX', show: !!job.latex },
+    { id: 'proposal', label: 'Proposal review', show: !!job.proposalReview },
   ].filter((t) => t.show)
 
   return (
@@ -237,6 +239,11 @@ function Completed({ job }: { job: Job }) {
             <LatexPanel latex={job.latex} />
           </TabsContent>
         )}
+        {job.proposalReview && (
+          <TabsContent value="proposal">
+            <ProposalReviewPanel review={job.proposalReview} />
+          </TabsContent>
+        )}
       </Tabs>
     </>
   )
@@ -251,6 +258,10 @@ function Overview({ job }: { job: Job }) {
   if (job.analysis) highlights.push({ label: 'Findings', value: `${job.analysis.findings.length} writing-pattern findings` })
   if (job.refinement) highlights.push({ label: 'Refined', value: `${job.refinement.refinedBlocks} passages, ${job.refinement.keptOriginal} kept original` })
   if (job.formatting) highlights.push({ label: 'Formatting', value: job.formatting.preset })
+  if (job.proposalReview) {
+    const open = job.proposalReview.items.filter((i) => i.status === 'MISSING' || i.status === 'NEEDS_REVIEW').length
+    highlights.push({ label: 'Proposal review', value: `${open} of ${job.proposalReview.items.length} checks need attention` })
+  }
 
   return (
     <>

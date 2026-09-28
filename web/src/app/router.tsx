@@ -11,6 +11,7 @@ import { FeaturesPage, PricingPage, PrivacyPage } from '../features/marketing/in
 // Signed-in and admin screens load on demand, so the public site stays light on mobile data.
 const lists = () => import('../features/jobs/list-pages')
 const admin = () => import('../features/admin/admin-pages')
+const proposals = () => import('../features/proposals/projects-page')
 
 function Root() {
   return (
@@ -67,6 +68,9 @@ export const router = createBrowserRouter([
               { path: '/app/new', lazy: () => import('../features/upload/new-job-page').then((m) => ({ Component: m.NewJobPage })) },
               { path: '/app/jobs/:jobId', lazy: () => import('../features/jobs/job-page').then((m) => ({ Component: m.JobPage })) },
               { path: '/app/history', lazy: () => lists().then((m) => ({ Component: m.HistoryPage })) },
+              { path: '/app/projects', lazy: () => proposals().then((m) => ({ Component: m.ProjectsPage })) },
+              { path: '/app/projects/new', lazy: () => proposals().then((m) => ({ Component: m.NewProjectPage })) },
+              { path: '/app/projects/:projectId', lazy: () => import('../features/proposals/project-page').then((m) => ({ Component: m.ProjectPage })) },
               { path: '/app/credits', lazy: () => import('../features/credits/credits-page').then((m) => ({ Component: m.CreditsPage })) },
               { path: '/app/settings', lazy: () => import('../features/account/settings-page').then((m) => ({ Component: m.SettingsPage })) },
               {

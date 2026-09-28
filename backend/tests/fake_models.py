@@ -15,6 +15,40 @@ from tests import fake_writer
 SOURCE_URL = "https://stats.example.org/report-2022"
 SOURCE_PAGE = "<html><body><h1>Annual report</h1><p>The report gives the figure for 2022. It covers every district.</p></body></html>"
 INSTRUCTION = "Cut filler and stock phrases, replace stacked transitions and vary sentence structure; keep every claim, number and citation."
+ABSTRACT = (
+    "Background: vaccine uptake among caregivers remains uneven. Methods: a cross-sectional survey of 410 caregivers in Mukono. "
+    "Results: distance to the health facility was associated with lower uptake of the vaccine among caregivers in rural parishes."
+)
+WORK = {
+    "doi": "10.1186/s12936-022-0001", "url": "https://doi.org/10.1186/s12936-022-0001", "title": "Vaccine uptake among caregivers in central Uganda",
+    "authors": "Okello, J.; Namara, A.; Kato, P.", "year": "2022", "container": "Malaria Journal", "volume": "21", "issue": "3", "pages": "1–10",
+    "type": "article", "abstract": ABSTRACT,
+}
+CROSSREF = {
+    "doi": WORK["doi"], "title": "Vaccine Uptake Among Caregivers in Central Uganda", "authors": "Okello, J.; Namara, A.; Kato, P.", "year": "2022",
+    "container": "Malaria Journal", "volume": "21", "issue": "3", "pages": "1–10", "type": "journal-article",
+}
+PLAN = {
+    "title": "Determinants of malaria vaccine uptake among caregivers in Mukono District",
+    "problem": "Uptake of the malaria vaccine remains below target, and the reasons in Mukono are not known.",
+    "purpose": "To establish the determinants of malaria vaccine uptake among caregivers in Mukono District.",
+    "specificObjectives": ["To assess the effect of distance on uptake", "To examine caregivers' attitudes towards the vaccine", "To determine the role of health workers in uptake"],
+    "questionsKind": "QUESTIONS",
+    "researchQuestions": ["How does distance affect uptake?", "What attitudes do caregivers hold?", "What role do health workers play?"],
+    "studyType": "QUANTITATIVE", "design": "A cross-sectional survey, because it measures uptake and its determinants at one time.",
+    "studyArea": "Mukono District", "population": "Caregivers of children under two", "sampling": "Multi-stage cluster sampling of parishes and households.",
+    "sampleSize": {"method": "YAMANE", "population": 2400, "populationSource": "", "margin": 0.05, "confidence": 95, "proportion": 0.5, "stated": None, "rationale": ""},
+    "inclusion": "Caregivers of children aged 6-23 months living in the district for six months.",
+    "variables": {"independent": ["distance", "attitudes", "health worker advice"], "dependent": ["vaccine uptake"], "intervening": []},
+    "alignment": [
+        {"objective": 1, "data": "Distance and uptake", "collection": "Questionnaire", "analysis": "Chi-square test"},
+        {"objective": 2, "data": "Attitude scores", "collection": "Questionnaire", "analysis": "Descriptive statistics and regression"},
+        {"objective": 3, "data": "Advice received", "collection": "Questionnaire", "analysis": "Logistic regression"},
+    ],
+    "theory": "The Health Belief Model, because uptake depends on perceived barriers and cues to action.",
+    "scope": "Mukono District, 2026, determinants of uptake.",
+    "timelineMonths": 6, "gaps": [], "questionsForStudent": [],
+}
 
 
 class FakeModels:
@@ -31,6 +65,10 @@ class FakeModels:
         self.sent_queries: list[str] | None = None  # queries the fake search "sent" (default: the suggested one)
         self.pages: dict[str, str] = {SOURCE_URL: SOURCE_PAGE}  # what reading each source page returns
         self.abstracts: dict[str, str] = {}  # what the abstract lookup returns for a source URL
+        self.works: list[dict[str, str]] = [dict(WORK)]  # what the scholarly index returns for any query
+        self.crossref: dict[str, dict[str, str]] = {WORK["doi"]: dict(CROSSREF)}  # registered details by DOI
+        self.searched: list[str] = []  # queries sent to the scholarly index
+        self.dois: dict[str, str] = {}  # DOIs looked up for PubMed/PMC pages
 
     def json(self, task: str, model: str, system: str, payload: dict[str, Any], schema: dict[str, Any], max_tokens: int) -> ModelResult:
         self.tasks.append(task)
@@ -112,4 +150,52 @@ class FakeModels:
             return {"pass": True, "problems": []}
         if task == "spec_fix":
             return payload["spec"]
+        return FakeModels.proposal(task, payload)
+
+    @staticmethod
+    def proposal(task: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Proposal steps: one scholarly need and one web need; a coherent plan; briefs citing the
+        first evidence item; drafts in the future tense that cite it; every review passes."""
+        if task == "p_needs":
+            return {
+                "needs": [
+                    {"id": "n1", "need": "Determinants of vaccine uptake among caregivers", "kind": "LITERATURE", "query": "malaria vaccine uptake caregivers"},
+                    {"id": "n2", "need": "The latest national figure", "kind": "FACT", "query": "malaria burden Uganda 2022"},
+                ]
+            }
+        if task == "p_extract":
+            return {"findings": [{"work": payload["works"][0]["id"], "statement": "Distance was associated with lower uptake among rural caregivers.", "passage": "distance to the health facility was associated with lower uptake of the vaccine", "scope": "Mukono, caregivers"}]}
+        if task == "p_search":
+            return {"findings": [{"url": SOURCE_URL, "title": "Annual report", "publisher": "Statistics office", "published": "2022", "access": "FULL_TEXT", "statement": "The report gives the national figure for 2022.", "passage": "The report gives the figure for 2022.", "scope": "Uganda, 2022"}]}
+        if task in ("p_plan",):
+            return dict(PLAN)
+        if task == "p_critique":
+            return {"items": [], "overall": "Sound."}
+        if task == "p_finalise":
+            return payload["draft"]
+        if task == "p_brief":
+            first = payload["evidence"][0]["id"] if payload["evidence"] else None
+
+            def cites(key: str) -> bool:
+                return first is not None and (key in ("background", "problem") or key.startswith("empirical"))
+
+            return {"sections": [{"key": s["key"], "points": [f"Explain {s['heading']}."], "evidence": [first] if cites(s["key"]) else []} for s in payload["sections"]]}
+        if task in ("p_draft", "p_fix"):
+            out = []
+            for s in payload["sections"]:
+                if task == "p_fix":
+                    out.append({"key": s["key"], "paragraphs": s["text"], "table": s["table"]})
+                    continue
+                cite = f" ⟦{s['evidence'][0]['id']}⟧" if s["evidence"] else ""
+                table = {"caption": "Work plan", "rows": [["Activity", "Months"], ["Data collection", "Month 3"]]} if s["table"] else {"caption": "", "rows": []}
+                out.append({"key": s["key"], "paragraphs": [f"This section sets out {s['heading'].lower()} for the study.{cite}", "The study will follow the approved plan."], "table": table})
+            return {"sections": out}
+        if task == "p_review":
+            return {"results": [{"key": s["key"], "grade": "PASS", "issues": [], "note": ""} for s in payload["sections"]]}
+        if task == "p_readiness":
+            return {"items": [{"id": q["id"], "status": "PASS", "note": "Present.", "where": ""} for q in payload["questions"]], "consistency": []}
+        if task == "p_audit":
+            items = [{"id": q["id"], "status": "NEEDS_REVIEW", "note": "Partly.", "where": ""} for qs in payload["vetting"].values() for q in qs]
+            first = payload["paragraphs"][0]["id"] if payload["paragraphs"] else ""
+            return {"items": items, "findings": [{"where": first, "kind": "ALIGNMENT", "severity": "major", "issue": "Objective 2 has no matching question.", "suggestion": "Add a question for it."}]}
         raise KeyError(f"no fake answer for {task}")

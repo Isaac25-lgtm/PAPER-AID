@@ -65,6 +65,14 @@ export const SERVICES: Record<ServiceId, ServiceInfo> = {
     youGet: ['Each claim marked supported, partly supported, contradicted or not found', 'The sources, with the passage quoted and the date read', 'Sources you could cite for uncited claims'],
     untouched: ['Your paper: claims are reported, never changed'],
   },
+  PROPOSAL: {
+    name: 'Research proposals',
+    short: 'Plan, research and write a UCU research proposal chapter by chapter, or review one you have written.',
+    icon: GraduationCap,
+    accepts: 'Your topic and study details, or your proposal as DOCX or PDF',
+    youGet: ['A readiness checklist against the UCU manual', 'Every claim traced to a source PaperAid confirmed', 'A Word file in the UCU layout'],
+    untouched: ['Facts only you can give: population sizes, instruments and approvals are asked for, never invented'],
+  },
   LATEX: {
     name: 'LaTeX conversion',
     short: 'Convert your paper into a clean, compilable LaTeX project.',
@@ -85,6 +93,7 @@ export const STAGE_LABELS: Record<Stage, string> = {
   PLANNING: 'Agreeing the refinement plan',
   REFINING: 'Refining flagged passages',
   REDRAFTING: 'Redrafting sections',
+  DRAFTING: 'Writing the chapter',
   FORMATTING: 'Applying formatting',
   AUDITING: 'Checking accuracy',
   EXPORTING: 'Preparing your files',

@@ -1,0 +1,161 @@
+{
+  "id": "ucu-2018-v1",
+  "institution": "Uganda Christian University",
+  "short": "UCU",
+  "source": "Uganda Christian University Academic Research Manual, revised April 2018",
+  "source_sha256": "35b3d43a19e8981ae343e92c3f96d0489e8fd432acf0f07b998e0a7df4735ed4",
+  "note": "The manual is a general guide: faculties may document their own variations (manual, About this manual and §1.1). Pages cited are the manual's printed page numbers (add seven for the PDF page). Only proposal rules are here: concept-paper (§1.4) and final-report rules (§4-§5.8) do not apply to a proposal.",
+  "citation_profiles": {
+    "APA6": {"label": "APA 6th edition (the UCU 2018 manual's appendix)", "source": "§1.6, p. 5; Appendix B §7.2, p. 44"},
+    "APA7": {"label": "APA 7th edition (if your faculty uses it)", "source": "§1.6, p. 5: faculties may communicate their own style"}
+  },
+  "default_citation": "APA6",
+  "levels": {
+    "BACHELORS": {"label": "Bachelor's", "pages": [10, 20], "source": "§2.2(iii), p. 10"},
+    "PGD": {"label": "Postgraduate Diploma", "pages": [15, 30], "source": "§2.2(iii), p. 10"},
+    "MASTERS": {"label": "Master's", "pages": [15, 30], "source": "§2.2(iii), p. 10"},
+    "PHD": {"label": "PhD", "pages": [25, 45], "source": "§2.2(iii), p. 10"}
+  },
+  "words_per_page": 250,
+  "words_per_page_source": "§1.7, p. 6 (double spacing, 1 inch margins, Trebuchet MS 12)",
+  "objectives": {"min": 2, "max": 5, "source": "§5.3.3, p. 19"},
+  "questions": {"min": 2, "max": 5, "source": "§5.3.4, p. 22"},
+  "citation_style": {"style": "APA", "source": "§1.6, p. 5"},
+  "formatting": {
+    "font": "Trebuchet MS",
+    "size_pt": 12,
+    "line_spacing": 2.0,
+    "margins_in": 1.0,
+    "page_numbers": "bottom-center",
+    "source": "§2.2(ii), p. 10"
+  },
+  "preliminary_pages": {
+    "items": ["Title Page (not numbered)", "Declaration", "Approval", "Table of Contents", "List of Tables", "List of Figures", "List of Appendices", "Glossary of Terms and Acronyms (where applicable)"],
+    "title_page": "The intended title, the candidate's name and student number, the academic programme, the proposed supervisor and the date of submission.",
+    "source": "§2.2(i)-(ii), pp. 9-10"
+  },
+  "rules": [
+    {"id": "UCU-P-TENSE", "requirement": "The proposal is written in the future tense, since it precedes the research.", "interpretation": "PaperAid applies this to the planned study only; published studies and established facts keep their natural tense.", "enforcement": "REQUIRED", "type": "hybrid", "source": "§2.2(ii), p. 10"},
+    {"id": "UCU-P-CHAPTERS", "requirement": "Three chapters or sections: General Introduction, Literature Review and Methodology. They may run continuously; chapter numbers are optional.", "enforcement": "REQUIRED", "type": "deterministic", "source": "§2.1 and §2.2(ii), pp. 7-10"},
+    {"id": "UCU-P-REFERENCES", "requirement": "A reference list at the end lists every work referred to in the text, in APA style.", "enforcement": "REQUIRED", "type": "deterministic", "source": "§1.6, p. 5; §2.2(ii), pp. 9-10"},
+    {"id": "UCU-P-OBJECTIVES", "requirement": "State the main objective and the specific objectives, each in a single sentence; two to five specific objectives are generally sufficient.", "enforcement": "RECOMMENDED", "type": "deterministic", "source": "§5.3.3, p. 19 (general research-document guidance)"},
+    {"id": "UCU-P-QUESTIONS", "requirement": "Research questions, hypotheses or propositions that are precise and not obvious; two to five are generally sufficient. Hypotheses only where inferential statistical testing is planned, stated as null and alternative.", "enforcement": "RECOMMENDED", "type": "hybrid", "source": "§5.3.4, pp. 19-22 (general research-document guidance)"},
+    {"id": "UCU-P-WORKPLAN", "requirement": "A work plan or timeline; a budget is optional.", "enforcement": "REQUIRED", "type": "deterministic", "source": "§2.1(iii), p. 9"},
+    {"id": "UCU-P-ETHICS", "requirement": "Proposals whose methods may affect participants' privacy or well-being are approved by the Research Ethics Committee before any data are collected.", "interpretation": "PaperAid describes the planned safeguards and the approval to be sought; it never states that approval has been obtained.", "enforcement": "REQUIRED", "type": "semantic", "source": "§1.3(v), p. 3; §5.5.11, p. 26"},
+    {"id": "UCU-P-SECONDARY", "requirement": "Studies using purely secondary data, projects and extended essays may not follow the full format; the faculty's own format applies.", "enforcement": "INFORMATIONAL", "type": "semantic", "source": "§2.1, p. 9; §7.4, pp. 64-65"},
+    {"id": "UCU-P-FACULTY", "requirement": "Faculties may set their own variations; students check with their faculty office for supplementary guidelines.", "enforcement": "INFORMATIONAL", "type": "semantic", "source": "About this manual, p. i; §1.1, p. 1"}
+  ],
+  "chapters": [
+    {
+      "number": 1,
+      "title": "General Introduction",
+      "share": 0.35,
+      "purpose": "The supervisor or committee should have no difficulty understanding the objective of the study and why it is important.",
+      "source": "§2.1(i), p. 7; §5.3, pp. 18-22",
+      "sections": [
+        {"key": "intro", "heading": "Introduction", "brief": "What the chapter covers, in a few sentences.", "share": 0.03, "source": "§5.3, p. 18"},
+        {"key": "background", "heading": "Background to the Study", "brief": "Historical, theoretical, conceptual and contextual background, moving from broad to narrow, defining the key concepts and building the case for the problem statement.", "share": 0.3, "source": "§5.3.1, p. 18; vetting form, p. 51"},
+        {"key": "problem", "heading": "Statement of the Problem", "brief": "The central problem stated clearly: the need for research, the gap in knowledge or practice it fills, and why it matters now.", "share": 0.12, "source": "§5.3.2, p. 19"},
+        {"key": "purpose", "heading": "Purpose of the Study", "brief": "The general objective in one or two sentences, aligned to the problem.", "share": 0.03, "source": "§2.1(i), p. 7"},
+        {"key": "objectives", "heading": "Objectives of the Study", "brief": "The specific objectives from the approved plan, each one sentence, going beyond 'to study' to analysis.", "share": 0.04, "source": "§5.3.3, p. 19; vetting form, p. 51"},
+        {"key": "questions", "heading": "Research Questions", "brief": "The research questions (or hypotheses, or propositions) from the approved plan, aligned one to one with the objectives.", "share": 0.04, "source": "§5.3.4, pp. 19-22"},
+        {"key": "scope", "heading": "Scope of the Study", "brief": "Geographical, time and content scope.", "share": 0.07, "source": "§5.3.7, p. 22"},
+        {"key": "justification", "heading": "Justification of the Study", "brief": "Why the study is being undertaken: convincing and brief. Must differ from significance.", "share": 0.08, "source": "§5.3.5, p. 22"},
+        {"key": "significance", "heading": "Significance of the Study", "brief": "Its importance to the field, the problem or policy, and its expected contribution to knowledge. Must differ from justification.", "share": 0.08, "source": "§5.3.6, p. 22"},
+        {"key": "framework", "heading": "Conceptual Framework", "brief": "The theory or theories applied and the conceptual framework: independent, dependent and any intervening variables and how they relate.", "share": 0.15, "source": "§5.3.8, p. 22"},
+        {"key": "synopsis", "heading": "Organisation of the Proposal", "brief": "A short synopsis of the three chapters.", "share": 0.06, "source": "§5.3, p. 18; vetting form, p. 51"}
+      ]
+    },
+    {
+      "number": 2,
+      "title": "Literature Review",
+      "share": 0.4,
+      "purpose": "A focused, evaluative examination of the literature that leads the reader to the research questions and the gap the study fills.",
+      "source": "§2.1(ii), pp. 7-8; §5.4, pp. 22-23",
+      "sections": [
+        {"key": "intro", "heading": "Introduction", "brief": "What the review covers and how it is organised.", "share": 0.05, "source": "§2.1(ii), p. 7"},
+        {"key": "theory", "heading": "Theoretical Review", "brief": "The theory applied to the problem, not merely described: critical analysis, similarities and differences between views.", "share": 0.2, "source": "§5.4.1, p. 23"},
+        {"key": "empirical", "heading": "Empirical Review", "brief": "One sub-section per specific objective: approaches, analyses, findings and conclusions of prior studies, analysed critically rather than summarised study by study.", "share": 0.62, "per_objective": true, "source": "§5.4.2, p. 23; §2.1(ii), p. 8"},
+        {"key": "gap", "heading": "Summary and Research Gap", "brief": "What is known, what is contested and the gap this study addresses.", "share": 0.13, "source": "§2.1(ii), p. 8; §5.4, p. 22"}
+      ]
+    },
+    {
+      "number": 3,
+      "title": "Methodology",
+      "share": 0.25,
+      "purpose": "An explicit description of how the study will be conducted, so the reader can judge whether the results will be reliable and valid, and could replicate it.",
+      "source": "§2.1(iii), pp. 8-9; §5.5, pp. 23-26",
+      "sections": [
+        {"key": "intro", "heading": "Introduction", "brief": "What the chapter covers.", "share": 0.03, "source": "§5.5, p. 23"},
+        {"key": "design", "heading": "Research Design", "brief": "The design and the rationale for choosing it.", "share": 0.09, "source": "§5.5.1, p. 24"},
+        {"key": "area", "skip_for": ["NON_EMPIRICAL"], "heading": "Area of Study", "brief": "Where the study will take place and why that area suits the problem.", "share": 0.07, "source": "§5.5.2, p. 24"},
+        {"key": "sources", "heading": "Sources of Information", "brief": "Primary and secondary data sources.", "share": 0.05, "source": "§5.5.3, p. 24"},
+        {"key": "population", "skip_for": ["NON_EMPIRICAL"], "heading": "Study Population", "brief": "The target population and why it is appropriate.", "share": 0.06, "source": "§5.5.4, p. 25"},
+        {"key": "sampling", "skip_for": ["NON_EMPIRICAL"], "heading": "Sample Size and Sampling Techniques", "brief": "How the sample size will be determined (formula and assumptions), the sampling procedure, and inclusion and exclusion criteria. Probability sampling for quantitative studies; non-probability for qualitative.", "share": 0.12, "source": "§5.5.4, p. 25; vetting form, p. 52"},
+        {"key": "variables", "skip_for": ["QUALITATIVE", "NON_EMPIRICAL"], "heading": "Variables and Measurement", "brief": "Dependent and independent variables, how each will be measured and its level of measurement (nominal, ordinal, interval, ratio).", "share": 0.09, "source": "§5.5.5, p. 25"},
+        {"key": "procedure", "skip_for": ["NON_EMPIRICAL"], "heading": "Data Collection Procedure", "brief": "Step by step, how data will be collected.", "share": 0.07, "source": "§5.5.6, p. 25"},
+        {"key": "instruments", "skip_for": ["NON_EMPIRICAL"], "heading": "Data Collection Instruments", "brief": "The tools (questionnaire, interview guide, observation checklist, equipment) and why they suit the objectives.", "share": 0.07, "source": "§5.5.7, p. 25"},
+        {"key": "quality", "heading": "Quality Control", "brief": "How validity and reliability of the instruments will be ensured, including any pilot or pre-test.", "share": 0.08, "source": "§5.5.8, pp. 25-26"},
+        {"key": "analysis", "heading": "Data Processing and Analysis", "brief": "How data will be cleaned and analysed, the method for each objective, and any software.", "share": 0.11, "source": "§5.5.10, p. 26"},
+        {"key": "ethics", "heading": "Ethical Considerations", "brief": "Confidentiality, consent, assent, anonymity and approval by the Research Ethics Committee where required.", "share": 0.07, "source": "§5.5.11, p. 26; §1.3(v), p. 3"},
+        {"key": "constraints", "heading": "Anticipated Methodological Constraints", "brief": "Expected limits of the methods and how they will be handled.", "share": 0.05, "source": "§5.5.12, p. 26"},
+        {"key": "workplan", "heading": "Work Plan", "brief": "A timeline of the study's activities, month by month, as a table.", "share": 0.04, "table": true, "source": "§2.1(iii), p. 9"}
+      ]
+    }
+  ],
+  "vetting": {
+    "source": "Form for vetting proposals and detailed guidelines for assessment, Appendix C §7.3.1, pp. 50-52",
+    "note": "The form gives 20, 15 and 15 marks (total 50) while the guidelines label them as percentages; PaperAid uses the questions as a checklist and gives no marks.",
+    "questions": {
+      "1": [
+        {"id": "C1-BROAD", "question": "Does the background go sufficiently from broad to narrow on the topic?"},
+        {"id": "C1-CASE", "question": "Does the background make a case for the problem statement?"},
+        {"id": "C1-CONCEPTS", "question": "Are concepts defined?"},
+        {"id": "C1-PROBLEM", "question": "Does the problem statement clearly state the problem and the gap in scholarly knowledge the research will fill?"},
+        {"id": "C1-PURPOSE", "question": "Is the purpose clearly stated, with objectives that support it and go beyond 'study' to higher-level research (analysis)?"},
+        {"id": "C1-ALIGN", "question": "Is the purpose aligned to the research problem, questions and/or hypotheses?"},
+        {"id": "C1-QUESTIONS", "question": "Is there a primary research question with aligned questions supporting it?"},
+        {"id": "C1-JUST-SIG", "question": "Is there a clear difference between justification and significance?"},
+        {"id": "C1-FLOW", "question": "Does the content reflect quality organisation and flow?"},
+        {"id": "C1-LANGUAGE", "question": "Are grammar, punctuation and word choice accurate?"},
+        {"id": "C1-RELEVANT", "question": "Is all content related to the topic?"},
+        {"id": "C1-SCOPE", "question": "Is the scope clearly defined?"},
+        {"id": "C1-FRAMEWORK", "question": "Is a conceptual or theoretical framework given?"},
+        {"id": "C1-SYNOPSIS", "question": "Is there a chapter synopsis?"}
+      ],
+      "2": [
+        {"id": "C2-REFS30", "question": "Are there a minimum of 30 quality references?", "deterministic": true, "note": "From the School of Research and Postgraduate Studies' proposal vetting guidelines; check whether your programme applies it."},
+        {"id": "C2-ORIGINAL", "question": "Is there evidence of quoting original sources rather than sources cited within prior research?"},
+        {"id": "C2-TYPES", "question": "Is there a balance of source types (data and prior research)?"},
+        {"id": "C2-BALANCE", "question": "Is there a balance of sources (more than one source drives each part)?"},
+        {"id": "C2-ANALYSIS", "question": "Does the writing engage with and analyse the literature, rather than show what was read?"},
+        {"id": "C2-ALIGN", "question": "Do the sources align with the topic, purpose, research questions and objectives?"},
+        {"id": "C2-MISSING", "question": "Are references missing that should be included to support the objectives and purpose?"},
+        {"id": "C2-TRANSITIONS", "question": "Are there transitions within and between paragraphs?"},
+        {"id": "C2-RELEVANT", "question": "Is all content related to the topic?"},
+        {"id": "C2-LANGUAGE", "question": "Is there appropriate grammar, punctuation and word choice?"},
+        {"id": "C2-ATTRIBUTION", "question": "Is the attribution style followed?"},
+        {"id": "C2-CURRENT", "question": "Is the literature up to date for this field? (The guidelines leave this to the faculty and the research; foundational theory is not out of date.)"},
+        {"id": "C2-AUTHORITIES", "question": "Are the key authorities included?"},
+        {"id": "C2-GAP", "question": "Is the research gap clear and articulate, showing the contribution of the study?"},
+        {"id": "C2-FLOW", "question": "Is the flow of information logical?"}
+      ],
+      "3": [
+        {"id": "C3-ALIGNED", "question": "Is the methodology aligned with the research?"},
+        {"id": "C3-APPROPRIATE", "question": "Is the methodology appropriate and adequate for the research task?"},
+        {"id": "C3-METHODS", "question": "Are the methods consistent with the chosen methodology?"},
+        {"id": "C3-DESIGN", "question": "Are the study design and its rationale appropriate?"},
+        {"id": "C3-SAMPLE", "question": "Is the sample adequately representative?"},
+        {"id": "C3-POPULATION", "question": "Is the target population appropriate?"},
+        {"id": "C3-SIZE", "question": "Is sample size determination described?"},
+        {"id": "C3-SAMPLING", "question": "Are the sampling procedures described?"},
+        {"id": "C3-CRITERIA", "question": "Are inclusion and exclusion criteria clearly stated?"},
+        {"id": "C3-ETHICS", "question": "Are ethical considerations during data collection addressed?"},
+        {"id": "C3-VALIDITY", "question": "Are the reliability and validity of the research tools addressed?"},
+        {"id": "C3-ANALYSIS", "question": "Is the data analysis process clearly described?"},
+        {"id": "C3-CONSISTENT", "question": "Is the methodology described consistently?"},
+        {"id": "C3-LANGUAGE", "question": "Are grammar and punctuation accurate?"}
+      ]
+    }
+  }
+}

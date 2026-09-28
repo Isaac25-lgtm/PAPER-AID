@@ -53,6 +53,11 @@ class Settings(BaseSettings):
     repair_attempts: int = 2
     research_max_claims: int = 10  # source check: most claims checked in one paper
     research_max_searches: int = 2  # source check: most web searches per claim
+    # Proposal projects: research needs planned per step (0 = the plan, then each chapter), scholarly
+    # works read per need, and the longest proposal the review service accepts.
+    proposal_needs: dict[int, int] = {0: 6, 1: 8, 2: 12, 3: 5}
+    proposal_works_per_need: int = 6
+    proposal_review_max_words: int = 20000
 
     # Invited testers (owner decision 2026-09-25): while set, only these emails (and admins) may use
     # the AI services, so a public link can't spend the AI budget. Empty = open to every user.

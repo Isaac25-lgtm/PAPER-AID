@@ -27,14 +27,15 @@ Students upload a paper, choose a service, see a server-calculated quote, and la
 
 ## Domain vocabulary
 - Job `status`: DRAFT → QUOTED → (AWAITING_PAYMENT) → QUEUED → PROCESSING → COMPLETED | FAILED | CANCELLED.
-- `stage`, used only while PROCESSING: EXTRACTING, ANALYSING, RESEARCHING (source check), PLANNING, REFINING, REDRAFTING, AUDITING, FORMATTING, CONVERTING (LaTeX), EXPORTING.
+- `stage`, used only while PROCESSING: EXTRACTING, ANALYSING, RESEARCHING (source check, proposal research), PLANNING, REFINING, REDRAFTING, DRAFTING (proposal chapters), AUDITING, FORMATTING, CONVERTING (LaTeX), EXPORTING.
 - `paymentStatus` is separate: NOT_REQUIRED, PENDING (credits held), PAID, FAILED, REFUNDED.
 - Money is prepaid UGX **credits**, never called tokens. A job costs its actual AI spend × `price_multiplier` (2), never more than its quote; APA/Harvard formatting is the one fixed price. Rules: `app/pricing/` (`quote.py` formulas, `credits.py` ledger, `billing.py` hold/settle/refund). Credits only move inside `update_job_and_wallet` transactions.
 - A COMPLETED job with `outcome: "PARTIAL"` must show its warnings. It is never presented as a clean success.
+- Research proposals (`app/proposals/`, owner decision 2026-09-28): a persistent **project** (plan, chapter versions, evidence library) whose paid steps are ordinary jobs linked by `projectId`. The rulebook is data (`app/proposals/rulebooks/ucu-2018-v1.json`, from the UCU manual). Approved decisions have ids and hashes (`decisions.py`); a changed decision marks the sections built on it for review. Writers cite only by evidence token; code renders APA 6/7 and removes any citation or figure it cannot trace (`evidence.py`). Sample sizes come from `sampling.py` and the student's own figures, never a model. Readiness is a checklist (PASS / NEEDS_REVIEW / MISSING / NOT_APPLICABLE / BLOCKED, each CODE / AI / AUTHOR), never a mark.
 - The AI score is labelled "Estimated AI-likeness" and shown as a band (Low/Moderate/High) with a confidence level. No percentage is shown until the score passes validation.
 
 ## Commands
 - Everything: `start-paperaid.bat`. Backend on :8000, web on http://localhost:5000.
 - Backend tests: `cd backend && .venv/Scripts/python -m pytest -q`; lint: `.venv/Scripts/python -m ruff check app tests`.
-- Web: `cd web && npm test` (unit tests), `npm run build` (typecheck + build); `node scripts/e2e.mjs out` runs the browser journey against web on :5000 and the browser-test backend (`cd backend && .venv/Scripts/python -m tests.serve_e2e`).
+- Web: `cd web && npm test` (unit tests), `npm run build` (typecheck + build); `node scripts/e2e.mjs out` (and `node scripts/e2e-proposal.mjs out [proposal.docx]`) runs the browser journey against web on :5000 and the browser-test backend (`cd backend && .venv/Scripts/python -m tests.serve_e2e`).
 - Test documents: `backend/tests/fixtures/generate.py` regenerates the 28 fixtures; `manifest.json` records what each must do.

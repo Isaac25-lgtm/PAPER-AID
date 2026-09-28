@@ -37,6 +37,9 @@ def main() -> None:
 
     fetch.page_text = lambda url: fetch._text(models.pages[url].encode(), "text/html") if url in models.pages else None
     fetch.abstract_text = lambda url: models.abstracts.get(url)
+    fetch.openalex_search = lambda query, from_year, limit: [dict(w) for w in models.works][:limit]
+    fetch.crossref_work = lambda doi: models.crossref.get(doi)
+    fetch.resolve_doi = lambda url: models.dois.get(url, fetch.doi_in(url))
     uvicorn.run(create_app(), host="127.0.0.1", port=8000)
 
 

@@ -22,7 +22,8 @@ interface Upload {
   error: string | null
 }
 
-const INITIAL: ServiceSelection = { writing: 'REFINE', intensity: 'STANDARD', style: 'PRESERVE_VOICE', sourceCheck: false, formatting: 'NONE', preset: 'apa7', latex: false }
+const INITIAL: ServiceSelection = { writing: 'REFINE', intensity: 'STANDARD', style: 'PRESERVE_VOICE', sourceCheck: false, formatting: 'NONE', preset: 'apa7', latex: false, proposal: 'NONE', level: 'MASTERS' }
+const REVIEW: ServiceSelection = { ...INITIAL, writing: 'NONE', proposal: 'REVIEW' }
 const ACCEPT = '.docx,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf'
 
 // What the price panel shows. Refinement is priced after a paid AI estimate that the student
@@ -117,7 +118,8 @@ export function NewJobPage() {
   }
   const [source, setSource] = useState<Upload | null>(null)
   const [guide, setGuide] = useState<Upload | null>(null)
-  const [selection, setSelection] = useState<ServiceSelection>(INITIAL)
+  const [selection, setSelection] = useState<ServiceSelection>(params.get('review') ? REVIEW : INITIAL)
+  const review = selection.proposal === 'REVIEW'
   const [restoring, setRestoring] = useState(!!resumeId)
   const [resumeError, setResumeError] = useState<string | null>(null)
 
@@ -176,6 +178,7 @@ export function NewJobPage() {
   // that is unavailable on this server falls back to none.
   useEffect(() => {
     const ok = (id: ServiceId) => config.availability[id] === 'available'
+    if (review) return // a proposal review runs on its own
     let writing = selection.writing
     let formatting = selection.formatting
     if (isPdf) {
@@ -189,7 +192,7 @@ export function NewJobPage() {
     const latex = selection.latex && !isPdf && ok('LATEX') // LaTeX needs the Word file
     if (writing !== selection.writing || formatting !== selection.formatting || sourceCheck !== selection.sourceCheck || latex !== selection.latex)
       setSelection((s) => ({ ...s, writing, formatting, sourceCheck, latex }))
-  }, [config.availability, isPdf, selection.writing, selection.formatting, selection.sourceCheck, selection.latex])
+  }, [config.availability, isPdf, review, selection.writing, selection.formatting, selection.sourceCheck, selection.latex])
 
   useEffect(() => {
     if (!draftId || !meta) return
@@ -290,6 +293,7 @@ export function NewJobPage() {
     ...(selection.formatting !== 'NONE' ? [selection.formatting] : []),
     ...(selection.sourceCheck ? (['SOURCE_CHECK'] as const) : []),
     ...(selection.latex ? (['LATEX'] as const) : []),
+    ...(review ? (['PROPOSAL'] as const) : []),
   ]
   const hold = pricing.quote ? pricing.quote.amount - pricing.quote.paid : 0
   const charging = config.creditsEnabled
@@ -348,7 +352,31 @@ export function NewJobPage() {
           </Step>
 
           <Step n={2} title="Choose the work" description="Pick one writing service and, if you like, formatting." disabled={!meta}>
-            <fieldset disabled={!meta || estimateRunning} className="min-w-0">
+            <div className="mb-6 rounded-xl border border-line p-4">
+              <Checkbox
+                checked={review}
+                disabled={!meta || estimateRunning || !!reasonFor('PROPOSAL')}
+                onChange={(e) => setSelection(e.target.checked ? { ...REVIEW, level: selection.level } : INITIAL)}
+                label={
+                  <>
+                    <span className="font-semibold text-fg">This is a research proposal: review it against the UCU manual</span> {badgeFor('PROPOSAL')}
+                    <span className="mt-0.5 block text-xs">
+                      {reasonFor('PROPOSAL') ??
+                        'Missing sections, objective and question alignment, tense, references, length for your level, and what a supervisor is likely to raise. Your proposal is not changed.'}
+                    </span>
+                  </>
+                }
+              />
+              {review && (
+                <Select label="Level" className="mt-3 max-w-xs" value={selection.level} onChange={(e) => set({ level: e.target.value as ServiceSelection['level'] })}>
+                  <option value="BACHELORS">Bachelor&rsquo;s (10&ndash;20 pages)</option>
+                  <option value="PGD">Postgraduate Diploma (15&ndash;30 pages)</option>
+                  <option value="MASTERS">Master&rsquo;s (15&ndash;30 pages)</option>
+                  <option value="PHD">PhD (25&ndash;45 pages)</option>
+                </Select>
+              )}
+            </div>
+            <fieldset disabled={!meta || estimateRunning || review} className={review ? 'min-w-0 opacity-50' : 'min-w-0'}>
               <legend className="mb-3 text-sm font-semibold text-fg">Writing</legend>
               <div className="grid gap-3 sm:grid-cols-2">
                 <OptionCard name="writing" checked={selection.writing === 'AI_CHECK'} onSelect={() => set({ writing: 'AI_CHECK' })} title={SERVICES.AI_CHECK.name} body="Report only — your document is not edited." badge={badgeFor('AI_CHECK')} disabledReason={reasonFor('AI_CHECK')} />
@@ -434,7 +462,7 @@ export function NewJobPage() {
                 </div>
               )}
             </fieldset>
-            <fieldset disabled={!meta || estimateRunning} className="mt-7 min-w-0">
+            <fieldset disabled={!meta || estimateRunning || review} className={review ? 'mt-7 min-w-0 opacity-50' : 'mt-7 min-w-0'}>
               <legend className="mb-3 text-sm font-semibold text-fg">Formatting</legend>
               <div className="grid gap-3 sm:grid-cols-3">
                 <OptionCard name="formatting" checked={selection.formatting === 'NONE'} onSelect={() => set({ formatting: 'NONE' })} title="Keep my formatting" body="Leave the layout as it is." />

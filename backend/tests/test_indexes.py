@@ -45,6 +45,7 @@ class _Store(FirestoreJobStore):
     def __init__(self, shapes: list):  # no client: only the query builder is exercised
         self._fs = firestore
         self._jobs = _Query(shapes)
+        self._projects = _Query(shapes)
 
     def delete_wallet(self, uid: str) -> None:
         pass
@@ -85,6 +86,7 @@ def shapes():
     service.admin_summary(rt)
     service.reconcile(rt)
     service.cleanup_expired(rt)
+    service.cleanup_expired_projects(rt)
     return recorded
 
 
@@ -93,6 +95,12 @@ def test_every_sorted_job_query_has_an_index(shapes):
     assert sorted_queries, "no queries were recorded"
     missing = [(sorted(f), o[0]) for f, o in sorted_queries if not _indexed(f, o)]
     assert missing == []
+
+
+def test_project_queries_need_no_composite_index(shapes):
+    """Projects are listed by owner and swept by expiry: one field each, unsorted, so Firestore's
+    automatic single-field indexes serve them."""
+    assert (frozenset({"ownerUid"}), None) in shapes and (frozenset({"expiresAt"}), None) in shapes
 
 
 def test_account_deletion_query_is_covered(shapes):

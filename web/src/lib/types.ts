@@ -1,7 +1,8 @@
 // Domain contracts shared by every screen. When the backend exists these are
 // generated from its Pydantic models; until then this file mirrors that plan.
+import type { Level, ProposalReview } from './proposal-types'
 
-export type ServiceId = 'AI_CHECK' | 'REFINE' | 'FORMAT' | 'TEMPLATE_FORMAT' | 'REDRAFT' | 'LATEX' | 'SOURCE_CHECK'
+export type ServiceId = 'AI_CHECK' | 'REFINE' | 'FORMAT' | 'TEMPLATE_FORMAT' | 'REDRAFT' | 'LATEX' | 'SOURCE_CHECK' | 'PROPOSAL'
 /** soon = not built yet; not_configured = the server's AI keys are not set; invite_only = testing is
  *  limited to invited testers and this visitor isn't one (or isn't signed in). */
 export type Availability = 'available' | 'soon' | 'not_configured' | 'invite_only'
@@ -16,7 +17,7 @@ export type JobStatus =
   | 'FAILED'
   | 'CANCELLED'
 
-export type Stage = 'EXTRACTING' | 'ANALYSING' | 'RESEARCHING' | 'PLANNING' | 'CONVERTING' | 'REFINING' | 'REDRAFTING' | 'FORMATTING' | 'AUDITING' | 'EXPORTING'
+export type Stage = 'EXTRACTING' | 'ANALYSING' | 'RESEARCHING' | 'PLANNING' | 'CONVERTING' | 'REFINING' | 'REDRAFTING' | 'DRAFTING' | 'FORMATTING' | 'AUDITING' | 'EXPORTING'
 export type PaymentStatus = 'NOT_REQUIRED' | 'PENDING' | 'PAID' | 'FAILED' | 'REFUNDED'
 export type FileRole = 'source' | 'guideline'
 export type Intensity = 'LIGHT' | 'STANDARD'
@@ -42,6 +43,9 @@ export interface ServiceSelection {
   formatting: 'NONE' | 'FORMAT' | 'TEMPLATE_FORMAT'
   preset: string
   latex: boolean
+  /** A proposal project's step, or REVIEW: an uploaded proposal checked against the rulebook. */
+  proposal?: 'NONE' | 'PLAN' | 'CHAPTER_1' | 'CHAPTER_2' | 'CHAPTER_3' | 'REVIEW'
+  level?: Level
 }
 
 export interface QuoteLine {
@@ -211,6 +215,8 @@ export interface Job {
   latex: LatexResult | null
   refinement: RefinementResult | null
   formatting: FormattingResult | null
+  proposalReview?: ProposalReview | null
+  projectId?: string | null
   outputs: OutputFile[]
   failure: JobFailure | null
   createdAt: string

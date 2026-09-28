@@ -15,10 +15,12 @@ from typing import Protocol
 
 from app.core.errors import PermanentStageError
 from app.jobs.models import Job, JobStatus, Wallet
+from app.proposals.models import Project
 
 Mutator = Callable[[Job], Job | None]
 WalletMutator = Callable[[Wallet], Wallet | None]
 PairMutator = Callable[[Job, Wallet], tuple[Job, Wallet] | None]
+ProjectMutator = Callable[[Project], Project | None]
 
 
 class JobStore(Protocol):
@@ -39,6 +41,13 @@ class JobStore(Protocol):
     def update_job_and_wallet(self, job_id: str, mutate: PairMutator) -> tuple[Job, Wallet] | None: ...
     def find_wallets(self, email_contains: str | None, limit: int) -> list[Wallet]: ...
     def delete_wallet(self, uid: str) -> None: ...
+    # proposal projects: one record each, changed only by atomic read-modify-write
+    def create_project_if_open(self, project: Project) -> bool: ...
+    def get_project(self, project_id: str) -> Project | None: ...
+    def update_project(self, project_id: str, mutate: ProjectMutator) -> Project | None: ...
+    def list_projects(self, owner_uid: str) -> list[Project]: ...
+    def expired_projects(self, before: datetime, limit: int) -> list[Project]: ...
+    def delete_project(self, project_id: str) -> None: ...
 
 
 # Firestore stores at most 1 MiB per document. Job records are kept well under that (long change
@@ -47,7 +56,7 @@ class JobStore(Protocol):
 MAX_RECORD_BYTES = 900_000
 
 
-def _dump(job: Job) -> str:
+def _dump(job: Job | Project) -> str:
     data = job.model_dump_json(by_alias=True)
     size = len(data.encode("utf-8"))
     if size > MAX_RECORD_BYTES:
@@ -67,6 +76,8 @@ class LocalJobStore:
         # a failed write in between) is applied before anything is read again, so the two files
         # can never be seen disagreeing.
         self._journal = root / "pending-pair.json"
+        self._projects = root / "projects"
+        self._projects.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._hits: dict[str, list[float]] = {}
         with self._lock:
@@ -218,6 +229,55 @@ class LocalJobStore:
         with self._lock:
             self._wallet_path(uid).unlink(missing_ok=True)
 
+    # projects: one file each, replaced atomically under the same lock
+    def _project_path(self, project_id: str) -> Path:
+        if not project_id.replace("_", "").isalnum():
+            raise ValueError("invalid project id")
+        return self._projects / f"{project_id}.json"
+
+    def _write_project(self, project: Project) -> None:
+        self._projects.mkdir(parents=True, exist_ok=True)
+        tmp = self._project_path(project.id).with_suffix(".tmp")
+        tmp.write_text(_dump(project), encoding="utf-8")
+        tmp.replace(self._project_path(project.id))
+
+    def create_project_if_open(self, project: Project) -> bool:
+        with self._lock:
+            wallet = self.get_wallet(project.owner_uid)
+            if wallet is not None and wallet.closing:
+                return False
+            self._write_project(project)
+            return True
+
+    def get_project(self, project_id: str) -> Project | None:
+        path = self._project_path(project_id)
+        with self._lock:
+            return Project.model_validate_json(path.read_text(encoding="utf-8")) if path.exists() else None
+
+    def update_project(self, project_id: str, mutate: ProjectMutator) -> Project | None:
+        with self._lock:
+            project = self.get_project(project_id)
+            if project is None:
+                return None
+            result = mutate(project)
+            if result is not None:
+                self._write_project(result)
+            return result
+
+    def list_projects(self, owner_uid: str) -> list[Project]:
+        with self._lock:
+            found = [Project.model_validate_json(p.read_text(encoding="utf-8")) for p in self._projects.glob("*.json")]
+        return sorted((p for p in found if p.owner_uid == owner_uid), key=lambda p: p.updated_at, reverse=True)
+
+    def expired_projects(self, before: datetime, limit: int) -> list[Project]:
+        with self._lock:
+            found = [Project.model_validate_json(p.read_text(encoding="utf-8")) for p in self._projects.glob("*.json")]
+        return sorted((p for p in found if p.expires_at < before), key=lambda p: p.expires_at)[:limit]
+
+    def delete_project(self, project_id: str) -> None:
+        with self._lock:
+            self._project_path(project_id).unlink(missing_ok=True)
+
 
 class FirestoreJobStore:
     """Production store: jobs/{jobId} documents, transactions for every update."""
@@ -229,6 +289,7 @@ class FirestoreJobStore:
         self._db = firestore.Client(project=project)
         self._jobs = self._db.collection("jobs")
         self._wallets = self._db.collection("wallets")
+        self._projects = self._db.collection("projects")
 
     def create(self, job: Job) -> None:
         self._jobs.document(job.id).create(json.loads(_dump(job)))
@@ -352,3 +413,51 @@ class FirestoreJobStore:
 
     def delete_wallet(self, uid: str) -> None:
         self._wallets.document(uid).delete()
+
+    def create_project_if_open(self, project: Project) -> bool:
+        """Like `create_if_open`: the account check and the write are one transaction."""
+        wallet_ref, project_ref = self._wallets.document(project.owner_uid), self._projects.document(project.id)
+
+        @self._fs.transactional
+        def run(transaction) -> bool:
+            snap = wallet_ref.get(transaction=transaction)
+            if snap.exists and Wallet.model_validate(snap.to_dict()).closing:
+                return False
+            transaction.create(project_ref, json.loads(_dump(project)))
+            return True
+
+        return run(self._db.transaction())
+
+    def get_project(self, project_id: str) -> Project | None:
+        snap = self._projects.document(project_id).get()
+        return Project.model_validate(snap.to_dict()) if snap.exists else None
+
+    def update_project(self, project_id: str, mutate: ProjectMutator) -> Project | None:
+        ref = self._projects.document(project_id)
+
+        @self._fs.transactional
+        def run(transaction) -> Project | None:
+            snap = ref.get(transaction=transaction)
+            if not snap.exists:
+                return None
+            result = mutate(Project.model_validate(snap.to_dict()))
+            if result is not None:
+                transaction.set(ref, json.loads(_dump(result)))
+            return result
+
+        return run(self._db.transaction())
+
+    def list_projects(self, owner_uid: str) -> list[Project]:
+        # An equality filter alone needs no composite index; a student has only a few projects.
+        docs = self._projects.where(filter=self._fs.FieldFilter("ownerUid", "==", owner_uid)).stream()
+        return sorted((Project.model_validate(d.to_dict()) for d in docs), key=lambda p: p.updated_at, reverse=True)
+
+    def expired_projects(self, before: datetime, limit: int) -> list[Project]:
+        # A single-field range filter uses Firestore's automatic index. Timestamps are stored as
+        # UTC ISO strings of one format, so string order is time order.
+        iso =before.isoformat().replace("+00:00", "Z")
+        docs = self._projects.where(filter=self._fs.FieldFilter("expiresAt", "<", iso)).limit(limit).stream()
+        return [Project.model_validate(d.to_dict()) for d in docs]
+
+    def delete_project(self, project_id: str) -> None:
+        self._projects.document(project_id).delete()

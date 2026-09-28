@@ -191,9 +191,9 @@ export function PrivacyPage() {
   useTitle('Privacy')
   const { config } = useData()
   const sections = [
-    { title: 'What we store', body: 'Your email address, the files you upload, the files we produce for you, and basic job details such as dates and what each job cost. Nothing else is required to use PaperAid.' },
-    { title: 'Who processes your paper', body: 'Your text is processed by PaperAid and by the AI providers we use for analysis and editing (OpenAI and Anthropic). They process it only to run your job. PaperAid never uses your papers to train AI models.' },
-    { title: 'How long we keep it', body: `Files are deleted automatically ${config.retentionDays} days after your job. You can delete a job, or your whole account, at any time from your dashboard.` },
+    { title: 'What we store', body: 'Your email address, the files you upload, the files we produce for you, and basic job details such as dates and what each job cost. For a research proposal, also the study details, plan, chapters and sources you work on, and the title-page details you choose to add. Nothing else is required to use PaperAid.' },
+    { title: 'Who processes your paper', body: 'Your text is processed by PaperAid and by the AI providers we use for analysis and editing (OpenAI and Anthropic). They process it only to run your job. For research proposals, short search queries about your topic are also sent to web search and to the OpenAlex and Crossref scholarly indexes, never your name or registration number. PaperAid never uses your papers to train AI models.' },
+    { title: 'How long we keep it', body: `Files are deleted automatically ${config.retentionDays} days after your job. A research proposal is kept while you work on it and deleted ${config.retentionDays} days after your last change to it; its page shows the date. You can delete a job, a proposal, or your whole account, at any time.` },
     { title: 'Who can see it', body: 'Only you. Our support team can see job details such as status and errors, but not your paper, unless you ask us to look at it.' },
     { title: 'Where it is processed', body: 'PaperAid runs on Google Cloud in Europe. Our AI providers may process text in other countries. By using PaperAid you consent to this transfer.' },
   ]

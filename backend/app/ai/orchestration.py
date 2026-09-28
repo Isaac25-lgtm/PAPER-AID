@@ -29,6 +29,12 @@ Source check (optional, with AI Check or Refine):
   d. writer checks, without searching, whether each quoted passage supports its claim
      (population, place, period); disagreement makes the claim UNCERTAIN              (RESEARCHING)
 
+Proposal projects (app/proposals/ai.py) follow the same loop: lead plans the research needs and
+gathers evidence (scholarly abstracts, or live search) → writer checks each finding → lead drafts
+the plan or a chapter's section briefs → writer critiques → lead finalises → writer drafts the
+sections → code checks citations, figures and tense → lead reviews → writer fixes (bounded rounds)
+→ lead assesses readiness. Reviewing an uploaded proposal is the lead's audit alone.
+
 University template formatting follows the same loop, with the formatting rules as the thing
 being planned: lead drafts rules from the guide → writer critiques → lead finalises → code
 applies them to the paper (wording can never change) → lead reviews the applied rules → writer
@@ -99,6 +105,23 @@ STEPS: dict[str, Step] = {
     "spec_finalise": Step("lead", Stage.FORMATTING, "spec-finalise-v1", 8000),
     "spec_review": Step("lead", Stage.FORMATTING, "spec-review-v1", 6000),
     "spec_fix": Step("writer", Stage.FORMATTING, "spec-fix-v1", 8000),
+    # Proposal projects (Proposal V1, owner decision 2026-09-28): the same two roles and loop.
+    # Evidence: lead plans the needs, reads abstracts or searches; writer checks each finding (verify).
+    "p_needs": Step("lead", Stage.RESEARCHING, "p-needs-v1", 4000),
+    "p_extract": Step("lead", Stage.RESEARCHING, "p-extract-v1", 4000),
+    "p_search": Step("lead", Stage.RESEARCHING, "p-search-v1", 4000),
+    # Plan, and each chapter's section briefs: lead drafts → writer critiques → lead finalises.
+    "p_plan": Step("lead", Stage.PLANNING, "p-plan-v1", 12000),
+    "p_brief": Step("lead", Stage.PLANNING, "p-brief-v1", 12000),
+    "p_critique": Step("writer", Stage.PLANNING, "p-critique-v1", 8000),
+    "p_finalise": Step("lead", Stage.PLANNING, "p-finalise-v1", 12000),
+    # Chapter: writer drafts → code checks → lead reviews → writer fixes (bounded rounds) → lead readiness.
+    "p_draft": Step("writer", Stage.DRAFTING, "p-draft-v1", 16000),
+    "p_review": Step("lead", Stage.AUDITING, "p-review-v1", 8000),
+    "p_fix": Step("writer", Stage.AUDITING, "p-fix-v1", 16000),
+    "p_readiness": Step("lead", Stage.AUDITING, "p-readiness-v1", 8000),
+    # Review of an uploaded proposal: the lead audits it against the rulebook (it is never rewritten).
+    "p_audit": Step("lead", Stage.ANALYSING, "p-audit-v1", 12000),
 }
 
 

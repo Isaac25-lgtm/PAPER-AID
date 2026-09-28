@@ -43,6 +43,14 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setitem(costs.SEARCH_FEE_USD, "fake", 0.01)  # the stand-in "searches" like the real lead
     monkeypatch.setattr(fetch, "page_text", lambda url: fetch_html_text(models.pages.get(url)))  # no network in tests
     monkeypatch.setattr(fetch, "abstract_text", lambda url: models.abstracts.get(url))
+
+    def openalex_search(query, from_year, limit):
+        models.searched.append(query)
+        return [dict(w) for w in models.works][:limit]
+
+    monkeypatch.setattr(fetch, "openalex_search", openalex_search)
+    monkeypatch.setattr(fetch, "crossref_work", lambda doi: models.crossref.get(doi))
+    monkeypatch.setattr(fetch, "resolve_doi", lambda url: models.dois.get(url, fetch.doi_in(url)))
     for c in _app_client(tmp_path, monkeypatch):
         c.models = models
         for email in TEST_ACCOUNTS:

@@ -129,6 +129,49 @@ def template_usd(settings: Settings, guide_words: int) -> float:
     return usd
 
 
+EVIDENCE_ITEM_CHARS = 420  # one evidence item as the models see it (statement, scope, source label, id)
+PLAN_CHARS = 9000  # an approved plan with its alignment table
+LIBRARY_ITEMS = 60  # evidence already in a project, as the planning steps see it
+
+
+def proposal_usd(settings: Settings, step: str, words: int) -> float:
+    """A proposal step at its worst: every planned research need read in the scholarly index and
+    also searched on the web, every finding checked, the plan or briefs negotiated, and (for a
+    chapter) drafting, every review and fix round, and the readiness assessment. `words` is the
+    chapter's target length."""
+    chapter = 0 if step == "PLAN" else int(step[-1])
+    needs = settings.proposal_needs.get(chapter, 6)
+    searches = settings.research_max_searches
+    provider, _, model = settings.lead_model.partition(":")
+    usd = _step_usd(settings, "p_needs", PLAN_CHARS + LIBRARY_ITEMS * 200, 0)
+    per_need = _step_usd(settings, "p_extract", settings.proposal_works_per_need * 3200, 0)
+    per_need += costs.estimate_usd(provider, model, 1500 + costs.SEARCH_INPUT_TOKENS_WORST * 4 * searches, STEPS["p_search"].max_tokens, settings.model_prices)
+    per_need += costs.search_fee_usd(provider, searches)
+    usd += needs * per_need
+    found = needs * 3
+    usd += _step_usd(settings, "verify", found * 1600, found * 250)
+    evidence_chars = (found + LIBRARY_ITEMS) * EVIDENCE_ITEM_CHARS
+    first = "p_plan" if chapter == 0 else "p_brief"
+    base = PLAN_CHARS + evidence_chars + (0 if chapter == 0 else 5000)
+    usd += _step_usd(settings, first, base, 0) + _step_usd(settings, "p_critique", base + 10000, 0) + _step_usd(settings, "p_finalise", base + 20000, 0)
+    if chapter == 0:
+        return usd
+    batches = _batches_for(words)
+    draft_input = batches * (PLAN_CHARS + BRIEF_CHARS) + found * EVIDENCE_ITEM_CHARS * 2 + words * 2
+    usd += _step_usd(settings, "p_draft", draft_input, words)
+    rounds = settings.repair_attempts
+    review_input = batches * (PLAN_CHARS + 6000) + words * CHARS_PER_WORD * 2 + found * EVIDENCE_ITEM_CHARS * 2
+    usd += (rounds + 1) * _step_usd(settings, "p_review", review_input, words * 2)
+    usd += rounds * _step_usd(settings, "p_fix", draft_input + words * CHARS_PER_WORD, words)
+    usd += _step_usd(settings, "p_readiness", PLAN_CHARS + words * CHARS_PER_WORD + 2 * 2500 * 12 + 4000, 0)
+    return usd
+
+
+def proposal_review_usd(settings: Settings, words: int) -> float:
+    """The lead's audit of an uploaded proposal: one call over the whole text."""
+    return _step_usd(settings, "p_audit", words * CHARS_PER_WORD + 150 * max(1, words // 120) + 12000, 0)
+
+
 # --- quote lines ------------------------------------------------------------------------------
 
 
@@ -180,6 +223,15 @@ def price(
     if selection.source_check:
         amount = with_margin(source_check_usd(settings, words), settings)
         lines.append(QuoteLine(label="Source check with live search (up to)", amount=amount))
+        ai += amount
+    if selection.proposal == "REVIEW":
+        amount = with_margin(proposal_review_usd(settings, words), settings)
+        lines.append(QuoteLine(label="Proposal review against the UCU manual (up to)", amount=amount))
+        ai += amount
+    elif selection.proposal != "NONE":
+        label = "Proposal plan with research (up to)" if selection.proposal == "PLAN" else f"Chapter {selection.proposal[-1]} with research, review and readiness check (up to)"
+        amount = with_margin(proposal_usd(settings, selection.proposal, words), settings)
+        lines.append(QuoteLine(label=label, amount=amount))
         ai += amount
     fixed = 0
     if selection.formatting == "FORMAT":

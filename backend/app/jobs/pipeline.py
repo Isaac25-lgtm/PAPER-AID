@@ -56,6 +56,8 @@ from app.latex import package as latex
 from app.pricing import credits
 from app.pricing.billing import refund_job, settle_completed
 from app.pricing.quote import Passage, bound_quote, to_ugx
+from app.proposals import pipeline as proposal_pipeline
+from app.proposals import review as proposal_review
 from app.reports.builder import change_report, writing_report
 from app.runtime import Runtime
 
@@ -136,7 +138,7 @@ class StageContext:
         self.job = updated
         return updated
 
-    def ai(self) -> AIRunner:
+    def ai(self, runner: type[AIRunner] = AIRunner) -> AIRunner:
         def record(call: ModelCall) -> None:
             def add(j: Job) -> Job:
                 j.model_calls = (j.model_calls + [call])[-200:]
@@ -162,9 +164,7 @@ class StageContext:
         budget = estimate.budget_usd if estimate is not None else self.job.budget_usd
         # The run executes with the engine it was priced with (its estimate's, then its quote's).
         engine = estimate.engine if estimate is not None else self.job.quote.engine if self.job.quote else None
-        return AIRunner(
-            self.rt.settings, record, spent, budget, cache=_ResponseCache(self), heartbeat=self.heartbeat, phase=self.phase, engine=engine
-        )
+        return runner(self.rt.settings, record, spent, budget, cache=_ResponseCache(self), heartbeat=self.heartbeat, phase=self.phase, engine=engine)
 
 
 class _ResponseCache:
@@ -1116,8 +1116,14 @@ def _run_step(rt: Runtime, job_id: str) -> None:
 
     started = utcnow()
     ctx = StageContext(rt, job)
+    if job.selection.proposal == "REVIEW":
+        run = proposal_review.STAGES.get(stage) or STAGES[stage]
+    elif job.selection.proposal != "NONE":
+        run = proposal_pipeline.STAGES[stage]
+    else:
+        run = STAGES[stage]
     try:
-        STAGES[stage](ctx)
+        run(ctx)
     except StageContinues:
         _continue_later(rt, job_id, stage)
         return
