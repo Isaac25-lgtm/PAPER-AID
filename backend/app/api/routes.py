@@ -274,4 +274,8 @@ def task_reconcile(rt: Runtime = Depends(get_runtime)) -> dict:
 
 @tasks.post("/cleanup", dependencies=[Depends(_require_task_caller)])
 def task_cleanup(rt: Runtime = Depends(get_runtime)) -> dict:
-    return {"expired": service.cleanup_expired(rt), "projectsExpired": service.cleanup_expired_projects(rt)}
+    return {
+        "expired": service.cleanup_expired(rt),
+        "projectsExpired": service.cleanup_expired_projects(rt),
+        "projectsMigrated": service.migrate_legacy_project_files(rt),
+    }

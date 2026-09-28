@@ -53,7 +53,7 @@ from app.jobs.models import (
 from app.pricing import credits
 from app.pricing.billing import hold_for_job, refund_job, release_hold
 from app.pricing.quote import ai_cap_usd, bound_quote, estimate_charged, estimate_scan_usd, needs_estimate, with_margin
-from app.proposals.models import Project
+from app.proposals.models import Project, moved_path
 from app.runtime import Runtime
 
 logger = logging.getLogger("paperaid.jobs")
@@ -725,6 +725,8 @@ def delete_account(rt: Runtime, user: User) -> int:
     4. The wallet becomes a closed tombstone (no email, no balance, no history) instead of being
        removed, so a request already past its checks can never recreate an open account: a late
        draft or credit grant finds it closed and is refused (Codex audit #2, second round).
+    5. The complete credit history is erased last (Codex audit 56c4f83 H02): the tombstone is closed,
+       so nothing can add to it meanwhile.
     An interrupted deletion leaves the account closing, and asking again finishes it.
     Credit balance (proposed default, awaiting the owner's decision): while credits are on, an
     account holding credit cannot be deleted until PaperAid has refunded it."""
@@ -774,6 +776,7 @@ def delete_account(rt: Runtime, user: User) -> int:
         return Wallet(uid=w.uid, email="", closing=True, grant_ops=w.grant_ops)
 
     rt.store.update_wallet(user.uid, "", tombstone)
+    rt.store.delete_ledger(user.uid)
     log(logger, logging.WARNING, "account deleted", uid=user.uid, jobs=len(claimed))
     return len(claimed)
 
@@ -844,6 +847,22 @@ def _require(rt: Runtime, job_id: str) -> Job:
     return job
 
 
+# Every job field is classified (Codex audit 56c4f83 H01): PAPER_FIELDS can quote or paraphrase the
+# student's paper and are emptied by `without_paper_text`; SUPPORT_FIELDS are metadata support may
+# see. A test fails when a field is added to Job without being put in one of the two sets.
+PAPER_FIELDS = frozenset({"analysis", "analysis_after", "refinement", "research", "references", "paper_checks", "proposal_review", "fix_notes"})
+SUPPORT_FIELDS = frozenset(
+    {
+        "id", "status", "stage", "payment_status", "selection", "services", "pipeline", "source", "guideline", "logo", "quote", "estimate",
+        "billing", "outcome", "warnings", "protected", "dismissed", "rejected_changes", "source_job", "latex", "formatting", "scope_words",
+        "project_id", "outputs", "failure", "created_at", "queued_at", "completed_at", "expires_at",
+        "owner_uid", "owner_email", "completed_stages", "generation", "attempts", "lease_until", "cost_usd", "estimate_cost_usd",
+        "refine_cost_usd", "budget_usd", "model_calls", "events", "admin_actions", "failure_detail", "files_deleted", "deleting", "retiring",
+        "input_sha256",
+    }
+)
+
+
 def without_paper_text[T: JobView](job: T) -> T:
     """A copy that keeps only support metadata (an allowlist, Codex audit #5): ids, reason codes,
     severities, counts, outcomes and public sources. Every field that can quote or paraphrase the
@@ -879,6 +898,7 @@ def without_paper_text[T: JobView](job: T) -> T:
                 "findings": [f.model_copy(update={"where": "", "issue": "", "suggestion": ""}) for f in review.findings],
             }
         )
+    update["fix_notes"] = {}  # the findings a "Fix selected" draft was made from (explanations, suggestions)
     return job.model_copy(update=update)
 
 
@@ -1085,10 +1105,46 @@ def _erase_project(rt: Runtime, project: Project, expired_before: datetime | Non
             continue
         _erase(rt, claimed)
     rt.files.delete_prefix(project.storage_prefix())
+    rt.files.delete_prefix(project.legacy_prefix())  # a project not yet migrated (Codex audit 56c4f83 H04)
     for profile_id in project.profiles:  # institution profiles built from this project's guide
         rt.files.delete(f"rulebooks/{profile_id}.json")
     rt.store.delete_project(project.id)
     return True
+
+
+def migrate_legacy_project_files(rt: Runtime) -> int:
+    """Move projects created before the storage change out of users/, where the bucket's fixed-age
+    rule would delete their files (Codex audit 56c4f83 H04). Resumable and safe to repeat: files are
+    copied first, the record's paths switch in one transaction, then the old files are removed.
+    A project with a step running is left for the next run; steps priced earlier still find their
+    files (reads fall back to the moved copy)."""
+    migrated = 0
+    for project in rt.store.all_projects():
+        old = project.legacy_paths()
+        if not old or project.deleting or step_running(rt, project):
+            continue
+        for path in old:
+            target = moved_path(path)
+            if rt.files.exists(path) and not rt.files.exists(target):
+                rt.files.put(target, rt.files.get(path), "application/json")
+
+        def switch(p: Project) -> Project | None:
+            if p.deleting:
+                return None
+            for chapter in p.chapters:
+                for version in chapter.versions:
+                    version.path = moved_path(version.path)
+            p.evidence_files = [moved_path(f) for f in p.evidence_files]
+            if p.guide is not None:
+                p.guide.path = moved_path(p.guide.path)
+            return p
+
+        if rt.store.update_project(project.id, switch) is not None:
+            rt.files.delete_prefix(project.legacy_prefix())
+            migrated += 1
+    if migrated:
+        log(logger, logging.INFO, "legacy projects migrated", projects=migrated)
+    return migrated
 
 
 def cleanup_expired_projects(rt: Runtime) -> int:

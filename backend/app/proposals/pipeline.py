@@ -30,6 +30,7 @@ from app.proposals.models import (
     ProposalPlan,
     StepInput,
     StoredChapterVersion,
+    moved_path,
 )
 
 if TYPE_CHECKING:
@@ -49,8 +50,9 @@ def step_input(ctx: "StageContext") -> StepInput:
 def load_library(files, paths: list[str]) -> dict[str, EvidenceItem]:
     items: list[EvidenceItem] = []
     for path in paths:
-        if files.exists(path):
-            items += [EvidenceItem.model_validate(i) for i in json.loads(files.get(path))]
+        found = path if files.exists(path) else moved_path(path)  # a step priced before its project was migrated
+        if files.exists(found):
+            items += [EvidenceItem.model_validate(i) for i in json.loads(files.get(found))]
     return {i.id: i for i in evidence.dedupe(items)}
 
 
@@ -498,7 +500,8 @@ def _revision(
     """A chapter revised from supervisor comments: the sections they concern, from the current
     version, with the comments as what the writer must fix (the revision is the rewrite; the usual
     review and at most two fixes follow). The comments are also points the reviewer checks."""
-    base = ChapterDocument.model_validate_json(ctx.rt.files.get(inp.base))
+    base_path = inp.base if ctx.rt.files.exists(inp.base) else moved_path(inp.base)
+    base = ChapterDocument.model_validate_json(ctx.rt.files.get(base_path))
     items = {i["key"]: i for i in _section_items(inp, library, {})}
     current: dict[str, SectionText] = {}
     for s in base.sections:
@@ -569,6 +572,7 @@ def _readiness(
     questions = [q for q in rulebook.vetting(inp.rulebook, n) if not q.get("deterministic")]
     others = {}
     for number, path in inp.chapters.items():
+        path = path if ctx.rt.files.exists(path) else moved_path(path)
         if number != n and ctx.rt.files.exists(path):
             other = ChapterDocument.model_validate_json(ctx.rt.files.get(path))
             others[str(number)] = [{"heading": s.heading, "text": " ".join(s.paragraphs)[:2500]} for s in other.sections]

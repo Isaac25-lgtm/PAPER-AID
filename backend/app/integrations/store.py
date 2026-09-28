@@ -44,6 +44,7 @@ class JobStore(Protocol):
     def find_wallets(self, email_contains: str | None, limit: int) -> list[Wallet]: ...
     def delete_wallet(self, uid: str) -> None: ...
     def ledger(self, uid: str, before: str | None, limit: int) -> list[LedgerEntry]: ...
+    def delete_ledger(self, uid: str) -> None: ...
     # proposal projects: one record each, changed only by atomic read-modify-write
     def create_project_if_open(self, project: Project) -> bool: ...
     def get_project(self, project_id: str) -> Project | None: ...
@@ -52,6 +53,7 @@ class JobStore(Protocol):
     def list_projects(self, owner_uid: str) -> list[Project]: ...
     def expired_projects(self, before: datetime, limit: int) -> list[Project]: ...
     def delete_project(self, project_id: str) -> None: ...
+    def all_projects(self) -> list[Project]: ...
 
 
 # Firestore stores at most 1 MiB per document. Job records are kept well under that (long change
@@ -255,6 +257,10 @@ class LocalJobStore:
             self._wallet_path(uid).unlink(missing_ok=True)
             self._ledger_path(uid).unlink(missing_ok=True)
 
+    def delete_ledger(self, uid: str) -> None:
+        with self._lock:
+            self._ledger_path(uid).unlink(missing_ok=True)
+
     def ledger(self, uid: str, before: str | None, limit: int) -> list[LedgerEntry]:
         with self._lock:
             path = self._ledger_path(uid)
@@ -330,6 +336,10 @@ class LocalJobStore:
     def delete_project(self, project_id: str) -> None:
         with self._lock:
             self._project_path(project_id).unlink(missing_ok=True)
+
+    def all_projects(self) -> list[Project]:
+        with self._lock:
+            return [Project.model_validate_json(p.read_text(encoding="utf-8")) for p in self._projects.glob("*.json")]
 
 
 class FirestoreJobStore:
@@ -471,16 +481,19 @@ class FirestoreJobStore:
         return [w for w in found if not w.closing]  # closed-account tombstones are never offered to admins
 
     def delete_wallet(self, uid: str) -> None:
-        ref = self._wallets.document(uid)
-        while True:  # the history goes with the account (in batches: a subcollection is not deleted with its parent)
-            docs = list(ref.collection("ledger").limit(400).stream())
+        self.delete_ledger(uid)
+        self._wallets.document(uid).delete()
+
+    def delete_ledger(self, uid: str) -> None:
+        ledger = self._wallets.document(uid).collection("ledger")
+        while True:  # in batches: a subcollection is not deleted with its parent
+            docs = list(ledger.limit(400).stream())
             if not docs:
-                break
+                return
             batch = self._db.batch()
             for doc in docs:
                 batch.delete(doc.reference)
             batch.commit()
-        ref.delete()
 
     def ledger(self, uid: str, before: str | None, limit: int) -> list[LedgerEntry]:
         query = self._wallets.document(uid).collection("ledger").order_by("at", direction=self._fs.Query.DESCENDING)
@@ -546,6 +559,10 @@ class FirestoreJobStore:
             return result
 
         return run(self._db.transaction())
+
+    def all_projects(self) -> list[Project]:
+        # Only the maintenance migration uses this; a student has few projects and there are few in all.
+        return [Project.model_validate(d.to_dict()) for d in self._projects.stream()]
 
     def list_projects(self, owner_uid: str) -> list[Project]:
         # An equality filter alone needs no composite index; a student has only a few projects.

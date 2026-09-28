@@ -7,6 +7,7 @@ Firestore keeps only this record (metadata and short text). Chapter text and evi
 storage, one immutable file per job, so two jobs finishing together can never overwrite each
 other: the record only gains the new file's path, inside a transaction."""
 
+import re
 from datetime import datetime
 from typing import Literal
 
@@ -18,6 +19,16 @@ Level = Literal["BACHELORS", "PGD", "MASTERS", "PHD"]
 StudyType = Literal["QUANTITATIVE", "QUALITATIVE", "MIXED", "SECONDARY", "NON_EMPIRICAL"]
 QuestionsKind = Literal["QUESTIONS", "HYPOTHESES", "PROPOSITIONS"]
 Support = Literal["SUPPORTED", "PARTLY_SUPPORTED", "CONTRADICTED", "NOT_FOUND"]
+
+
+LEGACY_PATH = re.compile(r"^users/([^/]+)/projects/([^/]+)/(.+)$")
+
+
+def moved_path(path: str) -> str:
+    """Where a file stored under the old project prefix (users/{uid}/projects/{id}/, before Codex
+    audit #3) lives after migration (projects/{uid}/{id}/). Other paths are unchanged."""
+    m = LEGACY_PATH.match(path)
+    return f"projects/{m[1]}/{m[2]}/{m[3]}" if m else path
 
 
 def _clean(value: str) -> str:
@@ -293,6 +304,15 @@ class Project(ProjectView):
         # Outside users/: the bucket's fixed-age backstop covers job files only; project files live
         # while the project is renewed and are removed by the app's own cleanup (Codex audit #3).
         return f"projects/{self.owner_uid}/{self.id}"
+
+    def legacy_prefix(self) -> str:
+        """Where projects created before that change kept their files (Codex audit 56c4f83 H04)."""
+        return f"users/{self.owner_uid}/projects/{self.id}"
+
+    def legacy_paths(self) -> list[str]:
+        """Files this record still names under the old prefix."""
+        paths = [v.path for c in self.chapters for v in c.versions] + list(self.evidence_files) + ([self.guide.path] if self.guide else [])
+        return [p for p in paths if LEGACY_PATH.match(p)]
 
     def chapter(self, number: int) -> StoredChapterState:
         return next(c for c in self.chapters if c.number == number)

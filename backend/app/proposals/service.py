@@ -47,6 +47,7 @@ from app.proposals.models import (
     StoredChapterState,
     TitlePage,
     WrittenSection,
+    moved_path,
 )
 from app.proposals.pipeline import INPUT, load_library
 from app.runtime import Runtime
@@ -107,9 +108,12 @@ def _change(rt: Runtime, user: User, project_id: str, mutate, conflict: str = "T
 def _chapter_doc(rt: Runtime, state_: StoredChapterState, version: int | None = None) -> ChapterDocument | None:
     number = version or state_.current
     entry = next((v for v in state_.versions if v.version == number), None)
-    if entry is None or not rt.files.exists(entry.path):
+    if entry is None:
         return None
-    return ChapterDocument.model_validate_json(rt.files.get(entry.path))
+    path = entry.path if rt.files.exists(entry.path) else moved_path(entry.path)
+    if not rt.files.exists(path):
+        return None
+    return ChapterDocument.model_validate_json(rt.files.get(path))
 
 
 def view(rt: Runtime, p: Project) -> ProjectView:
@@ -527,15 +531,25 @@ def upload_guide(rt: Runtime, user: User, project_id: str, filename: str, data: 
     model = inspect_upload(data, filename, rt.settings.max_upload_bytes, MAX_GUIDE_WORDS, rt.settings.max_pdf_pages, min_words=300)
     text = "\n".join(b.text for b in model.blocks if b.text.strip())
     sha = hashlib.sha256(text.encode()).hexdigest()
-    path = f"{p.storage_prefix()}/guide/{sha[:16]}.txt"
+    # A path of its own per attempt (a priced profile step may still read an earlier one), attached
+    # in a transaction; if the project was deleted meanwhile the file is removed again, so a late
+    # upload never leaves a private copy behind (Codex audit 56c4f83 H03).
+    path = f"{p.storage_prefix()}/guide/{sha[:16]}-{secrets.token_hex(4)}.txt"
     rt.files.put(path, text.encode("utf-8"), "text/plain")
     guide = GuideFile(name=PurePosixPath(filename).name[:120] or "guide", words=model.word_count, sha256=sha, path=path)
 
     def apply(q: Project) -> Project:
+        if any(c.versions for c in q.chapters):
+            raise AppError("Your chapters already follow the current structure. Start a new proposal to use your institution's guide.", code="CHAPTERS_WRITTEN")
         q.guide = guide
         return q
 
-    return view(rt, _change(rt, user, project_id, apply))
+    try:
+        attached = _change(rt, user, project_id, apply)
+    except AppError:
+        rt.files.delete(path)
+        raise
+    return view(rt, attached)
 
 
 def use_default_rulebook(rt: Runtime, user: User, project_id: str) -> ProjectView:
