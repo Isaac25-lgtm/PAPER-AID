@@ -86,6 +86,8 @@ export interface DataSource {
     setChapter(id: string, number: number, version: number, approved: boolean): Promise<Project>
     evidence(id: string): Promise<EvidenceItem[]>
     download(id: string, final: boolean, fileName: string): Promise<void>
+    /** The same proposal as a PDF, for reading and sharing (Word stays the file to submit). */
+    downloadPdf(id: string, final: boolean, fileName: string): Promise<void>
     remove(id: string): Promise<void>
     compare(id: string, number: number, older: number, newer: number): Promise<Comparison>
     /** Supervisor comments, pasted or from a marked-up Word file or PDF. */

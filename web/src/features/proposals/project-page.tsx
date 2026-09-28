@@ -301,7 +301,7 @@ function CompareView({ comparison }: { comparison: Comparison }) {
 }
 
 /** Everything that stands between the proposal and a complete download, in one place. */
-function ReadyPanel({ project, onDownload }: { project: Project; onDownload: (final: boolean) => void }) {
+function ReadyPanel({ project, onDownload }: { project: Project; onDownload: (final: boolean, pdf?: boolean) => void }) {
   const data = useData()
   const [error, setError] = useState<string | null>(null)
   const open = project.feedback.filter((c) => c.status === 'OPEN').length
@@ -334,6 +334,9 @@ function ReadyPanel({ project, onDownload }: { project: Project; onDownload: (fi
       <div className="flex flex-wrap gap-2">
         <Button disabled={!ready} onClick={() => onDownload(true)}>
           <Download className="size-4" aria-hidden /> Complete proposal (Word)
+        </Button>
+        <Button variant="secondary" disabled={!project.chapters.some((c) => c.number !== CONCEPT && c.current)} onClick={() => onDownload(ready, true)}>
+          <Download className="size-4" aria-hidden /> {ready ? 'Complete proposal (PDF)' : 'Draft (PDF)'}
         </Button>
         <Button variant="secondary" disabled={!project.chapters.some((c) => c.number !== CONCEPT && c.current)} onClick={() => onDownload(false)}>
           <Download className="size-4" aria-hidden /> Draft (Word)
@@ -423,12 +426,12 @@ export function ProjectPage() {
     [load],
   )
 
-  const download = async (final: boolean) => {
+  const download = async (final: boolean, pdf = false) => {
     if (!project) return
     setError(null)
     try {
-      const name = `${(project.plan?.title ?? 'Proposal').slice(0, 80)}${final ? '' : ' – draft'}.docx`
-      await data.projects.download(project.id, final, name)
+      const name = `${(project.plan?.title ?? 'Proposal').slice(0, 80)}${final ? '' : ' – draft'}.${pdf ? 'pdf' : 'docx'}`
+      await (pdf ? data.projects.downloadPdf(project.id, final, name) : data.projects.download(project.id, final, name))
     } catch (e) {
       setError(e instanceof DataError ? e.message : 'We could not prepare the document.')
     }

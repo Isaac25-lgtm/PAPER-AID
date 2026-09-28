@@ -150,6 +150,14 @@ def _docx(data: bytes, name: str) -> Response:
     return Response(data, media_type=DOCX, headers={"Content-Disposition": disposition, "Cache-Control": "no-store"})
 
 
+@router.get("/{project_id}/export.pdf")
+def export_pdf(project_id: str, final: bool = Query(False), user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> Response:
+    data, name = projects.export_pdf(rt, user, project_id, final)
+    ascii_name = name.encode("ascii", "ignore").decode() or "proposal.pdf"
+    disposition = f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(name)}"
+    return Response(data, media_type="application/pdf", headers={"Content-Disposition": disposition, "Cache-Control": "no-store"})
+
+
 @router.get("/{project_id}/concept/export")
 def export_concept(project_id: str, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> Response:
     return _docx(*projects.export_concept(rt, user, project_id))

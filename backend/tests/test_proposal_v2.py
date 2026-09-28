@@ -2,8 +2,11 @@
 response report, version comparison and the conceptual framework figure."""
 
 import io
+import shutil
 
+import pytest
 from docx import Document
+from pypdf import PdfReader
 
 from app.proposals import feedback
 from tests.test_api import STUDENT
@@ -166,3 +169,21 @@ def test_projects_from_before_the_concept_paper_gain_its_record():
         chapters=[StoredChapterState(number=n) for n in (1, 2, 3)], expires_at=now,
     )
     assert [c.number for c in old.chapters] == [1, 2, 3, 4]
+
+
+@pytest.mark.skipif(shutil.which("pdflatex") is None, reason="no LaTeX engine on this machine")
+def test_the_proposal_downloads_as_a_pdf(client):
+    project_id = _with_chapter_one(client)
+    pdf = client.get(f"/api/projects/{project_id}/export.pdf", headers=STUDENT)
+    assert pdf.status_code == 200 and pdf.content.startswith(b"%PDF") and pdf.headers["content-type"] == "application/pdf"
+    text = " ".join(page.extract_text() for page in PdfReader(io.BytesIO(pdf.content)).pages)
+    assert "Statement of the Problem" in text and "⟦" not in text
+
+
+def test_a_pdf_that_cannot_be_made_says_so(client, monkeypatch):
+    from app.proposals import service
+
+    project_id = _with_chapter_one(client)
+    monkeypatch.setattr(service, "compile_pdf", lambda result: (None, "engine missing"))
+    failed = client.get(f"/api/projects/{project_id}/export.pdf", headers=STUDENT)
+    assert failed.status_code == 400 and failed.json()["code"] == "PDF_FAILED" and "Word file" in failed.json()["message"]

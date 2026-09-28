@@ -23,6 +23,8 @@ from app.core.logging import log
 from app.jobs import state
 from app.jobs.models import Job, JobEvent, JobStatus, JobView, Quote, QuoteLine, ReadinessItem, ServiceSelection, utcnow
 from app.jobs.service import ACCOUNT_CLOSING, User, _erase_project, _rate_limit, availability, current_engine, step_running, submit
+from app.latex.convert import convert as to_latex
+from app.latex.package import compile_pdf
 from app.pricing.quote import bound_quote, fixed_price, proposal_usd, with_margin
 from app.proposals import decisions, evidence, feedback, rulebook, sampling
 from app.proposals import export as proposal_export
@@ -337,6 +339,18 @@ def export_docx(rt: Runtime, user: User, project_id: str, final: bool) -> tuple[
     title = (p.plan.title if p.plan else p.inputs.topic)[:80]
     safe = "".join(c for c in title if c.isalnum() or c in " -_").strip() or "Proposal"
     return data, f"{safe}{'' if final else ' – draft'}.docx"
+
+
+def export_pdf(rt: Runtime, user: User, project_id: str, final: bool) -> tuple[bytes, str]:
+    """The same proposal as a PDF for reading and sharing: the Word export converted to LaTeX and
+    compiled offline (no AI). Word stays the file to submit, in the institution's layout."""
+    _rate_limit(rt, user, "pdf", rt.settings.quotes_per_hour)
+    data, name = export_docx(rt, user, project_id, final)
+    pdf, problem = compile_pdf(to_latex(data))
+    if pdf is None:
+        log(logger, logging.WARNING, "proposal pdf failed", projectId=project_id, problem=problem)
+        raise AppError("The PDF could not be made this time. Download the Word file instead.", code="PDF_FAILED")
+    return pdf, name.removesuffix(".docx") + ".pdf"
 
 
 def export_concept(rt: Runtime, user: User, project_id: str) -> tuple[bytes, str]:
