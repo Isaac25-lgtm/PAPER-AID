@@ -21,6 +21,8 @@ def hold_for_job(j: Job, w: Wallet) -> int:
 def delivered_share(j: Job, service: str) -> float:
     """How much of a service the student actually received (fixed prices, owner decision
     2026-09-28): a FULL result is charged in full; a PARTIAL one only for what was delivered."""
+    if service in j.delivery:  # measured by the pipeline (a revision: the sections actually revised)
+        return max(0.0, min(1.0, j.delivery[service]))
     if service in ("REFINE", "REFINE_LIGHT", "REDRAFT"):
         r = j.refinement
         if r is None or not r.targeted_blocks:

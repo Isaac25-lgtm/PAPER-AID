@@ -16,6 +16,7 @@ from app.ai.orchestration import current_engine
 from app.core.config import Settings
 from app.core.errors import AppError, Conflict, Forbidden, InvalidDocument, LimitExceeded, NotFound
 from app.core.logging import log
+from app.documents.docx_io import read_docx
 from app.documents.intake import inspect_upload
 from app.formatting.guideline import MAX_GUIDE_WORDS
 from app.formatting.presets import PRESETS, PUBLIC_PRESETS
@@ -259,6 +260,9 @@ def upload_file(rt: Runtime, user: User, job_id: str, role: FileRole, filename: 
             previous.append(current.path)
         if role == "source":
             j.source = stored
+            j.fix_notes, j.scope_words = {}, None  # a "Fix selected" draft's passages belong to the file it came from
+            if j.selection.only_blocks:
+                j.selection = j.selection.model_copy(update={"only_blocks": []})
         else:
             j.guideline = stored
         j.quote = None  # a new file always needs a new quote
@@ -388,6 +392,7 @@ def request_quote(rt: Runtime, user: User, job_id: str, selection: ServiceSelect
         raise AppError(f"Proposal review accepts up to {rt.settings.proposal_review_max_words:,} words.", code="DOCUMENT_TOO_LONG")
     if selection.only_blocks and (selection.writing != "REFINE" or not all(re.fullmatch(r"b\d{5}", b) for b in selection.only_blocks)):
         raise AppError("Choose the passages to fix from your AI Check.", code="INVALID_SELECTION")
+    scope = _fix_scope(rt, job, selection.only_blocks) if selection.only_blocks else None
     if selection.source_check and selection.writing not in ("AI_CHECK", "REFINE", "REDRAFT"):
         raise AppError("Source check comes with AI Check, Check + Refine or Deep Redraft.", code="SOURCE_CHECK_NEEDS_CHECK")
     if job.source.format == "PDF" and any(s.value not in ("AI_CHECK", "SOURCE_CHECK", "PROPOSAL") for s in services):
@@ -450,7 +455,7 @@ def request_quote(rt: Runtime, user: User, job_id: str, selection: ServiceSelect
             run.passages if run else None,
             fee_paid=j.billing.fee_paid,
             estimate_id=run.id if run else None,
-            scope_words=j.scope_words if selection.only_blocks else None,
+            scope_words=scope,
         )
         issued.append(quote)
         j.quote = quote
@@ -460,6 +465,20 @@ def request_quote(rt: Runtime, user: User, job_id: str, selection: ServiceSelect
     if rt.store.update(job.id, save) is None:
         raise Conflict("Your files changed while we were pricing them. We'll price the new ones.", code="FILES_CHANGED")
     return QuoteResponse(quote=Quote.model_validate(issued[-1].model_dump()), estimate=job.estimate)
+
+
+def _fix_scope(rt: Runtime, job: Job, blocks: list[str]) -> int:
+    """"Fix selected" is priced by the words of the chosen passages, counted from the current file
+    every time it is quoted: a selection can only name passages PaperAid may rewrite, and changing it
+    changes the price (Codex audit 56c4f83 H08)."""
+    assert job.source is not None
+    if job.source.format != "DOCX":
+        raise AppError("Fixing passages needs the Word file. Upload the .docx version of this paper.", code="PDF_AI_CHECK_ONLY")
+    model = read_docx(rt.files.get(job.source.path))
+    editable = {b.id: b for b in model.blocks if b.editable and b.kind in ("paragraph", "list_item")}
+    if len(set(blocks)) != len(blocks) or any(b not in editable for b in blocks):
+        raise AppError("Choose the passages to fix from your AI Check.", code="INVALID_SELECTION")
+    return sum(editable[b].words for b in blocks)
 
 
 def _open_draft(j: Job) -> bool:
@@ -858,7 +877,7 @@ SUPPORT_FIELDS = frozenset(
         "project_id", "outputs", "failure", "created_at", "queued_at", "completed_at", "expires_at",
         "owner_uid", "owner_email", "completed_stages", "generation", "attempts", "lease_until", "cost_usd", "estimate_cost_usd",
         "refine_cost_usd", "budget_usd", "model_calls", "events", "admin_actions", "failure_detail", "files_deleted", "deleting", "retiring",
-        "input_sha256",
+        "input_sha256", "delivery",
     }
 )
 

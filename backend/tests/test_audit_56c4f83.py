@@ -15,7 +15,7 @@ from app.proposals import decisions, rulebook, service
 from app.proposals.models import ChapterDocument, ChapterSection, StoredChapterVersion
 from app.runtime import get_runtime
 from tests import conftest as fixtures
-from tests.test_api import ADMIN, STUDENT
+from tests.test_api import ADMIN, STUDENT, wait
 from tests.test_proposals import _create, plan
 
 UID = "u_" + hashlib.sha256(b"student@example.com").hexdigest()[:20]
@@ -185,3 +185,199 @@ def test_h04_a_step_priced_before_the_migration_still_reads_its_files(client):
     jobs.migrate_legacy_project_files(rt)
     assert not rt.files.exists(evidence_path)
     assert load_library(rt.files, [evidence_path]) == {}  # read from the moved copy, not a crash
+
+
+# --- H05-H07, M09: revisions --------------------------------------------------------------------
+
+
+def _comment(client, pid, key="problem", text="Clarify the problem statement."):
+    response = client.post(f"/api/projects/{pid}/feedback", headers=STUDENT, json={"text": text})
+    cid = response.json()["feedback"][-1]["id"]
+    placed = client.post(f"/api/projects/{pid}/feedback/{cid}", headers=STUDENT, json={"chapter": 1, "sections": [key]})
+    assert placed.status_code == 200, placed.text
+    return cid
+
+
+def _quote(client, pid):
+    quoted = client.post(f"/api/projects/{pid}/steps", headers=STUDENT, json={"step": "REVISE_1"})
+    assert quoted.status_code == 200, quoted.text
+    return quoted.json()
+
+
+def _submit(client, pid, body):
+    return client.post(f"/api/projects/{pid}/steps/{body['job']['id']}/submit", headers=STUDENT, json={"quoteId": body["quote"]["id"]})
+
+
+def _revise_only(keys):
+    """The writer answers the comments on `keys` and returns nothing for the other sections."""
+
+    def answer(payload):
+        return {
+            "sections": [
+                {"key": s["key"], "paragraphs": [*s["text"], "The proposed study will address this comment."] if s["key"] in keys else [], "table": s["table"]}
+                for s in payload["sections"]
+            ]
+        }
+
+    return answer
+
+
+def _feedback(client, pid, cid):
+    return next(c for c in client.get(f"/api/projects/{pid}", headers=STUDENT).json()["feedback"] if c["id"] == cid)
+
+
+def test_h05_a_revision_that_changes_nothing_fails_without_charge(fixed_client):
+    pid, _ = _project(fixed_client)
+    cid = _comment(fixed_client, pid)
+    fixed_client.models.overrides["p_fix"] = _revise_only(set())
+    body = _quote(fixed_client, pid)
+    assert _submit(fixed_client, pid, body).status_code == 200
+    job = wait(fixed_client, body["job"]["id"])
+    assert job["status"] == "FAILED" and job["failure"]["code"] == "NOTHING_REVISED" and job["billing"]["charged"] == 0
+    assert _feedback(fixed_client, pid, cid)["status"] == "OPEN"
+    assert next(c for c in fixed_client.get(f"/api/projects/{pid}", headers=STUDENT).json()["chapters"] if c["number"] == 1)["current"] == 1
+
+
+def test_h05_a_partial_revision_charges_its_share_and_leaves_the_rest_open(fixed_client):
+    pid, _ = _project(fixed_client)
+    done = _comment(fixed_client, pid, "problem")
+    missed = _comment(fixed_client, pid, "scope", "Narrow the scope.")
+    fixed_client.models.overrides["p_fix"] = _revise_only({"problem"})
+    body = _quote(fixed_client, pid)
+    assert body["quote"]["amount"] == 2000
+    assert _submit(fixed_client, pid, body).status_code == 200
+    job = wait(fixed_client, body["job"]["id"])
+    assert job["status"] == "COMPLETED" and job["outcome"] == "PARTIAL" and job["billing"]["charged"] == 1000
+    assert _feedback(fixed_client, pid, done)["status"] == "APPLIED" and _feedback(fixed_client, pid, missed)["status"] == "OPEN"
+
+
+def test_h06_untouched_sections_keep_their_review_state(client):
+    pid, _ = _project(client, unreviewed=True)
+    _comment(client, pid)
+    client.models.overrides["p_fix"] = _revise_only({"problem"})
+    body = _quote(client, pid)
+    _submit(client, pid, body)
+    assert wait(client, body["job"]["id"])["status"] == "COMPLETED"
+    chapter = client.get(f"/api/projects/{pid}/chapters/1", headers=STUDENT).json()
+    assert next(r for r in chapter["readiness"] if r["id"] == "C1-REVIEWED")["status"] == "NEEDS_REVIEW"
+    assert any("Background" in w for w in chapter["warnings"])
+
+
+def _second_version(rt, pid, base, text="NEWER background the student chose."):
+    newer = base.model_copy(deep=True)
+    next(s for s in newer.sections if s.key == "background").paragraphs = [text]
+    path = f"{rt.store.get_project(pid).storage_prefix()}/chapters/1/newer.json"
+    rt.files.put(path, newer.model_dump_json(by_alias=True).encode(), "application/json")
+
+    def change(p):
+        p.chapter(1).versions.append(StoredChapterVersion(version=2, job_id="job_newer", words=200, plan_version=1, path=path))
+        p.chapter(1).current = 2
+        return p
+
+    rt.store.update_project(pid, change)
+
+
+def test_h07_a_revision_priced_on_another_version_must_be_priced_again(client):
+    rt = get_runtime()
+    pid, base = _project(client)
+    _comment(client, pid)
+    body = _quote(client, pid)
+    _second_version(rt, pid, base)
+    refused = _submit(client, pid, body)
+    assert refused.status_code == 409 and refused.json()["code"] == "QUOTE_MISMATCH"
+
+
+def test_h07_a_version_chosen_during_the_revision_stays_current(client):
+    rt = get_runtime()
+    pid, base = _project(client)
+    _comment(client, pid)
+    revise = _revise_only({"problem"})
+
+    def choose_meanwhile(payload):
+        if rt.store.get_project(pid).chapter(1).current == 1:
+            _second_version(rt, pid, base)
+        return revise(payload)
+
+    client.models.overrides["p_fix"] = choose_meanwhile
+    body = _quote(client, pid)
+    _submit(client, pid, body)
+    job = wait(client, body["job"]["id"])
+    state = next(c for c in client.get(f"/api/projects/{pid}", headers=STUDENT).json()["chapters"] if c["number"] == 1)
+    assert state["current"] == 2 and len(state["versions"]) == 3
+    assert any("without replacing your choice" in w for w in job["warnings"])
+
+
+def test_m09_moving_a_comment_after_pricing_needs_a_new_price(client):
+    pid, _ = _project(client)
+    cid = _comment(client, pid)
+    body = _quote(client, pid)
+    client.post(f"/api/projects/{pid}/feedback/{cid}", headers=STUDENT, json={"chapter": 1, "sections": ["background"]})
+    refused = _submit(client, pid, body)
+    assert refused.status_code == 409 and refused.json()["code"] == "QUOTE_MISMATCH"
+
+
+def test_m09_a_comment_moved_during_the_revision_stays_open(client):
+    rt = get_runtime()
+    pid, _ = _project(client)
+    cid = _comment(client, pid)
+    revise = _revise_only({"problem"})
+
+    def move_meanwhile(payload):
+        service.update_feedback(rt, OWNER, pid, cid, 1, ["background"], "OPEN", "")
+        return revise(payload)
+
+    client.models.overrides["p_fix"] = move_meanwhile
+    body = _quote(client, pid)
+    _submit(client, pid, body)
+    assert wait(client, body["job"]["id"])["status"] == "COMPLETED"
+    assert _feedback(client, pid, cid)["status"] == "OPEN"
+
+
+# --- H08: fix drafts -----------------------------------------------------------------------------
+
+
+def _fix_draft(client):
+    from app.jobs.models import AnalysisResult, Finding
+
+    rt = get_runtime()
+    job, _ = _paper(rt)
+    doc = Document()
+    for i in range(30):
+        doc.add_paragraph(" ".join([f"passage{i}"] * 150))
+    out = io.BytesIO()
+    doc.save(out)
+    model = read_docx(out.getvalue())
+    rt.files.put(job.source.path, out.getvalue(), "application/octet-stream")
+    job.source.word_count, job.source.sha256 = model.word_count, hashlib.sha256(out.getvalue()).hexdigest()
+    blocks = [b.id for b in model.blocks if b.editable and b.kind == "paragraph"]
+    job.status = JobStatus.COMPLETED
+    finding = Finding(id="f-one", block_id=blocks[0], section="Body", reason="GENERIC_PHRASING", severity="minor", excerpt="", explanation="Clarify", suggestion="Be specific")
+    job.analysis = AnalysisResult(band="LOW", confidence="HIGH", analysed_words=model.word_count, excluded_words=0, algorithm_version="audit", findings=[finding])
+    rt.store.update(job.id, lambda j: job)
+    rt.files.put(f"{job.storage_prefix()}/internal/document.json", model.model_dump_json(by_alias=True).encode(), "application/json")
+    created = client.post(f"/api/jobs/{job.id}/fix", headers=STUDENT, json={"findingIds": ["f-one"], "safeOnly": False})
+    assert created.status_code == 200, created.text
+    return created.json()["id"], blocks
+
+
+def test_h08_widening_a_fix_selection_is_priced_by_the_words_chosen(fixed_client):
+    draft, blocks = _fix_draft(fixed_client)
+    selection = {"writing": "REFINE", "academic": False, "onlyBlocks": [blocks[0]]}
+    first = fixed_client.post(f"/api/jobs/{draft}/quote", headers=STUDENT, json={"selection": selection}).json()["quote"]["amount"]
+    widened = fixed_client.post(f"/api/jobs/{draft}/quote", headers=STUDENT, json={"selection": {**selection, "onlyBlocks": blocks}}).json()["quote"]["amount"]
+    assert first == 4000 and widened == 7000  # 150 words, then the full 4,500
+
+
+def test_h08_a_selection_must_name_passages_in_the_file(fixed_client):
+    draft, _ = _fix_draft(fixed_client)
+    selection = {"writing": "REFINE", "academic": False, "onlyBlocks": ["b99999"]}
+    refused = fixed_client.post(f"/api/jobs/{draft}/quote", headers=STUDENT, json={"selection": selection})
+    assert refused.status_code == 400 and refused.json()["code"] == "INVALID_SELECTION"
+
+
+def test_h08_replacing_the_file_clears_the_fix_selection(fixed_client):
+    draft, _ = _fix_draft(fixed_client)
+    other = {"file": ("other.docx", fixtures.fixture_bytes("simple_essay.docx"), "application/octet-stream")}
+    assert fixed_client.post(f"/api/jobs/{draft}/files/source", headers=STUDENT, files=other).status_code == 200
+    job = get_runtime().store.get(draft)
+    assert job.fix_notes == {} and job.scope_words is None and job.selection.only_blocks == []

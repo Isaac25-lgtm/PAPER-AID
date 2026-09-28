@@ -596,6 +596,9 @@ class Job(JobView):
     deleting: bool = False  # set atomically before deletion: no new work may start on the job
     retiring: bool = False  # claimed by retention cleanup: its files are being deleted, nothing new may start
     input_sha256: str | None = None  # a proposal step: the frozen project input it was priced on
+    # Share of a service actually delivered, recorded by the pipeline where it is not all-or-nothing
+    # (service key → 0..1); settlement charges each fixed-price line by it (Codex audit 56c4f83 H05).
+    delivery: dict[str, float] = {}
 
     def view(self) -> JobView:
         return JobView.model_validate(self.model_dump())

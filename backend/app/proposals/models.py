@@ -232,6 +232,14 @@ class FeedbackComment(Camel):
     applied_in: int | None = None  # the chapter version that applied it
     response: str = Field(default="", max_length=1000)  # the student's own reply for the response report
 
+    def signature(self) -> str:
+        """What a revision was priced to answer: the comment and where it was placed. A revision
+        marks the comment applied only if this is unchanged (Codex audit 56c4f83 M09)."""
+        import hashlib
+        import json
+
+        return hashlib.sha256(json.dumps([self.text, self.chapter, sorted(self.sections)]).encode()).hexdigest()[:16]
+
 
 class WrittenSection(Camel):
     """A section in a chapter's current version: where supervisor comments can be placed."""
@@ -326,6 +334,7 @@ class ChapterSection(Camel):
     table: list[list[str]] | None = None  # first row is the header
     table_caption: str = ""
     depends: dict[str, str] = {}  # decision id → the hash it was written from (app.proposals.decisions)
+    reviewed: bool | None = None  # the lead reviewed its final text (None: written before this was recorded)
 
 
 class StepInput(Camel):
@@ -346,6 +355,9 @@ class StepInput(Camel):
     # REVISE: the version being revised, and the supervisor's comments by section key; every other
     # section is carried over unchanged.
     base: str = ""
+    base_version: int = 0  # REVISE: the version priced, and a hash of its file (Codex audit 56c4f83 H07)
+    base_sha: str = ""
+    comment_signatures: dict[str, str] = {}  # REVISE: comment id → its signature when priced (M09)
     guide: str = ""  # PROFILE: the guide's text in storage, and its file name
     guide_name: str = ""
     revise: dict[str, list[str]] = {}
@@ -362,4 +374,5 @@ class ChapterDocument(Camel):
     cited: list[str]  # evidence ids cited, in order of first use
     readiness: list[ReadinessItem] = []
     warnings: list[str] = []
+    revised: list[str] = []  # a revision: the sections it delivered new text for
     words: int

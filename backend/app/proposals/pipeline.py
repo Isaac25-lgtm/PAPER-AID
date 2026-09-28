@@ -483,15 +483,32 @@ def stage_auditing(ctx: "StageContext") -> None:
             warnings.append(f"Note on {items[key]['number']} {items[key]['heading']}: {grade.note.strip()}")
 
     document = _document(inp, current, items, library)
+    for section in document.sections:
+        section.reviewed = section.key in grades
+    delivered: list[str] = []
     if base is not None:
         document, kept = _merge(base, document, set(current))
+        delivered = _delivered(base, document, set(current))
+        if not delivered:
+            raise PermanentStageError(
+                "NOTHING_REVISED", "PaperAid could not revise these sections this time, so your chapter is unchanged and nothing was charged.", "revise: no section changed"
+            )
+        document.revised = delivered
         if kept:
             warnings.append(f"These sections could not be revised this time, so your earlier text is kept: {', '.join(kept)}.")
+        # untouched sections keep what was known about them (Codex audit 56c4f83 H06)
+        warnings = _carried_warnings(base, delivered) + warnings
+        unreviewed = _unreviewed(base, document)
+        stripped = stripped or [i.note for i in base.readiness if i.id.endswith("-TRACE") and i.status != "PASS"]
     document.readiness = _readiness(ctx, runner, inp, document, library, bool(stripped), unreviewed)
     document.warnings = warnings
     ctx.put_json("chapter.json", document.model_dump(by_alias=True))
+    if base is not None:
+        targeted = [k for k in inp.revise if any(s.key == k for s in base.sections)]
+        share = len(delivered) / len(targeted) if targeted else 0.0
+        ctx.update(lambda j: j.model_copy(update={"delivery": {**j.delivery, "REVISE": share}}))
     if warnings:
-        ctx.update(lambda j: _warn(j, warnings, partial=bool(unresolved or stripped or unreviewed)))
+        ctx.update(lambda j: _warn(j, warnings, partial=bool(unresolved or stripped or unreviewed) or len(delivered) < len(inp.revise)))
 
 
 def _revision(
@@ -534,6 +551,31 @@ def _merge(base: ChapterDocument, revised: ChapterDocument, keys: set[str]) -> t
     words = sum(len(evidence.ANY_TOKEN.sub(" ", p).split()) for s in sections for p in s.paragraphs)
     merged = ChapterDocument(number=base.number, title=base.title, plan_version=revised.plan_version, sections=sections, cited=cited, words=words)
     return merged, [f"{s.number} {s.heading}" for s in base.sections if s.key in keys and s.key not in fresh]
+
+
+def _delivered(base: ChapterDocument, merged: ChapterDocument, targeted: set[str]) -> list[str]:
+    """The targeted sections whose text a revision actually changed."""
+    before = {s.key: (s.paragraphs, s.table, s.table_caption) for s in base.sections}
+    return [s.key for s in merged.sections if s.key in targeted and (s.paragraphs, s.table, s.table_caption) != before.get(s.key)]
+
+
+def _heading(s: ChapterSection) -> str:
+    return f"{s.number} {s.heading}"
+
+
+def _carried_warnings(base: ChapterDocument, delivered: list[str]) -> list[str]:
+    """The earlier version's warnings that still apply: all but those only about revised sections."""
+    revised = [_heading(s) for s in base.sections if s.key in delivered]
+    untouched = [_heading(s) for s in base.sections if s.key not in delivered]
+    return [w for w in base.warnings if not any(h in w for h in revised) or any(h in w for h in untouched)]
+
+
+def _unreviewed(base: ChapterDocument, merged: ChapterDocument) -> list[str]:
+    """Every final section not known to have been reviewed: revised ones from this run, untouched
+    ones from their own record (or, for a version written before sections recorded it, from that
+    version's review result)."""
+    earlier_all_reviewed = all(i.status == "PASS" for i in base.readiness if i.id.endswith("-REVIEWED"))
+    return [_heading(s) for s in merged.sections if s.reviewed is False or (s.reviewed is None and not earlier_all_reviewed)]
 
 
 def _document(inp: StepInput, current: dict[str, SectionText], items: dict[str, dict[str, Any]], library: dict[str, EvidenceItem]) -> ChapterDocument:
@@ -681,12 +723,14 @@ def stage_exporting(ctx: "StageContext") -> None:
     library_paths = list(dict.fromkeys([*project.evidence_files, *([evidence_path] if evidence_path else [])]))
     usable = sum(1 for i in load_library(ctx.rt.files, library_paths).values() if i.usable)
     candidate = False
+    kept_choice = False
+    left_open: list[str] = []
 
     def publish(p: Project) -> Project | None:
         nonlocal candidate
         if p.deleting:
             return None
-        nonlocal written_meanwhile
+        nonlocal written_meanwhile, kept_choice
         if job_id in p.published:  # a retry after this job's transaction already committed
             return p
         p.published.append(job_id)
@@ -716,16 +760,29 @@ def stage_exporting(ctx: "StageContext") -> None:
                     passed=sum(1 for r in document.readiness if r.status in ("PASS", "NOT_APPLICABLE")), total=len(document.readiness),
                 )
             )
-            state.current, state.approved = version, False
+            if inp.step == "REVISE" and state.current != inp.base_version:
+                kept_choice = True  # the student chose another version meanwhile: saved, not made current (H07)
+            else:
+                state.current, state.approved = version, False
+            left_open.clear()
             for comment in p.feedback:
-                if comment.id in inp.comment_ids and comment.status == "OPEN":
+                if comment.id not in inp.comment_signatures or comment.status != "OPEN":
+                    continue
+                answered = [k for k in comment.sections if k in inp.revise]
+                if comment.signature() == inp.comment_signatures[comment.id] and answered and all(k in document.revised for k in answered):
                     comment.status, comment.applied_in = "APPLIED", version
+                else:
+                    left_open.append(comment.text[:60])
         p.updated_at = utcnow()
         return p
 
     if ctx.rt.store.update_project(inp.project_id, publish) is None:
         raise PermanentStageError("PROJECT_DELETED", "This proposal was deleted before the step finished, so nothing was charged.", "project deleting at export")
     notes = ["You edited your plan while PaperAid was drafting one, so the new plan is kept alongside yours for you to compare."] if candidate else []
+    if kept_choice:
+        notes.append("You chose another version while PaperAid was revising, so the revision is saved as a new version without replacing your choice.")
+    if left_open:
+        notes.append(f"{len(left_open)} of your supervisor's comments stay open because their sections were not revised or were changed meanwhile.")
     if written_meanwhile:
         notes.append("A chapter was written before your institution's profile was ready, so your proposal keeps its current structure.")
 

@@ -415,13 +415,15 @@ def quote_step(rt: Runtime, user: User, project_id: str, step: Step, note: str) 
         return _quote_profile(rt, user, p)
     chapter = 0 if step == "PLAN" else CONCEPT if step == "CONCEPT" else int(step[-1])
     revising = step.startswith("REVISE_")
-    base, revise, comment_ids, revised_words = "", {}, [], 0
+    base, revise, comment_ids, revised_words, base_version, base_sha = "", {}, [], 0, 0, ""
     if revising:
         stored = p.chapter(chapter)
         doc = _chapter_doc(rt, stored)
         if doc is None:
             raise AppError("Write this chapter before revising it.", code="NOTHING_TO_REVISE")
         base = next(v.path for v in stored.versions if v.version == stored.current)
+        base_version = stored.current
+        base_sha = hashlib.sha256(rt.files.get(base if rt.files.exists(base) else moved_path(base))).hexdigest()
         written = {s.key: s for s in doc.sections}
         for comment in p.feedback:
             if comment.status == "OPEN" and comment.chapter == chapter:
@@ -454,8 +456,11 @@ def quote_step(rt: Runtime, user: User, project_id: str, step: Step, note: str) 
         private=[w for w in " ".join([p.title_page.student_name, p.title_page.reg_number, p.title_page.supervisor]).split() if len(w) > 2],
         step="REVISE" if revising else "PLAN" if chapter == 0 else "CHAPTER",
         base=base,
+        base_version=base_version,
+        base_sha=base_sha,
         revise=revise,
         comment_ids=list(dict.fromkeys(comment_ids)),
+        comment_signatures={c.id: c.signature() for c in p.feedback if c.id in set(comment_ids)},
     )
     data = inp.model_dump_json(by_alias=True).encode()
     sha = hashlib.sha256(data).hexdigest()
@@ -564,6 +569,16 @@ def use_default_rulebook(rt: Runtime, user: User, project_id: str) -> ProjectVie
     return view(rt, _change(rt, user, project_id, apply))
 
 
+def _revision_current(p: Project, inp: StepInput) -> bool:
+    """A revision runs only on the version and comments it was priced for."""
+    if inp.step != "REVISE":
+        return True
+    comments = {c.id: c for c in p.feedback}
+    return p.chapter(inp.chapter).current == inp.base_version and all(
+        cid in comments and comments[cid].status == "OPEN" and comments[cid].signature() == sig for cid, sig in inp.comment_signatures.items()
+    )
+
+
 def submit_step(rt: Runtime, user: User, project_id: str, job_id: str, quote_id: str) -> JobView:
     """Accept a step's quote. The project is checked and claimed in the same transaction that
     holds the credits (Codex audit 2026-09-28 #4): still the student's, not being deleted, on the
@@ -576,6 +591,8 @@ def submit_step(rt: Runtime, user: User, project_id: str, job_id: str, quote_id:
     if job.status not in state.SUBMITTED:
         if p.plan_version != inp.plan_version:
             raise Conflict("Your plan changed after this step was priced. Price it again so it uses your latest plan.", code="QUOTE_MISMATCH")
+        if not _revision_current(p, inp):
+            raise Conflict("Your chapter or your supervisor's comments changed after this revision was priced. Price it again.", code="QUOTE_MISMATCH")
         if p.active_job != job_id and step_running(rt, p):
             raise Conflict("A step is already running for this proposal. Wait for it to finish.", code="STEP_RUNNING")
     seen_active = p.active_job  # finished (or none): the claim may replace only this value
@@ -585,6 +602,8 @@ def submit_step(rt: Runtime, user: User, project_id: str, job_id: str, quote_id:
             return None
         if q.active_job not in (seen_active, j.id):
             return None  # another step was claimed after we looked
+        if not _revision_current(q, inp):
+            return None  # the chapter version or a comment changed after pricing (Codex audit 56c4f83 H07, M09)
         q.active_job = j.id
         q.jobs = q.jobs if j.id in q.jobs else (q.jobs + [j.id])[-100:]
         if inp.step == "PLAN" and not q.chapter(1).versions:
