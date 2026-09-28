@@ -1656,3 +1656,30 @@ def test_a_submission_that_wins_the_race_keeps_its_files(client, monkeypatch):
     service.cleanup_expired(rt)
     job = rt.store.get(job_id)
     assert job.status == JobStatus.QUEUED and not job.files_deleted and rt.files.exists(job.source.path)
+
+
+def test_only_the_services_list_skips_app_check(monkeypatch):
+    """A fresh App Check attestation (reCAPTCHA) takes seconds after an hour away. Only the harmless
+    services list may answer without it; every action and every read of the user's data needs it."""
+    import pytest
+    from firebase_admin import app_check
+    from firebase_admin import auth as fb_auth
+    from starlette.requests import Request
+
+    from app.core import auth
+    from app.core.config import Settings
+    from app.core.errors import Unauthorized
+
+    settings = Settings(_env_file=None, auth_mode="firebase", require_app_check=True)
+    monkeypatch.setattr(auth, "_firebase", lambda: None)
+    monkeypatch.setattr(fb_auth, "verify_id_token", lambda token, check_revoked: {"uid": "u1", "email": "a@b.co", "email_verified": True})
+
+    def no_attestation(token):
+        raise ValueError("no App Check token")
+
+    monkeypatch.setattr(app_check, "verify_token", no_attestation)
+    request = Request({"type": "http", "headers": [(b"authorization", b"Bearer id-token")]})
+    with pytest.raises(Unauthorized):
+        auth.current_user(request, settings)
+    user = auth.optional_user(request, settings)
+    assert user is not None and user.uid == "u1"

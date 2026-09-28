@@ -25,6 +25,10 @@ def _firebase():
 
 
 def current_user(request: Request, settings: Settings = Depends(get_settings)) -> User:
+    return _verified_user(request, settings, need_app_check=True)
+
+
+def _verified_user(request: Request, settings: Settings, need_app_check: bool) -> User:
     header = request.headers.get("authorization", "")
     if settings.auth_mode == "dev":
         if settings.env == "production":
@@ -46,7 +50,7 @@ def current_user(request: Request, settings: Settings = Depends(get_settings)) -
         claims = auth.verify_id_token(header[7:], check_revoked=True)
     except (auth.InvalidIdTokenError, auth.ExpiredIdTokenError, auth.RevokedIdTokenError, auth.CertificateFetchError, ValueError) as exc:
         raise Unauthorized("Your session has expired. Please sign in again.") from exc
-    if settings.require_app_check:
+    if settings.require_app_check and need_app_check:
         token = request.headers.get("x-firebase-appcheck", "")
         try:
             app_check.verify_token(token)
@@ -56,12 +60,14 @@ def current_user(request: Request, settings: Settings = Depends(get_settings)) -
 
 
 def optional_user(request: Request, settings: Settings = Depends(get_settings)) -> User | None:
-    """The signed-in user when the request carries a valid credential, otherwise None. For public
-    endpoints that personalise their answer (such as which services this visitor may use)."""
+    """The signed-in user when the request carries a valid ID token, otherwise None. Only for public
+    endpoints that personalise a harmless answer (which services this visitor may use). App Check is
+    not required here: waiting for a fresh reCAPTCHA attestation held the whole app on its splash
+    screen after an hour away. Every endpoint that acts or reads a user's data still requires it."""
     if not request.headers.get("authorization"):
         return None
     try:
-        return current_user(request, settings)
+        return _verified_user(request, settings, need_app_check=False)
     except Unauthorized:
         return None
 

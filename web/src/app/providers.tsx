@@ -15,6 +15,16 @@ function Splash({ children }: { children: ReactNode }) {
   )
 }
 
+/** Shown only if starting up takes unusually long (a slow connection), so it never looks stuck. */
+function SlowNote() {
+  const [slow, setSlow] = useState(false)
+  useEffect(() => {
+    const timer = setTimeout(() => setSlow(true), 4000)
+    return () => clearTimeout(timer)
+  }, [])
+  return slow ? <p className="text-sm text-fg-muted">Connecting securely to PaperAid&hellip;</p> : null
+}
+
 function DataProvider({ children }: { children: ReactNode }) {
   const { getAuthHeaders, ready, user } = useAuth()
   const uid = user?.uid
@@ -27,7 +37,7 @@ function DataProvider({ children }: { children: ReactNode }) {
     if (!ready) return
     let cancelled = false
     setFailed(false)
-    getAuthHeaders()
+    getAuthHeaders(false) // the services list needs only the sign-in token, never a reCAPTCHA wait
       .then((headers) => fetchPublicConfig(uid ? headers : {}))
       .then((c) => !cancelled && setConfig(c))
       .catch(() => !cancelled && setFailed(true))
@@ -64,6 +74,7 @@ function DataProvider({ children }: { children: ReactNode }) {
     return (
       <Splash>
         <Loader2 className="size-5 animate-spin text-brand-600" aria-label="Loading PaperAid" />
+        <SlowNote />
       </Splash>
     )
   return <DataContext.Provider value={source}>{children}</DataContext.Provider>

@@ -17,7 +17,9 @@ export interface AuthState {
   signInWithGoogle(): Promise<void>
   signOut(): Promise<void>
   updateName(name: string): Promise<void>
-  getAuthHeaders(): Promise<Record<string, string>>
+  /** Headers for an API request. `withAppCheck: false` sends only the sign-in token: for the services
+   *  list alone, so the app never waits for a reCAPTCHA check before it can draw. */
+  getAuthHeaders(withAppCheck?: boolean): Promise<Record<string, string>>
 }
 
 const AuthContext = createContext<AuthState | null>(null)
@@ -140,11 +142,14 @@ function FirebaseAuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let unsubscribe = () => {}
-    import('./firebase-client').then(({ auth, onIdTokenChanged }) => {
+    import('./firebase-client').then(({ auth, onIdTokenChanged, appCheckToken }) => {
       unsubscribe = onIdTokenChanged(auth, async (fbUser) => {
         if (!fbUser) {
           setUser(null)
         } else {
+          // Start the App Check (reCAPTCHA) attestation now, alongside restoring the sign-in, not on
+          // the first API request: after an hour away it takes seconds, and this overlaps them.
+          void appCheckToken()
           if (!fbUser.emailVerified) {
             // The saved sign-in doesn't know about a verification link clicked since; re-check, and
             // if it is verified now, fetch a fresh token (this callback runs again with it).
@@ -174,11 +179,12 @@ function FirebaseAuthProvider({ children }: { children: ReactNode }) {
 
   // Stable across token refreshes: it reads the current Firebase user when called, so the data
   // layer (and any draft in progress) is not rebuilt each time the ID token refreshes.
-  const getAuthHeaders = useCallback(async (): Promise<Record<string, string>> => {
+  const getAuthHeaders = useCallback(async (withAppCheck = true): Promise<Record<string, string>> => {
     const fb = await import('./firebase-client')
     const current = fb.auth.currentUser
     if (!current) return {}
     const headers: Record<string, string> = { Authorization: `Bearer ${await current.getIdToken()}` }
+    if (!withAppCheck) return headers
     const appCheck = await fb.appCheckToken()
     if (appCheck) headers['X-Firebase-AppCheck'] = appCheck
     return headers
