@@ -153,6 +153,7 @@ firebase deploy --only hosting,firestore:rules,firestore:indexes --project PROJE
 
 | Date | Commit | Image | API revision | Worker revision | Hosting release |
 |---|---|---|---|---|---|
+| 2026-09-28 | `7cd6a5a` | `backend:v13` (`sha256:7f7a7296a6d438805fce0f2d37a90bd0734c8886f066e97fab725f3c999fdb86`) | `paperaid-api-00013-zh5` | `paperaid-worker-00013-rbq` | live channel, 2026-09-28 14:57:56 EAT; bucket lifecycle scoped to `users/` |
 | 2026-09-27 | `898aa1c` | `backend:v11` (`sha256:114fb0dbd3284f417879b6eb3cb6327ee7d281ad7ab65bd674467eccc54aea0e`) | `paperaid-api-00012-prd` | `paperaid-worker-00012-gfv` | live channel, 2026-09-27 22:40 EAT (web unchanged since `b150929`) |
 
 ## Alerts worth creating (Cloud Monitoring)
