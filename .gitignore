@@ -29,3 +29,7 @@ web/out/
 backend/.audit_tmp_*/
 codex_verify_*/
 backend/codex_verify_*/
+
+# Codex audit scratch folders (2026-09-28)
+backend/.codex_*/
+web/codex_*/

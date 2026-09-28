@@ -52,14 +52,27 @@ function ListEditor({ label, items, onChange, add }: { label: string; items: str
 export function PlanEditor({ project, onSaved }: { project: Project; onSaved: (p: Project) => void }) {
   const data = useData()
   const [plan, setPlan] = useState<ProposalPlan>(project.plan as ProposalPlan)
+  // The version this draft was started from. It changes only together with the content (Codex audit
+  // 2026-09-28 #9): saving always names it, so a newer plan is never overwritten unseen.
+  const [base, setBase] = useState(project.planVersion)
   const [dirty, setDirty] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [sample, setSample] = useState<{ size: number | null; steps: string; missing: string } | null>(null)
 
   useEffect(() => {
-    if (!dirty && project.plan) setPlan(project.plan) // a finished step or another tab changed it
-  }, [project.plan, dirty])
+    if (!dirty && project.plan) {
+      setPlan(project.plan) // a finished step or another tab changed it: take content and version together
+      setBase(project.planVersion)
+    }
+  }, [project.plan, project.planVersion, dirty])
+  const conflict = dirty && project.planVersion !== base
+  const discard = () => {
+    if (project.plan) setPlan(project.plan)
+    setBase(project.planVersion)
+    setDirty(false)
+    setError(null)
+  }
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -84,8 +97,10 @@ export function PlanEditor({ project, onSaved }: { project: Project; onSaved: (p
     setBusy(true)
     setError(null)
     try {
-      onSaved(await data.projects.savePlan(project.id, plan, project.planVersion))
+      const saved = await data.projects.savePlan(project.id, plan, base)
+      setBase(saved.planVersion)
       setDirty(false)
+      onSaved(saved)
     } catch (e) {
       setError(e instanceof DataError ? e.message : 'We could not save your plan.')
     } finally {
@@ -122,6 +137,20 @@ export function PlanEditor({ project, onSaved }: { project: Project; onSaved: (p
         </div>
       </div>
       {error && <Alert tone="danger">{error}</Alert>}
+      {conflict && (
+        <Alert
+          tone="warning"
+          title="Your plan changed elsewhere"
+          action={
+            <Button size="sm" variant="secondary" onClick={discard}>
+              Discard my edits and load the latest
+            </Button>
+          }
+        >
+          A newer version (version {project.planVersion}) was saved from another tab or by a finished step. Your unsaved edits are still here, but saving them would be
+          refused: note what you changed, load the latest, and make your edits again.
+        </Alert>
+      )}
       {!dirty && project.planProblems.length > 0 && (
         <Alert tone="warning" title="Fix these before approving">
           <ul className="list-disc pl-5">

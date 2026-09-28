@@ -108,7 +108,19 @@ export function ProjectsPage() {
   )
 }
 
-const EMPTY_INPUTS: ProposalInputs = { topic: '', level: 'MASTERS', programme: '', faculty: '', studyArea: '', population: '', studyType: null, notes: '' }
+const EMPTY_INPUTS: ProposalInputs = {
+  topic: '',
+  level: 'MASTERS',
+  programme: '',
+  faculty: '',
+  studyArea: '',
+  population: '',
+  studyType: null,
+  notes: '',
+  populationSize: null,
+  populationSource: '',
+  expectedParticipants: null,
+}
 const EMPTY_TITLE: TitlePage = { studentName: '', regNumber: '', supervisor: '', submissionDate: '' }
 
 /** The study details and title page, used when creating a project and on its Details tab. */
@@ -173,13 +185,31 @@ export function DetailsForm({
           <Input label="Study area (if known)" value={inputs.studyArea} maxLength={200} onChange={(e) => set({ studyArea: e.target.value })} />
           <Input label="Study population (if known)" value={inputs.population} maxLength={200} onChange={(e) => set({ population: e.target.value })} />
         </div>
+        <div className="grid gap-4 sm:grid-cols-3">
+          <Input
+            label="Accessible population (if known)"
+            type="number"
+            min={1}
+            value={inputs.populationSize ?? ''}
+            onChange={(e) => set({ populationSize: e.target.value ? Number(e.target.value) : null })}
+            hint="Only a figure you have: PaperAid never supplies it."
+          />
+          <Input label="Where that figure comes from" value={inputs.populationSource} maxLength={300} onChange={(e) => set({ populationSource: e.target.value })} placeholder="e.g. district records, 2025" />
+          <Input
+            label="Expected participants (qualitative)"
+            type="number"
+            min={1}
+            value={inputs.expectedParticipants ?? ''}
+            onChange={(e) => set({ expectedParticipants: e.target.value ? Number(e.target.value) : null })}
+          />
+        </div>
         <TextArea
           label="What you already have (optional)"
           rows={4}
           maxLength={4000}
           value={inputs.notes}
           onChange={(e) => set({ notes: e.target.value })}
-          hint="A concept summary, your supervisor's guidance, decisions already made. Include figures you know, such as the size of your population and where it comes from: PaperAid never invents them."
+          hint="A concept summary, your supervisor's guidance, decisions already made."
         />
       </Card>
       <Card className="space-y-4 p-5">

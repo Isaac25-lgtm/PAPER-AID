@@ -165,3 +165,15 @@ Codex's review (`docs/Codex_Master_Context_Review_and_UCU_Proposal_Plan_20260928
 - **Citation style:** the manual's appendix uses APA 6. A project chooses "APA 6 (UCU 2018 manual)" (default) or APA 7; citations are stored as evidence tokens and rendered in the chosen style, so switching needs no AI.
 - **Retention:** a project expires 30 days after the student's last genuine action (edits, approvals, submissions, downloads — not page views); the expiry date is shown. Account deletion and cleanup cover projects.
 - **Pricing:** proposal jobs use the current credits-v1 policy while credits are off; fixed retail prices (with a frozen billing-policy version per quote) come after live costs are measured. Proposal features stay invite-only until the live gates pass.
+
+## 2026-09-28 — Codex's full audit of 655cda5: all 16 findings verified and fixed
+Report: `docs/Codex_Full_Code_Audit_20260928_655cda5.md`; regressions in `backend/tests/test_audit_20260928.py` and `web/scripts/e2e-proposal-recovery.mjs`.
+- **Fetching** connects only to the address it validated (resolved once, pinned, TLS checked against the real host, no environment proxy, every redirect re-checked).
+- **Formatting** never relinks a later section's own header or footer, and fails rather than change one.
+- **Storage:** project files live under `projects/`; the bucket's 31-day backstop applies to `users/` (job files) only. The live bucket rule must be updated at the next deploy.
+- **Proposal steps** are accepted in one transaction with the project (job, wallet and project together); deletion is refused while a step is queued or running, and expiry rechecks the date inside its claim. Deleting a project erases every job run for it.
+- **Every delivered text is checked** (paragraphs, table cells, captions); a section is never passed unreviewed (budget or not); at most two fixes, and the last text is always reviewed; reviewer notes reach the student.
+- **Complete export** requires every section the current plan needs and no code-level integrity failure; AI judgements and the 30-reference recommendation stay advisory.
+- **Decisions:** sections covering every objective depend on the whole set, so adding an objective marks them; missing sections are shown for review.
+- **Student figures:** a population size or stated sample comes only from the explicit fields the student fills in (population size, its source, expected participants).
+- **APA 6** first citations follow reading order. **The web** keeps a plan draft's version with its content and shows conflicts; load errors and refused monitoring are shown with a retry.

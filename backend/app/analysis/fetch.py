@@ -17,7 +17,7 @@ import json
 import logging
 import re
 import socket
-from urllib.parse import quote, urljoin, urlsplit
+from urllib.parse import quote, urljoin, urlsplit, urlunsplit
 
 import httpx
 from pypdf import PdfReader
@@ -34,16 +34,35 @@ MARKUP = re.compile(r"<[^>]+>")
 DOI = re.compile(r"\b(10\.\d{4,9}/[^\s?#&]+)")
 
 
-def _public(host: str) -> bool:
+def _public_address(host: str) -> str | None:
+    """One validated public IP for a host, resolved once, or None when any address it resolves to
+    is private, loopback, link-local, reserved, multicast or unspecified. The connection is then made
+    to this exact address (Codex audit 2026-09-28 #1): resolving again at connect time let a host
+    pass the check with a public address and connect to a private one (DNS rebinding)."""
     try:
         infos = socket.getaddrinfo(host, None)
     except (socket.gaierror, UnicodeError):
-        return False
-    for info in infos:
-        address = ipaddress.ip_address(info[4][0])
+        return None
+    addresses = [ipaddress.ip_address(info[4][0]) for info in infos]
+    for address in addresses:
         if address.is_private or address.is_loopback or address.is_link_local or address.is_reserved or address.is_multicast or address.is_unspecified:
-            return False
-    return bool(infos)
+            return None
+    return str(addresses[0]) if addresses else None
+
+
+def _pinned(url: str) -> tuple[str, dict[str, str], dict[str, str]] | None:
+    """(URL addressed to the validated IP, Host header, TLS server name) for a public http(s) URL.
+    TLS still verifies the certificate against the real host name."""
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        return None
+    address = _public_address(parts.hostname)
+    if address is None:
+        return None
+    ip = f"[{address}]" if ":" in address else address
+    netloc = f"{ip}:{parts.port}" if parts.port else ip
+    host = f"{parts.hostname}:{parts.port}" if parts.port else parts.hostname
+    return urlunsplit((parts.scheme, netloc, parts.path or "/", parts.query, "")), {"Host": host}, {"sni_hostname": parts.hostname}
 
 
 def _text(body: bytes, content_type: str) -> str | None:
@@ -63,12 +82,14 @@ def _get(url: str) -> tuple[bytes, str] | None:
     """(body, content type) of a public URL, or None when it cannot be read safely."""
     current = url
     try:
-        with httpx.Client(timeout=TIMEOUT_SEC, headers=HEADERS, follow_redirects=False) as client:
-            for _ in range(MAX_REDIRECTS + 1):
-                parts = urlsplit(current)
-                if parts.scheme not in ("http", "https") or not parts.hostname or not _public(parts.hostname):
+        # trust_env=False: an environment proxy would resolve the host itself, bypassing the pinning.
+        with httpx.Client(timeout=TIMEOUT_SEC, headers=HEADERS, follow_redirects=False, trust_env=False) as client:
+            for _ in range(MAX_REDIRECTS + 1):  # every hop is resolved, validated and pinned again
+                pinned = _pinned(current)
+                if pinned is None:
                     return None
-                with client.stream("GET", current) as response:
+                target, host, tls = pinned
+                with client.stream("GET", target, headers=host, extensions=tls) as response:
                     if response.is_redirect and "location" in response.headers:
                         current = urljoin(current, response.headers["location"])
                         continue

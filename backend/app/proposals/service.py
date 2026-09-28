@@ -21,7 +21,7 @@ from app.core.errors import AppError, Conflict, Forbidden, NotFound
 from app.core.logging import log
 from app.jobs import state
 from app.jobs.models import Job, JobEvent, JobStatus, JobView, Quote, ReadinessItem, ServiceSelection, utcnow
-from app.jobs.service import ACCOUNT_CLOSING, ACTIVE, User, _erase_project, _rate_limit, availability, current_engine, submit
+from app.jobs.service import ACCOUNT_CLOSING, User, _erase_project, _rate_limit, availability, current_engine, step_running, submit
 from app.pricing.quote import bound_quote
 from app.proposals import decisions, evidence, rulebook, sampling
 from app.proposals import export as proposal_export
@@ -43,7 +43,6 @@ from app.runtime import Runtime
 
 logger = logging.getLogger("paperaid.proposals")
 Step = Literal["PLAN", "CHAPTER_1", "CHAPTER_2", "CHAPTER_3"]
-CLAIM_SECONDS = 120  # a step claim whose job never got queued is free again after this long
 
 
 def _valid_id(project_id: str) -> bool:
@@ -110,20 +109,14 @@ def view(rt: Runtime, p: Project) -> ProjectView:
         out.plan_problems = rulebook.plan_problems(p.rulebook, p.plan)
         for chapter, stored in zip(out.chapters, p.chapters, strict=True):
             doc = _chapter_doc(rt, stored) if stored.current else None
-            chapter.needs_review = decisions.stale(doc, p.plan) if doc else []
-    out.active_job = p.active_job if _busy(rt, p) else None
+            if doc is None:
+                continue
+            written = {s.key for s in doc.sections}
+            expected = rulebook.sections(p.rulebook, stored.number, p.inputs.level, p.plan)
+            missing = [f"{s.number} {s.heading} (not written yet)" for s in expected if s.key not in written]
+            chapter.needs_review = decisions.stale(doc, p.plan) + missing
+    out.active_job = p.active_job if step_running(rt, p) else None
     return out
-
-
-def _busy(rt: Runtime, p: Project) -> bool:
-    if not p.active_job:
-        return False
-    job = rt.store.get(p.active_job)
-    if job is None:
-        return False
-    if job.status in ACTIVE:
-        return True
-    return job.status == JobStatus.QUOTED and p.active_since is not None and (utcnow() - p.active_since).total_seconds() < CLAIM_SECONDS
 
 
 def create(rt: Runtime, user: User, inputs: ProposalInputs, title_page: TitlePage, citation: CitationStyle) -> ProjectView:
@@ -258,8 +251,9 @@ def _render(doc: ChapterDocument, citer: evidence.Citer, plan: ProposalPlan | No
     stale = set(decisions.stale(doc, plan)) if plan else set()
     return [
         RenderedSection(
-            number=s.number, heading=s.heading, paragraphs=[citer.render(par) for par in s.paragraphs], table=s.table,
-            table_caption=s.table_caption, needs_review=f"{s.number} {s.heading}" in stale,
+            number=s.number, heading=s.heading, paragraphs=[citer.render(par) for par in s.paragraphs],
+            table=[[citer.render(cell) for cell in row] for row in s.table] if s.table else None,
+            table_caption=citer.render(s.table_caption), needs_review=f"{s.number} {s.heading}" in stale,
         )
         for s in doc.sections
     ]
@@ -322,7 +316,7 @@ def quote_step(rt: Runtime, user: User, project_id: str, step: Step, note: str) 
     the student submits."""
     _require_ai(rt, user)
     p = _owned(rt, user, project_id)
-    if _busy(rt, p):
+    if step_running(rt, p):
         raise Conflict("A step is already running for this proposal. Wait for it to finish.", code="STEP_RUNNING")
     note = note.strip()[:1000]
     chapter = 0 if step == "PLAN" else int(step[-1])
@@ -372,45 +366,40 @@ def quote_step(rt: Runtime, user: User, project_id: str, step: Step, note: str) 
     if not rt.store.create_if_open(job):
         rt.files.delete_prefix(job.storage_prefix())
         raise Conflict(ACCOUNT_CLOSING, code="ACCOUNT_CLOSING")
+    current = rt.store.get_project(p.id)
+    if current is None or current.deleting:  # deleted while this step was being priced: leave nothing behind
+        rt.files.delete_prefix(job.storage_prefix())
+        rt.store.delete(job.id)
+        raise NotFound("We couldn't find this proposal.")
     return StepQuote(job=job.view(), quote=Quote.model_validate(job.quote.model_dump()))
 
 
 def submit_step(rt: Runtime, user: User, project_id: str, job_id: str, quote_id: str) -> JobView:
-    """Accept a step's quote: claim the project (one step at a time), check the plan it was priced
-    on is still the current one, then accept through the shared submit."""
+    """Accept a step's quote. The project is checked and claimed in the same transaction that
+    holds the credits (Codex audit 2026-09-28 #4): still the student's, not being deleted, on the
+    plan version the step was priced on, and with no other step claimed since it was looked at."""
     p = _owned(rt, user, project_id)
     job = rt.store.get(job_id)
     if job is None or job.owner_uid != user.uid or job.project_id != p.id:
         raise NotFound("We couldn't find this step.")
-    if job.status in state.SUBMITTED:
-        return submit(rt, user, job_id, quote_id, from_project=True)  # a repeated click: the same answer
     inp = StepInput.model_validate_json(rt.files.get(f"{job.storage_prefix()}/internal/{INPUT}"))
-
-    def claim(q: Project) -> Project:
-        if q.plan_version != inp.plan_version:
+    if job.status not in state.SUBMITTED:
+        if p.plan_version != inp.plan_version:
             raise Conflict("Your plan changed after this step was priced. Price it again so it uses your latest plan.", code="QUOTE_MISMATCH")
-        if q.active_job and q.active_job != job_id and _busy(rt, q):
+        if p.active_job != job_id and step_running(rt, p):
             raise Conflict("A step is already running for this proposal. Wait for it to finish.", code="STEP_RUNNING")
-        q.active_job, q.active_since = job_id, utcnow()
-        q.jobs = (q.jobs + [job_id])[-100:] if job_id not in q.jobs else q.jobs
-        return q
+    seen_active = p.active_job  # finished (or none): the claim may replace only this value
 
-    _change(rt, user, project_id, claim)
-    try:
-        return submit(rt, user, job_id, quote_id, from_project=True)
-    except AppError:
-        _release(rt, project_id, job_id)
-        raise
-
-
-def _release(rt: Runtime, project_id: str, job_id: str) -> None:
-    def release(q: Project) -> Project | None:
-        if q.active_job != job_id:
+    def gate(j: Job, q: Project | None) -> Project | None:
+        if q is None or q.deleting or q.owner_uid != j.owner_uid or q.plan_version != inp.plan_version:
             return None
-        q.active_job, q.active_since = None, None
-        return q
+        if q.active_job not in (seen_active, j.id):
+            return None  # another step was claimed after we looked
+        q.active_job = j.id
+        q.jobs = q.jobs if j.id in q.jobs else (q.jobs + [j.id])[-100:]
+        return _renew(rt, q)
 
-    rt.store.update_project(project_id, release)
+    return submit(rt, user, job_id, quote_id, project_gate=gate)
 
 
 # --- deletion -------------------------------------------------------------------------------------

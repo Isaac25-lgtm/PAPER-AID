@@ -36,6 +36,11 @@ class ProposalInputs(Camel):
     population: str = Field(default="", max_length=200)
     study_type: StudyType | None = None  # None: the student is not sure yet; the plan proposes one
     notes: str = Field(default="", max_length=4000)  # concept summary, supervisor guidance, anything already decided
+    # The student's own figures, entered as such (Codex audit 2026-09-28 #13): the only accepted
+    # source of a population size or a stated sample. A number elsewhere (a year, an age) never is.
+    population_size: int | None = Field(default=None, ge=1, le=100_000_000)
+    population_source: str = Field(default="", max_length=300)
+    expected_participants: int | None = Field(default=None, ge=1, le=1_000_000)
 
     @field_validator("topic", "programme", "faculty", "study_area", "population")
     @classmethod
@@ -212,14 +217,15 @@ class Project(ProjectView):
     chapters: list[StoredChapterState]  # type: ignore[assignment]
     evidence_files: list[str] = []  # one file per job that gathered evidence
     published: list[str] = []  # jobs whose results were published here (a retried publish adds nothing)
-    active_since: datetime | None = None  # when `active_job` was claimed
     deleting: bool = False  # claimed for deletion (by the student, account deletion or expiry): nothing new may start
 
     def view(self) -> ProjectView:
         return ProjectView.model_validate(self.model_dump())
 
     def storage_prefix(self) -> str:
-        return f"users/{self.owner_uid}/projects/{self.id}"
+        # Outside users/: the bucket's fixed-age backstop covers job files only; project files live
+        # while the project is renewed and are removed by the app's own cleanup (Codex audit #3).
+        return f"projects/{self.owner_uid}/{self.id}"
 
     def chapter(self, number: int) -> StoredChapterState:
         return next(c for c in self.chapters if c.number == number)

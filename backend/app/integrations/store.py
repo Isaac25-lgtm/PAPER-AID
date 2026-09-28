@@ -21,6 +21,8 @@ Mutator = Callable[[Job], Job | None]
 WalletMutator = Callable[[Wallet], Wallet | None]
 PairMutator = Callable[[Job, Wallet], tuple[Job, Wallet] | None]
 ProjectMutator = Callable[[Project], Project | None]
+# A proposal step's job, its owner's wallet and its project, changed as one unit (Codex audit #4).
+TripleMutator = Callable[[Job, Wallet, Project | None], tuple[Job, Wallet, Project] | None]
 
 
 class JobStore(Protocol):
@@ -45,6 +47,7 @@ class JobStore(Protocol):
     def create_project_if_open(self, project: Project) -> bool: ...
     def get_project(self, project_id: str) -> Project | None: ...
     def update_project(self, project_id: str, mutate: ProjectMutator) -> Project | None: ...
+    def update_job_wallet_and_project(self, job_id: str, project_id: str, mutate: TripleMutator) -> tuple[Job, Wallet, Project] | None: ...
     def list_projects(self, owner_uid: str) -> list[Project]: ...
     def expired_projects(self, before: datetime, limit: int) -> list[Project]: ...
     def delete_project(self, project_id: str) -> None: ...
@@ -89,6 +92,8 @@ class LocalJobStore:
         pending = json.loads(self._journal.read_text(encoding="utf-8"))
         self._write_wallet(Wallet.model_validate(pending["wallet"]))
         self._write(Job.model_validate(pending["job"]))
+        if pending.get("project"):
+            self._write_project(Project.model_validate(pending["project"]))
         self._journal.unlink()
 
     def _path(self, job_id: str) -> Path:
@@ -262,6 +267,25 @@ class LocalJobStore:
             result = mutate(project)
             if result is not None:
                 self._write_project(result)
+            return result
+
+    def update_job_wallet_and_project(self, job_id: str, project_id: str, mutate: TripleMutator) -> tuple[Job, Wallet, Project] | None:
+        with self._lock:
+            job = self.get(job_id)
+            if job is None:
+                return None
+            wallet = self.get_wallet(job.owner_uid) or Wallet(uid=job.owner_uid, email=job.owner_email)
+            result = mutate(job, wallet, self.get_project(project_id))
+            if result is not None:
+                tmp = self._journal.with_suffix(".tmp")
+                triple = {
+                    "job": json.loads(_dump(result[0])),
+                    "wallet": json.loads(result[1].model_dump_json(by_alias=True)),
+                    "project": json.loads(_dump(result[2])),
+                }
+                tmp.write_text(json.dumps(triple), encoding="utf-8")
+                tmp.replace(self._journal)  # durable as one unit, applied (or re-applied) by _recover
+                self._recover()
             return result
 
     def list_projects(self, owner_uid: str) -> list[Project]:
@@ -443,6 +467,29 @@ class FirestoreJobStore:
             result = mutate(Project.model_validate(snap.to_dict()))
             if result is not None:
                 transaction.set(ref, json.loads(_dump(result)))
+            return result
+
+        return run(self._db.transaction())
+
+    def update_job_wallet_and_project(self, job_id: str, project_id: str, mutate: TripleMutator) -> tuple[Job, Wallet, Project] | None:
+        job_ref, project_ref = self._jobs.document(job_id), self._projects.document(project_id)
+
+        @self._fs.transactional
+        def run(transaction) -> tuple[Job, Wallet, Project] | None:
+            job_snap = job_ref.get(transaction=transaction)
+            if not job_snap.exists:
+                return None
+            job = Job.model_validate(job_snap.to_dict())
+            wallet_ref = self._wallets.document(job.owner_uid)
+            wallet_snap = wallet_ref.get(transaction=transaction)  # every read before any write
+            project_snap = project_ref.get(transaction=transaction)
+            wallet = Wallet.model_validate(wallet_snap.to_dict()) if wallet_snap.exists else Wallet(uid=job.owner_uid, email=job.owner_email)
+            project = Project.model_validate(project_snap.to_dict()) if project_snap.exists else None
+            result = mutate(job, wallet, project)
+            if result is not None:
+                transaction.set(job_ref, json.loads(_dump(result[0])))
+                transaction.set(wallet_ref, json.loads(result[1].model_dump_json(by_alias=True)))
+                transaction.set(project_ref, json.loads(_dump(result[2])))
             return result
 
         return run(self._db.transaction())

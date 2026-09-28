@@ -40,8 +40,21 @@ def final_blockers(project: Project, chapters: dict[int, ChapterDocument]) -> li
             continue
         if not project.chapter(n).approved:
             problems.append(f"Approve Chapter {n}.")
-        if project.plan and decisions.stale(doc, project.plan):
+        if project.plan is None:
+            continue
+        if decisions.stale(doc, project.plan):
             problems.append(f"Chapter {n} has sections written from decisions you have since changed; revise them.")
+        # Structure and integrity block a complete export (Codex audit 2026-09-28 #8); the AI's
+        # judgements and recommendations (such as 30 references) stay advisory.
+        written = {s.key for s in doc.sections if any(p.strip() for p in s.paragraphs)}
+        expected = rulebook.sections(project.rulebook, n, project.inputs.level, project.plan)
+        missing = [f"{s.number} {s.heading}" for s in expected if s.key not in written]
+        if missing:
+            problems.append(f"Chapter {n} is missing required sections: {', '.join(missing)}.")
+        for item in doc.readiness:
+            blocking = item.basis == "CODE" and (item.status in ("MISSING", "BLOCKED") or item.id.endswith("-REVIEWED") and item.status != "PASS")
+            if blocking:
+                problems.append(f"Chapter {n}: {item.question} ({item.note})")
     return problems
 
 
@@ -187,14 +200,16 @@ def build(project: Project, chapters: dict[int, ChapterDocument], library: dict[
                 p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
             if s.table:
                 table_count += 1
+                for field in [s.table_caption, *[c for row in s.table for c in row]]:
+                    cited += [i for i in evidence.cited_ids(field) if i not in cited]
                 caption = doc.add_paragraph()
-                caption.add_run(f"Table {n}.{table_count}: {s.table_caption or s.heading}").bold = True
+                caption.add_run(f"Table {n}.{table_count}: {citer.render(s.table_caption) or s.heading}").bold = True
                 grid = doc.add_table(rows=len(s.table), cols=len(s.table[0]))
                 grid.style = "Table Grid"
                 for r, row in enumerate(s.table):
                     for c, value in enumerate(row):
                         cell = grid.cell(r, c)
-                        cell.text = value
+                        cell.text = citer.render(value)
                         if r == 0:
                             for run in cell.paragraphs[0].runs:
                                 run.bold = True

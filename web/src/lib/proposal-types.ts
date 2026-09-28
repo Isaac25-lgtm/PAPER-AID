@@ -17,6 +17,10 @@ export interface ProposalInputs {
   population: string
   studyType: StudyType | null
   notes: string
+  /** The student's own figures: the only accepted source of a population size or stated sample. */
+  populationSize: number | null
+  populationSource: string
+  expectedParticipants: number | null
 }
 
 export interface TitlePage {

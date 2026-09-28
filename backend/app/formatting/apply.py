@@ -78,6 +78,31 @@ def _set_page_numbering(sectpr, fmt: str) -> None:
         sectpr.append(element)
 
 
+def _has_content(container) -> bool:
+    """Text, or anything else in a run (a logo, a field, a drawing), in a header or footer."""
+    return any(p.text.strip() for p in container.paragraphs) or any(r.findall(W + "drawing") or r.findall(W + "fldChar") or r.findall(W + "pict") for r in container._element.iter(W + "r")) or bool(container.tables)
+
+
+def _header_texts(doc) -> dict[tuple[int, str, str], str]:
+    """(section, header/footer, default/first/even) → its text, read straight from the parts each
+    section references. Read-only: python-docx's header properties create a definition when they
+    touch a linked header, which would change the document being checked."""
+    texts: dict[tuple[int, str, str], str] = {}
+    for index, section in enumerate(doc.sections):
+        for kind in ("headerReference", "footerReference"):
+            for ref in section._sectPr.findall(W + kind):
+                part = doc.part.related_parts.get(ref.get(qn("r:id")))
+                if part is not None:
+                    texts[(index, kind, ref.get(W + "type") or "default")] = "".join(t.text or "" for t in part.element.iter(W + "t")).strip()
+    return texts
+
+
+def _headers_kept(before: dict[tuple[int, str, str], str], after: dict[tuple[int, str, str], str]) -> bool:
+    """Every header or footer that had text still shows it in the same place (page numbers may be
+    added to one that was empty)."""
+    return all(old in after.get(key, "") for key, old in before.items() if old)
+
+
 def _page_break_only(p) -> bool:
     runs = p.findall(W + "r")
     return bool(runs) and all(
@@ -88,6 +113,7 @@ def _page_break_only(p) -> bool:
 def apply_formatting(data: bytes, spec: FormattingSpec, model: DocumentModel) -> tuple[bytes, FormattingResult]:
     before = body_text_fingerprint(data)
     doc = Document(io.BytesIO(data))
+    headers_before = _header_texts(doc)
     blocks = model.by_id()
     warnings: list[str] = []
 
@@ -187,20 +213,21 @@ def apply_formatting(data: bytes, spec: FormattingSpec, model: DocumentModel) ->
         section.top_margin, section.bottom_margin, section.left_margin, section.right_margin = (Cm(v) for v in spec.margins_cm)
         section.header_distance = section.footer_distance = Cm(1.25)
 
-    # 5. Page numbers in the first section; later sections inherit it.
-    first = doc.sections[0]
+    # 5. Page numbers in the first section; later sections inherit it. Every section is inspected on
+    # its own (Codex audit 2026-09-28 #2): a later section's own header or footer is never relinked,
+    # which would have discarded it. Only a later container with no content at all is relinked.
     in_header = spec.page_numbers.startswith("top")
-    container = first.header if in_header else first.footer
-    existing = " ".join(par.text for par in container.paragraphs).strip()
+    containers = [section.header if in_header else section.footer for section in doc.sections]
+    owned = [c for i, c in enumerate(containers) if (i == 0 or not c.is_linked_to_previous) and _has_content(c)]
     page_numbers_added = False
-    if existing:
+    if owned:
         warnings.append("Your document already has header or footer text, so we left it unchanged. Add page numbers there if needed.")
     else:
-        container.is_linked_to_previous = False
-        target = container.paragraphs[0] if container.paragraphs else container.add_paragraph()
+        containers[0].is_linked_to_previous = False
+        target = containers[0].paragraphs[0] if containers[0].paragraphs else containers[0].add_paragraph()
         _page_field_paragraph(target, WD_ALIGN_PARAGRAPH.RIGHT if spec.page_numbers.endswith("right") else WD_ALIGN_PARAGRAPH.CENTER)
-        for later in doc.sections[1:]:
-            (later.header if in_header else later.footer).is_linked_to_previous = True
+        for later in containers[1:]:
+            later.is_linked_to_previous = True  # empty by the check above: nothing is lost
         page_numbers_added = True
 
     # 6. Table of contents field after a "Contents" heading, when the preset wants one.
@@ -225,6 +252,8 @@ def apply_formatting(data: bytes, spec: FormattingSpec, model: DocumentModel) ->
     unchanged = body_text_fingerprint(result_bytes) == before
     if not unchanged:
         raise PermanentStageError("FORMAT_CHANGED_TEXT", "Formatting could not be applied without changing your text, so we stopped.")
+    if not _headers_kept(headers_before, _header_texts(Document(io.BytesIO(result_bytes)))):
+        raise PermanentStageError("FORMAT_CHANGED_TEXT", "Formatting could not be applied without changing your headers or footers, so we stopped.")
 
     if converted:
         sample = ", ".join(f"“{t[:40]}”" for t in converted[:3])

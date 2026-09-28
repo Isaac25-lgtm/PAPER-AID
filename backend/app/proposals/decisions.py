@@ -31,6 +31,11 @@ def decisions(plan: ProposalPlan) -> dict[str, Any]:
         "timeline": plan.timeline_months,
         "questions_kind": plan.questions_kind,
     }
+    # The whole sets: a section covering every objective changes when one is added or removed, not
+    # only when an existing one is edited (Codex audit 2026-09-28 #12).
+    out["objectives_set"] = plan.specific_objectives
+    out["questions_set"] = plan.research_questions
+    out["alignment_set"] = [row.model_dump() for row in plan.alignment]
     for i, objective in enumerate(plan.specific_objectives, start=1):
         out[f"O{i}"] = objective
     for i, question in enumerate(plan.research_questions, start=1):
@@ -44,14 +49,9 @@ def hashes(plan: ProposalPlan) -> dict[str, str]:
     return {k: hashlib.sha256(json.dumps(v, sort_keys=True).encode()).hexdigest()[:12] for k, v in decisions(plan).items()}
 
 
-def _all(prefix: str, plan: ProposalPlan) -> list[str]:
-    count = len(plan.specific_objectives)
-    return [f"{prefix}{i}" for i in range(1, count + 1)]
-
-
 def depends_on(chapter: int, key: str, plan: ProposalPlan) -> list[str]:
     """The decisions a section is written from. Unknown sections depend on the whole plan."""
-    objectives, questions, rows = _all("O", plan), _all("Q", plan), _all("A", plan)
+    objectives, questions, rows = ["objectives_set"], ["questions_set"], ["alignment_set"]
     if chapter == 2 and key.startswith("empirical"):
         n = key.removeprefix("empirical")
         return ["title", f"O{n}", f"Q{n}"]

@@ -220,12 +220,18 @@ export function NewJobPage() {
   useEffect(() => {
     if (!draftId || !estimateRunning) return
     let stop = () => {}
-    stop = data.watchJob(draftId, (job) => {
-      if (!job || job.estimate?.status === 'RUNNING') return
-      stop()
-      setPricing((p) => ({ ...p, estimate: job.estimate, quote: job.estimate?.status === 'READY' ? job.quote : null }))
-      walletChanged()
-    })
+    stop = data.watchJob(
+      draftId,
+      (job) => {
+        if (!job || job.estimate?.status === 'RUNNING') return
+        stop()
+        setPricing((p) => ({ ...p, estimate: job.estimate, quote: job.estimate?.status === 'READY' ? job.quote : null }))
+        walletChanged()
+      },
+      // Refused while watching (signed out, or the browser could not be verified): show it rather
+      // than an endless "Sizing your paper" (Codex audit 2026-09-28 #15). Refreshing resumes the draft.
+      (message) => setPricing((p) => ({ ...p, estimate: null, error: `${message} Your estimate keeps running; refresh the page to see it.` })),
+    )
     return () => stop()
   }, [data, draftId, estimateRunning])
 

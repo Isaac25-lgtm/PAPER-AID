@@ -256,7 +256,22 @@ export function ProjectPage() {
     }
   }
 
-  if (project === undefined) return <Skeleton className="h-96 rounded-2xl" />
+  if (project === undefined)
+    return error ? (
+      <Alert
+        tone="danger"
+        title="We could not load this proposal"
+        action={
+          <Button size="sm" variant="secondary" onClick={() => (setError(null), load())}>
+            Try again
+          </Button>
+        }
+      >
+        {error}
+      </Alert>
+    ) : (
+      <Skeleton className="h-96 rounded-2xl" />
+    )
   if (project === null) return <Alert tone="warning">This proposal no longer exists.</Alert>
   const hasChapter = project.chapters.some((c) => c.current)
 

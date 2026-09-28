@@ -24,11 +24,11 @@ gcloud firestore databases create --location=europe-west1   # permanent: the loc
 gcloud storage buckets create gs://PROJECT-papers --location=europe-west1 --uniform-bucket-level-access
 ```
 
-Retention backstop: storage deletes any file older than 31 days, even if the app's cleanup never ran.
+Retention backstop: storage deletes any job file (under `users/`) older than 31 days, even if the app's cleanup never ran. Proposal projects live under `projects/` and are deliberately outside this rule: they are kept while the student works on them and deleted by the app 30 days after the student's last action (`cleanup_expired_projects`), which a fixed object-age rule cannot express (object age follows creation time, not renewal).
 
 ```bash
 cat > lifecycle.json <<'EOF'
-{"rule": [{"action": {"type": "Delete"}, "condition": {"age": 31}}]}
+{"rule": [{"action": {"type": "Delete"}, "condition": {"age": 31, "matchesPrefix": ["users/"]}}]}
 EOF
 gcloud storage buckets update gs://PROJECT-papers --lifecycle-file=lifecycle.json
 ```

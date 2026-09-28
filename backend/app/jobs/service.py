@@ -4,8 +4,9 @@ user, so ownership, pricing and state rules can be unit-tested directly."""
 import hashlib
 import logging
 import secrets
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import PurePosixPath
 from typing import Literal
 
@@ -439,11 +440,16 @@ def _priced_input_intact(j: Job) -> bool:
     return j.source is not None and j.quote.source_sha256 == j.source.sha256
 
 
-def submit(rt: Runtime, user: User, job_id: str, quote_id: str, from_project: bool = False) -> JobView:
+ProjectGate = Callable[[Job, Project | None], Project | None]
+
+
+def submit(rt: Runtime, user: User, job_id: str, quote_id: str, project_gate: ProjectGate | None = None) -> JobView:
     """Accept a quote. A proposal step is submitted through its project (app.proposals.service),
-    which first checks that the plan it was priced on is still the student's."""
+    whose `project_gate` runs in the same transaction as the hold: it refuses (None) or returns the
+    project with the step claimed, so a project can never be deleted between its claim and the
+    credits being held (Codex audit 2026-09-28 #4)."""
     job = _owned(rt, user, job_id)
-    if job.project_id and not from_project:
+    if job.project_id and project_gate is None:
         raise AppError("Start this step from the proposal's page.", code="PROPOSAL_STEP")
     if job.status in state.SUBMITTED and job.quote and job.quote.id == quote_id:
         return job.view()  # double click or retried request: the same submission, nothing new
@@ -484,7 +490,18 @@ def submit(rt: Runtime, user: User, job_id: str, quote_id: str, from_project: bo
             state.transition(j, JobStatus.QUEUED, "Queued (testing: not charged)")
         return j, w
 
-    result = rt.store.update_job_and_wallet(job.id, accept)
+    if job.project_id:
+        assert project_gate is not None
+
+        def accept_step(j: Job, w: Wallet, p: Project | None) -> tuple[Job, Wallet, Project] | None:
+            claimed = project_gate(j, p)
+            accepted = accept(j, w) if claimed is not None else None
+            return (accepted[0], accepted[1], claimed) if accepted is not None and claimed is not None else None
+
+        triple = rt.store.update_job_wallet_and_project(job.id, job.project_id, accept_step)
+        result = (triple[0], triple[1]) if triple else None
+    else:
+        result = rt.store.update_job_and_wallet(job.id, accept)
     updated = result[0] if result else None
     if updated is None:
         current = _owned(rt, user, job_id)
@@ -822,7 +839,27 @@ def admin_retry(rt: Runtime, admin: User, job_id: str) -> AdminJob:
         state.transition(j, JobStatus.QUEUED, "Retried by admin — resumes from last completed stage")
         return j, w
 
-    result = rt.store.update_job_and_wallet(job.id, retry)
+    if job.project_id:
+        # A proposal step is retried only onto its live project, claiming it in the same transaction
+        # (Codex audit #4: admin retries too). A deleted project, or another step running, refuses.
+        project = rt.store.get_project(job.project_id)
+        if project is None or project.deleting:
+            raise Conflict("This step's proposal was deleted, so it cannot be retried.", code="PROJECT_DELETED")
+        if project.active_job != job.id and step_running(rt, project):
+            raise Conflict("Another step of this proposal is running. Retry this one when it finishes.", code="STEP_RUNNING")
+        seen_active = project.active_job
+
+        def retry_step(j: Job, w: Wallet, p: Project | None) -> tuple[Job, Wallet, Project] | None:
+            if p is None or p.deleting or p.active_job not in (seen_active, j.id):
+                return None
+            p.active_job = j.id
+            done = retry(j, w)
+            return (done[0], done[1], p) if done else None
+
+        triple = rt.store.update_job_wallet_and_project(job.id, job.project_id, retry_step)
+        result = (triple[0], triple[1]) if triple else None
+    else:
+        result = rt.store.update_job_and_wallet(job.id, retry)
     updated = result[0] if result else None
     if updated is None:
         return admin_get(rt, job_id)
@@ -893,19 +930,44 @@ def cleanup_expired(rt: Runtime) -> int:
     return cleaned
 
 
-def _erase_project(rt: Runtime, project: Project) -> bool:
-    """Claim a proposal project (refused while one of its steps is queued or running), then delete
-    its files and record. An interrupted erase leaves the claim, and the next call finishes it."""
+def step_running(rt: Runtime, p: Project) -> bool:
+    """A step of this project is queued or running. Its claim (`active_job`) is set in the same
+    transaction that holds the step's credits (app.jobs.service.submit)."""
+    return bool(p.active_job) and (step := rt.store.get(p.active_job or "")) is not None and step.status in ACTIVE
+
+
+def _erase_project(rt: Runtime, project: Project, expired_before: datetime | None = None) -> bool:
+    """Delete a proposal project: its record, its files and every job run for it (their frozen
+    inputs and saved AI answers hold the student's details; Codex audit 2026-09-28 #6).
+
+    1. The project is claimed atomically. Refused while a step is queued or running, and, for
+       expiry, if the student renewed it after it was listed (#5). A claim left by an interrupted
+       deletion is resumed.
+    2. Each child job, found by project id (not the project's own bounded list), is claimed and
+       erased. One that cannot be claimed yet leaves the project claimed, to be finished next time.
+    3. The files and the record go last."""
 
     def mark(p: Project) -> Project | None:
-        running = p.active_job and (step := rt.store.get(p.active_job)) is not None and step.status in ACTIVE
-        if running:
+        if p.deleting:
+            return p  # an interrupted deletion: finish it
+        if expired_before is not None and p.expires_at >= expired_before:
+            return None  # renewed since it was listed
+        if step_running(rt, p):
             return None
         p.deleting = True
         return p
 
     if rt.store.update_project(project.id, mark) is None:
         return False
+    for job in every_job(rt, project.owner_uid, None):
+        if job.project_id != project.id:
+            continue
+        claimed = _mark_deleting(rt, job.id)
+        if claimed is None:
+            if rt.store.get(job.id) is not None:
+                return False  # cannot be erased yet (a hold is still settling): resumed next time
+            continue
+        _erase(rt, claimed)
     rt.files.delete_prefix(project.storage_prefix())
     rt.store.delete_project(project.id)
     return True
@@ -913,8 +975,16 @@ def _erase_project(rt: Runtime, project: Project) -> bool:
 
 def cleanup_expired_projects(rt: Runtime) -> int:
     """Delete proposal projects 30 days after the student's last action (owner decision
-    2026-09-28). The expiry is shown on the project, so it is never a surprise."""
-    return sum(1 for p in rt.store.expired_projects(utcnow(), PAGE_SIZE) if _erase_project(rt, p))
+    2026-09-28). The expiry is shown on the project, so it is never a surprise. Pages through every
+    expired project; one that is refused (renewed, or a step running) is skipped this time."""
+    cutoff, seen, erased = utcnow(), set(), 0
+    while True:
+        batch = [p for p in rt.store.expired_projects(cutoff, PAGE_SIZE) if p.id not in seen]
+        if not batch:
+            return erased
+        for project in batch:
+            seen.add(project.id)
+            erased += _erase_project(rt, project, expired_before=cutoff)
 
 
 def ensure_valid_upload_name(filename: str) -> None:

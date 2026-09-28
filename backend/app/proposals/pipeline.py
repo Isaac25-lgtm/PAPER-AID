@@ -20,7 +20,7 @@ from app.analysis import fetch, research
 from app.core.errors import PermanentStageError
 from app.jobs.models import Job, ReadinessItem, Stage, utcnow
 from app.proposals import decisions, evidence, rulebook, sampling
-from app.proposals.ai import ProposalRunner, SectionText, Table
+from app.proposals.ai import Grade, ProposalRunner, SectionText, Table
 from app.proposals.models import (
     ChapterDocument,
     ChapterSection,
@@ -38,6 +38,7 @@ if TYPE_CHECKING:
 INPUT = "proposal_input.json"
 YEAR = re.compile(r"\b(?:19|20)\d{2}\b")  # "8 December 2025" gives 2025
 LITERATURE_YEARS = 15  # scholarly search window; foundational theory comes through the web search
+NOT_REVIEWED = "The section was not reviewed."
 TENSE_SECTIONS = {1: {"purpose", "objectives", "questions", "scope", "synopsis"}}  # chapter 3: every section
 
 
@@ -283,15 +284,18 @@ def _plan_from_model(data: dict[str, Any]) -> ProposalPlan:
 
 
 def _student_figures_only(plan: ProposalPlan, inp: StepInput) -> ProposalPlan:
-    """A population size or stated sample the student never gave is removed and asked for instead
-    (Codex review P0: the author owns these facts)."""
-    given = evidence._figures(json.dumps(_study(inp)))
+    """A population size or stated sample is kept only when it is exactly the figure the student
+    entered for it (Codex audit 2026-09-28 #13: a number anywhere in the notes, such as the year
+    2026, used to count). Otherwise it is removed and asked for."""
+    student = inp.inputs
     size = plan.sample_size
     asks = list(plan.questions_for_student)
-    if size.population is not None and str(size.population) not in given:
+    if size.population is not None and size.population != student.population_size:
         size = size.model_copy(update={"population": None, "population_source": ""})
         asks.append("How many people are in the accessible population, and where does that figure come from?")
-    if size.stated is not None and str(size.stated) not in given:
+    elif size.population is not None:
+        size = size.model_copy(update={"population_source": student.population_source or size.population_source})
+    if size.stated is not None and size.stated != student.expected_participants:
         size = size.model_copy(update={"stated": None})
         asks.append("How many participants do you expect to include, and why is that enough?")
     return plan.model_copy(update={"sample_size": size, "questions_for_student": list(dict.fromkeys(asks))})
@@ -347,7 +351,19 @@ def stage_drafting(ctx: "StageContext") -> None:
 # --- AUDITING ------------------------------------------------------------------------------------
 
 
+def _table_allowed(inp: StepInput, allowed: str) -> str:
+    """A work-plan table may also number the months of the student's own timeline."""
+    months = inp.plan.timeline_months if inp.plan else 0
+    return allowed + " " + " ".join(str(m) for m in range(1, months + 1))
+
+
+def _cells(text: SectionText) -> list[str]:
+    return [text.table.caption, *[cell for row in text.table.rows for cell in row]]
+
+
 def _checks(inp: StepInput, key: str, text: SectionText, library: dict[str, EvidenceItem], allowed: str) -> list[str]:
+    """Every text the student will receive is checked: paragraphs, and a table's cells and caption
+    (Codex audit 2026-09-28 #7), which are delivered and exported like prose."""
     usable = {i for i, item in library.items() if item.usable}
     problems: list[str] = []
     tense = inp.chapter == 3 or key in TENSE_SECTIONS.get(inp.chapter, set())
@@ -356,9 +372,22 @@ def _checks(inp: StepInput, key: str, text: SectionText, library: dict[str, Evid
         problems += evidence.figure_problems(paragraph, library, allowed)
         if tense:
             problems += evidence.tense_problems(paragraph)
+    table_allowed = _table_allowed(inp, allowed)
+    for cell in _cells(text):
+        found = evidence.citation_problems(cell, usable) + evidence.figure_problems(cell, library, table_allowed)
+        problems += [f"In the table: {p}" for p in found]
     if not any(p.strip() for p in text.paragraphs):
         problems.append("The section is empty.")
     return list(dict.fromkeys(problems))
+
+
+def _strip_table(inp: StepInput, text: SectionText, library: dict[str, EvidenceItem], usable: set[str], allowed: str) -> Table:
+    table_allowed = _table_allowed(inp, allowed)
+
+    def clean(cell: str) -> str:
+        return evidence.strip_unsupported(cell, library, usable, table_allowed)
+
+    return Table(caption=clean(text.table.caption), rows=[[clean(c) for c in row] for row in text.table.rows])
 
 
 def stage_auditing(ctx: "StageContext") -> None:
@@ -379,7 +408,11 @@ def stage_auditing(ctx: "StageContext") -> None:
     vetting = rulebook.vetting(inp.rulebook, inp.chapter)
     warnings: list[str] = []
     unresolved: dict[str, list[str]] = {}
-    for _ in range(settings.repair_attempts + 1):
+    grades: dict[str, Grade] = {}
+    rounds = settings.repair_attempts
+    # review, fix, review ... review: the delivered text is always the reviewed text, with at most
+    # `rounds` fixes, as priced (Codex audit 2026-09-28 #11).
+    for round_ in range(rounds + 1):
         problems = {k: _checks(inp, k, t, library, allowed) for k, t in current.items()}
         review = [
             {**items[k], "text": t.paragraphs, "table": t.table.model_dump(), "paperaidChecks": problems[k], "_words": " ".join(t.paragraphs)}
@@ -390,34 +423,46 @@ def stage_auditing(ctx: "StageContext") -> None:
         for key in current:
             grade = grades.get(key)
             issues = [*problems[key], *(grade.issues if grade and grade.grade == "REPAIR" else [])]
-            if grade is None and not runner.budget_reached:
-                issues.append("The section was not reviewed.")
+            if grade is None:  # never silently passed, whether or not the budget ran out (#10)
+                issues.append(NOT_REVIEWED)
             if issues:
                 unresolved[key] = issues
-        if not unresolved or runner.budget_reached:
+        if not unresolved or runner.budget_reached or round_ == rounds:
             break
         fixes = [{**items[k], "text": current[k].paragraphs, "table": current[k].table.model_dump(), "issues": unresolved[k], "_words": " ".join(current[k].paragraphs)} for k in unresolved]
         for key, fixed in runner.fix(fixes, common).items():
-            current[key] = fixed
+            if key in unresolved:
+                current[key] = fixed
 
     stripped = []
     for key, text in current.items():
         cleaned = [evidence.strip_unsupported(p, library, usable, allowed) for p in text.paragraphs]
-        if cleaned != text.paragraphs:
+        table = _strip_table(inp, text, library, usable, allowed)
+        if cleaned != text.paragraphs or table != text.table:
             stripped.append(items[key]["heading"])
-        current[key] = text.model_copy(update={"paragraphs": [p for p in cleaned if p]})
+        current[key] = text.model_copy(update={"paragraphs": [p for p in cleaned if p], "table": table})
     if stripped:
         warnings.append(f"PaperAid removed sentences it could not trace to confirmed evidence or your plan in: {', '.join(stripped)}.")
-    if unresolved:
-        concerns = [f"{items[k]['number']} {items[k]['heading']}: " + "; ".join(v[:3]) for k, v in unresolved.items()]
+    unreviewed = [f"{items[k]['number']} {items[k]['heading']}" for k in current if k not in grades]
+    if unreviewed:
+        warnings.append(f"These sections could not be reviewed within this step's limits, so treat them as unchecked: {', '.join(unreviewed)}.")
+    concerns = []
+    for key, issues in unresolved.items():
+        raised = [i for i in issues if i != NOT_REVIEWED][:3]
+        if raised:
+            concerns.append(f"{items[key]['number']} {items[key]['heading']}: " + "; ".join(raised))
+    if concerns:
         warnings.append("The reviewer still had concerns after the fix rounds: " + " | ".join(concerns))
+    for key, grade in grades.items():  # Codex audit #16: reviewer notes are delivered, never dropped
+        if key in items and grade.grade == "PASS_WITH_WARNINGS" and grade.note.strip():
+            warnings.append(f"Reviewer note, {items[key]['number']} {items[key]['heading']}: {grade.note.strip()}")
 
     document = _document(inp, current, items, library)
-    document.readiness = _readiness(ctx, runner, inp, document, library, bool(stripped))
+    document.readiness = _readiness(ctx, runner, inp, document, library, bool(stripped), unreviewed)
     document.warnings = warnings
     ctx.put_json("chapter.json", document.model_dump(by_alias=True))
     if warnings:
-        ctx.update(lambda j: _warn(j, warnings, partial=bool(unresolved or stripped)))
+        ctx.update(lambda j: _warn(j, warnings, partial=bool(unresolved or stripped or unreviewed)))
 
 
 def _document(inp: StepInput, current: dict[str, SectionText], items: dict[str, dict[str, Any]], library: dict[str, EvidenceItem]) -> ChapterDocument:
@@ -428,9 +473,9 @@ def _document(inp: StepInput, current: dict[str, SectionText], items: dict[str, 
         text = current.get(key)
         if text is None or not text.paragraphs:
             continue
-        for paragraph in text.paragraphs:
-            cited += [i for i in evidence.cited_ids(paragraph) if i not in cited]
         table = _table(text.table) if item["table"] else None
+        for field in [*text.paragraphs, *(_cells(text) if table else [])]:
+            cited += [i for i in evidence.cited_ids(field) if i not in cited]
         sections.append(
             ChapterSection(
                 key=key, number=item["number"], heading=item["heading"], paragraphs=text.paragraphs, table=table,
@@ -448,7 +493,9 @@ def _table(table: Table) -> list[list[str]] | None:
     return [r[:width] + [""] * (width - len(r)) for r in rows] if len(rows) >= 2 and width >= 2 else None
 
 
-def _readiness(ctx: "StageContext", runner: ProposalRunner, inp: StepInput, document: ChapterDocument, library: dict[str, EvidenceItem], stripped: bool) -> list[ReadinessItem]:
+def _readiness(
+    ctx: "StageContext", runner: ProposalRunner, inp: StepInput, document: ChapterDocument, library: dict[str, EvidenceItem], stripped: bool, unreviewed: list[str]
+) -> list[ReadinessItem]:
     assert inp.plan is not None
     n = inp.chapter
     questions = [q for q in rulebook.vetting(inp.rulebook, n) if not q.get("deterministic")]
@@ -487,6 +534,13 @@ def _readiness(ctx: "StageContext", runner: ProposalRunner, inp: StepInput, docu
             id=f"C{n}-TRACE", question="Every citation and figure traces to confirmed evidence or your approved plan", basis="CODE", chapter=n,
             status="NEEDS_REVIEW" if stripped else "PASS",
             note="Untraceable sentences were removed; check that the sections still read well." if stripped else "Checked by PaperAid on every sentence.",
+        )
+    )
+    items.append(
+        ReadinessItem(
+            id=f"C{n}-REVIEWED", question="Every section was reviewed after its last change", basis="CODE", chapter=n,
+            status="NEEDS_REVIEW" if unreviewed else "PASS",
+            note=f"Not reviewed: {', '.join(unreviewed)}." if unreviewed else "Each section's final text was reviewed.",
         )
     )
     if n == 2:

@@ -17,7 +17,7 @@ from app.analysis import research
 from app.proposals.models import CitationStyle, EvidenceItem, EvidenceSource
 
 TOKEN = re.compile(r"⟦(E[0-9a-f]{6})(\|n)?⟧")
-TOKEN_RUN = re.compile(r"(?:\s*⟦E[0-9a-f]{6}⟧)+")
+CITATION = re.compile(r"⟦(?P<narrative>E[0-9a-f]{6})\|n⟧|(?:\s*⟦E[0-9a-f]{6}⟧)+")  # a narrative token, or a run of parenthetical ones
 ANY_TOKEN = re.compile(r"⟦[^⟧]*⟧")
 TYPED_CITATION = re.compile(r"\([A-Z][^()]{0,80}?,\s*(?:19|20)\d{2}[a-z]?(?:,\s*p+\.\s*\d+)?\)|\b[A-Z][A-Za-z'’-]+(?:\s+et\s+al\.)?\s+\((?:19|20)\d{2}[a-z]?\)")
 FIGURE = re.compile(r"(?<![\w.])\d{1,3}(?:,\d{3})+(?:\.\d+)?%?|(?<![\w.])\d+(?:\.\d+)?%?")
@@ -106,11 +106,14 @@ class Citer:
         parenthetical citation. Callers check first (`citation_problems`): an unknown token here is
         a programming error, not student-facing."""
 
-        def run(match: re.Match[str]) -> str:
+        def one(match: re.Match[str]) -> str:
+            if match.group("narrative"):
+                return self.cite([self.library[match.group("narrative")].source], narrative=True)
             return " " + self.cite([self.library[i].source for i, _ in TOKEN.findall(match.group(0))])
 
-        text = TOKEN_RUN.sub(run, text)
-        text = TOKEN.sub(lambda m: self.cite([self.library[m.group(1)].source], narrative=True), text)
+        # One pass in reading order, so APA 6's "first citation" is the first in the text (Codex
+        # audit 2026-09-28 #14: narrative citations used to be rendered after every parenthetical one).
+        text = CITATION.sub(one, text)
         return re.sub(r"\s+([.,;:])", r"\1", text).strip()
 
 

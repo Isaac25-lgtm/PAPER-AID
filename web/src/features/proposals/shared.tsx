@@ -78,20 +78,41 @@ const STEP_STAGES: Partial<Record<Stage, string>> = {
 export function StepProgress({ jobId, onDone }: { jobId: string; onDone: (job: Job | null) => void }) {
   const data = useData()
   const [job, setJob] = useState<Job | null>(null)
+  const [blocked, setBlocked] = useState<string | null>(null)
+  const [attempt, setAttempt] = useState(0)
   useEffect(() => {
     let finished = false
-    const stop = data.watchJob(jobId, (next) => {
-      setJob(next)
-      if (!next || ['COMPLETED', 'FAILED', 'CANCELLED'].includes(next.status)) {
-        if (!finished) {
-          finished = true
-          walletChanged()
-          onDone(next)
+    setBlocked(null)
+    const stop = data.watchJob(
+      jobId,
+      (next) => {
+        setJob(next)
+        if (!next || ['COMPLETED', 'FAILED', 'CANCELLED'].includes(next.status)) {
+          if (!finished) {
+            finished = true
+            walletChanged()
+            onDone(next)
+          }
         }
-      }
-    })
+      },
+      setBlocked, // refused (signed out, or the browser could not be verified): say so, never a silent "Queued"
+    )
     return () => stop()
-  }, [data, jobId, onDone])
+  }, [data, jobId, onDone, attempt])
+  if (blocked)
+    return (
+      <Alert
+        tone="warning"
+        title="We lost track of this step"
+        action={
+          <Button size="sm" variant="secondary" onClick={() => setAttempt((n) => n + 1)}>
+            Check again
+          </Button>
+        }
+      >
+        {blocked} The step itself keeps running and its result is saved to your proposal.
+      </Alert>
+    )
   return (
     <div className="rounded-xl bg-brand-50 p-4 text-sm" aria-live="polite">
       <p className="flex items-center gap-2 font-semibold text-brand-900">
