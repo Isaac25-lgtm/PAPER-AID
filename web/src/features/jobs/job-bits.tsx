@@ -40,8 +40,8 @@ export const serviceNames = (job: Pick<Job, 'services'>) => job.services.map((s)
 export const jobTitle = (job: Pick<Job, 'source'>) => job.source?.name ?? 'Draft (no paper yet)'
 
 /** Where a job opens: an unfinished draft resumes on the new-job page. */
-export const jobLink = (job: Pick<Job, 'id' | 'status'>) =>
-  job.status === 'DRAFT' || job.status === 'QUOTED' ? `/app/new?draft=${job.id}` : `/app/jobs/${job.id}`
+// Every job, drafts included, lives on its own page: the paper with the next step beside it.
+export const jobLink = (job: Pick<Job, 'id' | 'status'>) => `/app/jobs/${job.id}`
 
 export function JobRow({ job }: { job: Job }) {
   return (

@@ -70,6 +70,9 @@ export interface DataSource {
     rebuild(jobId: string): Promise<Job>
     /** A new refinement draft of the same paper for the chosen findings (or every safe one). */
     fix(jobId: string, findingIds: string[], safeOnly: boolean): Promise<Job>
+    /** The next job on the same paper: from the original or the finished one, optionally with the
+     *  student's own instruction for chosen passages (or the whole paper). */
+    continueFrom(jobId: string, origin: 'original' | 'result', instruction?: string, blocks?: string[]): Promise<Job>
   }
   /** Proposal projects: the plan, chapters and evidence live on the server; every paid step is a job. */
   projects: {
@@ -100,6 +103,8 @@ export interface DataSource {
     deleteFeedback(id: string, commentId: string): Promise<Project>
     downloadResponse(id: string): Promise<void>
     downloadConcept(id: string, fileName: string): Promise<void>
+    /** The student's own request for changes to a chapter (4: the concept paper). */
+    requestChanges(id: string, chapter: number, instruction: string, sections: string[]): Promise<Project>
     /** The institution's research guide, read into a profile by the PROFILE step. */
     uploadGuide(id: string, file: File): Promise<Project>
     useDefaultRulebook(id: string): Promise<Project>

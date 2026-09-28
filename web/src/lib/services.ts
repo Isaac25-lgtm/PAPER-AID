@@ -22,7 +22,7 @@ export const SERVICES: Record<ServiceId, ServiceInfo> = {
     short: 'See which passages read as generic or formulaic, and why.',
     icon: Search,
     accepts: 'DOCX or text-based PDF',
-    youGet: ['Estimated AI-likeness band with a confidence level', 'Passage-by-passage findings with reasons', 'A downloadable report'],
+    youGet: ['Estimated AI-likeness as a percentage, with its confidence', 'The passages that read as AI-written, marked in your paper with the reasons', 'A downloadable report'],
     untouched: ['Your document — AI Check never edits it'],
   },
   REFINE: {

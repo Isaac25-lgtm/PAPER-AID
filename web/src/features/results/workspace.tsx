@@ -1,8 +1,9 @@
 import { clsx } from 'clsx'
-import { ArrowRight, Check, CheckCircle2, Info, Lightbulb, Loader2, RotateCcw, ShieldCheck, Sparkles, Undo2, Wand2, X } from 'lucide-react'
+import { ArrowRight, Check, CheckCircle2, ChevronRight, Info, LayoutTemplate, Lightbulb, Loader2, MessageSquarePlus, PenLine, RotateCcw, ShieldCheck, Sparkles, Undo2, Wand2, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { Button, ButtonLink } from '../../components/ui/button'
+import { Button } from '../../components/ui/button'
+import { TextArea } from '../../components/ui/field'
 import { Alert, Badge, Card, Skeleton } from '../../components/ui/primitives'
 import { DataError, useData } from '../../lib/data'
 import { formatNumber } from '../../lib/format'
@@ -20,6 +21,10 @@ const BAND_STYLE: Record<Band, string> = {
 const SEVERITY_TINT = { minor: 'bg-sky-50 ring-sky-200', moderate: 'bg-amber-50 ring-amber-200', major: 'bg-rose-50 ring-rose-200' }
 const SEVERITY_BAR = { minor: 'bg-sky-400', moderate: 'bg-amber-400', major: 'bg-rose-500' }
 const RANK = { minor: 0, moderate: 1, major: 2 }
+type Severity = Finding['severity']
+const STRENGTH: Record<Severity, string> = { major: 'Strong AI patterns', moderate: 'Moderate AI patterns', minor: 'Weak AI patterns' }
+const STRENGTH_CHIP: Record<Severity, string> = { major: 'Strong', moderate: 'Moderate', minor: 'Weak' }
+const markLabel = (f: Finding) => (f.category === 'AI_LIKE' ? STRENGTH[f.severity] : CATEGORY_LABELS[f.category])
 const CHECK_TITLES: Record<PaperCheck['kind'], string> = {
   CITED_NOT_LISTED: 'Cited but not in your reference list',
   LISTED_NOT_CITED: 'In your reference list but not cited',
@@ -47,6 +52,11 @@ export function Workspace({ job: initial }: { job: Job }) {
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [view, setView] = useState<'findings' | 'changes'>(initial.refinement ? 'changes' : 'findings')
+  const [strength, setStrength] = useState<Severity | 'ALL'>('ALL')
+  const [asking, setAsking] = useState(false)
+  const [request, setRequest] = useState('')
+  const [scope, setScope] = useState<'picked' | 'all'>('picked')
+  const [picked, setPicked] = useState<Set<string>>(new Set())
   const blockRefs = useRef<Record<string, HTMLElement | null>>({})
 
   useEffect(() => setJob(initial), [initial])
@@ -66,7 +76,12 @@ export function Workspace({ job: initial }: { job: Job }) {
   const referenceIssues = references.length + verified.filter((r) => r.retracted || r.status === 'MISMATCH' || r.status === 'NOT_VERIFIED').length
   const open = findings.filter((f) => !dismissed.has(f.id))
   const count = (c: Category) => (c === 'REFERENCES' ? referenceIssues + (verified.length && !referenceIssues ? 1 : 0) : open.filter((f) => f.category === c).length)
-  const visible = (showDismissed ? findings : open).filter((f) => category === 'ALL' || f.category === category)
+  const order = useMemo(() => Object.fromEntries((doc?.blocks ?? []).map((b, i) => [b.id, i])), [doc])
+  const visible = (showDismissed ? findings : open)
+    .filter((f) => (category === 'ALL' || f.category === category) && (strength === 'ALL' || f.severity === strength))
+    .sort((a, b) => (order[a.blockId] ?? 0) - (order[b.blockId] ?? 0))
+  const aiLike = open.filter((f) => f.category === 'AI_LIKE')
+  const strengthCount = (s: Severity) => aiLike.filter((f) => f.severity === s).length
   const byBlock = useMemo(() => {
     const map: Record<string, Finding[]> = {}
     for (const f of open) (map[f.blockId] ??= []).push(f)
@@ -115,8 +130,34 @@ export function Workspace({ job: initial }: { job: Job }) {
   const fix = (safeOnly: boolean) =>
     act('fix', async () => {
       const draft = await data.workspace.fix(job.id, [...selected], safeOnly)
-      navigate(`/app/new?draft=${draft.id}&service=REFINE`)
+      navigate(`/app/jobs/${draft.id}`)
     })
+  // The next step on the same paper: a new draft opens with the paper and its options beside it.
+  const origin = job.refinement || job.formatting ? 'result' : 'original'
+  const canPick = !(job.refinement?.mode === 'REDRAFT') // a deep redraft changes the paragraphs, so the whole paper is asked about
+  const next = (key: string, mode: 'redraft' | 'format') =>
+    act(key, async () => {
+      const draft = await data.workspace.continueFrom(job.id, mode === 'redraft' ? 'original' : origin)
+      navigate(`/app/jobs/${draft.id}?next=${mode}`)
+    })
+  const askForChanges = () =>
+    act('ask', async () => {
+      const blocks = scope === 'picked' && canPick ? [...picked] : []
+      const draft = await data.workspace.continueFrom(job.id, origin, request, blocks)
+      navigate(`/app/jobs/${draft.id}`)
+    })
+  const togglePick = (id: string) =>
+    setPicked((s) => {
+      const nextSet = new Set(s)
+      if (nextSet.has(id)) nextSet.delete(id)
+      else nextSet.add(id)
+      return nextSet
+    })
+  const step = () => {
+    if (!visible.length) return
+    const at = visible.findIndex((f) => f.id === active)
+    focus(visible[(at + 1) % visible.length])
+  }
   const downloadChoices = () =>
     act('rebuild', async () => {
       const rebuilt = await data.workspace.rebuild(job.id)
@@ -135,9 +176,10 @@ export function Workspace({ job: initial }: { job: Job }) {
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_24rem]">
         {/* The paper */}
         <Card className="order-2 min-w-0 p-5 sm:p-8 lg:order-1 lg:max-h-[calc(100dvh-7rem)] lg:overflow-y-auto">
+          {analysis && <ScoreHeader job={job} />}
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm font-semibold">{job.refinement ? 'Your paper, with the changes you are keeping' : 'Your paper'}</p>
-            <p className="text-xs text-fg-subtle">Highlighted passages have findings. Click one to see it.</p>
+            <p className="text-xs text-fg-subtle">{asking && scope === 'picked' && canPick ? 'Click the passages you want changed.' : 'Highlighted passages have findings. Click one to see it.'}</p>
           </div>
           {docError ? (
             <Alert tone="warning">{docError}</Alert>
@@ -164,21 +206,38 @@ export function Workspace({ job: initial }: { job: Job }) {
                       {text}
                     </h3>
                   )
+                const picking = asking && scope === 'picked' && canPick && (b.kind === 'paragraph' || b.kind === 'list_item')
+                const shown = marks.find((f) => f.id === active)
                 return (
-                  <p
-                    key={b.id}
-                    ref={(el) => void (blockRefs.current[b.id] = el)}
-                    onClick={top ? () => focus(top) : undefined}
-                    className={clsx(
-                      'whitespace-pre-line rounded-md',
-                      top && 'cursor-pointer px-2 py-1 ring-1 transition-shadow ' + SEVERITY_TINT[top.severity],
-                      isActive && 'ring-2 ring-brand-500',
-                      change && !own && 'border-l-4 border-brand-400 pl-3',
-                      (b.kind === 'reference' || b.kind === 'caption') && 'text-sm text-fg-muted',
+                  <div key={b.id} ref={(el) => void (blockRefs.current[b.id] = el)}>
+                    {top && !picking && (
+                      <span className={clsx('mb-1 inline-block rounded px-1.5 py-0.5 font-sans text-[11px] font-semibold', top.category !== 'AI_LIKE' ? 'bg-violet-100 text-violet-800' : top.severity === 'major' ? 'bg-rose-100 text-rose-800' : top.severity === 'moderate' ? 'bg-amber-100 text-amber-900' : 'bg-sky-100 text-sky-800')}>
+                        {markLabel(top)}
+                      </span>
                     )}
-                  >
-                    {text}
-                  </p>
+                    <p
+                      onClick={picking ? () => togglePick(b.id) : top ? () => focus(top) : undefined}
+                      className={clsx(
+                        'whitespace-pre-line rounded-md',
+                        top && !picking && 'cursor-pointer px-2 py-1 ring-1 transition-shadow ' + SEVERITY_TINT[top.severity],
+                        isActive && !picking && 'ring-2 ring-brand-500',
+                        picking && 'cursor-pointer px-2 py-1 ring-1 ' + (picked.has(b.id) ? 'bg-brand-50 ring-2 ring-brand-500' : 'ring-line hover:ring-brand-300'),
+                        change && !own && 'border-l-4 border-brand-400 pl-3',
+                        (b.kind === 'reference' || b.kind === 'caption') && 'text-sm text-fg-muted',
+                      )}
+                    >
+                      {text}
+                    </p>
+                    {shown && !picking && (
+                      <div className="mt-2 rounded-lg border border-line bg-white p-3 font-sans text-sm shadow-card">
+                        <p className="font-semibold">{REASON_LABELS[shown.reason]}</p>
+                        <p className="mt-1 text-fg-muted">{shown.explanation}</p>
+                        <p className="mt-1.5 flex gap-1.5 text-brand-800">
+                          <Lightbulb className="mt-0.5 size-4 shrink-0 text-brand-600" aria-hidden /> {shown.suggestion}
+                        </p>
+                      </div>
+                    )}
+                  </div>
                 )
               })}
             </article>
@@ -187,26 +246,51 @@ export function Workspace({ job: initial }: { job: Job }) {
 
         {/* The review panel */}
         <aside className="order-1 space-y-4 lg:sticky lg:top-20 lg:order-2 lg:max-h-[calc(100dvh-6rem)] lg:overflow-y-auto">
-          {analysis && (
-            <Card className="p-4">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-sm font-semibold">Estimated AI-likeness</p>
-                <Badge>Confidence: {analysis.confidence.toLowerCase()}</Badge>
-              </div>
-              <div className="mt-3 flex items-center gap-2">
-                <span className={clsx('rounded-lg px-3 py-1.5 text-sm font-bold ring-1 ring-inset', BAND_STYLE[analysis.band])}>{label(analysis.band)}</span>
-                {job.analysisAfter && (
-                  <>
-                    <ArrowRight className="size-4 text-fg-subtle" aria-hidden />
-                    <span className={clsx('rounded-lg px-3 py-1.5 text-sm font-bold ring-1 ring-inset', BAND_STYLE[job.analysisAfter.band])}>{label(job.analysisAfter.band)} after</span>
-                  </>
+          <Card className="space-y-2 p-4">
+            <p className="text-sm font-semibold">What next?</p>
+            {job.source?.format === 'DOCX' ? (
+              <>
+                {!job.refinement && (
+                  <Button className="w-full" loading={busy === 'redraft'} onClick={() => next('redraft', 'redraft')}>
+                    <PenLine className="size-4" aria-hidden /> Redraft my paper
+                  </Button>
                 )}
-              </div>
-              <p className="mt-3 flex gap-2 text-xs leading-relaxed text-fg-subtle">
-                <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden /> {DISCLAIMER}
-              </p>
-            </Card>
-          )}
+                <Button className="w-full" variant={job.refinement ? 'primary' : 'secondary'} onClick={() => setAsking(!asking)}>
+                  <MessageSquarePlus className="size-4" aria-hidden /> Ask for changes
+                </Button>
+                {asking && (
+                  <div className="space-y-2 rounded-lg bg-surface-subtle p-3">
+                    <TextArea
+                      label="What should change?"
+                      rows={3}
+                      maxLength={1000}
+                      value={request}
+                      onChange={(e) => setRequest(e.target.value)}
+                      hint="For example your supervisor's comments, or: make the introduction shorter and more direct."
+                    />
+                    {canPick && (
+                      <div className="flex flex-wrap gap-3 text-sm">
+                        <label className="flex items-center gap-1.5">
+                          <input type="radio" name="scope" checked={scope === 'picked'} onChange={() => setScope('picked')} /> Passages I pick ({picked.size})
+                        </label>
+                        <label className="flex items-center gap-1.5">
+                          <input type="radio" name="scope" checked={scope === 'all'} onChange={() => setScope('all')} /> The whole paper
+                        </label>
+                      </div>
+                    )}
+                    <Button className="w-full" disabled={request.trim().length < 3 || (canPick && scope === 'picked' && picked.size === 0)} loading={busy === 'ask'} onClick={askForChanges}>
+                      See the price <ArrowRight className="size-4" aria-hidden />
+                    </Button>
+                  </div>
+                )}
+                <Button className="w-full" variant="secondary" loading={busy === 'format'} onClick={() => next('format', 'format')}>
+                  <LayoutTemplate className="size-4" aria-hidden /> {job.refinement ? 'Format the finished paper' : 'Format my paper'}
+                </Button>
+              </>
+            ) : (
+              <p className="text-sm text-fg-muted">Upload the Word (.docx) version to redraft, change or format it.</p>
+            )}
+          </Card>
 
           {job.refinement && (
             <div className="flex gap-1 rounded-lg bg-surface-muted p-1 text-sm font-medium" role="tablist">
@@ -255,13 +339,38 @@ export function Workspace({ job: initial }: { job: Job }) {
             </Card>
           ) : (
             <Card className="p-4">
+              {aiLike.length > 0 && (
+                <div className="mb-3 flex flex-wrap items-center gap-1.5" role="group" aria-label="AI patterns by strength">
+                  {(['major', 'moderate', 'minor'] as Severity[])
+                    .filter((s) => strengthCount(s) > 0)
+                    .map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => {
+                          setStrength(strength === s ? 'ALL' : s)
+                          setCategory('AI_LIKE')
+                        }}
+                        aria-pressed={strength === s}
+                        className={clsx('flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold ring-1 ring-inset', strength === s ? 'bg-fg text-white ring-fg' : 'ring-line-strong')}
+                      >
+                        <span className={clsx('size-2 rounded-full', SEVERITY_BAR[s])} aria-hidden /> {STRENGTH_CHIP[s]} {strengthCount(s)}
+                      </button>
+                    ))}
+                  <Button size="sm" variant="secondary" className="ml-auto" disabled={!visible.length} onClick={step}>
+                    Next <ChevronRight className="size-4" aria-hidden />
+                  </Button>
+                </div>
+              )}
               <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter findings">
                 {(['ALL', ...ORDER] as (Category | 'ALL')[])
                   .filter((c) => c === 'ALL' || count(c) > 0)
                   .map((c) => (
                     <button
                       key={c}
-                      onClick={() => setCategory(c)}
+                      onClick={() => {
+                        setCategory(c)
+                        setStrength('ALL')
+                      }}
                       aria-pressed={category === c}
                       className={clsx('rounded-full px-3 py-1 text-xs font-medium ring-1 ring-inset', category === c ? 'bg-brand-700 text-white ring-brand-700' : 'text-fg-muted ring-line-strong hover:ring-brand-300')}
                     >
@@ -344,9 +453,6 @@ export function Workspace({ job: initial }: { job: Job }) {
                   <p className="text-xs text-fg-subtle">
                     PaperAid rewrites only those passages, in your voice. It never changes figures, citations, quotations or your methods. You see the price first.
                   </p>
-                  <ButtonLink to="/app/new?service=REDRAFT" variant="ghost" size="sm" className="w-full">
-                    Or deep-redraft the whole paper <ArrowRight className="size-4" aria-hidden />
-                  </ButtonLink>
                 </div>
               )}
             </Card>
@@ -365,6 +471,44 @@ export function Workspace({ job: initial }: { job: Job }) {
         )}
         <DownloadList jobId={job.id} outputs={job.outputs} expiresAt={job.expiresAt} />
       </div>
+    </div>
+  )
+}
+
+/** The headline: estimated AI-likeness as a percentage, with the band and what it does and does not mean. */
+function ScoreHeader({ job }: { job: Job }) {
+  const a = job.analysis!
+  const after = job.analysisAfter
+  const pct = (r: { percent?: number | null }) => (r.percent != null ? `${r.percent}%` : null)
+  return (
+    <div className="mb-6 rounded-xl border border-line bg-surface-subtle p-4">
+      <div className="flex flex-wrap items-end gap-x-6 gap-y-2">
+        <div>
+          <p className="text-xs font-semibold tracking-wide text-fg-subtle uppercase">Estimated AI-likeness</p>
+          <p className="mt-1 flex items-baseline gap-2 font-sans">
+            <span className="text-4xl font-bold tracking-tight">{pct(a) ?? label(a.band)}</span>
+            {after && (
+              <>
+                <ArrowRight className="size-5 self-center text-fg-subtle" aria-hidden />
+                <span className="text-4xl font-bold tracking-tight text-brand-700">{pct(after) ?? label(after.band)}</span>
+                <span className="text-sm text-fg-muted">after</span>
+              </>
+            )}
+          </p>
+        </div>
+        <div className="flex items-center gap-2 pb-1">
+          <span className={clsx('rounded-lg px-2.5 py-1 text-xs font-bold ring-1 ring-inset', BAND_STYLE[(after ?? a).band])}>{label((after ?? a).band)}</span>
+          <Badge>Confidence: {a.confidence.toLowerCase()}</Badge>
+        </div>
+      </div>
+      {a.percent != null && (
+        <div className="mt-3 h-2 overflow-hidden rounded-full bg-white ring-1 ring-line" aria-hidden>
+          <div className={clsx('h-full rounded-full', (after ?? a).band === 'HIGH' ? 'bg-rose-500' : (after ?? a).band === 'MODERATE' ? 'bg-amber-400' : 'bg-brand-500')} style={{ width: `${(after ?? a).percent ?? a.percent}%` }} />
+        </div>
+      )}
+      <p className="mt-3 flex gap-2 font-sans text-xs leading-relaxed text-fg-subtle">
+        <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden /> {DISCLAIMER} The percentage estimates how much of your text reads as AI-written; it is not proof of how it was written.
+      </p>
     </div>
   )
 }

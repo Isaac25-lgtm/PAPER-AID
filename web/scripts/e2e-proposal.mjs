@@ -147,6 +147,11 @@ try {
   if (!concept.suggestedFilename().endsWith('concept paper.docx')) throw new Error(`unexpected concept file: ${concept.suggestedFilename()}`)
   await shot('p8-concept')
   step('concept paper written from the plan, checked against its limits and downloaded')
+  await page.getByLabel('What should change in your concept paper?').fill('Shorten the background to half a page.')
+  await page.getByRole('button', { name: 'See the price' }).first().click()
+  await page.getByRole('button', { name: 'Make these changes' }).click()
+  await page.waitForFunction(() => [...document.querySelectorAll('option')].some((o) => o.textContent.startsWith('Version 2')), null, { timeout: 90_000 })
+  step('changes to the concept paper asked for directly: a new version, from the student\'s own words')
 
   // Another institution: a new proposal follows the student's own research guide.
   await page.goto(`${base}/app/projects`)

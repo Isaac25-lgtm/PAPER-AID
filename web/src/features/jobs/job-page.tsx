@@ -13,7 +13,8 @@ import { BandChange, DownloadList, FormattingPanel, LatexPanel, SourceCheckPanel
 import { Workspace } from '../results/workspace'
 import { ProposalReviewPanel } from '../proposals/review-panel'
 import { useJob } from './hooks'
-import { jobLink, jobTitle, serviceNames, StageTimeline, StatusBadge } from './job-bits'
+import { DraftStudio, PaperPreview } from '../studio/studio'
+import { jobTitle, serviceNames, StageTimeline, StatusBadge } from './job-bits'
 
 const isTerminal = (j: Job) => j.status === 'COMPLETED' || j.status === 'FAILED' || j.status === 'CANCELLED'
 
@@ -43,7 +44,10 @@ export function JobPage() {
         It may have been deleted, or the link may be wrong.
       </EmptyState>
     )
-  if (job.status === 'DRAFT' || job.status === 'QUOTED') return <Navigate to={jobLink(job)} replace /> // not submitted yet: resume it
+  const draft = job.status === 'DRAFT' || job.status === 'QUOTED'
+  if (draft && job.selection.proposal === 'REVIEW') return <Navigate to={`/app/new?draft=${job.id}&service=PROPOSAL_REVIEW`} replace />
+  if (draft && !job.source) return <Navigate to="/app/new" replace /> // nothing uploaded yet: choose the job again
+  const running = (job.status === 'QUEUED' || job.status === 'PROCESSING') && !!job.source && !job.projectId
 
   return (
     <>
@@ -54,7 +58,7 @@ export function JobPage() {
         <div className="min-w-0">
           <h1 className="text-xl font-bold break-words sm:text-2xl">{jobTitle(job)}</h1>
           <p className="mt-1 text-sm text-fg-muted">
-            {serviceNames(job)} · Submitted {formatDateTime(job.createdAt)}
+            {draft ? `Uploaded ${formatDateTime(job.createdAt)} · nothing has run yet` : `${serviceNames(job)} · Submitted ${formatDateTime(job.createdAt)}`}
           </p>
         </div>
         <div className="shrink-0 self-start">
@@ -62,7 +66,20 @@ export function JobPage() {
         </div>
       </div>
 
-      {job.status === 'COMPLETED' && job.analysis ? (
+      {draft ? (
+        <DraftStudio job={job} />
+      ) : running ? (
+        // The paper stays on screen while PaperAid works on it.
+        <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_24rem]">
+          <div className="order-2 lg:order-1">
+            <PaperPreview jobId={job.id} dim />
+          </div>
+          <aside className="order-1 space-y-4 lg:order-2">
+            <InProgress job={job} />
+            <JobDetails job={job} />
+          </aside>
+        </div>
+      ) : job.status === 'COMPLETED' && job.analysis ? (
         // The review workspace needs the full width; the job's details follow it.
         <div className="space-y-6">
           <JobBody job={job} />

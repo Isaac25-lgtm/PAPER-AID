@@ -1,7 +1,7 @@
 import { clsx } from 'clsx'
 import { ArrowRight, Check, CheckCircle2, Info, Loader2 } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router'
+import { Link, Navigate, useNavigate, useSearchParams } from 'react-router'
 import { Button, ButtonLink } from '../../components/ui/button'
 import { Checkbox, Select } from '../../components/ui/field'
 import { FileChip, FileDropzone, fileMetaLine } from '../../components/ui/file-dropzone'
@@ -14,6 +14,7 @@ import { useTitle } from '../../lib/use-title'
 import { useWallet, walletChanged } from '../../lib/use-wallet'
 import { useAuth } from '../auth/auth-context'
 import { DISCLAIMER } from '../results/report'
+import { QuickUpload } from '../studio/studio'
 import { jobType, ServiceChooser, type JobType } from './service-chooser'
 
 interface Upload {
@@ -158,7 +159,12 @@ function OptionCard({ name, checked, onSelect, title, body, badge, disabledReaso
 export function NewJobPage() {
   const [params] = useSearchParams()
   const type = jobType(params.get('service') ?? (params.get('review') ? 'PROPOSAL_REVIEW' : null))
-  if (!type && !params.get('draft')) return <ServiceChooser />
+  const draft = params.get('draft')
+  const review = type?.id === 'PROPOSAL_REVIEW'
+  // Every other job: upload, and the paper opens on its own page with the next step beside it.
+  if (draft && !review) return <Navigate to={`/app/jobs/${draft}`} replace />
+  if (!type && !draft) return <ServiceChooser />
+  if (type && !review) return <QuickUpload key={type.id} type={type} />
   return <NewJobForm key={type?.id ?? 'draft'} type={type} />
 }
 

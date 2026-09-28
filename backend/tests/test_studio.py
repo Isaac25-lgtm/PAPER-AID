@@ -37,7 +37,7 @@ def test_the_check_gives_a_percentage_consistent_with_its_band(client):
     _, job = _run(client, CHECK)
     analysis = job["analysis"]
     assert isinstance(analysis["percent"], int) and 0 <= analysis["percent"] <= 100
-    bands = {"LOW": (0, 40), "MODERATE": (25, 70), "HIGH": (50, 100)}
+    bands = {"LOW": (0, 14), "MODERATE": (15, 31), "HIGH": (32, 100)}  # the band's own limits
     low, high = bands[analysis["band"]]
     assert low <= analysis["percent"] <= high
 

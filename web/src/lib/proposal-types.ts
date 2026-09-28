@@ -5,7 +5,7 @@ export type Level = 'BACHELORS' | 'PGD' | 'MASTERS' | 'PHD'
 export type StudyType = 'QUANTITATIVE' | 'QUALITATIVE' | 'MIXED' | 'SECONDARY' | 'NON_EMPIRICAL'
 export type CitationStyle = 'APA6' | 'APA7'
 export type SampleMethod = 'YAMANE' | 'COCHRAN' | 'KREJCIE_MORGAN' | 'CENSUS' | 'SATURATION' | 'AUTHOR_STATED' | 'NOT_APPLICABLE'
-export type StepId = 'PLAN' | 'CHAPTER_1' | 'CHAPTER_2' | 'CHAPTER_3' | 'CONCEPT' | 'REVISE_1' | 'REVISE_2' | 'REVISE_3' | 'PROFILE'
+export type StepId = 'PLAN' | 'CHAPTER_1' | 'CHAPTER_2' | 'CHAPTER_3' | 'CONCEPT' | 'REVISE_1' | 'REVISE_2' | 'REVISE_3' | 'REVISE_4' | 'PROFILE'
 export type ReadinessStatus = 'PASS' | 'NEEDS_REVIEW' | 'MISSING' | 'NOT_APPLICABLE' | 'BLOCKED'
 
 export interface ProposalInputs {
@@ -114,6 +114,8 @@ export interface FeedbackComment {
   status: FeedbackStatus
   appliedIn: number | null
   response: string
+  /** STUDENT: the student's own request for changes (not a supervisor comment). */
+  by?: 'SUPERVISOR' | 'STUDENT'
 }
 
 export interface WrittenSection {

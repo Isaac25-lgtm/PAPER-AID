@@ -1,15 +1,16 @@
 import { clsx } from 'clsx'
-import { ArrowRight, CheckCircle2, Circle, Download, ExternalLink, Trash2, TriangleAlert } from 'lucide-react'
+import { ArrowRight, CheckCircle2, Circle, Download, ExternalLink, MessageSquarePlus, Trash2, TriangleAlert } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
 import { Button } from '../../components/ui/button'
-import { Select } from '../../components/ui/field'
+import { Checkbox, Select, TextArea } from '../../components/ui/field'
 import { FileDropzone } from '../../components/ui/file-dropzone'
 import { Dialog, Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/overlays'
 import { Alert, Badge, Card, PageHeader, Skeleton } from '../../components/ui/primitives'
 import { DataError, useData } from '../../lib/data'
-import { formatDate } from '../../lib/format'
-import type { ChapterView, Comparison, EvidenceItem, Project, Rulebook } from '../../lib/proposal-types'
+import { formatDate, formatTokens } from '../../lib/format'
+import { walletChanged } from '../../lib/use-wallet'
+import type { ChapterView, Comparison, EvidenceItem, Project, Rulebook, StepQuote } from '../../lib/proposal-types'
 import type { Job } from '../../lib/types'
 import { useTitle } from '../../lib/use-title'
 import { FeedbackPanel } from './feedback-panel'
@@ -112,10 +113,10 @@ function ChapterPanel({ project, number, running, onStarted, onChanged }: { proj
   )
   if (!state.current) return runner
   const comments = project.feedback.filter((c) => c.status === 'OPEN' && c.chapter === number && c.sections.length)
-  const reviser = !concept && comments.length > 0 && (
+  const reviser = comments.length > 0 && (
     <StepRunner
       projectId={project.id}
-      step={`REVISE_${number as 1 | 2 | 3}`}
+      step={`REVISE_${number}`}
       label={`Revise from your supervisor's comments (${comments.length})`}
       description="PaperAid revises only the sections these comments are on and checks them again. Every other section stays exactly as it is, and the current version is kept."
       disabledReason={running ? 'A step is running for this proposal. Wait for it to finish.' : planReady ? undefined : 'Approve your plan first.'}
@@ -253,10 +254,96 @@ function ChapterPanel({ project, number, running, onStarted, onChanged }: { proj
             <ReadinessList items={chapter.readiness} />
           </Card>
         )}
+        {chapter && <AskForChanges project={project} number={number} chapter={chapter} running={running} onStarted={onStarted} onChanged={onChanged} />}
         {reviser}
         {runner}
       </aside>
     </div>
+  )
+}
+
+/** The student's own request for changes: what to change, on which sections (or all), then the price
+ *  and Start. The revision rewrites only those sections and keeps a new version. */
+function AskForChanges({ project, number, chapter, running, onStarted, onChanged }: { project: Project; number: 1 | 2 | 3 | 4; chapter: ChapterView; running: boolean; onStarted: (id: string) => void; onChanged: (p: Project) => void }) {
+  const data = useData()
+  const [text, setText] = useState('')
+  const [sections, setSections] = useState<Set<string>>(new Set())
+  const [quote, setQuote] = useState<StepQuote | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const run = async (action: () => Promise<void>) => {
+    setBusy(true)
+    setError(null)
+    try {
+      await action()
+    } catch (e) {
+      setError(e instanceof DataError ? e.message : 'That did not work. Try again.')
+    } finally {
+      setBusy(false)
+    }
+  }
+  const price = () =>
+    run(async () => {
+      onChanged(await data.projects.requestChanges(project.id, number, text, [...sections]))
+      setQuote(await data.projects.quoteStep(project.id, `REVISE_${number}`, ''))
+    })
+  const start = () =>
+    run(async () => {
+      if (!quote) return
+      await data.projects.submitStep(project.id, quote.job.id, quote.quote.id)
+      walletChanged()
+      setQuote(null)
+      setText('')
+      setSections(new Set())
+      onStarted(quote.job.id)
+    })
+  const toggle = (key: string) =>
+    setSections((s) => {
+      const next = new Set(s)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  return (
+    <Card className="space-y-3 p-4">
+      <p className="flex items-center gap-2 text-sm font-semibold">
+        <MessageSquarePlus className="size-4 text-brand-600" aria-hidden /> Ask for changes
+      </p>
+      <TextArea
+        label={number === 4 ? 'What should change in your concept paper?' : `What should change in Chapter ${number}?`}
+        rows={3}
+        maxLength={1500}
+        value={text}
+        disabled={running || !!quote}
+        onChange={(e) => setText(e.target.value)}
+        hint="Your supervisor's comments, or your own: for example, shorten the background and make the problem statement more specific."
+      />
+      <div>
+        <p className="text-xs font-semibold text-fg-subtle">Sections {sections.size === 0 && '(all, unless you pick some)'}</p>
+        <div className="mt-1 max-h-40 space-y-1 overflow-y-auto">
+          {chapter.sections.map((s) => (
+            <Checkbox key={s.key} checked={sections.has(s.key)} disabled={running || !!quote} onChange={() => toggle(s.key)} label={`${s.number} ${s.heading}`} />
+          ))}
+        </div>
+      </div>
+      {error && <Alert tone="warning">{error}</Alert>}
+      {quote ? (
+        <div className="rounded-lg bg-surface-subtle p-3 text-sm">
+          {quote.quote.lines.map((l) => (
+            <p key={l.label} className="flex justify-between gap-3">
+              <span className="text-fg-muted">{l.label}</span> <span className="font-medium whitespace-nowrap">{formatTokens(l.amount)}</span>
+            </p>
+          ))}
+          <Button className="mt-3 w-full" loading={busy} onClick={start}>
+            Make these changes <ArrowRight className="size-4" aria-hidden />
+          </Button>
+        </div>
+      ) : (
+        <Button variant="secondary" className="w-full" disabled={running || text.trim().length < 3} loading={busy} onClick={price}>
+          {running ? 'Wait for the step that is running' : 'See the price'}
+        </Button>
+      )}
+    </Card>
   )
 }
 

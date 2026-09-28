@@ -194,6 +194,8 @@ export function createApiSource({ config, getAuthHeaders }: Options): DataSource
       setChange: (jobId, changeId, accepted) => request<Job>(`/api/jobs/${jobId}/changes/${changeId}`, { method: 'POST', body: JSON.stringify({ accepted }) }),
       rebuild: (jobId) => request<Job>(`/api/jobs/${jobId}/rebuild`, { method: 'POST' }),
       fix: (jobId, findingIds, safeOnly) => request<Job>(`/api/jobs/${jobId}/fix`, { method: 'POST', body: JSON.stringify({ findingIds, safeOnly }) }),
+      continueFrom: (jobId, origin, instruction = '', blocks = []) =>
+        request<Job>(`/api/jobs/${jobId}/continue`, { method: 'POST', body: JSON.stringify({ origin, instruction, blocks }) }),
     },
 
     projects: {
@@ -233,6 +235,8 @@ export function createApiSource({ config, getAuthHeaders }: Options): DataSource
       deleteFeedback: (id, commentId) => request<Project>(`/api/projects/${id}/feedback/${commentId}`, { method: 'DELETE' }),
       downloadResponse: (id) => saveFile(`/api/projects/${id}/feedback/report`, 'Response to supervisor comments.docx'),
       downloadConcept: (id, fileName) => saveFile(`/api/projects/${id}/concept/export`, fileName),
+      requestChanges: (id, chapter, instruction, sections) =>
+        request<Project>(`/api/projects/${id}/chapters/${chapter}/request`, { method: 'POST', body: JSON.stringify({ instruction, sections }) }),
       uploadGuide(id, file) {
         const form = new FormData()
         form.append('file', file)

@@ -144,7 +144,7 @@ function CommentCard({
   return (
     <Card className="p-4">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs font-semibold text-fg-subtle">Comment {n}</span>
+        <span className="text-xs font-semibold text-fg-subtle">{comment.by === 'STUDENT' ? 'Your request' : `Comment ${n}`}</span>
         <Badge tone={status.tone}>
           {status.label}
           {comment.appliedIn ? ` in version ${comment.appliedIn}` : ''}

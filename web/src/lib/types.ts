@@ -173,6 +173,8 @@ export interface Finding {
 export interface AnalysisResult {
   band: Band
   confidence: Confidence
+  /** Estimated AI-likeness as a percentage (absent on analyses made before it was recorded). */
+  percent?: number | null
   analysedWords: number
   excludedWords: number
   findings: Finding[]
@@ -300,6 +302,8 @@ export interface Job {
   dismissed?: string[]
   rejectedChanges?: string[]
   sourceJob?: string | null
+  /** A continued draft: what each chosen passage should change (the student's request, or findings). */
+  fixNotes?: Record<string, string[]>
   paperChecks: PaperChecks | null
   research: ResearchResult | null
   latex: LatexResult | null
