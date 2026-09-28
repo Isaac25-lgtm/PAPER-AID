@@ -11,3 +11,9 @@ codex_*/
 .env.*
 !.env.example
 *.egg-info/
+# audit and test scratch folders (never part of the image)
+.ae*/
+.ar*/
+.av*/
+.audit*/
+.codex*/
