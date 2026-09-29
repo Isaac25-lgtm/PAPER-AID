@@ -118,12 +118,11 @@ def test_h02_deleting_the_account_erases_the_credit_history(client):
 def test_h03_a_guide_arriving_after_deletion_leaves_nothing_behind(client, monkeypatch):
     rt = get_runtime()
     pid = _create(client)["id"]
-    prefix = rt.store.get_project(pid).storage_prefix()
     original_put = rt.files.put
     paths = []
 
     def racing_put(path, data, content_type):
-        if path.startswith(prefix + "/guide/"):
+        if path.startswith(f"users/{UID}/guides/{pid}/"):
             service.delete(rt, OWNER, pid)
             paths.append(path)
         return original_put(path, data, content_type)

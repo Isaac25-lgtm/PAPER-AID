@@ -40,6 +40,31 @@ try {
   await page.getByRole('button', { name: 'Try again' }).waitFor()
   console.log('✓ M26: a failed version load shows its error with a retry, no stale content, and cannot be chosen')
 
+  state.current = 2
+  await page.reload()
+  await page.getByRole('tab', { name: 'Chapter 1', exact: true }).click()
+  await page.getByLabel('Version', { exact: true }).selectOption('1')
+  await page.getByText('VERSION ONE visible text', { exact: true }).waitFor()
+  await page.getByText(/Changes are made to the current version/).waitFor()
+  assert.equal(await page.getByLabel('What should change in Chapter 1?').count(), 0)
+  console.log('✓ historical chapters cannot submit change requests against another version')
+
+  project.profileMissing = true
+  project.rulebook = 'custom-missing'
+  let restored = false
+  await page.route(`**/api/projects/${project.id}/rulebook/default`, (r) => {
+    restored = true
+    project.profileMissing = false
+    project.rulebook = 'ucu-2018-v1'
+    return r.fulfill({ json: project })
+  })
+  await page.reload()
+  await page.getByRole('tab', { name: 'Details', exact: true }).click()
+  await page.getByRole('button', { name: 'Use the standard structure', exact: true }).click()
+  await page.getByText('Your chapters follow this structure; it stays the same for this proposal.', { exact: true }).waitFor()
+  assert.ok(restored, 'missing-profile recovery did not call the restoration endpoint')
+  console.log('✓ a missing institution profile can be restored after chapters exist')
+
   // M25: rejecting a Deep Redraft group shows every original paragraph again.
   const workspace = await context.newPage()
   const job = await api('/api/jobs', {})
@@ -74,6 +99,13 @@ try {
   await article.getByText('ORIGINAL SECOND PARAGRAPH', { exact: true }).waitFor()
   assert.equal(await article.getByText('REWRITTEN GROUP', { exact: true }).count(), 0)
   console.log('✓ M25: rejecting a redrafted group restores every original paragraph')
+  job.analysisAfter = { ...job.analysis, band: 'LOW', percent: null }
+  doc.percent = 33
+  doc.percentAfter = 9
+  await workspace.reload()
+  await workspace.locator('aside').getByText('9%', { exact: true }).waitFor()
+  await workspace.locator('aside').getByText('33%', { exact: true }).waitFor()
+  console.log('✓ recovered before and after percentages render on an older refined result')
 } catch (e) {
   failed = true
   console.error(`audit journey failed: ${e.message}`)

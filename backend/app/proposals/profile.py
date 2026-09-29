@@ -67,9 +67,14 @@ def _num(value: Any) -> float:
         return 0.0
     try:
         number = float(value)
-    except ValueError:
+    except (ValueError, OverflowError):  # not a number, or too large to be one (Codex re-check M16)
         return 0.0
     return number if math.isfinite(number) else 0.0
+
+
+def _text(value: Any) -> str:
+    """A model value as text: only strings count (a null, list or number is empty)."""
+    return value.strip() if isinstance(value, str) else ""
 
 
 def _dicts(value: Any) -> list[dict[str, Any]]:
@@ -96,11 +101,11 @@ def build(answer: dict[str, Any], guide_name: str) -> dict[str, Any]:
     default = rulebook.load(rulebook.DEFAULT)
     if not isinstance(answer, dict):
         raise NotAGuide("the profile is not an object")
-    chapters_in = {c.get("number"): c for c in _dicts(answer.get("chapters"))}
+    chapters_in = {c["number"]: c for c in _dicts(answer.get("chapters")) if type(c.get("number")) is int}
     if sorted(chapters_in, key=str) != [1, 2, 3] or any(len(_dicts(c.get("sections"))) < 2 for c in chapters_in.values()):
         raise NotAGuide("the profile needs chapters 1-3 with at least two sections each")
     unclear = _texts(answer.get("unclear"))[:20]
-    source = f"{answer.get('institution', '').strip() or 'Institution'} research guide ({guide_name[:80]})"
+    source = f"{_text(answer.get('institution')) or 'Institution'} research guide ({guide_name[:80]})"
 
     shares = _normalised([_num(chapters_in[n].get("share")) for n in (1, 2, 3)])
     chapters = []
@@ -112,22 +117,22 @@ def build(answer: dict[str, Any], guide_name: str) -> dict[str, Any]:
         sections = []
         per_objective_used = False
         for s, s_share in zip(raw, section_shares, strict=True):
-            key = _key(str(s.get("key", "")) or str(s.get("heading", "")))
+            key = _key(_text(s.get("key")) or _text(s.get("heading")))
             while key in seen:
                 key += "x"
             seen.add(key)
-            section = {"key": key, "heading": str(s.get("heading", "")).strip()[:120] or key.title(), "brief": str(s.get("brief", "")).strip()[:400], "share": round(s_share, 4), "source": source}
+            section = {"key": key, "heading": _text(s.get("heading"))[:120] or key.title(), "brief": _text(s.get("brief"))[:400], "share": round(s_share, 4), "source": source}
             if s.get("perObjective") and n == 2 and not per_objective_used:
                 section["per_objective"], per_objective_used = True, True
             if s.get("table"):
                 section["table"] = True
             sections.append(section)
-        chapters.append({"number": n, "title": str(spec.get("title", "")).strip()[:120] or default["chapters"][n - 1]["title"], "share": round(share, 4),
-                         "purpose": str(spec.get("purpose", "")).strip()[:300], "source": source, "sections": sections})
+        chapters.append({"number": n, "title": _text(spec.get("title"))[:120] or default["chapters"][n - 1]["title"], "share": round(share, 4),
+                         "purpose": _text(spec.get("purpose"))[:300], "source": source, "sections": sections})
     chapters.append(copy.deepcopy(next(c for c in default["chapters"] if c.get("kind") == "CONCEPT")))  # the concept paper keeps the default layout
 
     levels = copy.deepcopy(default["levels"])
-    given = {entry.get("level"): entry for entry in _dicts(answer.get("levels"))}
+    given = {_text(entry.get("level")): entry for entry in _dicts(answer.get("levels"))}
     for level in LEVELS:
         entry = given.get(level)
         low, high = (int(_num(entry.get("pagesMin"))), int(_num(entry.get("pagesMax")))) if entry else (0, 0)
@@ -171,8 +176,8 @@ def build(answer: dict[str, Any], guide_name: str) -> dict[str, Any]:
     default_citation = "APA6" if citation == "APA6" else "APA7"
     return {
         "id": f"custom-{secrets.token_hex(6)}",
-        "institution": str(answer.get("institution", "")).strip()[:160] or "Your institution",
-        "short": str(answer.get("short", "")).strip()[:20],
+        "institution": _text(answer.get("institution"))[:160] or "Your institution",
+        "short": _text(answer.get("short"))[:20],
         "source": source,
         "source_sha256": "",
         "note": "Built by PaperAid from the student's uploaded guide; values the guide does not give come from the default profile.",

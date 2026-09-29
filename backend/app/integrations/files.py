@@ -12,7 +12,7 @@ class FileStore(Protocol):
     def get(self, path: str) -> bytes: ...
     def exists(self, path: str) -> bool: ...
     def delete(self, path: str) -> None: ...
-    def delete_prefix(self, prefix: str) -> None: ...
+    def delete_prefix(self, prefix: str, *, flat: bool = False) -> None: ...
     def local_path(self, path: str) -> Path | None: ...
     def signed_url(self, path: str, download_name: str) -> str | None: ...
 
@@ -49,8 +49,14 @@ class LocalFileStore:
     def delete(self, path: str) -> None:
         self._full(path).unlink(missing_ok=True)
 
-    def delete_prefix(self, prefix: str) -> None:
-        shutil.rmtree(self._full(prefix), ignore_errors=True)
+    def delete_prefix(self, prefix: str, *, flat: bool = False) -> None:
+        full = self._full(prefix)
+        if flat:  # legacy guide attempts were files with a project-specific name prefix
+            for candidate in full.parent.glob(full.name + "*"):
+                if candidate.is_file() and self._root in candidate.resolve().parents:
+                    candidate.unlink(missing_ok=True)
+        else:
+            shutil.rmtree(full, ignore_errors=True)
 
     def local_path(self, path: str) -> Path | None:
         return self._full(path)
@@ -82,8 +88,8 @@ class GcsFileStore:
         except NotFound:
             pass  # already gone: deletion is idempotent
 
-    def delete_prefix(self, prefix: str) -> None:
-        for blob in self._bucket.list_blobs(prefix=_safe(prefix) + "/"):
+    def delete_prefix(self, prefix: str, *, flat: bool = False) -> None:
+        for blob in self._bucket.list_blobs(prefix=_safe(prefix) + ("" if flat else "/")):
             blob.delete()
 
     def local_path(self, path: str) -> Path | None:

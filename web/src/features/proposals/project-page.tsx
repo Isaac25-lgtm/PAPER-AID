@@ -254,7 +254,12 @@ function ChapterPanel({ project, number, running, onStarted, onChanged }: { proj
             <ReadinessList items={chapter.readiness} />
           </Card>
         )}
-        {chapter && <AskForChanges project={project} number={number} chapter={chapter} running={running} onStarted={onStarted} onChanged={onChanged} />}
+        {chapter &&
+          (version === state.current ? (
+            <AskForChanges project={project} number={number} chapter={chapter} running={running} onStarted={onStarted} onChanged={onChanged} />
+          ) : (
+            <Card className="p-4 text-sm text-fg-muted">Changes are made to the current version. Choose it above, or use this version first, to ask for changes.</Card>
+          ))}
         {reviser}
         {runner}
       </aside>
@@ -269,6 +274,7 @@ function AskForChanges({ project, number, chapter, running, onStarted, onChanged
   const [text, setText] = useState('')
   const [sections, setSections] = useState<Set<string>>(new Set())
   const [quote, setQuote] = useState<StepQuote | null>(null)
+  const [requestId, setRequestId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const run = async (action: () => Promise<void>) => {
@@ -284,8 +290,20 @@ function AskForChanges({ project, number, chapter, running, onStarted, onChanged
   }
   const price = () =>
     run(async () => {
-      onChanged(await data.projects.requestChanges(project.id, number, text, [...sections]))
-      setQuote(await data.projects.quoteStep(project.id, `REVISE_${number}`, ''))
+      // The price covers this request only: never an earlier request the student walked away from.
+      const before = new Set(project.feedback.map((c) => c.id))
+      const updated = await data.projects.requestChanges(project.id, number, text, [...sections])
+      onChanged(updated)
+      const mine = updated.feedback.find((c) => c.by === 'STUDENT' && !before.has(c.id))
+      if (!mine) throw new DataError('We could not save your request. Try again.')
+      setRequestId(mine.id)
+      setQuote(await data.projects.quoteStep(project.id, `REVISE_${number}`, '', [mine.id]))
+    })
+  const cancel = () =>
+    run(async () => {
+      if (requestId) onChanged(await data.projects.deleteFeedback(project.id, requestId))
+      setRequestId(null)
+      setQuote(null)
     })
   const start = () =>
     run(async () => {
@@ -293,6 +311,7 @@ function AskForChanges({ project, number, chapter, running, onStarted, onChanged
       await data.projects.submitStep(project.id, quote.job.id, quote.quote.id)
       walletChanged()
       setQuote(null)
+      setRequestId(null)
       setText('')
       setSections(new Set())
       onStarted(quote.job.id)
@@ -336,6 +355,9 @@ function AskForChanges({ project, number, chapter, running, onStarted, onChanged
           ))}
           <Button className="mt-3 w-full" loading={busy} onClick={start}>
             Make these changes <ArrowRight className="size-4" aria-hidden />
+          </Button>
+          <Button variant="ghost" size="sm" className="mt-1 w-full" disabled={busy} onClick={cancel}>
+            Cancel
           </Button>
         </div>
       ) : (
@@ -453,7 +475,14 @@ function InstitutionCard({ project, running, onStarted, onChanged }: { project: 
         </Alert>
       )}
       {error && <Alert tone="danger">{error}</Alert>}
-      {written ? (
+      {project.profileMissing ? (
+        <Alert tone="warning" title="Your institution's structure can no longer be read">
+          <p>Go back to the standard proposal structure to keep working on this proposal.</p>
+          <Button className="mt-2" size="sm" loading={busy} onClick={() => run(() => data.projects.useDefaultRulebook(project.id))}>
+            Use the standard structure
+          </Button>
+        </Alert>
+      ) : written ? (
         <p className="text-xs text-fg-subtle">Your chapters follow this structure; it stays the same for this proposal.</p>
       ) : (
         <>

@@ -33,6 +33,7 @@ class PlanEdit(Camel):
 class StepRequest(Camel):
     step: Literal["PLAN", "CHAPTER_1", "CHAPTER_2", "CHAPTER_3", "CONCEPT", "REVISE_1", "REVISE_2", "REVISE_3", "REVISE_4", "PROFILE"]
     note: str = ""
+    comments: list[str] = Field(default=[], max_length=50)  # REVISE: exactly these requests
 
 
 class FeedbackText(Camel):
@@ -120,7 +121,7 @@ def sample_size(project_id: str, body: SampleSize, user: User = Depends(current_
 
 @router.post("/{project_id}/steps", response_model=projects.StepQuote)
 def quote_step(project_id: str, body: StepRequest, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> projects.StepQuote:
-    return projects.quote_step(rt, user, project_id, body.step, body.note)
+    return projects.quote_step(rt, user, project_id, body.step, body.note, body.comments)
 
 
 @router.post("/{project_id}/steps/{job_id}/submit", response_model=JobView)

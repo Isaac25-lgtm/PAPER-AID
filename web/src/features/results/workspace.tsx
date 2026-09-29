@@ -176,10 +176,9 @@ export function Workspace({ job: initial }: { job: Job }) {
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_24rem]">
         {/* The paper */}
         <Card className="order-2 min-w-0 p-5 sm:p-8 lg:order-1 lg:max-h-[calc(100dvh-7rem)] lg:overflow-y-auto">
-          {analysis && <ScoreHeader job={job} />}
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm font-semibold">{job.refinement ? 'Your paper, with the changes you are keeping' : 'Your paper'}</p>
-            <p className="text-xs text-fg-subtle">{asking && scope === 'picked' && canPick ? 'Click the passages you want changed.' : 'Highlighted passages have findings. Click one to see it.'}</p>
+            <p className="text-xs text-fg-subtle">{asking && scope === 'picked' && canPick ? 'Click the passages you want changed.' : open.length ? 'Click a highlighted passage.' : ''}</p>
           </div>
           {docError ? (
             <Alert tone="warning">{docError}</Alert>
@@ -207,7 +206,6 @@ export function Workspace({ job: initial }: { job: Job }) {
                     </h3>
                   )
                 const picking = asking && scope === 'picked' && canPick && (b.kind === 'paragraph' || b.kind === 'list_item')
-                const shown = marks.find((f) => f.id === active)
                 return (
                   <div key={b.id} ref={(el) => void (blockRefs.current[b.id] = el)}>
                     {top && !picking && (
@@ -228,15 +226,6 @@ export function Workspace({ job: initial }: { job: Job }) {
                     >
                       {text}
                     </p>
-                    {shown && !picking && (
-                      <div className="mt-2 rounded-lg border border-line bg-white p-3 font-sans text-sm shadow-card">
-                        <p className="font-semibold">{REASON_LABELS[shown.reason]}</p>
-                        <p className="mt-1 text-fg-muted">{shown.explanation}</p>
-                        <p className="mt-1.5 flex gap-1.5 text-brand-800">
-                          <Lightbulb className="mt-0.5 size-4 shrink-0 text-brand-600" aria-hidden /> {shown.suggestion}
-                        </p>
-                      </div>
-                    )}
                   </div>
                 )
               })}
@@ -246,6 +235,7 @@ export function Workspace({ job: initial }: { job: Job }) {
 
         {/* The review panel */}
         <aside className="order-1 space-y-4 lg:sticky lg:top-20 lg:order-2 lg:max-h-[calc(100dvh-6rem)] lg:overflow-y-auto">
+          {analysis && <ScoreCard job={job} percent={analysis.percent ?? doc?.percent ?? null} percentAfter={doc?.percentAfter ?? null} />}
           <Card className="space-y-2 p-4">
             <p className="text-sm font-semibold">What next?</p>
             {job.source?.format === 'DOCX' ? (
@@ -475,41 +465,40 @@ export function Workspace({ job: initial }: { job: Job }) {
   )
 }
 
-/** The headline: estimated AI-likeness as a percentage, with the band and what it does and does not mean. */
-function ScoreHeader({ job }: { job: Job }) {
+/** The headline, compact: the estimated AI-likeness score and its band. What it means sits behind the i. */
+function ScoreCard({ job, percent, percentAfter }: { job: Job; percent: number | null; percentAfter: number | null }) {
+  const [about, setAbout] = useState(false)
   const a = job.analysis!
   const after = job.analysisAfter
-  const pct = (r: { percent?: number | null }) => (r.percent != null ? `${r.percent}%` : null)
+  const now = after ?? a
+  const shown = after ? (after.percent ?? percentAfter) : percent
   return (
-    <div className="mb-6 rounded-xl border border-line bg-surface-subtle p-4">
-      <div className="flex flex-wrap items-end gap-x-6 gap-y-2">
-        <div>
-          <p className="text-xs font-semibold tracking-wide text-fg-subtle uppercase">Estimated AI-likeness</p>
-          <p className="mt-1 flex items-baseline gap-2 font-sans">
-            <span className="text-4xl font-bold tracking-tight">{pct(a) ?? label(a.band)}</span>
-            {after && (
-              <>
-                <ArrowRight className="size-5 self-center text-fg-subtle" aria-hidden />
-                <span className="text-4xl font-bold tracking-tight text-brand-700">{pct(after) ?? label(after.band)}</span>
-                <span className="text-sm text-fg-muted">after</span>
-              </>
-            )}
-          </p>
-        </div>
-        <div className="flex items-center gap-2 pb-1">
-          <span className={clsx('rounded-lg px-2.5 py-1 text-xs font-bold ring-1 ring-inset', BAND_STYLE[(after ?? a).band])}>{label((after ?? a).band)}</span>
-          <Badge>Confidence: {a.confidence.toLowerCase()}</Badge>
-        </div>
+    <Card className="p-4">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-semibold tracking-wide text-fg-subtle uppercase">Estimated AI-likeness</p>
+        <button className="rounded-full p-1 text-fg-subtle hover:bg-surface-muted hover:text-fg" aria-label="What this score means" aria-expanded={about} onClick={() => setAbout(!about)}>
+          <Info className="size-4" aria-hidden />
+        </button>
       </div>
-      {a.percent != null && (
-        <div className="mt-3 h-2 overflow-hidden rounded-full bg-white ring-1 ring-line" aria-hidden>
-          <div className={clsx('h-full rounded-full', (after ?? a).band === 'HIGH' ? 'bg-rose-500' : (after ?? a).band === 'MODERATE' ? 'bg-amber-400' : 'bg-brand-500')} style={{ width: `${(after ?? a).percent ?? a.percent}%` }} />
+      <div className="mt-1 flex items-baseline gap-2">
+        {after && <span className="text-lg font-semibold text-fg-subtle line-through decoration-1">{percent != null ? `${percent}%` : label(a.band)}</span>}
+        <span className="text-4xl font-bold tracking-tight">{shown != null ? `${shown}%` : label(now.band)}</span>
+        <span className={clsx('ml-auto rounded-lg px-2.5 py-1 text-xs font-bold ring-1 ring-inset', BAND_STYLE[now.band])}>{label(now.band)}</span>
+      </div>
+      {shown != null && (
+        <div className="mt-2 h-2 overflow-hidden rounded-full bg-surface-muted" aria-hidden>
+          <div className={clsx('h-full rounded-full', now.band === 'HIGH' ? 'bg-rose-500' : now.band === 'MODERATE' ? 'bg-amber-400' : 'bg-brand-500')} style={{ width: `${Math.max(shown, 2)}%` }} />
         </div>
       )}
-      <p className="mt-3 flex gap-2 font-sans text-xs leading-relaxed text-fg-subtle">
-        <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden /> {DISCLAIMER} The percentage estimates how much of your text reads as AI-written; it is not proof of how it was written.
-      </p>
-    </div>
+      {about && (
+        <div className="mt-3 space-y-1.5 text-xs leading-relaxed text-fg-muted">
+          <p>
+            Scored across {formatNumber(now.analysedWords)} words{now.excludedWords > 0 ? `; ${formatNumber(now.excludedWords)} words in headings, references, quotations and short passages were not scored` : ''}. Confidence: {now.confidence.toLowerCase()}.
+          </p>
+          <p>{DISCLAIMER} This is a weighted writing-pattern score on a 0–100 scale, displayed as a percentage. It is not proof of how your paper was written, and the percentage is not the share of words written by AI. Fresh checks can differ.</p>
+        </div>
+      )}
+    </Card>
   )
 }
 

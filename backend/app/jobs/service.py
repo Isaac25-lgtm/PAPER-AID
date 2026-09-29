@@ -1134,6 +1134,11 @@ def _erase_project(rt: Runtime, project: Project, expired_before: datetime | Non
         _erase(rt, claimed)
     rt.files.delete_prefix(project.storage_prefix())
     rt.files.delete_prefix(project.legacy_prefix())  # a project not yet migrated (Codex audit 56c4f83 H04)
+    guide_prefix = f"users/{project.owner_uid}/guides/{project.id}"
+    rt.files.delete_prefix(guide_prefix)
+    rt.files.delete_prefix(guide_prefix + "-", flat=True)  # copies uploaded before guides had their own directory
+    if project.guide is not None:
+        rt.files.delete(project.guide.path)  # stored outside the project's prefix
     for profile_id in project.profiles:  # institution profiles built from this project's guide
         rt.files.delete(f"rulebooks/{profile_id}.json")
     rt.store.delete_project(project.id)

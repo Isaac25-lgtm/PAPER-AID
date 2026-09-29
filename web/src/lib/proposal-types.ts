@@ -157,6 +157,8 @@ export interface Project {
   guideName: string | null
   /** The current profile was read from the current guide. */
   guideRead: boolean
+  /** The institution's profile can no longer be read: the proposal can go back to the standard structure. */
+  profileMissing?: boolean
   /** A one-off message returned by an action (for example why Chapter One did not start). */
   notice: string | null
   chapters: ChapterState[]

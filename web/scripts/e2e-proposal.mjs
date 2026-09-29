@@ -6,7 +6,7 @@ import { chromium } from 'playwright-core'
 
 const out = process.argv[2] ?? 'e2e-output'
 const reviewFile = process.argv[3]
-const base = 'http://localhost:5000'
+const base = process.env.PAPERAID_BASE ?? 'http://localhost:5000'
 const executablePath = process.env.CHROME_PATH ?? 'C:/Program Files/Google/Chrome/Application/chrome.exe'
 mkdirSync(out, { recursive: true })
 
@@ -148,6 +148,10 @@ try {
   await shot('p8-concept')
   step('concept paper written from the plan, checked against its limits and downloaded')
   await page.getByLabel('What should change in your concept paper?').fill('Shorten the background to half a page.')
+  await page.getByRole('button', { name: 'See the price' }).first().click()
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await page.getByRole('button', { name: 'Make these changes' }).waitFor({ state: 'detached' })
+  step('a priced request can be cancelled before it starts')
   await page.getByRole('button', { name: 'See the price' }).first().click()
   await page.getByRole('button', { name: 'Make these changes' }).click()
   await page.waitForFunction(() => [...document.querySelectorAll('option')].some((o) => o.textContent.startsWith('Version 2')), null, { timeout: 90_000 })

@@ -213,7 +213,7 @@ export function createApiSource({ config, getAuthHeaders }: Options): DataSource
       approvePlan: (id, baseVersion) => request<Project>(`/api/projects/${id}/plan/approve`, { method: 'POST', body: JSON.stringify({ baseVersion }) }),
       takeCandidate: (id, accept) => request<Project>(`/api/projects/${id}/plan/candidate`, { method: 'POST', body: JSON.stringify({ accept }) }),
       sampleSize: (id, sample) => request<{ size: number | null; steps: string; missing: string }>(`/api/projects/${id}/sample-size`, { method: 'POST', body: JSON.stringify(sample) }),
-      quoteStep: (id, step, note) => request<StepQuote>(`/api/projects/${id}/steps`, { method: 'POST', body: JSON.stringify({ step, note }) }),
+      quoteStep: (id, step, note, comments) => request<StepQuote>(`/api/projects/${id}/steps`, { method: 'POST', body: JSON.stringify({ step, note, comments: comments ?? [] }) }),
       submitStep: async (id, jobId, quoteId) => {
         await request<Job>(`/api/projects/${id}/steps/${jobId}/submit`, { method: 'POST', body: JSON.stringify({ quoteId }) })
       },

@@ -86,7 +86,7 @@ export interface DataSource {
     approvePlan(id: string, baseVersion: number): Promise<Project>
     takeCandidate(id: string, accept: boolean): Promise<Project>
     sampleSize(id: string, sample: SampleSize): Promise<{ size: number | null; steps: string; missing: string }>
-    quoteStep(id: string, step: StepId, note: string): Promise<StepQuote>
+    quoteStep(id: string, step: StepId, note: string, comments?: string[]): Promise<StepQuote>
     submitStep(id: string, jobId: string, quoteId: string): Promise<void>
     chapter(id: string, number: number, version?: number): Promise<ChapterView>
     setChapter(id: string, number: number, version: number, approved: boolean): Promise<Project>

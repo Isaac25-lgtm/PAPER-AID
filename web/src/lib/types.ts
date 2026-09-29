@@ -230,8 +230,12 @@ export interface JobDocument {
   blocks: { id: string; kind: string; level: number | null; section: string; text: string }[]
   /** Deep Redraft: which paragraphs each redrafted group covers. */
   groups: Record<string, string[]>
+  /** Recovered after-refinement score for older results, when their saved analysis is available. */
+  percentAfter?: number | null
   /** Every change in full (the job record may shorten long passages). */
   changes: ChangedBlock[]
+  /** The percentage, recalculated for results recorded before it was kept on the job. */
+  percent?: number | null
 }
 
 export interface ChangedBlock {

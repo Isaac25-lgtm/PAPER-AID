@@ -205,6 +205,14 @@ def iter_paragraphs(doc: DocxDocument) -> Iterator[tuple[str, object, bool]]:
     yield from walk(doc.element.body, False)
 
 
+def remap_block_ids(doc: DocxDocument, previous: dict[str, object], block_map: dict[str, str]) -> None:
+    """Carry source IDs through a layout change using paragraph identity, including duplicate text."""
+    positions = {p: bid for bid, p, _ in iter_paragraphs(doc)}
+    mapped = {source: positions[previous[current]] for source, current in block_map.items() if current in previous and previous[current] in positions}
+    block_map.clear()
+    block_map.update(mapped)
+
+
 def _style_name(paragraph: Paragraph) -> str:
     try:
         return paragraph.style.name if paragraph.style is not None else "Normal"

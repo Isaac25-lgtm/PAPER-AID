@@ -15,7 +15,7 @@ from docx.shared import Cm, Pt, RGBColor
 from docx.text.paragraph import Paragraph
 
 from app.core.errors import PermanentStageError
-from app.documents.docx_io import W, body_text_fingerprint, iter_paragraphs
+from app.documents.docx_io import W, body_text_fingerprint, iter_paragraphs, remap_block_ids
 from app.documents.model import DocumentModel
 from app.formatting.presets import FormattingSpec
 from app.jobs.models import FormattingResult, FormattingRule
@@ -113,10 +113,11 @@ def _page_break_only(p) -> bool:
 LOGO_WIDTH_CM = 3.5
 
 
-def add_logo(data: bytes, image: bytes, align: str) -> bytes:
+def add_logo(data: bytes, image: bytes, align: str, block_map: dict[str, str] | None = None) -> bytes:
     """Place an institution logo at the top of the first page, sized proportionally (master
     context §17). A picture paragraph only: no text changes, so the wording check still holds."""
     doc = Document(io.BytesIO(data))
+    previous = {bid: p for bid, p, _ in iter_paragraphs(doc)} if block_map is not None else {}
     body = doc.element.body
     first = body[0] if len(body) else None
     paragraph = doc.add_paragraph()
@@ -124,6 +125,8 @@ def add_logo(data: bytes, image: bytes, align: str) -> bytes:
     paragraph.add_run().add_picture(io.BytesIO(image), width=Cm(LOGO_WIDTH_CM))
     if first is not None:
         first.addprevious(paragraph._p)  # move it to the very top
+    if block_map is not None:
+        remap_block_ids(doc, previous, block_map)
     out = io.BytesIO()
     doc.save(out)
     result = out.getvalue()
@@ -132,9 +135,10 @@ def add_logo(data: bytes, image: bytes, align: str) -> bytes:
     return result
 
 
-def apply_formatting(data: bytes, spec: FormattingSpec, model: DocumentModel) -> tuple[bytes, FormattingResult]:
+def apply_formatting(data: bytes, spec: FormattingSpec, model: DocumentModel, block_map: dict[str, str] | None = None) -> tuple[bytes, FormattingResult]:
     before = body_text_fingerprint(data)
     doc = Document(io.BytesIO(data))
+    previous = {bid: p for bid, p, _ in iter_paragraphs(doc)} if block_map is not None else {}
     headers_before = _header_texts(doc)
     blocks = model.by_id()
     warnings: list[str] = []
@@ -214,14 +218,14 @@ def apply_formatting(data: bytes, spec: FormattingSpec, model: DocumentModel) ->
             if in_table or block is None or block.kind != "heading" or (block.level or 1) != 1:
                 continue
             if seen_level_one and _CHAPTER_ONE.match(block.text) and index > 0:
-                previous = paragraphs[index - 1][1]
+                preceding = paragraphs[index - 1][1]
                 body_sectpr = doc.element.body.sectPr
                 prelim_sectpr = deepcopy(body_sectpr)
                 _set_page_numbering(prelim_sectpr, "lowerRoman")
-                if _page_break_only(previous):
-                    for r in previous.findall(W + "r"):
-                        previous.remove(r)
-                previous.get_or_add_pPr().append(prelim_sectpr)
+                if _page_break_only(preceding):
+                    for r in preceding.findall(W + "r"):
+                        preceding.remove(r)
+                preceding.get_or_add_pPr().append(prelim_sectpr)
                 _set_page_numbering(body_sectpr, "decimal")
                 roman_applied = True
                 break
@@ -304,4 +308,6 @@ def apply_formatting(data: bytes, spec: FormattingSpec, model: DocumentModel) ->
         rules.append(FormattingRule(label="Captions", value=f"{caption_count} table/figure captions styled"))
     if toc_inserted:
         rules.append(FormattingRule(label="Contents", value="Table of contents inserted — right-click it in Word and choose Update Field"))
+    if block_map is not None:
+        remap_block_ids(doc, previous, block_map)
     return result_bytes, FormattingResult(preset=spec.label, rules=rules, body_text_unchanged=unchanged, warnings=warnings)

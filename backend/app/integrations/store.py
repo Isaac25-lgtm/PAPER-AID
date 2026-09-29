@@ -228,8 +228,7 @@ class LocalJobStore:
         seen = {e.id for e in Wallet.model_validate_json(path.read_text(encoding="utf-8")).entries} if path.exists() else set()
         new = _new_entries(seen, wallet)
         if new:  # appended before the wallet is replaced; a repeat after a crash is removed on reading
-            with self._ledger_path(wallet.uid).open("a", encoding="utf-8") as ledger:
-                ledger.writelines(json.dumps(_entry_json(e)) + "\n" for e in new)
+            self._append_ledger(wallet.uid, new)
         tmp = self._wallet_path(wallet.uid).with_suffix(".tmp")
         tmp.write_text(wallet.model_dump_json(by_alias=True), encoding="utf-8")
         tmp.replace(self._wallet_path(wallet.uid))
@@ -283,17 +282,31 @@ class LocalJobStore:
         with self._lock:
             self._ledger_path(uid).unlink(missing_ok=True)
 
-    def ledger(self, uid: str, before: str | None, limit: int) -> list[LedgerEntry]:
-        with self._lock:
-            path = self._ledger_path(uid)
-            lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+    def _append_ledger(self, uid: str, entries: list[LedgerEntry]) -> None:
+        """Append history lines, first cutting off a line a crash left half-written (its change is
+        replayed whole from the journal), so a new line never joins a torn one (Codex re-check M10)."""
+        path = self._ledger_path(uid)
+        if path.exists():
+            data = path.read_bytes()
+            if data and not data.endswith(b"\n"):
+                path.write_bytes(data[: data.rfind(b"\n") + 1])
+        with path.open("a", encoding="utf-8") as ledger:
+            ledger.writelines(json.dumps(_entry_json(e)) + "\n" for e in entries)
+
+    def _read_ledger(self, uid: str) -> dict[str, LedgerEntry]:
+        path = self._ledger_path(uid)
         entries: dict[str, LedgerEntry] = {}
-        for line in lines:
+        for line in path.read_text(encoding="utf-8").splitlines() if path.exists() else []:
             try:
                 entry = LedgerEntry.model_validate_json(line)
             except ValidationError:
-                continue  # a line torn by a crash mid-append; its change was replayed from the journal
+                continue  # a torn line; its change was replayed from the journal
             entries[entry.id] = entry
+        return entries
+
+    def ledger(self, uid: str, before: str | None, limit: int) -> list[LedgerEntry]:
+        with self._lock:
+            entries = self._read_ledger(uid)
         ordered = sorted(entries.values(), key=lambda e: (_entry_json(e)["at"], e.id), reverse=True)
         return [e for e in ordered if _after_cursor(e, before)][:limit]
 
@@ -302,10 +315,8 @@ class LocalJobStore:
             wallet = self.get_wallet(uid)
             if wallet is None or wallet.ledger_backfilled:
                 return False
-            path = self._ledger_path(uid)
-            known = {LedgerEntry.model_validate_json(line).id for line in path.read_text(encoding="utf-8").splitlines() if line.strip()} if path.exists() else set()
-            with path.open("a", encoding="utf-8") as ledger:
-                ledger.writelines(json.dumps(_entry_json(e)) + "\n" for e in wallet.entries if e.id not in known)
+            known = set(self._read_ledger(uid))
+            self._append_ledger(uid, [e for e in wallet.entries if e.id not in known])
             wallet.ledger_backfilled = True
             self._write_wallet(wallet)
             return True

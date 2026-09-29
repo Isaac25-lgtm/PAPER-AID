@@ -6,14 +6,18 @@ is called. Usage: cd backend && .venv/Scripts/python -m tests.serve_e2e"""
 
 import os
 import shutil
+import tempfile
 from pathlib import Path
 
 import uvicorn
 
-DATA = Path(__file__).resolve().parents[1] / ".data_e2e"
+DEFAULT_DATA = (Path(__file__).resolve().parents[1] / ".data_e2e").resolve()
+DATA = Path(os.environ.get("PAPERAID_E2E_DATA_DIR", str(DEFAULT_DATA))).resolve()
 
 
 def main() -> None:
+    if DATA != DEFAULT_DATA and not (DATA.is_relative_to(Path(tempfile.gettempdir()).resolve()) and DATA.name == ".data_e2e"):
+        raise ValueError("Browser-test data must be the default directory or a .data_e2e directory under the system temporary directory")
     shutil.rmtree(DATA, ignore_errors=True)  # every browser-test run starts empty
     os.environ.update(
         {
@@ -45,7 +49,7 @@ def main() -> None:
     fetch.crossref_search = lambda text, rows=3: [dict(r) for r in models.crossref_found]
     fetch.openalex_retracted = lambda doi: doi in models.retracted
     fetch.resolve_doi = lambda url: models.dois.get(url, fetch.doi_in(url))
-    uvicorn.run(create_app(), host="127.0.0.1", port=8000)
+    uvicorn.run(create_app(), host="127.0.0.1", port=int(os.environ.get("PAPERAID_E2E_PORT", "8000")))
 
 
 if __name__ == "__main__":

@@ -7,10 +7,10 @@ import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
 import { chromium } from 'playwright-core'
 
 const out = process.argv[2] ?? 'e2e-output'
-const base = 'http://localhost:5000'
+const base = process.env.PAPERAID_BASE ?? 'http://localhost:5000'
 const fixtures = '../backend/tests/fixtures/generated/'
 const LOGO_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
-const jobsDir = '../backend/.data_e2e/jobs' // local store: one JSON file per job, drafts included
+const jobsDir = process.env.PAPERAID_E2E_DATA_DIR ? `${process.env.PAPERAID_E2E_DATA_DIR}/jobs` : '../backend/.data_e2e/jobs'
 const jobCount = () => (existsSync(jobsDir) ? readdirSync(jobsDir).filter((f) => f.endsWith('.json')).length : 0)
 const executablePath = process.env.CHROME_PATH ?? 'C:/Program Files/Google/Chrome/Application/chrome.exe'
 mkdirSync(out, { recursive: true })
@@ -97,13 +97,19 @@ try {
   await shot('1-uploaded-paper')
   step('the paper opens at once, with only "Check for AI" and its price beside it')
   await startAndFinish('Check for AI')
-  await page.getByText('Estimated AI-likeness').first().waitFor()
-  await page.getByText(/^\d{1,3}%$/).first().waitFor()
-  await page.getByText(/AI patterns/).first().waitFor()
+  const report = page.locator('aside').first()
+  await report.getByText('Estimated AI-likeness').waitFor()
+  await report.getByText(/^\d{1,3}%$/).first().waitFor()
+  if (await report.getByText(/not proof/).count()) throw new Error('the disclaimer should sit behind the i, not crowd the score')
+  await report.getByRole('button', { name: 'What this score means' }).click()
+  await report.getByText(/Scored across [\d,]+ words/).waitFor()
+  await report.getByText(/not proof of how your paper was written/).waitFor()
+  await page.locator('article').getByText(/AI patterns/).first().waitFor()
   await page.getByRole('button', { name: /^Next/ }).click()
-  await page.locator('article').getByText(/Be specific|Replace|Vary|Say|Use/).first().waitFor()
+  await report.getByText(/Be specific|Replace|Vary|Say|Use/).first().waitFor()
+  if (await page.locator('article').getByText(/Be specific|Replace|Vary|Say|Use/).count()) throw new Error('explanations belong on the right, not in the paper')
   await shot('2-check-results')
-  step('results on the same screen: a percentage, marked passages with labels, the report with Next')
+  step('results on the same screen: the percentage on the right, marked passages on the left, explanations on the right with Next')
   await page.getByRole('button', { name: /^Academic writing \(/ }).click()
   await page.getByRole('button', { name: 'Dismiss' }).first().click()
   await page.getByRole('button', { name: /Show 1 dismissed/ }).click()

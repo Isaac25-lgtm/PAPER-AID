@@ -174,7 +174,7 @@ def job_rebuild(job_id: str, user: User = Depends(current_user), rt: Runtime = D
 class ContinueRequest(Camel):
     origin: Literal["original", "result"] = "original"
     instruction: str = Field(default="", max_length=2000)
-    blocks: list[str] = Field(default=[], max_length=400)
+    blocks: list[str] = Field(default=[], max_length=3000)
 
 
 @api.post("/jobs/{job_id}/continue", response_model=JobView)

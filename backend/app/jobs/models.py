@@ -93,7 +93,7 @@ class ServiceSelection(Camel):
     academic: bool = True  # academic or research work: adds the academic, evidence and methodology review
     custom: CustomLayout | None = None  # the student's own font, size, spacing, margins or alignment over the preset
     logo: Literal["NONE", "CENTER", "LEFT"] = "NONE"  # an institution logo at the top of the first page
-    only_blocks: list[str] = Field(default=[], max_length=300)  # "Fix selected": refine exactly these passages
+    only_blocks: list[str] = Field(default=[], max_length=3000)  # "Fix selected": refine exactly these passages
     # A step of a proposal project, or REVIEW: an uploaded proposal checked against the rulebook.
     proposal: Literal["NONE", "PLAN", "CHAPTER_1", "CHAPTER_2", "CHAPTER_3", "CONCEPT", "REVISE_1", "REVISE_2", "REVISE_3", "REVISE_4", "PROFILE", "REVIEW"] = "NONE"
     level: Literal["BACHELORS", "PGD", "MASTERS", "PHD"] = "MASTERS"  # the proposal's level (REVIEW only)

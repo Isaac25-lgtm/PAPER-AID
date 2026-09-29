@@ -131,7 +131,7 @@ def view(rt: Runtime, p: Project) -> ProjectView:
     except AppError as exc:
         if exc.code != "PROFILE_MISSING":
             raise
-        out.institution_notes, out.blockers = [rulebook.PROFILE_MISSING], [rulebook.PROFILE_MISSING]
+        out.institution_notes, out.blockers, out.profile_missing = [rulebook.PROFILE_MISSING], [rulebook.PROFILE_MISSING], True
         out.active_job = p.active_job if step_running(rt, p) else None
         return out
     out.blockers = proposal_export.final_blockers(p, docs)
@@ -351,7 +351,11 @@ def chapter(rt: Runtime, user: User, project_id: str, number: int, version: int 
 def export_docx(rt: Runtime, user: User, project_id: str, final: bool) -> tuple[bytes, str]:
     """The proposal in the UCU layout. A draft leaves out what is missing; a final export first
     requires every blocker resolved. Downloading counts as the student's action (renews expiry)."""
-    p = _owned(rt, user, project_id)
+    return _export(rt, user, _owned(rt, user, project_id), final)
+
+
+def _export(rt: Runtime, user: User, p: Project, final: bool) -> tuple[bytes, str]:
+    project_id = p.id
     chapters = {n: doc for n in (1, 2, 3) if (doc := _chapter_doc(rt, p.chapter(n))) is not None}
     if not chapters:
         raise AppError("Write at least one chapter before downloading the proposal.", code="NOTHING_TO_EXPORT")
@@ -369,8 +373,8 @@ def export_docx(rt: Runtime, user: User, project_id: str, final: bool) -> tuple[
 def export_pdf(rt: Runtime, user: User, project_id: str, final: bool) -> tuple[bytes, str]:
     """The same proposal as a PDF for reading and sharing: the Word export converted to LaTeX and
     compiled offline (no AI). Word stays the file to submit, in the institution's layout."""
-    data, name = export_docx(rt, user, project_id, final)
     p = _owned(rt, user, project_id)
+    data, name = _export(rt, user, p, final)  # one snapshot for the document and its cache key (Codex re-check M27)
     # The same content always gives the same PDF: kept beside the project, keyed by what the document
     # is built from (the Word file itself carries its creation time), so a repeat costs nothing (M27).
     built_from = [
@@ -432,7 +436,7 @@ def chapter_one_estimate(settings, level: str) -> QuoteLine:
     return QuoteLine(label="Chapter 1, started when you approve the plan (up to)", amount=with_margin(proposal_usd(settings, "CHAPTER_1", words), settings), service="CHAPTER_1")
 
 
-def quote_step(rt: Runtime, user: User, project_id: str, step: Step, note: str) -> StepQuote:
+def quote_step(rt: Runtime, user: User, project_id: str, step: Step, note: str, comments: list[str] | None = None) -> StepQuote:
     """Freeze the project's input for a step, price it and return the quote. Nothing is held until
     the student submits."""
     _require_ai(rt, user)
@@ -454,8 +458,12 @@ def quote_step(rt: Runtime, user: User, project_id: str, step: Step, note: str) 
         base_version = stored.current
         base_sha = hashlib.sha256(rt.files.get(base if rt.files.exists(base) else moved_path(base))).hexdigest()
         written = {s.key: s for s in doc.sections}
+        # The student's own request is priced alone (Codex review #4); otherwise the open supervisor
+        # comments on this chapter. An abandoned request never slips into a later price.
+        wanted = set(comments or [])
         for comment in p.feedback:
-            if comment.status == "OPEN" and comment.chapter == chapter:
+            included = comment.id in wanted if wanted else comment.by == "SUPERVISOR"
+            if included and comment.status == "OPEN" and comment.chapter == chapter:
                 for key in comment.sections:
                     if key in written and len(revise.setdefault(key, [])) < 8:
                         revise[key].append(comment.text)
@@ -569,7 +577,9 @@ def upload_guide(rt: Runtime, user: User, project_id: str, filename: str, data: 
     # A path of its own per attempt (a priced profile step may still read an earlier one), attached
     # in a transaction; if the project was deleted meanwhile the file is removed again, so a late
     # upload never leaves a private copy behind (Codex audit 56c4f83 H03).
-    path = f"{p.storage_prefix()}/guide/{sha[:16]}-{secrets.token_hex(4)}.txt"
+    # Under users/: the bucket's 31-day rule removes any copy an interrupted upload leaves behind
+    # (Codex re-check H03); a guide is needed only until it is read into a profile.
+    path = f"users/{p.owner_uid}/guides/{p.id}/{sha[:16]}-{secrets.token_hex(4)}.txt"
     rt.files.put(path, text.encode("utf-8"), "text/plain")
     guide = GuideFile(name=PurePosixPath(filename).name[:120] or "guide", words=model.word_count, sha256=sha, path=path)
 
@@ -579,11 +589,12 @@ def upload_guide(rt: Runtime, user: User, project_id: str, filename: str, data: 
         q.guide = guide
         return q
 
+    attached: Project | None = None
     try:
         attached = _change(rt, user, project_id, apply)
-    except AppError:
-        rt.files.delete(path)
-        raise
+    finally:
+        if attached is None:  # refused or failed for any reason: the copy must not outlive the attempt
+            rt.files.delete(path)
     return view(rt, attached)
 
 
@@ -865,4 +876,3 @@ def sample_size_preview(sample: SampleSize) -> dict[str, object]:
     """What PaperAid will calculate from the student's figures, shown while they edit the plan."""
     result = sampling.calculate(sample)
     return {"size": result.size, "steps": result.steps, "missing": result.missing}
-

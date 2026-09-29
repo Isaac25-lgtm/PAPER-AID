@@ -276,6 +276,7 @@ class ProjectView(Camel):
     institution_notes: list[str] = []  # what the student's guide left open (computed for the view)
     guide_name: str | None = None  # the uploaded guide's file name (computed for the view)
     guide_read: bool = False  # the current profile was read from the current guide (computed for the view)
+    profile_missing: bool = False  # the institution profile could not be loaded (computed for the view)
     blockers: list[str] = []  # what stands between the project and a complete download (computed for the view)
     notice: str | None = None  # a one-off message for the student (not stored meaningfully; set on a response)
     chapters: list[ChapterState]

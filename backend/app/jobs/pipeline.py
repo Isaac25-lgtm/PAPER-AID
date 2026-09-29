@@ -665,14 +665,14 @@ def _select_targets(ctx: StageContext, model: DocumentModel) -> list[Target]:
 
     chosen = set(ctx.job.selection.only_blocks)
     if chosen:  # "Fix selected": the student chose these passages; the AI Check's findings on them guide the rewrite
-        for bid, notes in ctx.job.fix_notes.items():
-            if bid in chosen:
-                findings.setdefault(bid, []).extend(n for n in notes if n not in findings.get(bid, []))
+        for bid in chosen:
+            notes = [*ctx.job.fix_notes.get(bid, []), *ctx.job.fix_notes.get("*", [])]  # "*": a request for every chosen passage
+            findings.setdefault(bid, []).extend(n for n in notes if n not in findings.get(bid, []))
         candidates = [b for b in prose if b.editable and b.id in chosen]
     else:
         candidates = sorted((b for b in prose if b.editable and b.id in flagged and b.id not in preserve), key=priority)
     share = 1.0 if chosen else 0.25 if ctx.job.selection.intensity == "LIGHT" else 0.5
-    cap = max(150, share * result.analysed_words)
+    cap = sum(b.words for b in candidates) if chosen else max(150, share * result.analysed_words)
     targets, used = [], 0
     for block in candidates:
         if used + block.words > cap and targets:
@@ -755,7 +755,7 @@ def _planned_targets(ctx: StageContext) -> list[Target]:
         item = final.get(raw["id"])
         # The student's own request (Ask for changes) reaches the writer in their words, and a passage
         # they asked to change is always rewritten (owner request 2026-09-29).
-        asked = [n for n in ctx.job.fix_notes.get(raw["id"], []) if n.startswith("The student asks:")]
+        asked = [n for n in [*ctx.job.fix_notes.get(raw["id"], []), *ctx.job.fix_notes.get("*", [])] if n.startswith("The student asks:")]
         if (item and item.action == "rewrite") or asked:
             instruction = " ".join([item.instruction if item and item.action == "rewrite" else "", *asked]).strip()
             targets.append(Target(**{**raw, "instruction": instruction, "preserve": item.preserve if item else ""}))
@@ -914,13 +914,13 @@ def stage_auditing(ctx: StageContext) -> None:
     ctx.update(save)
 
 
-def with_logo(rt, job: Job, data: bytes) -> tuple[bytes, FormattingRule | None]:
+def with_logo(rt, job: Job, data: bytes, block_map: dict[str, str] | None = None) -> tuple[bytes, FormattingRule | None]:
     """The student's institution logo on the first page, when they chose one: the same step for the
     finished file and for "Download with my choices" (Codex audit 56c4f83 M14)."""
     if job.selection.logo == "NONE" or job.logo is None or job.selection.formatting == "NONE":
         return data, None
     where = "top left" if job.selection.logo == "LEFT" else "top centre"
-    return add_logo(data, rt.files.get(job.logo.path), job.selection.logo), FormattingRule(label="Logo", value=f"{job.logo.name}, {where} of the first page")
+    return add_logo(data, rt.files.get(job.logo.path), job.selection.logo, block_map), FormattingRule(label="Logo", value=f"{job.logo.name}, {where} of the first page")
 
 
 def stage_formatting(ctx: StageContext) -> None:

@@ -60,7 +60,7 @@ def test_asking_for_changes_sends_the_students_words_to_the_writer(fixed_client)
     draft = fixed_client.post(
         f"/api/jobs/{refined_id}/continue", headers=STUDENT, json={"origin": "result", "instruction": "Make this paragraph shorter and plainer.", "blocks": [first]}
     ).json()
-    assert draft["selection"]["onlyBlocks"] == [first] and draft["fixNotes"][first] == ["The student asks: Make this paragraph shorter and plainer."]
+    assert draft["selection"]["onlyBlocks"] == [first] and draft["fixNotes"]["*"] == ["The student asks: Make this paragraph shorter and plainer."]
     quote = fixed_client.post(f"/api/jobs/{draft['id']}/quote", headers=STUDENT, json={"selection": draft["selection"]}).json()["quote"]
     assert fixed_client.post(f"/api/jobs/{draft['id']}/submit", headers=STUDENT, json={"quoteId": quote["id"]}).status_code == 200
     assert wait(fixed_client, draft["id"], timeout=120)["status"] == "COMPLETED"
@@ -85,7 +85,9 @@ def test_changes_to_the_concept_paper_can_be_asked_for_directly(client):
     assert asked.status_code == 200, asked.json()
     comment = asked.json()["feedback"][-1]
     assert comment["by"] == "STUDENT" and comment["chapter"] == 4 and comment["sections"] == ["background"]
-    job = run_step(client, project_id, "REVISE_4")
+    quoted = client.post(f"/api/projects/{project_id}/steps", headers=STUDENT, json={"step": "REVISE_4", "comments": [comment["id"]]}).json()
+    assert client.post(f"/api/projects/{project_id}/steps/{quoted['job']['id']}/submit", headers=STUDENT, json={"quoteId": quoted["quote"]["id"]}).status_code == 200
+    job = wait(client, quoted["job"]["id"])
     assert job["status"] == "COMPLETED", job
     project = client.get(f"/api/projects/{project_id}", headers=STUDENT).json()
     assert next(c for c in project["chapters"] if c["number"] == 4)["current"] == 2

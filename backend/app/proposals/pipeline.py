@@ -239,7 +239,10 @@ def stage_planning(ctx: "StageContext") -> None:
     runner = ctx.ai(ProposalRunner)
     assert isinstance(runner, ProposalRunner)
     if inp.step == "PROFILE":
-        guide = ctx.rt.files.get(inp.guide).decode("utf-8")
+        guide_path = inp.guide if ctx.rt.files.exists(inp.guide) else moved_path(inp.guide)
+        if not ctx.rt.files.exists(guide_path):
+            raise PermanentStageError("GUIDE_EXPIRED", "Your guide is no longer stored. Upload it again, then read it. Nothing was charged.", "profile: guide missing")
+        guide = ctx.rt.files.get(guide_path).decode("utf-8")
         final, draft, critique = runner.profile({"guide": guide, "reference": profile.reference()})
         try:
             book = profile.build(final, inp.guide_name)
@@ -489,11 +492,13 @@ def stage_auditing(ctx: "StageContext") -> None:
     if base is not None:
         document, kept = _merge(base, document, set(current))
         delivered = _delivered(base, document, set(current))
-        if not delivered:
+        # answered: changed AND passed the final review (Codex re-check H05); changed text alone is not an answer
+        resolved = [k for k in delivered if k not in unresolved]
+        if not resolved:
             raise PermanentStageError(
-                "NOTHING_REVISED", "PaperAid could not revise these sections this time, so your chapter is unchanged and nothing was charged.", "revise: no section changed"
+                "NOTHING_REVISED", "PaperAid could not resolve these comments this time, so your chapter is unchanged and nothing was charged.", "revise: nothing resolved"
             )
-        document.revised = delivered
+        document.revised = resolved
         if kept:
             warnings.append(f"These sections could not be revised this time, so your earlier text is kept: {', '.join(kept)}.")
         # untouched sections keep what was known about them (Codex audit 56c4f83 H06)
@@ -505,10 +510,10 @@ def stage_auditing(ctx: "StageContext") -> None:
     ctx.put_json("chapter.json", document.model_dump(by_alias=True))
     if base is not None:
         targeted = [k for k in inp.revise if any(s.key == k for s in base.sections)]
-        share = len(delivered) / len(targeted) if targeted else 0.0
+        share = len(document.revised) / len(targeted) if targeted else 0.0
         ctx.update(lambda j: j.model_copy(update={"delivery": {**j.delivery, "REVISE": share}}))
     if warnings:
-        ctx.update(lambda j: _warn(j, warnings, partial=bool(unresolved or stripped or unreviewed) or len(delivered) < len(inp.revise)))
+        ctx.update(lambda j: _warn(j, warnings, partial=bool(unresolved or stripped or unreviewed) or len(document.revised) < len(inp.revise)))
 
 
 def _revision(
