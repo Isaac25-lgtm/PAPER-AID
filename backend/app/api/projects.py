@@ -7,6 +7,7 @@ from fastapi import APIRouter, Body, Depends, File, Query, UploadFile
 from fastapi.responses import Response
 from pydantic import Field
 
+from app.api.public import student_json
 from app.core.auth import current_user
 from app.jobs.models import Camel, JobView
 from app.jobs.service import User
@@ -120,13 +121,13 @@ def sample_size(project_id: str, body: SampleSize, user: User = Depends(current_
 
 
 @router.post("/{project_id}/steps", response_model=projects.StepQuote)
-def quote_step(project_id: str, body: StepRequest, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> projects.StepQuote:
-    return projects.quote_step(rt, user, project_id, body.step, body.note, body.comments)
+def quote_step(project_id: str, body: StepRequest, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> Response:
+    return student_json(rt, projects.quote_step(rt, user, project_id, body.step, body.note, body.comments))
 
 
 @router.post("/{project_id}/steps/{job_id}/submit", response_model=JobView)
-def submit_step(project_id: str, job_id: str, quote_id: str = Body(..., embed=True, alias="quoteId"), user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> JobView:
-    return projects.submit_step(rt, user, project_id, job_id, quote_id)
+def submit_step(project_id: str, job_id: str, quote_id: str = Body(..., embed=True, alias="quoteId"), user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> Response:
+    return student_json(rt, projects.submit_step(rt, user, project_id, job_id, quote_id))
 
 
 @router.get("/{project_id}/chapters/{number}", response_model=projects.ChapterView)

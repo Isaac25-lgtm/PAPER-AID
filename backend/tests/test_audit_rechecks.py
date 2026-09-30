@@ -15,7 +15,7 @@ from app.jobs.pipeline import StageContext, _select_targets
 from app.proposals import profile, rulebook, service
 from app.runtime import get_runtime
 from tests.fake_models import profile_answer
-from tests.test_api import STUDENT, wait
+from tests.test_api import STUDENT, enable_score, wait
 from tests.test_audit_56c4f83 import OWNER, UID, _comment, _paper, _project, _quote, _submit
 from tests.test_proposals import _create
 from tests.test_studio import _run
@@ -303,6 +303,7 @@ def test_selected_passages_keep_their_identity_after_formatting_and_a_logo(fixed
 
 
 def test_old_refined_results_recover_both_percentages_without_a_model_call(fixed_client):
+    enable_score()
     rt = get_runtime()
     job_id, original = _run(fixed_client, {"writing": "REFINE", "academic": False})
     calls = len(fixed_client.models.requests)
@@ -341,6 +342,7 @@ def test_review4_an_abandoned_request_never_joins_a_later_price(client):
 
 
 def test_results_from_before_the_percentage_show_one(fixed_client):
+    enable_score()
     rt = get_runtime()
     checked_id, checked = _run(fixed_client, {"writing": "AI_CHECK", "academic": False})
     rt.store.update(checked_id, lambda j: j.model_copy(update={"analysis": j.analysis.model_copy(update={"percent": None})}))

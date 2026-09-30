@@ -60,6 +60,9 @@ def document(rt: Runtime, user: User, job_id: str) -> dict[str, Any]:
     blocks = [{"id": b.id, "kind": b.kind, "level": b.level, "section": b.section, "text": b.text} for b in model.blocks if b.text.strip()]
     groups = {g.id: g.block_ids for g in paragraph_groups.groups(model)} if job.refinement and job.refinement.mode == "REDRAFT" else {}
     changes = [ChangedBlock.model_validate(c).model_dump(by_alias=True) for c in _internal(rt, job, "changes_full.json") or []]
+    result = {"blocks": blocks, "groups": groups, "changes": changes}
+    if not rt.settings.show_ai_score:
+        return result
     percent = job.analysis.percent if job.analysis else None
     if job.analysis is not None and job.analysis.coverage_complete is not False and percent is None and raw is not None:
         percent = _saved_percent(rt, job, model)
@@ -73,7 +76,7 @@ def document(rt: Runtime, user: User, job_id: str) -> dict[str, Any]:
             and rt.files.exists(f"{job.storage_prefix()}/internal/refined.docx")
         ):
             percent_after = _analysis_after(StageContext(rt, job), job.analysis_after.method).percent
-    return {"blocks": blocks, "groups": groups, "changes": changes, "percent": percent, "percentAfter": percent_after}
+    return {**result, "percent": percent, "percentAfter": percent_after}
 
 
 def _saved_percent(rt: Runtime, job: Job, model: DocumentModel) -> int | None:

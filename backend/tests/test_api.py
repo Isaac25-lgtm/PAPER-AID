@@ -12,6 +12,13 @@ ADMIN = {"Authorization": "Dev demo@paperaid.app"}
 REFINE_FORMAT = {"writing": "REFINE", "intensity": "STANDARD", "formatting": "FORMAT", "preset": "apa7", "latex": False}
 
 
+def enable_score() -> None:
+    """Opt a score-specific regression into the internal calibration display."""
+    from app.runtime import get_runtime
+
+    get_runtime().settings.show_ai_score = True
+
+
 def start_job(client, name="simple_essay.docx", selection=None, headers=STUDENT):
     job_id = client.post("/api/jobs", headers=headers).json()["id"]
     upload = client.post(f"/api/jobs/{job_id}/files/source", headers=headers, files={"file": (name, fixture_bytes(name), "application/octet-stream")})
@@ -1048,6 +1055,7 @@ def _judge_all(judgement):
 
 
 def test_both_checkers_can_reject_every_signal_as_a_false_positive(real_client):
+    enable_score()
     real_client.models.overrides["analyse"] = _judge_all(lambda b: {"rejected": [s["rule"] for s in b["signals"]]})
     real_client.models.overrides["analyse_peer"] = real_client.models.overrides["analyse"]
     _, job = _submit(real_client, {"writing": "AI_CHECK"})
@@ -1105,6 +1113,7 @@ def test_the_reviewer_sees_the_post_scan_and_linked_passages_and_its_warnings_re
 
 
 def test_the_after_band_uses_both_checkers_judgments_of_the_finished_paper(real_client):
+    enable_score()
     models = real_client.models
     models.overrides["analyse"] = _analyse_all
     order = ["LOW", "MODERATE", "HIGH"]

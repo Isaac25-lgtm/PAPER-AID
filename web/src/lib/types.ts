@@ -171,9 +171,10 @@ export interface Finding {
 }
 
 export interface AnalysisResult {
-  band: Band
-  confidence: Confidence
-  /** Estimated AI-likeness as a percentage (absent on analyses made before it was recorded). */
+  /** These score fields are absent from student responses while AI scoring is disabled. */
+  band?: Band
+  confidence?: Confidence
+  /** Estimated AI-likeness as a percentage, present only when scoring is enabled and available. */
   percent?: number | null
   coverageComplete?: boolean | null
   disagreementBlocks?: string[]

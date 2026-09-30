@@ -269,8 +269,8 @@ function Completed({ job }: { job: Job }) {
 /** The AI-likeness band for the overview, when the score is switched on. */
 function scoreHighlight(job: Job): ReactNode {
   if (job.analysis?.coverageComplete === false || job.analysisAfter?.coverageComplete === false) return 'Check incomplete'
-  if (job.analysis && job.analysisAfter) return <BandChange before={job.analysis.band} after={job.analysisAfter.band} />
-  if (job.analysis) return job.analysis.band.charAt(0) + job.analysis.band.slice(1).toLowerCase()
+  if (job.analysis?.band && job.analysisAfter?.band) return <BandChange before={job.analysis.band} after={job.analysisAfter.band} />
+  if (job.analysis?.band) return job.analysis.band.charAt(0) + job.analysis.band.slice(1).toLowerCase()
   return null
 }
 

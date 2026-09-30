@@ -515,6 +515,7 @@ function ScoreCard({ job, percent, percentAfter }: { job: Job; percent: number |
   const a = job.analysis!
   const after = job.analysisAfter
   const now = after ?? a
+  if (!now.band || !now.confidence) return <WritingCard job={job} />
   const complete = now.coverageComplete !== false
   const shown = complete ? (after ? (after.percent ?? percentAfter) : percent) : null
   return (
@@ -526,7 +527,7 @@ function ScoreCard({ job, percent, percentAfter }: { job: Job; percent: number |
         </button>
       </div>
       <div className="mt-1 flex items-baseline gap-2">
-        {after && <span className="text-lg font-semibold text-fg-subtle line-through decoration-1">{a.coverageComplete === false ? 'Check incomplete' : percent != null ? `${percent}%` : label(a.band)}</span>}
+        {after && <span className="text-lg font-semibold text-fg-subtle line-through decoration-1">{a.coverageComplete === false ? 'Check incomplete' : percent != null ? `${percent}%` : a.band ? label(a.band) : 'Writing feedback'}</span>}
         <span className={clsx('font-bold tracking-tight', complete ? 'text-4xl' : 'text-2xl')}>{!complete ? 'Check incomplete' : shown != null ? `${shown}%` : label(now.band)}</span>
         {complete && <span className={clsx('ml-auto rounded-lg px-2.5 py-1 text-xs font-bold ring-1 ring-inset', BAND_STYLE[now.band])}>{label(now.band)}</span>}
       </div>
@@ -624,8 +625,8 @@ function ReadySummary({ job, aiScore }: { job: Job; aiScore: boolean }) {
   const r = job.refinement!
   const findings = [...(job.analysis?.findings ?? []), ...(job.analysis?.review ?? [])]
   const needsYou = findings.filter((f) => !f.safe && !(job.dismissed ?? []).includes(f.id)).length
-  const beforeLabel = job.analysis?.coverageComplete === false ? 'Check incomplete' : job.analysis ? label(job.analysis.band) : '—'
-  const afterLabel = job.analysisAfter?.coverageComplete === false ? 'Check incomplete' : job.analysisAfter ? label(job.analysisAfter.band) : null
+  const beforeLabel = aiScore ? (job.analysis?.coverageComplete === false ? 'Check incomplete' : job.analysis?.band ? label(job.analysis.band) : '—') : null
+  const afterLabel = aiScore ? (job.analysisAfter?.coverageComplete === false ? 'Check incomplete' : job.analysisAfter?.band ? label(job.analysisAfter.band) : null) : null
   const items = [
     ...(aiScore ? [{ label: 'Estimated AI-likeness', value: afterLabel ? `${beforeLabel} → ${afterLabel}` : beforeLabel }] : []),
     { label: r.mode === 'REDRAFT' ? 'Passages redrafted' : 'Passages refined', value: String(r.refinedBlocks) },

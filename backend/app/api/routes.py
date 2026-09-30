@@ -6,6 +6,7 @@ from fastapi import APIRouter, Body, Depends, File, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import Field
 
+from app.api.public import student_json
 from app.core.auth import current_user, optional_user, require_admin
 from app.core.errors import AppError, Forbidden
 from app.jobs import service, workspace
@@ -50,8 +51,8 @@ def delete_me(user: User = Depends(current_user), rt: Runtime = Depends(get_runt
 
 
 @api.post("/jobs", response_model=JobView)
-def create_job(user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> JobView:
-    return service.create_draft(rt, user)
+def create_job(user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> Response:
+    return student_json(rt, service.create_draft(rt, user))
 
 
 @api.post("/jobs/{job_id}/files/logo", response_model=ImageMeta)
@@ -102,8 +103,8 @@ def wallet(user: User = Depends(current_user), rt: Runtime = Depends(get_runtime
 
 
 @api.post("/jobs/{job_id}/submit", response_model=JobView)
-def submit(job_id: str, quote_id: str = Body(..., embed=True, alias="quoteId"), user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> JobView:
-    return service.submit(rt, user, job_id, quote_id)
+def submit(job_id: str, quote_id: str = Body(..., embed=True, alias="quoteId"), user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> Response:
+    return student_json(rt, service.submit(rt, user, job_id, quote_id))
 
 
 @api.get("/jobs", response_model=Page[JobView])
@@ -114,18 +115,18 @@ def list_jobs(
     limit: int = 10,
     user: User = Depends(current_user),
     rt: Runtime = Depends(get_runtime),
-) -> Page[JobView]:
-    return service.list_jobs(rt, user, status, service_id, cursor, limit)
+) -> Response:
+    return student_json(rt, service.list_jobs(rt, user, status, service_id, cursor, limit))
 
 
 @api.get("/jobs/{job_id}", response_model=JobView)
-def get_job(job_id: str, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> JobView:
-    return service.get_job(rt, user, job_id)
+def get_job(job_id: str, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> Response:
+    return student_json(rt, service.get_job(rt, user, job_id))
 
 
 @api.post("/jobs/{job_id}/cancel", response_model=JobView)
-def cancel(job_id: str, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> JobView:
-    return service.cancel(rt, user, job_id)
+def cancel(job_id: str, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> Response:
+    return student_json(rt, service.cancel(rt, user, job_id))
 
 
 @api.delete("/jobs/{job_id}", status_code=204)
@@ -152,23 +153,23 @@ def download(job_id: str, output_id: str, user: User = Depends(current_user), rt
 
 
 @api.get("/jobs/{job_id}/document")
-def job_document(job_id: str, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> dict:
-    return workspace.document(rt, user, job_id)
+def job_document(job_id: str, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> Response:
+    return JSONResponse(workspace.document(rt, user, job_id), headers={"Cache-Control": "no-store"})
 
 
 @api.post("/jobs/{job_id}/findings/{finding_id}", response_model=JobView)
-def job_finding(job_id: str, finding_id: str, dismissed: bool = Body(..., embed=True), user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> JobView:
-    return workspace.set_finding(rt, user, job_id, finding_id, dismissed)
+def job_finding(job_id: str, finding_id: str, dismissed: bool = Body(..., embed=True), user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> Response:
+    return student_json(rt, workspace.set_finding(rt, user, job_id, finding_id, dismissed))
 
 
 @api.post("/jobs/{job_id}/changes/{change_id}", response_model=JobView)
-def job_change(job_id: str, change_id: str, accepted: bool = Body(..., embed=True), user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> JobView:
-    return workspace.set_change(rt, user, job_id, change_id, accepted)
+def job_change(job_id: str, change_id: str, accepted: bool = Body(..., embed=True), user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> Response:
+    return student_json(rt, workspace.set_change(rt, user, job_id, change_id, accepted))
 
 
 @api.post("/jobs/{job_id}/rebuild", response_model=JobView)
-def job_rebuild(job_id: str, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> JobView:
-    return workspace.rebuild(rt, user, job_id)
+def job_rebuild(job_id: str, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> Response:
+    return student_json(rt, workspace.rebuild(rt, user, job_id))
 
 
 class ContinueRequest(Camel):
@@ -178,8 +179,8 @@ class ContinueRequest(Camel):
 
 
 @api.post("/jobs/{job_id}/continue", response_model=JobView)
-def continue_job(job_id: str, body: ContinueRequest, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> JobView:
-    return workspace.continue_from(rt, user, job_id, body.origin, body.instruction, body.blocks)
+def continue_job(job_id: str, body: ContinueRequest, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> Response:
+    return student_json(rt, workspace.continue_from(rt, user, job_id, body.origin, body.instruction, body.blocks))
 
 
 @api.post("/jobs/{job_id}/fix", response_model=JobView)
@@ -189,8 +190,8 @@ def job_fix(
     safe_only: bool = Body(default=False, embed=True, alias="safeOnly"),
     user: User = Depends(current_user),
     rt: Runtime = Depends(get_runtime),
-) -> JobView:
-    return workspace.fix_draft(rt, user, job_id, finding_ids, safe_only)
+) -> Response:
+    return student_json(rt, workspace.fix_draft(rt, user, job_id, finding_ids, safe_only))
 
 
 # --- admin -------------------------------------------------------------------------------

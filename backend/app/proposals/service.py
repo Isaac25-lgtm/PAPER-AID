@@ -53,6 +53,8 @@ from app.proposals.models import (
     moved_path,
 )
 from app.proposals.pipeline import INPUT, _confirmed_gap, load_library
+from app.proposals.structure import guide_read as _guide_read
+from app.proposals.structure import structure_current as _structure_current
 from app.runtime import Runtime
 
 logger = logging.getLogger("paperaid.proposals")
@@ -384,6 +386,13 @@ def export_pdf(rt: Runtime, user: User, project_id: str, final: bool) -> tuple[b
     compiled offline (no AI). Word stays the file to submit, in the institution's layout."""
     p = _owned(rt, user, project_id)
     data, name = _export(rt, user, p, final)  # one snapshot for the document and its cache key (Codex re-check M27)
+    converted = to_latex(data)
+    if converted.omitted and final:
+        raise AppError(
+            f"{converted.omitted} part{'s' if converted.omitted != 1 else ''} of your proposal could not be converted to PDF. Download the Word file instead.",
+            code="PDF_INCOMPLETE",
+        )
+    pdf_name = name.removesuffix(".docx") + (" (PDF, incomplete).pdf" if converted.omitted else ".pdf")
     # The same content always gives the same PDF: kept beside the project, keyed by what the document
     # is built from (the Word file itself carries its creation time), so a repeat costs nothing (M27).
     built_from = [
@@ -392,19 +401,19 @@ def export_pdf(rt: Runtime, user: User, project_id: str, final: bool) -> tuple[b
     ]
     cached = f"{p.storage_prefix()}/pdf/{hashlib.sha256(json.dumps(built_from).encode()).hexdigest()[:24]}.pdf"
     if rt.files.exists(cached):
-        return rt.files.get(cached), name.removesuffix(".docx") + ".pdf"
+        return rt.files.get(cached), pdf_name
     _rate_limit(rt, user, "pdf", rt.settings.uploads_per_hour)
     if not PDF_SLOTS.acquire(blocking=False):  # compilers are bounded per instance
         raise AppError("PaperAid is making other PDFs right now. Try again in a minute, or download the Word file.", code="PDF_BUSY", status=503)
     try:
-        pdf, problem = compile_pdf(to_latex(data))
+        pdf, problem = compile_pdf(converted)
     finally:
         PDF_SLOTS.release()
     if pdf is None:
         log(logger, logging.WARNING, "proposal pdf failed", projectId=project_id, problem=problem)
         raise AppError("The PDF could not be made this time. Download the Word file instead.", code="PDF_FAILED")
     rt.files.put(cached, pdf, "application/pdf")
-    return pdf, name.removesuffix(".docx") + ".pdf"
+    return pdf, pdf_name
 
 
 def export_latex(rt: Runtime, user: User, project_id: str, final: bool) -> tuple[bytes, str]:
@@ -417,7 +426,7 @@ def export_latex(rt: Runtime, user: User, project_id: str, final: bool) -> tuple
     if result.omitted:  # a complete proposal is never offered with content missing (Codex review #5)
         if final:
             raise AppError(
-                f"{result.omitted} part{'s' if result.omitted != 1 else ''} of your proposal could not be converted to LaTeX. Download the Word or PDF file instead.",
+                f"{result.omitted} part{'s' if result.omitted != 1 else ''} of your proposal could not be converted to LaTeX. Download the Word file instead.",
                 code="LATEX_INCOMPLETE",
             )
         return archive, name.removesuffix(".docx") + " (LaTeX, incomplete).zip"
@@ -528,6 +537,7 @@ def quote_step(rt: Runtime, user: User, project_id: str, step: Step, note: str, 
         chapter=chapter,
         note=note,
         rulebook=p.rulebook,
+        guide_sha256=p.guide.sha256 if p.guide else "",
         inputs=p.inputs,
         plan=p.plan if chapter else None,
         plan_version=p.plan_version,
@@ -594,7 +604,7 @@ def _quote_profile(rt: Runtime, user: User, p: Project) -> StepQuote:
     _rate_limit(rt, user, "quote", rt.settings.quotes_per_hour)
     inp = StepInput(
         project_id=p.id, step="PROFILE", chapter=0, rulebook=p.rulebook, inputs=p.inputs, plan_version=p.plan_version,
-        guide=p.guide.path, guide_name=p.guide.name,
+        guide=p.guide.path, guide_name=p.guide.name, guide_sha256=p.guide.sha256,
     )
     data = inp.model_dump_json(by_alias=True).encode()
     sha = hashlib.sha256(data).hexdigest()
@@ -618,6 +628,8 @@ def upload_guide(rt: Runtime, user: User, project_id: str, filename: str, data: 
     """The institution's research guide (Word or PDF), kept as text for the profile step."""
     _require_ai(rt, user)
     p = _owned(rt, user, project_id)
+    if step_running(rt, p):
+        raise Conflict("A proposal step is running. Upload the guide after it finishes.", code="STEP_RUNNING")
     if any(c.versions for c in p.chapters):
         raise AppError("Your chapters already follow the current structure. Start a new proposal to use your institution's guide.", code="CHAPTERS_WRITTEN")
     _rate_limit(rt, user, "guide", rt.settings.uploads_per_hour)
@@ -634,6 +646,8 @@ def upload_guide(rt: Runtime, user: User, project_id: str, filename: str, data: 
     guide = GuideFile(name=PurePosixPath(filename).name[:120] or "guide", words=model.word_count, sha256=sha, path=path)
 
     def apply(q: Project) -> Project:
+        if step_running(rt, q):
+            raise Conflict("A proposal step is running. Upload the guide after it finishes.", code="STEP_RUNNING")
         if any(c.versions for c in q.chapters):
             raise AppError("Your chapters already follow the current structure. Start a new proposal to use your institution's guide.", code="CHAPTERS_WRITTEN")
         q.guide = guide
@@ -655,6 +669,8 @@ def use_default_rulebook(rt: Runtime, user: User, project_id: str) -> ProjectVie
     removed: list[str] = []
 
     def apply(q: Project) -> Project:
+        if step_running(rt, q):
+            raise Conflict("A proposal step is running. Change the structure after it finishes.", code="STEP_RUNNING")
         # always allowed when the profile is gone: the proposal must stay usable (Codex audit 56c4f83 M17)
         if any(c.versions for c in q.chapters) and rulebook.available(q.rulebook):
             raise AppError("Your chapters already follow the current structure.", code="CHAPTERS_WRITTEN")
@@ -671,27 +687,6 @@ def use_default_rulebook(rt: Runtime, user: User, project_id: str) -> ProjectVie
 
 
 GUIDE_UNREAD = "Your institution's guide is uploaded but not read yet. Read it, or choose the standard structure, before PaperAid writes your proposal."
-
-
-def _guide_read(p: Project) -> bool:
-    """Whether the project's current profile was read from its current guide."""
-    try:
-        book = rulebook.load(p.rulebook)
-    except AppError as exc:
-        if exc.code != "PROFILE_MISSING":
-            raise
-        return False
-    return p.guide is not None and book.get("guide_sha256") == p.guide.sha256
-
-
-def _structure_current(p: Project, inp: StepInput) -> bool:
-    """The guide a profile step was priced on, or the structure any other step was priced on, is
-    still the project's, and no unread guide is waiting (Codex review 2026-09-30 #2)."""
-    if inp.step == "PROFILE":
-        return p.guide is not None and p.guide.path in (inp.guide, moved_path(inp.guide))
-    if p.rulebook != inp.rulebook:
-        return False
-    return p.guide is None or any(c.versions for c in p.chapters) or _guide_read(p)
 
 
 def _revision_current(p: Project, inp: StepInput) -> bool:

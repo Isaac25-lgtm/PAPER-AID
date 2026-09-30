@@ -362,6 +362,7 @@ class StepInput(Camel):
     comment_signatures: dict[str, str] = {}  # REVISE: comment id → its signature when priced (M09)
     guide: str = ""  # PROFILE: the guide's text in storage, and its file name
     guide_name: str = ""
+    guide_sha256: str | None = None  # new quotes bind every step to its guide; None preserves older steps
     revise: dict[str, list[str]] = {}
     comment_ids: list[str] = []
     only: list[str] = []  # COMPLETE: the section keys still to write (the base version's missing sections)

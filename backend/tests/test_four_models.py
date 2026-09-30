@@ -13,7 +13,7 @@ from app.core.config import Settings
 from app.proposals.ai import ProposalRunner
 from tests.fake_models import FakeModels
 from tests.test_ai_coverage import _judgment, _passage
-from tests.test_api import STUDENT, _submit
+from tests.test_api import STUDENT, _submit, enable_score
 
 BRIEF = writing_brief("PRESERVE_VOICE", "STANDARD")
 
@@ -128,6 +128,7 @@ def test_rejected_rewrites_are_not_exported(client):
 
 
 def test_disagreement_lowers_confidence_and_is_visible_in_the_result(client):
+    enable_score()
     client.models.overrides["analyse_peer"] = lambda p: {"blocks": [{**_judgment(b["id"]), "riskBand": "high"} for b in p["blocks"]]}
     _, job = _submit(client, {"writing": "AI_CHECK", "academic": False})
     assert job["analysis"]["coverageComplete"] is True

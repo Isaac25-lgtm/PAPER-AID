@@ -20,7 +20,7 @@ from app.proposals.ai import ProposalRunner
 from app.runtime import get_runtime
 from tests.test_ai import ScriptedProvider, real_settings, runner_with
 from tests.test_ai_coverage import _judgment, _passage
-from tests.test_api import STUDENT, _judge_all, _submit
+from tests.test_api import STUDENT, _judge_all, _submit, enable_score
 from tests.test_audit_20260928 import _chapter_ready
 from tests.test_audit_20260928 import _run as run_step
 
@@ -155,12 +155,14 @@ def test_one_band_differences_are_averaged_not_flagged(client):
 
 
 def test_low_against_high_everywhere_makes_confidence_low(client):
+    enable_score()
     client.models.overrides["analyse_peer"] = _judge_all(lambda b: {"riskBand": "high"})
     _, job = _submit(client, {"writing": "AI_CHECK", "academic": False})
     assert job["analysis"]["disagreementBlocks"] and job["analysis"]["confidence"] == "LOW"
 
 
 def test_one_uncertain_passage_in_a_long_paper_is_flagged_without_low_confidence(client):
+    enable_score()
     chosen: list[str] = []
 
     def one_high(b):

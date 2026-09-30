@@ -33,6 +33,7 @@ from app.proposals.models import (
     StoredChapterVersion,
     moved_path,
 )
+from app.proposals.structure import structure_current
 
 if TYPE_CHECKING:
     from app.jobs.pipeline import StageContext
@@ -637,19 +638,38 @@ def _line_key(inp: StepInput) -> str:
 
 
 def _finish_context(ctx: "StageContext", inp: StepInput) -> dict[str, Any]:
-    """For a finish: the chapter's approved sections, shortened, so the missing ones are written,
-    fixed and reviewed to agree with them and not repeat them (Codex review 2026-09-30 #6)."""
+    """Show every approved section and give nearby ones most of the bounded text budget."""
     if inp.step != "COMPLETE":
         return {}
     base = _base_document(ctx, inp)
-    budget, shown = 9000, []
-    for s in base.sections:
-        text = " ".join(s.paragraphs)
-        excerpt = text if len(text) <= 1500 else text[:1500].rsplit(" ", 1)[0] + " …"
-        if budget - len(excerpt) < 0:
-            break
-        budget -= len(excerpt)
-        shown.append({"number": s.number, "heading": s.heading, "text": excerpt})
+    assert inp.plan is not None
+    planned = [s.key for s in rulebook.sections(inp.rulebook, inp.chapter, inp.inputs.level, inp.plan)]
+    approved = {s.key for s in base.sections}
+    nearby = set()
+    for key in inp.only:
+        if key not in planned:
+            continue
+        index = planned.index(key)
+        nearby.update(k for k in planned[max(0, index - 1):index + 2] if k in approved)
+
+    def excerpt(value: str, limit: int) -> str:
+        if len(value) <= limit:
+            return value
+        head = value[:max(0, limit - 2)].rsplit(" ", 1)[0]
+        return head + " …" if head else ""
+
+    texts = {s.key: " ".join(" ".join(s.paragraphs).split()) for s in base.sections}
+    budget = max(0, 9000 - sum(len(s.number) + len(s.heading) + 40 for s in base.sections))
+    # Reserve a short excerpt for every section before expanding the neighbors of missing ones.
+    preview = min(180, budget // max(1, 3 * len(base.sections)))
+    shown = [{"number": s.number, "heading": s.heading, "text": excerpt(texts[s.key], preview)} for s in base.sections]
+    budget -= sum(len(row["text"]) for row in shown)
+    for s, row in zip(base.sections, shown, strict=True):
+        if s.key not in nearby or budget <= 0:
+            continue
+        expanded = excerpt(texts[s.key], min(1500, len(row["text"]) + budget))
+        budget -= max(0, len(expanded) - len(row["text"]))
+        row["text"] = expanded
     return {"approvedSections": shown}
 
 
@@ -911,7 +931,7 @@ def stage_exporting(ctx: "StageContext") -> None:
         nonlocal candidate
         if p.deleting:
             return None
-        if (p.guide is None or p.guide.path not in (inp.guide, moved_path(inp.guide))) if inp.step == "PROFILE" else p.rulebook != inp.rulebook:
+        if not structure_current(p, inp):
             raise PermanentStageError(  # replaced while this step ran: nothing is saved, nothing charged (Codex review #2)
                 "INPUTS_CHANGED", "Your institution's guide or proposal structure changed while this step was running, so nothing was saved and nothing was charged. Start it again.",
                 "guide or rulebook changed during the step",

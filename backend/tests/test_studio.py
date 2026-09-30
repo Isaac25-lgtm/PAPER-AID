@@ -7,7 +7,7 @@ import io
 from docx import Document
 
 from tests.conftest import fixture_bytes
-from tests.test_api import STUDENT, start_job, wait
+from tests.test_api import STUDENT, enable_score, start_job, wait
 from tests.test_proposal_v2 import _with_chapter_one
 
 CHECK = {"writing": "AI_CHECK", "academic": False}
@@ -34,6 +34,7 @@ def test_the_paper_shows_as_soon_as_it_is_uploaded(client):
 
 
 def test_the_check_gives_a_percentage_consistent_with_its_band(client):
+    enable_score()
     _, job = _run(client, CHECK)
     analysis = job["analysis"]
     assert isinstance(analysis["percent"], int) and 0 <= analysis["percent"] <= 100

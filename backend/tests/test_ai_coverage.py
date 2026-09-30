@@ -72,12 +72,15 @@ def test_bound_quote_prices_the_frozen_checker():
 
 @pytest.mark.parametrize("returned", [0, 1])
 def test_incomplete_analysis_has_no_overall_percentage_or_low_headline(client, returned):
+    from app.runtime import get_runtime
+
     client.models.overrides["analyse"] = lambda p: {"blocks": [_judgment(b["id"]) for b in p["blocks"][:returned]]}
     job_id, job = _submit(client, {"writing": "AI_CHECK", "academic": False})
     assert job["status"] == "COMPLETED" and job["outcome"] == "PARTIAL"
-    assert job["analysis"]["coverageComplete"] is False and job["analysis"]["percent"] is None
+    assert job["analysis"]["coverageComplete"] is False and "percent" not in job["analysis"]
+    assert get_runtime().store.get(job_id).analysis.percent is None  # computed internally, never exposed to students
     document = client.get(f"/api/jobs/{job_id}/document", headers=STUDENT).json()
-    assert document["percent"] is None  # saved rule scores must not recreate an overall percentage
+    assert "percent" not in document  # saved rule scores must not recreate or expose an overall percentage
     report = Document(io.BytesIO(client.get(f"/api/jobs/{job_id}/outputs/writing-report", headers=STUDENT).content))
     text = "\n".join(p.text for p in report.paragraphs)
     assert "Not every passage could be assessed" in text and "Low (confidence:" not in text
@@ -101,5 +104,6 @@ def test_a_paper_without_eligible_passages_is_not_zero_percent_low(client):
     client.post(f"/api/jobs/{job_id}/submit", headers=STUDENT, json={"quoteId": quote["id"]})
     job = wait(client, job_id)
     assert job["outcome"] == "PARTIAL"
-    assert job["analysis"]["coverageComplete"] is False and job["analysis"]["percent"] is None
+    assert job["analysis"]["coverageComplete"] is False and "percent" not in job["analysis"]
+    assert get_runtime().store.get(job_id).analysis.percent is None
     assert any("no body passages" in w for w in job["warnings"])
