@@ -1,12 +1,14 @@
 import { FileQuestion } from 'lucide-react'
+import { useState } from 'react'
 import { createBrowserRouter, isRouteErrorResponse, Outlet, ScrollRestoration, useRouteError } from 'react-router'
 import { AppLayout } from '../components/layout/app-layout'
 import { Logo } from '../components/layout/logo'
 import { PublicLayout } from '../components/layout/public-layout'
-import { ButtonLink } from '../components/ui/button'
+import { Button, ButtonLink } from '../components/ui/button'
 import { RequireAdmin, RequireAuth, SignInPage, SignUpPage } from '../features/auth/auth-pages'
 import { HomePage } from '../features/marketing/home-page'
 import { FeaturesPage, PricingPage, PrivacyPage } from '../features/marketing/info-pages'
+import { isStaleBuildError, reloadForUpdate } from '../lib/stale-build'
 
 // Signed-in and admin screens load on demand, so the public site stays light on mobile data.
 const lists = () => import('../features/jobs/list-pages')
@@ -25,6 +27,21 @@ function Root() {
 function ErrorPage() {
   const error = useRouteError()
   const notFound = isRouteErrorResponse(error) && error.status === 404
+  const stale = isStaleBuildError(error)
+  const [reloading] = useState(() => stale && reloadForUpdate())
+  if (reloading) return null // the new version is loading
+  if (stale) {
+    return (
+      <div className="flex min-h-dvh flex-col items-center justify-center gap-6 bg-surface-subtle px-4 text-center">
+        <Logo />
+        <div>
+          <h1 className="text-2xl font-bold">PaperAid has been updated</h1>
+          <p className="mt-2 text-fg-muted">Reload the page to use the new version. Your jobs are safe.</p>
+        </div>
+        <Button onClick={() => window.location.reload()}>Reload</Button>
+      </div>
+    )
+  }
   return (
     <div className="flex min-h-dvh flex-col items-center justify-center gap-6 bg-surface-subtle px-4 text-center">
       <Logo />
