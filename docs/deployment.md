@@ -191,6 +191,7 @@ Procedure:
 
 | Date | Commit | Image | API revision | Worker revision | Hosting release |
 |---|---|---|---|---|---|
+| 2026-09-30 | `2f0a2d1` | `followup-2f0a2d1` (`sha256:c3d63d4cedc43661367fac48350eae1813aa030bb86bebe6b8c1232aa2e2adfe`) | `paperaid-api-00019-ttn` | `paperaid-worker-00019-4xl` | scores hidden from student responses, steps bound to their guide, PDF omission guard, finish context; SHOW_AI_SCORE and PARTIAL_CHAPTERS still off; hosting deployed |
 | 2026-09-30 | `5277491` | `four-models-5277491` (`sha256:419a89bf3c83c51907c2a0c72635b86e7aef2155a1e7a9e7a4fc0d9035126b05`) | `paperaid-api-00018-fx8` | `paperaid-worker-00018-9cx` | four-model algorithm, writing feedback only (SHOW_AI_SCORE off), three sections, PARTIAL_CHAPTERS off; hosting deployed |
 | 2026-09-29 | `1d573b6` | `studio-1d573b6` (`sha256:be9c08f6828ed8913bb70b3ea0dfa2df1269071e595ebb7800016b56045e6b83`) | `paperaid-api-00017-6wr` | `paperaid-worker-00017-szd` | studio reliability fixes; hosting deployed |
 | 2026-09-29 | `6f39072` | `backend:v16` (`sha256:c6fec6d7673b8bfa562f85d0fdb39007cffe8696aff59b450fbf7ef140fe9c79`) | `paperaid-api-00016-w25` | `paperaid-worker-00016-4h7` | live channel, 2026-09-29 02:4x EAT; one screen from upload to final draft, AI-likeness percentage |
