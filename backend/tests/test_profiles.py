@@ -57,7 +57,7 @@ def test_the_proposal_follows_the_students_institution(client):
     assert quoted["quote"]["lines"][0]["label"].startswith("Your institution's guide")
     job = _run(client, project["id"], "PROFILE")
     assert job["status"] == "COMPLETED", job
-    assert client.models.tasks[-3:] == ["p_profile", "p_profile_critique", "p_profile_finalise"]
+    assert client.models.tasks[-6:] == ["p_profile", "p_profile_critique", "p_profile_guide", "p_profile_finalise", "p_profile_review", "p_profile_review_peer"]
     project = client.get(f"/api/projects/{project['id']}", headers=STUDENT).json()
     assert project["rulebook"].startswith("custom-") and project["institution"] == "Kyambogo University" and project["citation"] == "APA7"
     assert "The guide does not say how long the literature review should be." in project["institutionNotes"] and project["guideRead"]

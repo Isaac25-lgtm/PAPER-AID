@@ -31,7 +31,7 @@ class PlanEdit(Camel):
 
 
 class StepRequest(Camel):
-    step: Literal["PLAN", "CHAPTER_1", "CHAPTER_2", "CHAPTER_3", "CONCEPT", "REVISE_1", "REVISE_2", "REVISE_3", "REVISE_4", "PROFILE"]
+    step: Literal["PLAN", "CHAPTER_1", "CHAPTER_2", "CHAPTER_3", "CONCEPT", "REVISE_1", "REVISE_2", "REVISE_3", "REVISE_4", "COMPLETE_1", "COMPLETE_2", "COMPLETE_3", "COMPLETE_4", "PROFILE"]
     note: str = ""
     comments: list[str] = Field(default=[], max_length=50)  # REVISE: exactly these requests
 
@@ -162,6 +162,14 @@ def export_pdf(project_id: str, final: bool = Query(False), user: User = Depends
     ascii_name = name.encode("ascii", "ignore").decode() or "proposal.pdf"
     disposition = f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(name)}"
     return Response(data, media_type="application/pdf", headers={"Content-Disposition": disposition, "Cache-Control": "no-store"})
+
+
+@router.get("/{project_id}/export.zip")
+def export_latex(project_id: str, final: bool = Query(False), user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> Response:
+    data, name = projects.export_latex(rt, user, project_id, final)
+    ascii_name = name.encode("ascii", "ignore").decode() or "proposal.zip"
+    disposition = f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(name)}"
+    return Response(data, media_type="application/zip", headers={"Content-Disposition": disposition, "Cache-Control": "no-store"})
 
 
 @router.get("/{project_id}/concept/export")

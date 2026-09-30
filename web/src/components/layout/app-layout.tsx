@@ -1,6 +1,6 @@
 import * as Menu from '@radix-ui/react-dropdown-menu'
 import { clsx } from 'clsx'
-import { FileCheck2, GraduationCap, History, LayoutDashboard, LogOut, Menu as MenuIcon, PenLine, Plus, Search, Settings, ShieldCheck, Wallet } from 'lucide-react'
+import { FileCheck2, GraduationCap, History, LayoutDashboard, LogOut, Menu as MenuIcon, Plus, Search, Settings, ShieldCheck, Wallet } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router'
 import { useAuth } from '../../features/auth/auth-context'
@@ -22,17 +22,20 @@ export function AppLayout() {
 
   useEffect(() => setMenuOpen(false), [location.pathname, location.search])
 
-  // Each service is one click away from anywhere; New job still lists every option.
+  // The three sections are one click away from anywhere (owner decision 2026-09-29).
   const service = new URLSearchParams(location.search).get('service') ?? (new URLSearchParams(location.search).get('review') ? 'PROPOSAL_REVIEW' : '')
   const onNew = (...ids: string[]) => location.pathname === '/app/new' && ids.includes(service)
   const offered = (id: ServiceId) => config.availability[id] !== 'soon'
   const nav: { to: string; label: string; icon: typeof History; active: boolean; mobileOnly?: boolean }[] = [
     { to: '/app', label: 'Dashboard', icon: LayoutDashboard, active: location.pathname === '/app' },
-    ...(offered('AI_CHECK') ? [{ to: '/app/new?service=AI_CHECK', label: 'AI Check', icon: Search, active: onNew('AI_CHECK', 'SOURCE_CHECK') }] : []),
-    ...(offered('REFINE') ? [{ to: '/app/new?service=REFINE', label: 'Refine', icon: PenLine, active: onNew('REFINE', 'REDRAFT') }] : []),
-    ...(offered('FORMAT') ? [{ to: '/app/new?service=FORMAT', label: 'Formatting', icon: FileCheck2, active: onNew('FORMAT', 'TEMPLATE_FORMAT', 'LATEX') }] : []),
+    ...(offered('AI_CHECK')
+      ? [{ to: '/app/new?service=PAPER_CHECK', label: 'Paper Check', icon: Search, active: onNew('PAPER_CHECK', 'AI_CHECK', 'REFINE', 'REDRAFT', 'SOURCE_CHECK') }]
+      : []),
     ...(offered('PROPOSAL')
-      ? [{ to: '/app/projects', label: 'Proposals', icon: GraduationCap, active: location.pathname.startsWith('/app/projects') || onNew('PROPOSAL_REVIEW') }]
+      ? [{ to: '/app/projects', label: 'Research Proposals', icon: GraduationCap, active: location.pathname.startsWith('/app/projects') || onNew('PROPOSAL_REVIEW') }]
+      : []),
+    ...(offered('FORMAT')
+      ? [{ to: '/app/new?service=ACADEMIC_FORMAT', label: 'Academic Formatting', icon: FileCheck2, active: onNew('ACADEMIC_FORMAT', 'FORMAT', 'TEMPLATE_FORMAT', 'LATEX') }]
       : []),
     { to: '/app/history', label: 'History', icon: History, active: location.pathname.startsWith('/app/history') || location.pathname.startsWith('/app/jobs') },
     ...(config.creditsEnabled ? [{ to: '/app/credits', label: 'Tokens', icon: Wallet, active: location.pathname.startsWith('/app/credits'), mobileOnly: true }] : []),

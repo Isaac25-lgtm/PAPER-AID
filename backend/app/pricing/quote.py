@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 
 from app.ai import costs
-from app.ai.orchestration import BATCH_WORDS, PROMPTS, STEPS
+from app.ai.orchestration import BATCH_WORDS, PROMPTS, STEPS, current_engine, model_for_engine
 from app.analysis import research
 from app.core.config import Settings
 from app.jobs.models import BoundQuote, Engine, Passage, QuoteLine, ServiceSelection, utcnow
@@ -44,13 +44,14 @@ def ai_cap_usd(ugx: int, settings: Settings) -> float:
     return ugx / settings.ugx_per_usd / settings.price_multiplier
 
 
-def _step_usd(settings: Settings, task: str, payload_chars: float, words: float) -> float:
-    """Projected cost of one algorithm step over a payload, batched as the runner batches it."""
+def _step_usd(settings: Settings, task: str, payload_chars: float, words: float, engine: Engine | None = None) -> float:
+    """Projected cost of one algorithm step over a payload, batched as the runner batches it, with
+    the model and prompt version of the engine being priced (F9: an older engine's own prompts)."""
+    engine = engine or current_engine(settings)
     step = STEPS[task]
-    ref = settings.lead_model if step.role == "lead" else settings.writer_model
-    provider, _, model = ref.partition(":")
+    provider, _, model = model_for_engine(engine, task).partition(":")
     batches = max(1, math.ceil(words / BATCH_WORDS))
-    per_batch = len(PROMPTS[step.prompt]) + payload_chars / batches
+    per_batch = len(PROMPTS[engine.prompts.get(task, step.prompt)]) + payload_chars / batches
     return batches * costs.estimate_usd(provider, model, int(per_batch), step.max_tokens, settings.model_prices)
 
 
@@ -61,35 +62,43 @@ def _batches_for(words: float) -> int:
     return max(1, math.ceil(words / BATCH_WORDS))
 
 
-def analysis_usd(settings: Settings, words: int) -> float:
+def analysis_usd(settings: Settings, words: int, engine: Engine | None = None) -> float:
+    e = engine or current_engine(settings)
     passages = max(1, words // 120)
     payload = words * CHARS_PER_WORD + (ITEM_OVERHEAD + SIGNAL_CHARS) * passages + BUNDLE_CHARS * _batches_for(words)
-    return _step_usd(settings, "analyse", payload, words)
+    usd = _step_usd(settings, "analyse", payload, words, e)
+    if e.ai_check_peer_model:
+        usd += _step_usd(settings, "analyse_peer", payload, words, e)
+    # explicit coverage re-asks each checker once for the passages it skipped: at worst all of them
+    return usd * (2 if e.explicit_coverage else 1)
 
 
 ANCHOR_CHARS = 4000  # the objectives passages sent with every academic-review batch
 
 
-def academic_usd(settings: Settings, words: int) -> float:
+def academic_usd(settings: Settings, words: int, engine: Engine | None = None) -> float:
     """The lead's academic, evidence and methodology review over every passage."""
+    e = engine or current_engine(settings)
     passages = max(1, words // 120)
     payload = words * CHARS_PER_WORD + ITEM_OVERHEAD * passages + (ANCHOR_CHARS + BUNDLE_CHARS) * _batches_for(words)
-    return _step_usd(settings, "academic", payload, words)
+    return _step_usd(settings, "academic", payload, words, e)
 
 
-def estimate_scan_usd(settings: Settings, words: int, selection: ServiceSelection) -> float:
+def estimate_scan_usd(settings: Settings, words: int, selection: ServiceSelection, engine: Engine | None = None) -> float:
     """The most the paid estimate can cost: the lead's analysis of the whole paper plus its draft
     plan for the share of the paper the service may change (a quarter or a half for refinement,
     all of it for Deep Redraft)."""
+    e = engine or current_engine(settings)
     share = 1.0 if selection.writing == "REDRAFT" else 0.25 if selection.intensity == "LIGHT" else 0.5
     planned_words = max(150, share * words)
-    plan = _step_usd(settings, "plan", planned_words * CHARS_PER_WORD * 1.4 + BRIEF_CHARS * _batches_for(planned_words), planned_words)
-    return analysis_usd(settings, words) + plan
+    plan = _step_usd(settings, "plan", planned_words * CHARS_PER_WORD * 1.4 + BRIEF_CHARS * _batches_for(planned_words), planned_words, e)
+    return analysis_usd(settings, words, e) + plan
 
 
-def refinement_usd(settings: Settings, passages: list[Passage], deep: bool = False) -> float:
+def refinement_usd(settings: Settings, passages: list[Passage], deep: bool = False, engine: Engine | None = None) -> float:
     """The rest of the refinement once the draft plan exists: critique and final plan over every
     planned passage, then rewrite, review, one fix round and a second review of the rewrites."""
+    e = engine or current_engine(settings)
     if not passages:
         return 0.0
     all_chars = sum(p.chars + p.instruction_chars + ITEM_OVERHEAD for p in passages)
@@ -98,45 +107,55 @@ def refinement_usd(settings: Settings, passages: list[Passage], deep: bool = Fal
     rw_chars = sum(p.chars for p in rewrites)
     rw_words = sum(p.words for p in rewrites)
     brief = BRIEF_CHARS * _batches_for(all_words)
-    usd = _step_usd(settings, "critique", all_chars + brief, all_words)
-    usd += _step_usd(settings, "finalise", all_chars + 250 * len(passages) + brief, all_words)
+    usd = _step_usd(settings, "critique", all_chars + brief, all_words, e)
+    if e.require_dual_approval and e.frontier_guidance:
+        usd += _step_usd(settings, "guide", all_chars + brief, all_words, e)
+    usd += _step_usd(settings, "finalise", all_chars + 250 * len(passages) + brief, all_words, e)
     if rewrites:
         n = len(rewrites)
         review_words = 2 * rw_words + n * REVIEW_CONTEXT_CHARS / CHARS_PER_WORD  # context counts toward batch size
         review_chars = 2 * rw_chars + n * (200 + ITEM_OVERHEAD + REVIEW_CONTEXT_CHARS) + BRIEF_CHARS * _batches_for(review_words)
         write, fix = ("redraft", "redraft_fix") if deep else ("refine", "repair")
-        usd += _step_usd(settings, write, rw_chars + n * (800 + 200 + ITEM_OVERHEAD) + BRIEF_CHARS * _batches_for(rw_words), rw_words)
-        usd += _step_usd(settings, "review", review_chars, review_words)
-        usd += _step_usd(settings, fix, 2 * rw_chars + n * (400 + ITEM_OVERHEAD) + BRIEF_CHARS * _batches_for(rw_words), rw_words)
-        usd += _step_usd(settings, "review", review_chars, review_words)
+        usd += _step_usd(settings, write, rw_chars + n * (800 + 200 + ITEM_OVERHEAD) + BRIEF_CHARS * _batches_for(rw_words), rw_words, e)
+        rounds = settings.repair_attempts
+        usd += (rounds + 1) * _step_usd(settings, "review", review_chars, review_words, e)
+        if e.require_dual_approval:
+            usd += (rounds + 1) * _step_usd(settings, "review_peer", review_chars, review_words, e)
+        usd += rounds * _step_usd(settings, fix, 2 * rw_chars + n * (400 + ITEM_OVERHEAD) + BRIEF_CHARS * _batches_for(rw_words), rw_words, e)
     return usd
 
 
-def source_check_usd(settings: Settings, words: int) -> float:
+def source_check_usd(settings: Settings, words: int, engine: Engine | None = None) -> float:
     """The source check at its worst: finding the claims, every allowed search for every claim
     (each search's fee plus the pages it reads), and the writer's check of the evidence."""
+    e = engine or current_engine(settings)
     claims = research.claims_for(words, settings.research_max_claims)
     if not claims:
         return 0.0
-    usd = _step_usd(settings, "claims", words * CHARS_PER_WORD + ITEM_OVERHEAD * max(1, words // 120), words)
-    provider, _, model = settings.lead_model.partition(":")
+    usd = _step_usd(settings, "claims", words * CHARS_PER_WORD + ITEM_OVERHEAD * max(1, words // 120), words, e)
+    provider, _, model = model_for_engine(e, "research").partition(":")
     searches = settings.research_max_searches
     per_claim = costs.estimate_usd(provider, model, 1500 + costs.SEARCH_INPUT_TOKENS_WORST * 4 * searches, STEPS["research"].max_tokens, settings.model_prices)
     usd += claims * (per_claim + costs.search_fee_usd(provider, searches))
-    usd += _step_usd(settings, "verify", claims * 3200, claims * 450)
+    usd += _step_usd(settings, "verify", claims * 3200, claims * 450, e)
     return usd
 
 
-def template_usd(settings: Settings, guide_words: int) -> float:
+def template_usd(settings: Settings, guide_words: int, engine: Engine | None = None) -> float:
     """University template rules: draft, critique and final rules, then every review and fix
     round allowed (the worst case)."""
+    e = engine or current_engine(settings)
     guide = guide_words * CHARS_PER_WORD
     rounds = settings.repair_attempts
-    usd = _step_usd(settings, "spec_plan", guide, 0)
-    usd += _step_usd(settings, "spec_critique", guide + 4000, 0)
-    usd += _step_usd(settings, "spec_finalise", guide + 8000, 0)
-    usd += (rounds + 1) * _step_usd(settings, "spec_review", guide + 3000, 0)
-    usd += rounds * _step_usd(settings, "spec_fix", guide + 6000, 0)
+    usd = _step_usd(settings, "spec_plan", guide, 0, e)
+    usd += _step_usd(settings, "spec_critique", guide + 4000, 0, e)
+    if e.require_dual_approval and e.frontier_guidance:
+        usd += _step_usd(settings, "spec_guide", guide + 4000, 0, e)
+    usd += _step_usd(settings, "spec_finalise", guide + 8000, 0, e)
+    usd += (rounds + 1) * _step_usd(settings, "spec_review", guide + 3000, 0, e)
+    if e.require_dual_approval:
+        usd += (rounds + 1) * _step_usd(settings, "spec_review_peer", guide + 3000, 0, e)
+    usd += rounds * _step_usd(settings, "spec_fix", guide + 6000, 0, e)
     return usd
 
 
@@ -145,61 +164,79 @@ PLAN_CHARS = 9000  # an approved plan with its alignment table
 LIBRARY_ITEMS = 60  # evidence already in a project, as the planning steps see it
 
 
-def proposal_usd(settings: Settings, step: str, words: int) -> float:
+def proposal_usd(settings: Settings, step: str, words: int, engine: Engine | None = None) -> float:
     """A proposal step at its worst: every planned research need read in the scholarly index and
     also searched on the web, every finding checked, the plan or briefs negotiated, and (for a
     chapter) drafting, every review and fix round, and the readiness assessment. `words` is the
     chapter's target length."""
+    e = engine or current_engine(settings)
     chapter = 0 if step == "PLAN" else 4 if step == "CONCEPT" else int(step[-1])
     needs = settings.proposal_needs.get(chapter, 6)
     searches = settings.research_max_searches
-    provider, _, model = settings.lead_model.partition(":")
-    usd = _step_usd(settings, "p_needs", PLAN_CHARS + LIBRARY_ITEMS * 200, 0)
-    per_need = _step_usd(settings, "p_extract", settings.proposal_works_per_need * 3200, 0)
+    provider, _, model = model_for_engine(e, "p_search").partition(":")
+    usd = _step_usd(settings, "p_needs", PLAN_CHARS + LIBRARY_ITEMS * 200, 0, e)
+    per_need = _step_usd(settings, "p_extract", settings.proposal_works_per_need * 3200, 0, e)
     per_need += costs.estimate_usd(provider, model, 1500 + costs.SEARCH_INPUT_TOKENS_WORST * 4 * searches, STEPS["p_search"].max_tokens, settings.model_prices)
     per_need += costs.search_fee_usd(provider, searches)
     usd += needs * per_need
     found = needs * 3
-    usd += _step_usd(settings, "verify", found * 1600, found * 250)
+    usd += _step_usd(settings, "verify", found * 1600, found * 250, e)
     evidence_chars = (found + LIBRARY_ITEMS) * EVIDENCE_ITEM_CHARS
     first = "p_plan" if chapter == 0 else "p_brief"
     base = PLAN_CHARS + evidence_chars + (0 if chapter == 0 else 5000)
-    usd += _step_usd(settings, first, base, 0) + _step_usd(settings, "p_critique", base + 10000, 0) + _step_usd(settings, "p_finalise", base + 20000, 0)
+    usd += _step_usd(settings, first, base, 0, e) + _step_usd(settings, "p_critique", base + 10000, 0, e) + _step_usd(settings, "p_finalise", base + 20000, 0, e)
+    if e.require_dual_approval and e.frontier_guidance:
+        usd += _step_usd(settings, "p_guide", base + 10000, 0, e)
     if chapter == 0:
+        if e.require_dual_approval:
+            usd += _step_usd(settings, "p_plan_review", base + 20000, 0, e) + _step_usd(settings, "p_plan_review_peer", base + 20000, 0, e)
         return usd
     batches = _batches_for(words)
     draft_input = batches * (PLAN_CHARS + BRIEF_CHARS) + found * EVIDENCE_ITEM_CHARS * 2 + words * 2
-    usd += _step_usd(settings, "p_draft", draft_input, words)
+    usd += _step_usd(settings, "p_draft", draft_input, words, e)
     rounds = settings.repair_attempts
     review_input = batches * (PLAN_CHARS + 6000) + words * CHARS_PER_WORD * 2 + found * EVIDENCE_ITEM_CHARS * 2
-    usd += (rounds + 1) * _step_usd(settings, "p_review", review_input, words * 2)
-    usd += rounds * _step_usd(settings, "p_fix", draft_input + words * CHARS_PER_WORD, words)
-    usd += _step_usd(settings, "p_readiness", PLAN_CHARS + words * CHARS_PER_WORD + 2 * 2500 * 12 + 4000, 0)
+    usd += (rounds + 1) * _step_usd(settings, "p_review", review_input, words * 2, e)
+    if e.require_dual_approval:  # plus one review by both of any section code cleaned after the rounds
+        usd += (rounds + 2) * _step_usd(settings, "p_review_peer", review_input, words * 2, e) + _step_usd(settings, "p_review", review_input, words * 2, e)
+    usd += rounds * _step_usd(settings, "p_fix", draft_input + words * CHARS_PER_WORD, words, e)
+    usd += _step_usd(settings, "p_readiness", PLAN_CHARS + words * CHARS_PER_WORD + 2 * 2500 * 12 + 4000, 0, e)
     return usd
 
 
-def revise_usd(settings: Settings, words: int) -> float:
+def revise_usd(settings: Settings, words: int, engine: Engine | None = None) -> float:
     """Sections revised from supervisor comments at their worst: the first fix, every review and
     further fix round, and the chapter's readiness check again. `words` is the revised text."""
+    e = engine or current_engine(settings)
     batches = _batches_for(words)
     fix_input = batches * (PLAN_CHARS + BRIEF_CHARS) + LIBRARY_ITEMS * EVIDENCE_ITEM_CHARS + words * CHARS_PER_WORD * 2
     rounds = settings.repair_attempts
-    usd = (rounds + 1) * _step_usd(settings, "p_fix", fix_input, words)
-    usd += (rounds + 1) * _step_usd(settings, "p_review", batches * (PLAN_CHARS + 6000) + words * CHARS_PER_WORD * 2 + LIBRARY_ITEMS * EVIDENCE_ITEM_CHARS, words * 2)
-    usd += _step_usd(settings, "p_readiness", PLAN_CHARS + 12000 * CHARS_PER_WORD + 2 * 2500 * 12 + 4000, 0)
+    usd = (rounds + 1) * _step_usd(settings, "p_fix", fix_input, words, e)
+    review_input = batches * (PLAN_CHARS + 6000) + words * CHARS_PER_WORD * 2 + LIBRARY_ITEMS * EVIDENCE_ITEM_CHARS
+    usd += (rounds + 1) * _step_usd(settings, "p_review", review_input, words * 2, e)
+    if e.require_dual_approval:  # plus one review by both of any section code cleaned after the rounds
+        usd += (rounds + 2) * _step_usd(settings, "p_review_peer", review_input, words * 2, e) + _step_usd(settings, "p_review", review_input, words * 2, e)
+    usd += _step_usd(settings, "p_readiness", PLAN_CHARS + 12000 * CHARS_PER_WORD + 2 * 2500 * 12 + 4000, 0, e)
     return usd
 
 
-def profile_usd(settings: Settings, guide_words: int) -> float:
+def profile_usd(settings: Settings, guide_words: int, engine: Engine | None = None) -> float:
     """An institution profile: the lead drafts it from the whole guide, the writer critiques it and
     the lead finalises it (each call reads the guide)."""
+    e = engine or current_engine(settings)
     guide = guide_words * CHARS_PER_WORD + 12000
-    return _step_usd(settings, "p_profile", guide, 0) + _step_usd(settings, "p_profile_critique", guide + 8000, 0) + _step_usd(settings, "p_profile_finalise", guide + 12000, 0)
+    usd = _step_usd(settings, "p_profile", guide, 0, e) + _step_usd(settings, "p_profile_critique", guide + 8000, 0, e) + _step_usd(settings, "p_profile_finalise", guide + 12000, 0, e)
+    if e.require_dual_approval and e.frontier_guidance:
+        usd += _step_usd(settings, "p_profile_guide", guide + 8000, 0, e)
+    if e.require_dual_approval:  # both approvals of the finished profile
+        usd += _step_usd(settings, "p_profile_review", guide + 16000, 0, e) + _step_usd(settings, "p_profile_review_peer", guide + 16000, 0, e)
+    return usd
 
 
-def proposal_review_usd(settings: Settings, words: int) -> float:
+def proposal_review_usd(settings: Settings, words: int, engine: Engine | None = None) -> float:
     """The lead's audit of an uploaded proposal: one call over the whole text."""
-    return _step_usd(settings, "p_audit", words * CHARS_PER_WORD + 150 * max(1, words // 120) + 12000, 0)
+    e = engine or current_engine(settings)
+    return _step_usd(settings, "p_audit", words * CHARS_PER_WORD + 150 * max(1, words // 120) + 12000, 0, e)
 
 
 # --- quote lines ------------------------------------------------------------------------------
@@ -252,41 +289,49 @@ def price(
     passages: list[Passage] | None = None,
     fee_paid: int = 0,
     scope_words: int | None = None,
+    engine: Engine | None = None,
+    part: float = 1.0,
+    cap: int | None = None,
 ) -> Priced:
     """Quote lines for a selection. Under the fixed policy each AI service has its price by page
     band; under the cost policy (refinement priced from its estimate's `passages`) each is its
     worst-case AI cost as a ceiling. Either way the job's spend cap is the worst-case projection,
     so quality is never cut to fit a price."""
     fixed_mode = settings.pricing_mode == "fixed"
+    e = engine or current_engine(settings)  # the engine the run will execute with (its routes and prompts)
     services: list[tuple[str, str, float, int | None]] = []  # (key, label, worst-case USD, banded words)
     if selection.writing == "AI_CHECK":
-        services.append(("AI_CHECK", "AI Check", analysis_usd(settings, words), words))
+        services.append(("AI_CHECK", "Writing check", analysis_usd(settings, words, e), words))
     elif selection.writing in ("REFINE", "REDRAFT"):
         deep = selection.writing == "REDRAFT"
         light = selection.intensity == "LIGHT" and not deep
         share = 1.0 if deep or selection.only_blocks else 0.25 if light else 0.5
         scope = scope_words or words  # "Fix selected": the chosen passages, not the whole paper
         planned = passages or worst_passages(scope, share)
-        usd = refinement_usd(settings, planned, deep=deep) + (0 if passages else analysis_usd(settings, words))
+        usd = refinement_usd(settings, planned, deep=deep, engine=e) + (0 if passages else analysis_usd(settings, words, e))
+        if e.ai_check_peer_model:
+            usd += analysis_usd(settings, words, e)  # the finished paper is independently checked again
         key = "REDRAFT" if deep else "REFINE_LIGHT" if light else "REFINE"
         label = "Deep redraft" if deep else f"Check + Refine, {'light' if light else 'standard'}"
         services.append((key, label, usd, scope))
     if selection.academic and selection.writing in ("AI_CHECK", "REFINE", "REDRAFT"):
-        services.append(("ACADEMIC", "Academic, evidence and method review", academic_usd(settings, words), words))
+        services.append(("ACADEMIC", "Academic, evidence and method review", academic_usd(settings, words, e), words))
     if selection.source_check:
-        services.append(("SOURCE_CHECK", "Source check with live search", source_check_usd(settings, words), words))
+        services.append(("SOURCE_CHECK", "Source check with live search", source_check_usd(settings, words, e), words))
     if selection.proposal == "REVIEW":
-        services.append(("REVIEW", "Proposal review", proposal_review_usd(settings, words), words))
+        services.append(("REVIEW", "Proposal review", proposal_review_usd(settings, words, e), words))
     elif selection.proposal == "PROFILE":
-        services.append(("PROFILE", "Your institution's guide, read into a profile", profile_usd(settings, guide_words), None))
+        services.append(("PROFILE", "Your institution's guide, read into a profile", profile_usd(settings, guide_words, e), None))
     elif selection.proposal.startswith("REVISE_"):
         banded = scope_words or words
-        services.append(("REVISE", f"Chapter {selection.proposal[-1]} revised from your supervisor's comments", revise_usd(settings, banded), banded))
+        services.append(("REVISE", f"Chapter {selection.proposal[-1]} revised from your supervisor's comments", revise_usd(settings, banded, e), banded))
     elif selection.proposal != "NONE":
         label = {"PLAN": "Proposal plan", "CONCEPT": "Concept paper"}.get(selection.proposal, f"Chapter {selection.proposal[-1]}")
-        services.append((selection.proposal, label, proposal_usd(settings, selection.proposal, words), None))
+        if selection.finish:  # "Finish chapter": the sections still to write, priced at `part`, their share
+            label += ": the sections still to write"
+        services.append((selection.proposal, label, proposal_usd(settings, selection.proposal, words, e), None))
     if selection.formatting == "TEMPLATE_FORMAT":
-        services.append(("TEMPLATE_FORMAT", "University template formatting", template_usd(settings, guide_words), words))
+        services.append(("TEMPLATE_FORMAT", "University template formatting", template_usd(settings, guide_words, e), words))
 
     lines: list[QuoteLine] = []
     if fee_paid:
@@ -294,6 +339,10 @@ def price(
     ai = 0
     for key, label, usd, banded in services:
         amount = fixed_price(settings, key, banded) if fixed_mode else with_margin(usd, settings)
+        if part < 1.0 and selection.finish:
+            amount = round_up(amount * part)
+        if cap is not None and selection.finish:  # what the chapter has not yet cost (Codex review #3)
+            amount = min(amount, cap)
         lines.append(QuoteLine(label=label if fixed_mode else f"{label} (up to)", amount=amount, service=key))
         ai += amount
     fixed = 0
@@ -320,11 +369,13 @@ def bound_quote(
     fee_paid: int = 0,
     estimate_id: str | None = None,
     scope_words: int | None = None,
+    part: float = 1.0,
+    cap: int | None = None,
 ) -> BoundQuote:
     """A quote bound to the exact files, selection and engine it priced, with the rate and
     multiplier frozen. `fee_paid` is every estimate already charged on the job: it counts toward the
     quote, so accepting holds only the rest."""
-    priced = price(settings, selection, words, guide_words, passages, fee_paid, scope_words)
+    priced = price(settings, selection, words, guide_words, passages, fee_paid, scope_words, engine=engine, part=part, cap=cap)
     return BoundQuote(
         id=f"quote_{secrets.token_hex(6)}",
         lines=priced.lines,

@@ -7,7 +7,10 @@ import { Badge, Card } from '../../components/ui/primitives'
 import { formatBytes, formatDate } from '../../lib/format'
 import type { Band, CheckedClaim, FormattingResult, LatexResult, OutputFile, ResearchResult, Source } from '../../lib/types'
 
-export const DISCLAIMER =
+/** Writing-pattern feedback (owner decision 2026-09-30): it never claims to detect AI. */
+export const DISCLAIMER = 'This is feedback on how your writing reads. It does not detect AI and is not a judgement of who wrote your paper.'
+/** Shown with the AI-likeness score, only when that score is switched on (a validated detector). */
+export const SCORE_DISCLAIMER =
   'This estimates formulaic writing patterns. It is not a detector verdict: AI detectors often disagree with each other and can flag human writing.'
 
 export function FormattingPanel({ formatting }: { formatting: FormattingResult }) {

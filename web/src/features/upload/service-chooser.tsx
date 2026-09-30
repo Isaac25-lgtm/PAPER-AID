@@ -3,7 +3,7 @@ import { ArrowRight, Check, FilePen, FileSearch } from 'lucide-react'
 import { Link } from 'react-router'
 import { Badge, PageHeader } from '../../components/ui/primitives'
 import { useData } from '../../lib/data'
-import { AVAILABILITY_BADGE, INVITE_ONLY_REASON, NOT_CONFIGURED_REASON, SERVICES } from '../../lib/services'
+import { AVAILABILITY_BADGE, INVITE_ONLY_REASON, NOT_CONFIGURED_REASON, SECTIONS, type SectionInfo } from '../../lib/services'
 import type { ServiceId, ServiceSelection } from '../../lib/types'
 import { useTitle } from '../../lib/use-title'
 
@@ -20,33 +20,26 @@ export interface JobType {
   icon: typeof FilePen
 }
 
-const job = (id: ServiceId, selection: Partial<ServiceSelection>): JobType => ({
-  id,
-  service: id,
-  name: SERVICES[id].name,
-  short: SERVICES[id].short,
-  youGet: SERVICES[id].youGet,
-  accepts: SERVICES[id].accepts,
+const section = (info: SectionInfo, selection: Partial<ServiceSelection>): JobType => ({
+  id: info.id,
+  service: info.service,
+  name: info.name,
+  short: info.short,
+  youGet: info.youGet,
+  accepts: info.accepts,
   selection,
-  icon: SERVICES[id].icon,
+  icon: info.icon,
 })
+const [PAPER_CHECK_INFO, PROPOSALS_INFO, FORMAT_INFO] = SECTIONS
+const PAPER_CHECK = section(PAPER_CHECK_INFO, { writing: 'AI_CHECK' })
+const ACADEMIC_FORMAT = section(FORMAT_INFO, { writing: 'NONE', formatting: 'FORMAT' })
 
+// Three sections (owner decision 2026-09-29). Redraft, source check, university templates and LaTeX
+// are steps and choices inside them, no longer jobs of their own.
 export const JOB_GROUPS: { title: string; types: JobType[] }[] = [
+  { title: PAPER_CHECK_INFO.name, types: [PAPER_CHECK] },
   {
-    title: 'Check and improve your paper',
-    types: [
-      job('AI_CHECK', { writing: 'AI_CHECK' }),
-      job('REFINE', { writing: 'REFINE' }),
-      job('REDRAFT', { writing: 'REDRAFT' }),
-      { ...job('SOURCE_CHECK', { writing: 'AI_CHECK', sourceCheck: true }), accepts: 'DOCX or text-based PDF (comes with an AI Check)' },
-    ],
-  },
-  {
-    title: 'Format your paper',
-    types: [job('FORMAT', { writing: 'NONE', formatting: 'FORMAT' }), job('TEMPLATE_FORMAT', { writing: 'NONE', formatting: 'TEMPLATE_FORMAT' }), job('LATEX', { writing: 'NONE', latex: true })],
-  },
-  {
-    title: 'Research proposals',
+    title: PROPOSALS_INFO.name,
     types: [
       {
         id: 'PROPOSAL_REVIEW',
@@ -70,11 +63,25 @@ export const JOB_GROUPS: { title: string; types: JobType[] }[] = [
       },
     ],
   },
+  { title: FORMAT_INFO.name, types: [ACADEMIC_FORMAT] },
 ]
+
+// Links from before the sections (bookmarks, emails, the old menu) open the section they now belong
+// to, at the step they asked for: the id is kept, so the starting step and choices are the same.
+const EARLIER: Record<string, JobType> = {
+  AI_CHECK: PAPER_CHECK,
+  REFINE: PAPER_CHECK,
+  REDRAFT: PAPER_CHECK,
+  SOURCE_CHECK: PAPER_CHECK,
+  FORMAT: ACADEMIC_FORMAT,
+  TEMPLATE_FORMAT: ACADEMIC_FORMAT,
+  LATEX: ACADEMIC_FORMAT,
+}
 
 export function jobType(id: string | null): JobType | null {
   if (!id) return null
-  return JOB_GROUPS.flatMap((g) => g.types).find((t) => t.id === id && t.selection) ?? null
+  const current = JOB_GROUPS.flatMap((g) => g.types).find((t) => t.id === id && t.selection)
+  return current ?? (EARLIER[id] ? { ...EARLIER[id], id } : null)
 }
 
 /** The first step of a new job: choose what PaperAid will do, then upload knowing what happens. */

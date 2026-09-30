@@ -344,7 +344,7 @@ class StepInput(Camel):
     its input version). Stored with the job; its hash binds the quote."""
 
     project_id: str
-    step: Literal["PLAN", "CHAPTER", "REVISE", "PROFILE"]
+    step: Literal["PLAN", "CHAPTER", "REVISE", "COMPLETE", "PROFILE"]
     chapter: int  # 0 for the plan
     note: str = ""  # the student's instruction for this run
     rulebook: str
@@ -364,6 +364,7 @@ class StepInput(Camel):
     guide_name: str = ""
     revise: dict[str, list[str]] = {}
     comment_ids: list[str] = []
+    only: list[str] = []  # COMPLETE: the section keys still to write (the base version's missing sections)
 
 
 class ChapterDocument(Camel):
@@ -377,4 +378,7 @@ class ChapterDocument(Camel):
     readiness: list[ReadinessItem] = []
     warnings: list[str] = []
     revised: list[str] = []  # a revision: the sections it delivered new text for
+    missing: list[str] = []  # sections not yet written (not approved in time): "Finish chapter" writes them
+    full_price: int = 0  # a partly written chapter: its full price when first written (UGX)
+    paid: int = 0  # what the draft and its finishes have been charged so far; a finish costs at most the rest
     words: int

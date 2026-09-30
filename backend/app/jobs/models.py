@@ -96,6 +96,7 @@ class ServiceSelection(Camel):
     only_blocks: list[str] = Field(default=[], max_length=3000)  # "Fix selected": refine exactly these passages
     # A step of a proposal project, or REVIEW: an uploaded proposal checked against the rulebook.
     proposal: Literal["NONE", "PLAN", "CHAPTER_1", "CHAPTER_2", "CHAPTER_3", "CONCEPT", "REVISE_1", "REVISE_2", "REVISE_3", "REVISE_4", "PROFILE", "REVIEW"] = "NONE"
+    finish: bool = False  # "Finish chapter": only the sections still to write, priced at their share
     level: Literal["BACHELORS", "PGD", "MASTERS", "PHD"] = "MASTERS"  # the proposal's level (REVIEW only)
 
     def services(self) -> list[ServiceId]:
@@ -140,6 +141,7 @@ class FileMeta(Camel):
 class StoredFile(FileMeta):
     path: str
     sha256: str
+    scorable_words: int | None = None  # words in passages an AI Check can score (None: uploaded before it was counted)
 
 
 class QuoteLine(Camel):
@@ -162,12 +164,20 @@ class Quote(Camel):
 
 
 class Engine(Camel):
-    """What a run executes with, frozen when it is priced: the two models and the prompt version of
+    """What a run executes with, frozen when it is priced: model routes, approval policy and the prompt version of
     every algorithm step. A job runs with its quote's engine even if PaperAid is updated meanwhile,
     so the calls its estimate made replay from the cache instead of being paid for again."""
 
     lead_model: str
     writer_model: str
+    ai_check_model: str | None = None  # old engines keep their original lead for analysis
+    ai_check_peer_model: str | None = None
+    routine_model: str | None = None
+    drafting_model: str | None = None
+    require_dual_approval: bool = False  # frozen older jobs retain their quoted algorithm
+    explicit_coverage: bool = False  # a passage counts as checked only when judged explicitly (older runs: omission meant LOW)
+    frontier_guidance: bool = True  # with dual approval: the guidance step before each plan is finalised
+    partial_chapters: bool = False  # a new chapter may be delivered without its unapproved sections
     prompts: dict[str, str]  # step → prompt version (released prompt files never change)
 
 
@@ -304,6 +314,8 @@ class AnalysisResult(Camel):
     # Estimated AI-likeness as a percentage (owner decision 2026-09-29): the word-weighted passage
     # score the band comes from, computed by code. None for analyses made before it was recorded.
     percent: int | None = None
+    coverage_complete: bool | None = None  # None on older runs; False means no complete AI score
+    disagreement_blocks: list[str] = []  # stable passage IDs, never an authorship verdict
     analysed_words: int
     excluded_words: int
     findings: list[Finding]

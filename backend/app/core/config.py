@@ -31,6 +31,19 @@ class Settings(BaseSettings):
     # quoted or run; there is no stand-in.
     lead_model: str = "openai:gpt-6-sol"
     writer_model: str = "anthropic:claude-opus-5-5"
+    ai_check_model: str = "openai:gpt-6-luna"  # writing-pattern reviewer, owner decision 2026-09-29
+    ai_check_peer_model: str | None = "anthropic:claude-sonnet-5-5"
+    routine_model: str | None = "openai:gpt-6-luna"
+    drafting_model: str | None = "anthropic:claude-sonnet-5-5"
+    require_dual_approval: bool = True
+    frontier_guidance: bool = True  # Opus guides each plan before Sol finalises it (a cost lever; both approvals stay)
+    # A new chapter delivers its approved sections and "Finish chapter" writes the rest. Off until a
+    # rollback to 1d573b6 (which cannot protect a partly written chapter) is no longer needed (owner, 2026-09-30).
+    partial_chapters: bool = False
+    # The AI-likeness percentage and band. Off: a real-model pilot scored 10 human and 10 AI-written papers
+    # alike (6% each), so students get writing-pattern feedback only until a validated detector exists
+    # (owner decision 2026-09-30). The score is still computed and kept for admins and calibration.
+    show_ai_score: bool = False
     model_prices: dict[str, tuple[float, float, float]] = {}  # "provider:model" → USD per 1M (input, output, cached input)
     anthropic_api_key: SecretStr | None = None
     openai_api_key: SecretStr | None = None

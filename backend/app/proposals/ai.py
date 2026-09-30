@@ -6,7 +6,7 @@ batches halved. Schemas are strict: every field required, nothing extra."""
 from collections.abc import Callable
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, StrictBool
 
 from app.ai.orchestration import AIRunner
 from app.ai.providers import UNAVAILABLE, ModelResult
@@ -181,6 +181,11 @@ class Grade(BaseModel):
     note: str
 
 
+class Permission(BaseModel):
+    approved: StrictBool
+    issues: list[str]
+
+
 class _Grades(BaseModel):
     results: list[Grade]
 
@@ -258,7 +263,9 @@ class ProposalRunner(AIRunner):
         draft = self._raw(task, payload, schema, shape)
         critique = _whole(self._call("p_critique", {**payload, "kind": kind, "draft": draft}, CRITIQUE_SCHEMA, Critique), "p_critique")
         assert isinstance(critique, Critique)
-        final = self._raw("p_finalise", {**payload, "kind": kind, "draft": draft, "critique": critique.model_dump()}, schema, shape)
+        guidance = _whole(self._call("p_guide", {**payload, "kind": kind, "draft": draft}, CRITIQUE_SCHEMA, Critique), "p_guide") if self.guided else None
+        final = self._raw("p_finalise", {**payload, "kind": kind, "draft": draft, "critique": critique.model_dump(),
+                                           **({"frontierGuidance": guidance.model_dump()} if guidance else {})}, schema, shape)
         return final, draft, critique
 
     def profile(self, payload: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], Critique]:
@@ -269,7 +276,9 @@ class ProposalRunner(AIRunner):
         draft = self._raw("p_profile", payload, PROFILE, None)
         critique = _whole(self._call("p_profile_critique", {**payload, "draft": draft}, PROFILE_CRITIQUE, Critique), "p_profile_critique")
         assert isinstance(critique, Critique)
-        final = self._raw("p_profile_finalise", {**payload, "draft": draft, "critique": critique.model_dump()}, PROFILE, None)
+        guidance = _whole(self._call("p_profile_guide", {**payload, "draft": draft}, PROFILE_CRITIQUE, Critique), "p_profile_guide") if self.guided else None
+        final = self._raw("p_profile_finalise", {**payload, "draft": draft, "critique": critique.model_dump(),
+                                                   **({"frontierGuidance": guidance.model_dump()} if guidance else {})}, PROFILE, None)
         return final, draft, critique
 
     def _raw(self, task: str, payload: dict[str, Any], schema: dict[str, Any], shape: type[BaseModel] | None) -> dict[str, Any]:
@@ -294,14 +303,50 @@ class ProposalRunner(AIRunner):
     def grade(self, items: list[dict[str, Any]], common: dict[str, Any]) -> dict[str, Grade]:
         known = {i["key"] for i in items}
         out: dict[str, Grade] = {}
-        for answer in self._batched("p_review", items, lambda b: {**common, "sections": b}, REVIEW_SCHEMA, _Grades, stop_on_budget=True):
-            out.update({g.key: g for g in answer.results if g.key in known})
+        tasks = ["p_review", "p_review_peer"] if self._engine.require_dual_approval else ["p_review"]
+        assessments = []
+        for task in tasks:
+            judged = {}
+            for batch, answer in self._batched_with_items(task, items, lambda b: {**common, "sections": b}, REVIEW_SCHEMA, _Grades, stop_on_budget=True):
+                batch_keys = {item["key"] for item in batch}
+                judged.update({g.key: g for g in answer.results if g.key in batch_keys})
+            assessments.append(judged)
+        for key in known:
+            grades = [a.get(key) for a in assessments]
+            if any(g is None for g in grades):
+                continue  # missing either approval is NOT_REVIEWED downstream
+            issues = list(dict.fromkeys(i for g in grades if g.grade == "REPAIR" or (self._engine.require_dual_approval and g.issues) for i in (g.issues or ["REVIEW_REJECTED"])))
+            grade = "REPAIR" if issues else "PASS_WITH_WARNINGS" if any(g.grade == "PASS_WITH_WARNINGS" for g in grades) else "PASS"
+            out[key] = Grade(key=key, grade=grade, issues=issues, note=" ".join(dict.fromkeys(g.note for g in grades if g.note.strip())))
         return out
 
     def readiness(self, payload: dict[str, Any]) -> Readiness:
         answer = _whole(self._call("p_readiness", payload, READINESS_SCHEMA, Readiness), "p_readiness")
         assert isinstance(answer, Readiness)
         return answer
+
+    def approve_plan(self, payload: dict[str, Any]) -> None:
+        self._approve(
+            ("p_plan_review", "p_plan_review_peer"), payload, "DOCUMENT_NOT_APPROVED",
+            "PaperAid could not approve this proposal plan. No document was released and nothing was charged. Please try again.",
+        )
+
+    def approve_profile(self, payload: dict[str, Any]) -> None:
+        """Both approvals for an institution profile before any proposal is written to it."""
+        self._approve(
+            ("p_profile_review", "p_profile_review_peer"), payload, "PROFILE_NOT_APPROVED",
+            "PaperAid could not confirm your institution's structure from this guide, so nothing was changed and you were not charged. "
+            "You can try again, or continue with the standard structure.",
+        )
+
+    def _approve(self, tasks: tuple[str, str], payload: dict[str, Any], code: str, message: str) -> None:
+        if not self._engine.require_dual_approval:
+            return
+        schema = _obj({"approved": {"type": "boolean"}, "issues": _STRS})
+        for task in tasks:
+            answer = self._call(task, payload, schema, Permission)
+            if answer is None or not answer.approved or answer.issues:
+                raise PermanentStageError(code, message, f"{task}: not approved")
 
     def audit(self, payload: dict[str, Any]) -> Audit:
         answer = _whole(self._call("p_audit", payload, AUDIT_SCHEMA, Audit), "p_audit")

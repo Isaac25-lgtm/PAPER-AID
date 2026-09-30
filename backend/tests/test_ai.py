@@ -16,11 +16,14 @@ BRIEF = writing_brief("PRESERVE_VOICE", "STANDARD")
 
 
 def real_settings(**overrides) -> Settings:
+    # Keep the original algorithm covered for already quoted jobs; test_four_models covers new runs.
+    defaults = {"ai_check_peer_model": None, "routine_model": None, "drafting_model": None, "require_dual_approval": False}
+    defaults.update(overrides)
     return Settings(
         anthropic_api_key="sk-test",
         openai_api_key="sk-test",
-        model_prices={"anthropic:gpt-6-sol": (0, 0, 0), "anthropic:m": (0, 0, 0)},
-        **overrides,
+        model_prices={"anthropic:gpt-6-sol": (0, 0, 0), "anthropic:gpt-6-luna": (0, 0, 0), "anthropic:m": (0, 0, 0)},
+        **defaults,
     )
 
 
@@ -264,8 +267,9 @@ def test_every_step_is_performed_by_its_fixed_role():
     lead |= {"p_needs", "p_extract", "p_search", "p_plan", "p_brief", "p_finalise", "p_review", "p_readiness", "p_audit", "p_profile", "p_profile_finalise"}  # proposals
     writer = {"critique", "refine", "repair", "redraft", "redraft_fix", "verify", "spec_critique", "spec_fix"}  # verify: checks the lead's evidence, never searches
     writer |= {"p_critique", "p_draft", "p_fix", "p_profile_critique"}
-    assert set(STEPS) == lead | writer
-    assert all(runner.model_for(t) == "openai:gpt-6-sol" for t in lead)
+    assert lead | writer <= set(STEPS)
+    assert runner.model_for("analyse") == "openai:gpt-6-luna"
+    assert all(runner.model_for(t) == "openai:gpt-6-sol" for t in lead - {"analyse"})
     assert all(runner.model_for(t) == "anthropic:claude-opus-5-5" for t in writer)
 
 
@@ -545,7 +549,7 @@ def test_the_spend_cap_is_a_hard_ceiling(monkeypatch):
             result.model = "gpt-6-sol"
             return result
 
-    scripted = Recording({"analyse": [{"blocks": []}]})
+    scripted = Recording({"analyse": [{"blocks": []}, {"blocks": []}]})  # the answer, and the one retry
     monkeypatch.setattr(orchestration, "provider_for", lambda ref, settings: (scripted, "gpt-6-sol"))
     settings = real_settings()
     runner = AIRunner(settings, lambda c: None, lambda: 0.0, 0.05)
@@ -576,7 +580,7 @@ def test_dense_input_at_full_output_stays_within_the_cap(monkeypatch):
             result.model = "gpt-6-sol"
             return result
 
-    scripted = Dense({"analyse": [{"blocks": []}]})
+    scripted = Dense({"analyse": [{"blocks": []}, {"blocks": []}]})  # the answer, and the one retry
     monkeypatch.setattr(orchestration, "provider_for", lambda ref, settings: (scripted, "gpt-6-sol"))
     runner = AIRunner(real_settings(), lambda c: None, lambda: 0.0, 0.05)
     runner.analyse([{"id": "b1", "text": "Dense text 12,345; 67% (x=9) " * 60, "signals": []}], [], {})

@@ -15,15 +15,70 @@ export const AVAILABILITY_BADGE: Record<Exclude<Availability, 'available'>, stri
 export const NOT_CONFIGURED_REASON = "Unavailable: this server's AI service has not been set up yet."
 export const INVITE_ONLY_REASON = 'Open to invited testers while PaperAid is in testing. Academic formatting is open to everyone.'
 
+/** The three sections students choose from (owner decision 2026-09-29). Services are steps inside
+ *  them: Redraft, Ask for changes, Source check and Finish live in Paper Check; university templates
+ *  and LaTeX are finishing choices. `service` is whose availability the section follows. */
+export interface SectionInfo {
+  id: 'PAPER_CHECK' | 'PROPOSALS' | 'ACADEMIC_FORMAT'
+  service: ServiceId
+  name: string
+  short: string
+  icon: LucideIcon
+  accepts: string
+  youGet: string[]
+  untouched: string[]
+  to: string
+}
+
+export const SECTIONS: SectionInfo[] = [
+  {
+    id: 'PAPER_CHECK',
+    service: 'AI_CHECK',
+    name: 'Paper Check',
+    short: 'Check how your paper reads, then redraft it, ask for changes and finish it, all on one screen.',
+    icon: Search,
+    accepts: 'DOCX or text-based PDF (a PDF can be checked only)',
+    youGet: [
+      'Writing feedback: generic, formulaic or repetitive passages marked and explained',
+      'A redraft (light, standard or deep) in your own voice: keep or undo every change',
+      'Changes in your own words or your supervisor\'s, your sources checked, and your paper finished in APA, Harvard, your university\'s layout or LaTeX',
+    ],
+    untouched: ['Citations, quotations, numbers and URLs', 'Your argument and findings', 'Anything you choose to keep in your own words'],
+    to: '/app/new?service=PAPER_CHECK',
+  },
+  {
+    id: 'PROPOSALS',
+    service: 'PROPOSAL',
+    name: 'Research Proposals',
+    short: 'Plan, research and write a research proposal chapter by chapter, or review one you have written.',
+    icon: GraduationCap,
+    accepts: 'Your topic and study details, or your proposal as DOCX or PDF',
+    youGet: ['A plan you edit and approve first', 'Chapters written from confirmed sources, revised from your supervisor\'s comments', 'The complete proposal in Word, PDF or LaTeX'],
+    untouched: ['Figures only you can supply: PaperAid asks for them', 'Your approved plan'],
+    to: '/app/projects',
+  },
+  {
+    id: 'ACADEMIC_FORMAT',
+    service: 'FORMAT',
+    name: 'Academic Formatting',
+    short: 'Lay out a finished paper in APA, Harvard or your university\'s own guide, with a LaTeX version if you want one.',
+    icon: FileCheck2,
+    accepts: 'DOCX, plus your guide as DOCX or PDF if you use one',
+    youGet: ['APA, Harvard and other styles: headings, spacing and page numbers', 'Your university\'s guide read into exact rules, with its sources (this uses AI and is priced as such)', 'An optional institution logo and LaTeX version'],
+    untouched: ['Every word of your text'],
+    to: '/app/new?service=ACADEMIC_FORMAT',
+  },
+]
+
 // Display copy only. Availability and prices come from the server's public config.
 export const SERVICES: Record<ServiceId, ServiceInfo> = {
   AI_CHECK: {
-    name: 'AI Check',
+    name: 'Writing check',
     short: 'See which passages read as generic or formulaic, and why.',
     icon: Search,
     accepts: 'DOCX or text-based PDF',
-    youGet: ['Estimated AI-likeness as a percentage, with its confidence', 'The passages that read as AI-written, marked in your paper with the reasons', 'A downloadable report'],
-    untouched: ['Your document — AI Check never edits it'],
+    youGet: ['Generic, formulaic or repetitive passages marked in your paper', 'The reason and a suggestion for each', 'A downloadable writing report'],
+    untouched: ['Your document — the writing check never edits it'],
   },
   REFINE: {
     name: 'Check + Refine',
@@ -61,7 +116,7 @@ export const SERVICES: Record<ServiceId, ServiceInfo> = {
     name: 'Source check',
     short: 'Your key factual claims checked against current sources.',
     icon: BookCheck,
-    accepts: 'Added to AI Check or Check + Refine (DOCX or PDF)',
+    accepts: 'With a writing check or a redraft, or on its own from your results (DOCX or PDF)',
     youGet: ['Each claim marked supported, partly supported, contradicted or not found', 'The sources, with the passage quoted and the date read', 'Sources you could cite for uncited claims'],
     untouched: ['Your paper: claims are reported, never changed'],
   },
@@ -139,7 +194,7 @@ export const REASON_LABELS: Record<ReasonCode, string> = {
 }
 
 export const CATEGORY_LABELS: Record<FindingCategory | 'REFERENCES', string> = {
-  AI_LIKE: 'AI-like writing',
+  AI_LIKE: 'Formulaic writing',
   ACADEMIC: 'Academic writing',
   EVIDENCE: 'Evidence and claims',
   REFERENCES: 'References',

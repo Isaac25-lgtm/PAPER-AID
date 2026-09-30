@@ -4,19 +4,18 @@ import { Link } from 'react-router'
 import { ButtonLink } from '../../components/ui/button'
 import { Badge } from '../../components/ui/primitives'
 import { useData } from '../../lib/data'
-import { AVAILABILITY_BADGE, SERVICES, SERVICE_ORDER } from '../../lib/services'
+import { AVAILABILITY_BADGE, SECTIONS } from '../../lib/services'
 
 export function ServiceGrid() {
   const { config } = useData()
   return (
     <ul className="grid gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
-      {SERVICE_ORDER.map((id) => {
-        const s = SERVICES[id]
-        const availability = config.availability[id]
+      {SECTIONS.map((s) => {
+        const availability = config.availability[s.service]
         const soon = availability !== 'available'
         return (
           <li
-            key={id}
+            key={s.id}
             className={clsx(
               'relative flex gap-4 rounded-2xl border border-line bg-white p-5 transition-shadow sm:block sm:p-6',
               !soon && 'shadow-card hover:shadow-raised',

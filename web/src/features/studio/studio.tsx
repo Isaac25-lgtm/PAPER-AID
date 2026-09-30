@@ -16,8 +16,8 @@ const ACCEPT = '.docx,.pdf,application/vnd.openxmlformats-officedocument.wordpro
 /** The step a chosen job starts with, once the paper is uploaded. */
 export function modeFor(service: string | null): Mode {
   if (service === 'REFINE' || service === 'REDRAFT') return 'redraft'
-  if (service === 'FORMAT' || service === 'TEMPLATE_FORMAT' || service === 'LATEX') return 'format'
-  return 'check'
+  if (service === 'ACADEMIC_FORMAT' || service === 'FORMAT' || service === 'TEMPLATE_FORMAT' || service === 'LATEX') return 'format'
+  return 'check' // Paper Check starts with the check
 }
 
 /** New job, step one: just the paper. It opens on its own page at once, with the next step beside it. */

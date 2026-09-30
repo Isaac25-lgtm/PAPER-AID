@@ -132,6 +132,7 @@ try {
   await page.getByText('Figure 1.1: Conceptual framework').waitFor()
   step('the conceptual framework figure is drawn from the plan')
   await page.getByRole('tab', { name: /Ready/ }).click()
+  if (!(await page.getByRole('button', { name: 'Complete proposal (LaTeX)' }).isDisabled())) throw new Error('LaTeX is offered only for the complete proposal')
   await page.getByText('Write Chapter 2.', { exact: true }).waitFor()
   const [report] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Response to comments' }).click()])
   if (!report.suggestedFilename().startsWith('Response to supervisor')) throw new Error(`unexpected report: ${report.suggestedFilename()}`)

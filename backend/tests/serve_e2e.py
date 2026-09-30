@@ -24,7 +24,7 @@ def main() -> None:
             "DATA_DIR": str(DATA),
             "OPENAI_API_KEY": "sk-e2e",
             "ANTHROPIC_API_KEY": "sk-e2e",
-            "MODEL_PRICES": '{"fake:gpt-6-sol":[0,0,0],"fake:claude-opus-5-5":[0,0,0]}',
+            "MODEL_PRICES": '{"fake:gpt-6-sol":[0,0,0],"fake:gpt-6-luna":[0,0,0],"fake:claude-sonnet-5-5":[0,0,0],"fake:claude-opus-5-5":[0,0,0]}',
             "ADMIN_EMAILS": '["demo@paperaid.app"]',
             "ENV": "local",
             "CREDITS_ENABLED": "true",  # the browser journey covers credits, whatever the local .env says

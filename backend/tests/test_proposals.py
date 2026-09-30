@@ -163,15 +163,25 @@ def test_a_plan_is_researched_negotiated_and_never_invents_the_students_figures(
     assert article["source"]["title"] == "Vaccine Uptake Among Caregivers in Central Uganda"  # registered details, not the model's
 
 
-def test_an_over_long_field_from_the_model_is_shortened_not_fatal(client):
-    """Found in a real-model run: a long analysis plan must not fail the step (and every retry)."""
-    long_plan = {**PLAN, "alignment": [{**PLAN["alignment"][0], "analysis": "Binary logistic regression " * 80}, *PLAN["alignment"][1:]]}
+def test_an_over_long_field_from_the_model_is_shortened_to_a_whole_sentence(client):
+    """Found in a real-model run: a long analysis plan must not fail the step. It ends at a complete
+    sentence (a sentence cut mid-way made both reviewers refuse a plan: Phase 4 pilot)."""
+    long_plan = {**PLAN, "alignment": [{**PLAN["alignment"][0], "analysis": "Binary logistic regression will be used. " * 60}, *PLAN["alignment"][1:]]}
     client.models.overrides["p_finalise"] = lambda payload: long_plan
     project = _create(client)
     job = _run(client, project["id"], "PLAN")
     assert job["status"] == "COMPLETED", job
     analysis = client.get(f"/api/projects/{project['id']}", headers=STUDENT).json()["plan"]["alignment"][0]["analysis"]
-    assert len(analysis) <= 1000 and analysis.endswith("…")
+    assert len(analysis) <= 1000 and analysis.endswith("used.")
+
+
+def test_an_over_long_run_on_field_fails_the_plan_without_charge(fixed_client):
+    """No sentence end to cut at: never delivered cut mid-way (Codex review 2026-09-30 #7)."""
+    long_plan = {**PLAN, "alignment": [{**PLAN["alignment"][0], "analysis": "Binary logistic regression " * 80}, *PLAN["alignment"][1:]]}
+    fixed_client.models.overrides["p_finalise"] = lambda payload: long_plan
+    project = _create(fixed_client)
+    job = _run(fixed_client, project["id"], "PLAN")
+    assert job["status"] == "FAILED" and job["failure"]["code"] == "PLAN_INVALID" and job["billing"]["charged"] == 0
 
 
 def test_the_plans_price_includes_chapter_one_which_starts_on_approval_once(client):
@@ -280,6 +290,10 @@ def test_invented_figures_and_typed_citations_never_reach_the_chapter(client):
     assert "73%" not in text and "Smith" not in text and "The study will follow the plan." in text
     trace = next(r for r in chapter["readiness"] if r["id"] == "C1-TRACE")
     assert trace["status"] == "NEEDS_REVIEW"
+    # the removal happened before the final approval: both reviewers approved the delivered wording
+    for task in ("p_review", "p_review_peer"):
+        last = [r for t, r in zip(client.models.tasks, client.models.requests, strict=True) if t == task][-1]
+        assert "73%" not in last and "Smith" not in last and "The study will follow the plan." in last
 
 
 def test_web_sources_get_their_year_and_pmc_articles_their_registered_details(client):
@@ -483,4 +497,3 @@ def test_a_review_runs_alone(client):
     assert mixed.status_code == 400 and mixed.json()["code"] == "REVIEW_ALONE"
     step = client.post(f"/api/jobs/{job_id}/quote", headers=STUDENT, json={"selection": {"proposal": "PLAN"}})
     assert step.status_code == 400 and step.json()["code"] == "PROPOSAL_STEP"
-

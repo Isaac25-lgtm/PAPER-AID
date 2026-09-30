@@ -175,6 +175,8 @@ export interface AnalysisResult {
   confidence: Confidence
   /** Estimated AI-likeness as a percentage (absent on analyses made before it was recorded). */
   percent?: number | null
+  coverageComplete?: boolean | null
+  disagreementBlocks?: string[]
   analysedWords: number
   excludedWords: number
   findings: Finding[]
@@ -427,6 +429,8 @@ export interface PublicConfig {
   availability: Record<ServiceId, Availability>
   /** Off = testing mode: nothing needs a balance and nothing is charged; prices are still shown. */
   creditsEnabled: boolean
+  /** The AI-likeness percentage and band are shown only when on (off since the 2026-09-30 pilot). */
+  aiScore?: boolean
   minTopUpUgx: number
   ugxPerUsd: number
   ugxPerToken: number

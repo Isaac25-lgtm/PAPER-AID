@@ -112,6 +112,17 @@ function ChapterPanel({ project, number, running, onStarted, onChanged }: { proj
     />
   )
   if (!state.current) return runner
+  const missing = version === state.current ? (chapter?.missing ?? []) : []
+  const finisher = missing.length > 0 && (
+    <StepRunner
+      projectId={project.id}
+      step={`COMPLETE_${number as 1 | 2 | 3 | 4}`}
+      label={concept ? 'Finish my concept paper' : `Finish Chapter ${number}`}
+      description={`PaperAid writes only the sections still missing (${missing.join('; ')}) and checks them before you see them. You pay only for those sections: with this draft, never more than one ${concept ? 'concept paper' : 'chapter'}.`}
+      disabledReason={running ? 'A step is running for this proposal. Wait for it to finish.' : undefined}
+      onStarted={onStarted}
+    />
+  )
   const comments = project.feedback.filter((c) => c.status === 'OPEN' && c.chapter === number && c.sections.length)
   const reviser = comments.length > 0 && (
     <StepRunner
@@ -164,7 +175,7 @@ function ChapterPanel({ project, number, running, onStarted, onChanged }: { proj
           ) : state.approved ? (
             <Badge tone="brand">Approved</Badge>
           ) : (
-            <Button disabled={!loaded} onClick={() => choose(true)}>
+            <Button disabled={!loaded || missing.length > 0} onClick={() => choose(true)}>
               {concept ? 'Approve the concept paper' : 'Approve this chapter'}
             </Button>
           )}
@@ -260,6 +271,7 @@ function ChapterPanel({ project, number, running, onStarted, onChanged }: { proj
           ) : (
             <Card className="p-4 text-sm text-fg-muted">Changes are made to the current version. Choose it above, or use this version first, to ask for changes.</Card>
           ))}
+        {finisher}
         {reviser}
         {runner}
       </aside>
@@ -505,9 +517,12 @@ function InstitutionCard({ project, running, onStarted, onChanged }: { project: 
               onStarted={onStarted}
             />
           )}
-          {custom && (
-            <Button variant="ghost" size="sm" disabled={busy} onClick={() => run(() => data.projects.useDefaultRulebook(project.id))}>
-              Use the default structure instead
+          {project.guideName && !project.guideRead && (
+            <p className="text-xs text-fg-subtle">Until your guide is read, choose it or the standard structure: PaperAid writes your proposal to one of them.</p>
+          )}
+          {(custom || (project.guideName && !project.guideRead)) && (
+            <Button variant="ghost" size="sm" disabled={busy || running} onClick={() => run(() => data.projects.useDefaultRulebook(project.id))}>
+              Use the standard structure instead
             </Button>
           )}
         </>
@@ -517,7 +532,7 @@ function InstitutionCard({ project, running, onStarted, onChanged }: { project: 
 }
 
 /** Everything that stands between the proposal and a complete download, in one place. */
-function ReadyPanel({ project, onDownload }: { project: Project; onDownload: (final: boolean, pdf?: boolean) => void }) {
+function ReadyPanel({ project, onDownload }: { project: Project; onDownload: (final: boolean, kind?: 'docx' | 'pdf' | 'latex') => void }) {
   const data = useData()
   const [error, setError] = useState<string | null>(null)
   const open = project.feedback.filter((c) => c.status === 'OPEN').length
@@ -551,11 +566,14 @@ function ReadyPanel({ project, onDownload }: { project: Project; onDownload: (fi
         <Button disabled={!ready} onClick={() => onDownload(true)}>
           <Download className="size-4" aria-hidden /> Complete proposal (Word)
         </Button>
-        <Button variant="secondary" disabled={!project.chapters.some((c) => c.number !== CONCEPT && c.current)} onClick={() => onDownload(ready, true)}>
+        <Button variant="secondary" disabled={!project.chapters.some((c) => c.number !== CONCEPT && c.current)} onClick={() => onDownload(ready, 'pdf')}>
           <Download className="size-4" aria-hidden /> {ready ? 'Complete proposal (PDF)' : 'Draft (PDF)'}
         </Button>
         <Button variant="secondary" disabled={!project.chapters.some((c) => c.number !== CONCEPT && c.current)} onClick={() => onDownload(false)}>
           <Download className="size-4" aria-hidden /> Draft (Word)
+        </Button>
+        <Button variant="secondary" disabled={!ready} onClick={() => onDownload(true, 'latex')}>
+          <Download className="size-4" aria-hidden /> Complete proposal (LaTeX)
         </Button>
         {project.feedback.length > 0 && (
           <Button variant="secondary" onClick={() => data.projects.downloadResponse(project.id).catch((e: unknown) => setError(e instanceof DataError ? e.message : 'We could not prepare the report.'))}>
@@ -642,12 +660,13 @@ export function ProjectPage() {
     [load],
   )
 
-  const download = async (final: boolean, pdf = false) => {
+  const download = async (final: boolean, kind: 'docx' | 'pdf' | 'latex' = 'docx') => {
     if (!project) return
     setError(null)
     try {
-      const name = `${(project.plan?.title ?? 'Proposal').slice(0, 80)}${final ? '' : ' – draft'}.${pdf ? 'pdf' : 'docx'}`
-      await (pdf ? data.projects.downloadPdf(project.id, final, name) : data.projects.download(project.id, final, name))
+      const stem = `${(project.plan?.title ?? 'Proposal').slice(0, 80)}${final ? '' : ' – draft'}`
+      if (kind === 'latex') await data.projects.downloadLatex(project.id, final, `${stem} (LaTeX).zip`)
+      else await (kind === 'pdf' ? data.projects.downloadPdf(project.id, final, `${stem}.pdf`) : data.projects.download(project.id, final, `${stem}.docx`))
     } catch (e) {
       setError(e instanceof DataError ? e.message : 'We could not prepare the document.')
     }

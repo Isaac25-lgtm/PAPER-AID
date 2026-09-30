@@ -19,6 +19,7 @@ from pydantic import ValidationError
 from app.analysis import fetch, research
 from app.core.errors import PermanentStageError
 from app.jobs.models import Job, ReadinessItem, Stage, utcnow
+from app.pricing.quote import round_up
 from app.proposals import decisions, evidence, profile, rulebook, sampling
 from app.proposals.ai import Grade, ProposalRunner, SectionText, Table
 from app.proposals.models import (
@@ -251,6 +252,7 @@ def stage_planning(ctx: "StageContext") -> None:
             raise PermanentStageError(
                 "NOT_A_GUIDE", "PaperAid could not find a proposal structure in this guide, so nothing was charged. Check it is your institution's research guide.", f"profile: {exc}"
             ) from exc
+        runner.approve_profile({"guide": guide, "reference": profile.reference(), "finalProfile": book})  # the exact profile to be used
         ctx.put_json("profile.json", {"profile": book, "draft": draft, "critique": critique.model_dump()})
         return
     usable = [i for i in _library(ctx, inp).values() if i.usable]
@@ -259,10 +261,11 @@ def stage_planning(ctx: "StageContext") -> None:
         payload = {"study": _study(inp), "level": inp.inputs.level, "rules": rules, "evidence": _for_model(usable), "note": inp.note}
         final, draft, critique = runner.negotiate("plan", payload)
         plan = _confirmed_gap(_student_figures_only(_plan_from_model(final), inp), {i.id for i in usable})
+        runner.approve_plan({**payload, "finalPlan": plan.model_dump(by_alias=True)})
         ctx.put_json("plan.json", {"plan": plan.model_dump(by_alias=True), "draft": draft, "critique": critique.model_dump()})
         return
     assert inp.plan is not None
-    sections = rulebook.sections(inp.rulebook, inp.chapter, inp.inputs.level, inp.plan)
+    sections = [s for s in rulebook.sections(inp.rulebook, inp.chapter, inp.inputs.level, inp.plan) if not inp.only or s.key in inp.only]
     sample = sampling.calculate(inp.plan.sample_size) if inp.chapter == 3 else None
     payload = {
         "plan": _plan(inp),
@@ -272,6 +275,7 @@ def stage_planning(ctx: "StageContext") -> None:
         "evidence": _for_model(usable),
         "sampleSize": sample.steps if sample else "",
         "note": inp.note,
+        **_finish_context(ctx, inp),
     }
     final, draft, critique = runner.negotiate("briefs", payload)
     ids = {i.id for i in usable}
@@ -295,9 +299,25 @@ def _plan_from_model(data: dict[str, Any]) -> ProposalPlan:
                 target: Any = data
                 for key in path:
                     target = target[key]
-                limit = error["ctx"]["max_length"]
-                target[last] = target[last][: limit - 1].rsplit(" ", 1)[0] + "…"
+                shortened = _shorten(target[last], error["ctx"]["max_length"])
+                if shortened is None:
+                    raise PermanentStageError(
+                        "PLAN_INVALID", "PaperAid could not fit part of the plan within its limits this time. Nothing was charged; please try again.",
+                        f"plan field {'.'.join(str(k) for k in error['loc'])} has no sentence end to shorten at",
+                    ) from exc
+                target[last] = shortened
     return ProposalPlan.model_validate(data)
+
+
+def _shorten(text: str, limit: int) -> str | None:
+    """Text within `limit`, ending at a complete sentence in its second half; None when there is none.
+    A sentence cut mid-way reads as an error to the reviewers and to the student (Phase 4 pilot), so it
+    is never delivered (Codex review 2026-09-30 #7)."""
+    head = text[:limit]
+    end = max(head.rfind(mark) for mark in (". ", "? ", "! "))
+    if end < limit // 2:
+        return None
+    return head[: end + 1]
 
 
 def _confirmed_gap(plan: ProposalPlan, usable: set[str]) -> ProposalPlan:
@@ -345,6 +365,8 @@ def _section_items(inp: StepInput, library: dict[str, EvidenceItem], briefs: dic
     assert inp.plan is not None
     items = []
     for s in rulebook.sections(inp.rulebook, inp.chapter, inp.inputs.level, inp.plan):
+        if inp.only and s.key not in inp.only:  # finishing a chapter: its missing sections only
+            continue
         brief = briefs.get(s.key, {"points": [], "evidence": []})
         assigned = [library[i] for i in brief["evidence"] if i in library and library[i].usable]
         items.append(
@@ -365,7 +387,7 @@ def stage_drafting(ctx: "StageContext") -> None:
     library = _library(ctx, inp)
     sample = sampling.calculate(inp.plan.sample_size) if inp.chapter == 3 else None
     items = _section_items(inp, library, ctx.get_json("briefs.json")["briefs"])
-    drafted = runner.draft(items, _common(inp, sample.steps if sample else ""))
+    drafted = runner.draft(items, {**_common(inp, sample.steps if sample else ""), **_finish_context(ctx, inp)})
     ctx.put_json("drafted.json", {k: v.model_dump() for k, v in drafted.items()})
     missing = [i["heading"] for i in items if i["key"] not in drafted]
     if missing:
@@ -405,6 +427,18 @@ def _checks(inp: StepInput, key: str, text: SectionText, library: dict[str, Evid
     return list(dict.fromkeys(problems))
 
 
+def _cleaned(inp: StepInput, text: SectionText, library: dict[str, EvidenceItem], usable: set[str], allowed: str) -> SectionText:
+    """A section with every untraceable sentence removed, repeated until nothing more changes
+    (removing a cited sentence can leave a neighbour's figure unsupported)."""
+    for _ in range(5):
+        paragraphs = [p for p in (evidence.strip_unsupported(p, library, usable, allowed) for p in text.paragraphs) if p]
+        tidy = text.model_copy(update={"paragraphs": paragraphs, "table": _strip_table(inp, text, library, usable, allowed)})
+        if tidy == text:
+            break
+        text = tidy
+    return text
+
+
 def _strip_table(inp: StepInput, text: SectionText, library: dict[str, EvidenceItem], usable: set[str], allowed: str) -> Table:
     table_allowed = _table_allowed(inp, allowed)
 
@@ -426,7 +460,7 @@ def stage_auditing(ctx: "StageContext") -> None:
     usable = {i for i, item in library.items() if item.usable}
     sample = sampling.calculate(inp.plan.sample_size) if inp.chapter == 3 else None
     allowed = _allowed_text(inp, sample.figures if sample else "")
-    common = _common(inp, sample.steps if sample else "")
+    common = {**_common(inp, sample.steps if sample else ""), **_finish_context(ctx, inp)}
     vetting = rulebook.vetting(inp.rulebook, inp.chapter)
     warnings: list[str] = []
     base: ChapterDocument | None = None
@@ -435,6 +469,8 @@ def stage_auditing(ctx: "StageContext") -> None:
     else:
         items = {i["key"]: i for i in _section_items(inp, library, ctx.get_json("briefs.json")["briefs"])}
         current = {k: SectionText.model_validate(v) for k, v in ctx.get_json("drafted.json").items()}
+        if inp.step == "COMPLETE":
+            base = _base_document(ctx, inp)
     unresolved: dict[str, list[str]] = {}
     grades: dict[str, Grade] = {}
     rounds = settings.repair_attempts
@@ -462,11 +498,56 @@ def stage_auditing(ctx: "StageContext") -> None:
             if key in unresolved:
                 current[key] = fixed
 
-    stripped = []
+    stripped: list[str] = []
+    if runner._engine.require_dual_approval:
+        # Code removes what it cannot trace BEFORE the final approval, so both reviewers approve the
+        # exact wording that is delivered (Codex, plan review 2026-09-29).
+        cleaned = {key: tidy for key, text in current.items() if (tidy := _cleaned(inp, text, library, usable, allowed)) != text}
+        if cleaned:
+            stripped += [items[key]["heading"] for key in cleaned]
+            current.update(cleaned)
+            problems = {k: _checks(inp, k, current[k], library, allowed) for k in cleaned}
+            regraded = runner.grade(
+                [
+                    {**items[k], "text": current[k].paragraphs, "table": current[k].table.model_dump(), "paperaidChecks": problems[k], "_words": " ".join(current[k].paragraphs)}
+                    for k in cleaned
+                ],
+                {**common, "vetting": vetting},
+            )
+            for key in cleaned:
+                grade = regraded.get(key)
+                grades.pop(key, None)
+                if grade is not None:
+                    grades[key] = grade
+                issues = [*problems[key], *(grade.issues if grade and grade.grade == "REPAIR" else [])] + ([] if grade else [NOT_REVIEWED])
+                if issues:
+                    unresolved[key] = issues
+                else:
+                    unresolved.pop(key, None)
+    missing: list[str] = []
+    if runner._engine.require_dual_approval:
+        # Only wording both reviewers approved is delivered. A revision keeps the earlier text of the
+        # rest; a new chapter (or a finish) delivers what was approved and records the rest as not
+        # written yet, for "Finish chapter" (owner decision 2026-09-29). Nothing approved: no document.
+        approved = [k for k in items if k in current and k not in unresolved]
+        missing = [k for k in items if k not in approved] if inp.step in ("CHAPTER", "COMPLETE") else []
+        if base is None and (not approved or (missing and not runner._engine.partial_chapters)):
+            raise PermanentStageError(
+                "DOCUMENT_NOT_APPROVED", "PaperAid could not write and approve every section of this draft. No document was released and nothing was charged. Please try again.",
+                f"{len(approved)} of {len(items)} sections approved",
+            )
+        for key in unresolved:
+            current.pop(key, None)  # never rejected new text: _merge keeps earlier wording, a finish keeps it missing
+
     for key, text in current.items():
         cleaned = [evidence.strip_unsupported(p, library, usable, allowed) for p in text.paragraphs]
         table = _strip_table(inp, text, library, usable, allowed)
         if cleaned != text.paragraphs or table != text.table:
+            if runner._engine.require_dual_approval:  # the final guard: nothing changes after approval
+                raise PermanentStageError(
+                    "DOCUMENT_NOT_APPROVED", "PaperAid could not verify the final wording. No document was released and nothing was charged. Please try again.",
+                    "post-review evidence cleanup would change approved wording",
+                )
             stripped.append(items[key]["heading"])
         current[key] = text.model_copy(update={"paragraphs": [p for p in cleaned if p], "table": table})
     if stripped:
@@ -489,7 +570,16 @@ def stage_auditing(ctx: "StageContext") -> None:
     for section in document.sections:
         section.reviewed = section.key in grades
     delivered: list[str] = []
-    if base is not None:
+    if base is not None and inp.step == "COMPLETE":
+        document, delivered = _completed(inp, base, document)
+        if not delivered:
+            raise PermanentStageError(
+                "NOTHING_WRITTEN", "PaperAid could not write the remaining sections this time, so your chapter is unchanged and nothing was charged.", "complete: nothing written"
+            )
+        warnings = [w for w in base.warnings if not w.startswith(STILL_MISSING)] + warnings
+        stripped = stripped or [i.note for i in base.readiness if i.id.endswith("-TRACE") and i.status != "PASS"]
+        unreviewed = _unreviewed(base, document)
+    elif base is not None:
         document, kept = _merge(base, document, set(current))
         delivered = _delivered(base, document, set(current))
         # answered: changed AND passed the final review (Codex re-check H05); changed text alone is not an answer
@@ -505,15 +595,101 @@ def stage_auditing(ctx: "StageContext") -> None:
         warnings = _carried_warnings(base, delivered) + warnings
         unreviewed = _unreviewed(base, document)
         stripped = stripped or [i.note for i in base.readiness if i.id.endswith("-TRACE") and i.status != "PASS"]
-    document.readiness = _readiness(ctx, runner, inp, document, library, bool(stripped), unreviewed)
+    if inp.step == "CHAPTER":
+        document.missing = missing
+    total = {k: items[k]["words"] for k in items}  # sections are weighed by their planned length
+    if document.missing:
+        headings = [f"{items[k]['number']} {items[k]['heading']}" for k in document.missing if k in items] or [
+            f"{s.number} {s.heading}" for s in rulebook.sections(inp.rulebook, inp.chapter, inp.inputs.level, inp.plan) if s.key in document.missing
+        ]
+        warnings.append(f"{STILL_MISSING} {', '.join(headings)}. Finish the chapter to write them; you are charged only for the sections delivered.")
+    document.readiness = _readiness(ctx, runner, inp, document, library, bool(stripped), unreviewed) + _missing_items(inp, document.missing)
     document.warnings = warnings
+    share: float | None = None
+    if inp.step in ("CHAPTER", "COMPLETE") and runner._engine.require_dual_approval:
+        written = delivered if inp.step == "COMPLETE" else [k for k in items if k not in missing]
+        share = sum(total.get(k, 0) for k in written) / max(1, sum(total.values()))
+    if document.missing or inp.step == "COMPLETE":
+        # The draft and its finishes never cost more than one chapter, however many finishes it takes
+        # (Codex review 2026-09-30 #3): each charge is added to what the chapter has cost so far, and a
+        # finish is priced at most at the rest. The charge is settlement's own: line x delivered share.
+        line = next((ln.amount for ln in (ctx.job.quote.lines if ctx.job.quote else []) if ln.service == _line_key(inp)), 0)
+        charge = round_up(line * min(1.0, share if share is not None else 1.0))
+        document.full_price = base.full_price if base is not None and inp.step == "COMPLETE" else line
+        document.paid = (base.paid if base is not None and inp.step == "COMPLETE" else 0) + charge
     ctx.put_json("chapter.json", document.model_dump(by_alias=True))
-    if base is not None:
+    if share is not None:
+        ctx.update(lambda j: j.model_copy(update={"delivery": {**j.delivery, _line_key(inp): share}}))
+    if base is not None and inp.step == "REVISE":
         targeted = [k for k in inp.revise if any(s.key == k for s in base.sections)]
         share = len(document.revised) / len(targeted) if targeted else 0.0
         ctx.update(lambda j: j.model_copy(update={"delivery": {**j.delivery, "REVISE": share}}))
     if warnings:
-        ctx.update(lambda j: _warn(j, warnings, partial=bool(unresolved or stripped or unreviewed) or len(document.revised) < len(inp.revise)))
+        ctx.update(lambda j: _warn(j, warnings, partial=bool(unresolved or stripped or unreviewed or document.missing) or len(document.revised) < len(inp.revise)))
+
+
+STILL_MISSING = "These sections are not written yet:"
+
+
+def _line_key(inp: StepInput) -> str:
+    """The quote line a chapter step (or its finish) is priced and settled on."""
+    return "CONCEPT" if inp.chapter == 4 else f"CHAPTER_{inp.chapter}"
+
+
+def _finish_context(ctx: "StageContext", inp: StepInput) -> dict[str, Any]:
+    """For a finish: the chapter's approved sections, shortened, so the missing ones are written,
+    fixed and reviewed to agree with them and not repeat them (Codex review 2026-09-30 #6)."""
+    if inp.step != "COMPLETE":
+        return {}
+    base = _base_document(ctx, inp)
+    budget, shown = 9000, []
+    for s in base.sections:
+        text = " ".join(s.paragraphs)
+        excerpt = text if len(text) <= 1500 else text[:1500].rsplit(" ", 1)[0] + " …"
+        if budget - len(excerpt) < 0:
+            break
+        budget -= len(excerpt)
+        shown.append({"number": s.number, "heading": s.heading, "text": excerpt})
+    return {"approvedSections": shown}
+
+
+def _base_document(ctx: "StageContext", inp: StepInput) -> ChapterDocument:
+    """The chapter version a revision or a finish was priced on."""
+    path = inp.base if ctx.rt.files.exists(inp.base) else moved_path(inp.base)
+    return ChapterDocument.model_validate_json(ctx.rt.files.get(path))
+
+
+def _completed(inp: StepInput, base: ChapterDocument, written: ChapterDocument) -> tuple[ChapterDocument, list[str]]:
+    """A finished chapter: the base version's sections with the newly written ones in their place in
+    the chapter's order. Returns (document, the sections written now)."""
+    assert inp.plan is not None
+    fresh = {s.key: s for s in written.sections}
+    earlier = {s.key: s for s in base.sections}
+    order = [s.key for s in rulebook.sections(inp.rulebook, inp.chapter, inp.inputs.level, inp.plan)]
+    order += [k for k in earlier if k not in order]
+    sections = [fresh.get(k) or earlier[k] for k in order if k in fresh or k in earlier]
+    cited: list[str] = []
+    for section in sections:
+        for field in [*section.paragraphs, section.table_caption, *[c for row in section.table or [] for c in row]]:
+            cited += [i for i in evidence.cited_ids(field) if i not in cited]
+    words = sum(len(evidence.ANY_TOKEN.sub(" ", p).split()) for s in sections for p in s.paragraphs)
+    done = [k for k in base.missing if k in fresh]
+    document = ChapterDocument(
+        number=base.number, title=base.title, plan_version=base.plan_version, sections=sections, cited=cited, words=words,
+        missing=[k for k in base.missing if k not in fresh],
+    )
+    return document, done
+
+
+def _missing_items(inp: StepInput, missing: list[str]) -> list[ReadinessItem]:
+    """Each section not written yet is a MISSING readiness item, settled by code."""
+    if not missing or inp.plan is None:
+        return []
+    return [
+        ReadinessItem(id=f"C{inp.chapter}-{s.key}-WRITTEN", question=f"Is {s.number} {s.heading} written?", status="MISSING", basis="CODE", note="Finish the chapter to write it.")
+        for s in rulebook.sections(inp.rulebook, inp.chapter, inp.inputs.level, inp.plan)
+        if s.key in missing
+    ]
 
 
 def _revision(
@@ -716,7 +892,7 @@ def stage_exporting(ctx: "StageContext") -> None:
         ctx.rt.files.put(evidence_path, ctx.get_bytes("evidence.json"), "application/json")
     chapter_path = ""
     document: ChapterDocument | None = None
-    if inp.step in ("CHAPTER", "REVISE"):
+    if inp.step in ("CHAPTER", "REVISE", "COMPLETE"):
         document = ChapterDocument.model_validate(ctx.get_json("chapter.json"))
         chapter_path = f"{project.storage_prefix()}/chapters/{inp.chapter}/{job_id}.json"
         ctx.rt.files.put(chapter_path, document.model_dump_json(by_alias=True).encode(), "application/json")
@@ -735,6 +911,11 @@ def stage_exporting(ctx: "StageContext") -> None:
         nonlocal candidate
         if p.deleting:
             return None
+        if (p.guide is None or p.guide.path not in (inp.guide, moved_path(inp.guide))) if inp.step == "PROFILE" else p.rulebook != inp.rulebook:
+            raise PermanentStageError(  # replaced while this step ran: nothing is saved, nothing charged (Codex review #2)
+                "INPUTS_CHANGED", "Your institution's guide or proposal structure changed while this step was running, so nothing was saved and nothing was charged. Start it again.",
+                "guide or rulebook changed during the step",
+            )
         nonlocal written_meanwhile, kept_choice
         if job_id in p.published:  # a retry after this job's transaction already committed
             return p
@@ -761,11 +942,11 @@ def stage_exporting(ctx: "StageContext") -> None:
             state.versions.append(
                 StoredChapterVersion(
                     version=version, job_id=job_id, words=document.words, plan_version=inp.plan_version, path=chapter_path,
-                    note=(inp.note or ("Revised from your supervisor's comments" if inp.step == "REVISE" else ""))[:300],
+                    note=(inp.note or ("Revised from your supervisor's comments" if inp.step == "REVISE" else "Finished: the sections still to write" if inp.step == "COMPLETE" else ""))[:300],
                     passed=sum(1 for r in document.readiness if r.status in ("PASS", "NOT_APPLICABLE")), total=len(document.readiness),
                 )
             )
-            if inp.step == "REVISE" and state.current != inp.base_version:
+            if inp.step in ("REVISE", "COMPLETE") and state.current != inp.base_version:
                 kept_choice = True  # the student chose another version meanwhile: saved, not made current (H07)
             else:
                 state.current, state.approved = version, False

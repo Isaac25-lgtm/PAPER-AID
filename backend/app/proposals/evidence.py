@@ -209,13 +209,17 @@ def tense_problems(paragraph: str) -> list[str]:
 
 def strip_unsupported(paragraph: str, library: dict[str, EvidenceItem], usable: set[str], allowed_text: str) -> str:
     """The last line of defence after the fix rounds: remove each sentence that still carries an
-    invalid citation or an unsupported figure. Never adds anything."""
+    invalid citation or an unsupported figure. Never adds anything, and returns the paragraph exactly
+    as it was when nothing is removed: its spacing and line breaks are part of the approved text."""
     kept = []
+    removed = False
     for sentence in re.split(r"(?<=[.!?])\s+(?=[A-Z⟦])", paragraph):
         if citation_problems(sentence, usable):
+            removed = True
             continue
         context = sentence if cited_ids(sentence) else sentence + " " + " ".join(f"⟦{i}⟧" for i in cited_ids(paragraph))
         if figure_problems(context, library, allowed_text):
+            removed = True
             continue
         kept.append(sentence)
-    return " ".join(kept).strip()
+    return " ".join(kept).strip() if removed else paragraph

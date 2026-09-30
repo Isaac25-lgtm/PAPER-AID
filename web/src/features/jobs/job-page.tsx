@@ -266,12 +266,19 @@ function Completed({ job }: { job: Job }) {
   )
 }
 
+/** The AI-likeness band for the overview, when the score is switched on. */
+function scoreHighlight(job: Job): ReactNode {
+  if (job.analysis?.coverageComplete === false || job.analysisAfter?.coverageComplete === false) return 'Check incomplete'
+  if (job.analysis && job.analysisAfter) return <BandChange before={job.analysis.band} after={job.analysisAfter.band} />
+  if (job.analysis) return job.analysis.band.charAt(0) + job.analysis.band.slice(1).toLowerCase()
+  return null
+}
+
 function Overview({ job }: { job: Job }) {
+  const { config } = useData()
   const highlights: { label: string; value: ReactNode }[] = []
-  if (job.analysis && job.analysisAfter)
-    highlights.push({ label: 'Estimated AI-likeness', value: <BandChange before={job.analysis.band} after={job.analysisAfter.band} /> })
-  else if (job.analysis)
-    highlights.push({ label: 'Estimated AI-likeness', value: job.analysis.band.charAt(0) + job.analysis.band.slice(1).toLowerCase() })
+  const score = config.aiScore ? scoreHighlight(job) : null // writing-pattern feedback only unless switched on (owner decision 2026-09-30)
+  if (score) highlights.push({ label: 'Estimated AI-likeness', value: score })
   if (job.analysis) highlights.push({ label: 'Findings', value: `${job.analysis.findings.length} writing-pattern findings` })
   if (job.refinement) highlights.push({ label: 'Refined', value: `${job.refinement.refinedBlocks} passages, ${job.refinement.keptOriginal} kept original` })
   if (job.formatting) highlights.push({ label: 'Formatting', value: job.formatting.preset })
@@ -296,7 +303,9 @@ function Overview({ job }: { job: Job }) {
       </div>
       {job.analysis && (
         <p className="text-xs leading-relaxed text-fg-subtle">
-          AI-likeness is an estimate of writing patterns, not proof of authorship. Other detectors may give different results.
+          {config.aiScore
+            ? 'AI-likeness is an estimate of writing patterns, not proof of authorship. Other detectors may give different results.'
+            : 'Writing-pattern feedback describes how your text reads. It does not detect AI and is not a judgement of who wrote it.'}
         </p>
       )}
     </>

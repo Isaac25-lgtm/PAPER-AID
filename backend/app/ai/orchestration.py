@@ -1,4 +1,9 @@
-"""PaperAid's permanent two-model algorithm.
+"""PaperAid's editing algorithm, with per-run frozen model routes.
+
+New runs (owner decision 2026-09-29): Luna and Sonnet independently assess writing patterns;
+Luna performs routine research and drafts plans, Sonnet critiques, writes and repairs. Opus
+guides each plan; Sol finalises it. Both Sol and Opus must approve delivered changed wording.
+Engines quoted before this change keep the original roles and call payloads described below.
 
 Two fixed roles (models are configuration; the roles and their order are not):
   lead   (GPT-6 Sol)       analyses, drafts the plan, finalises it, reviews the result
@@ -65,6 +70,7 @@ from pydantic import BaseModel, Field, StrictBool, ValidationError
 from app.ai import costs
 from app.ai.providers import UNAVAILABLE, ModelResult, parse, provider_for
 from app.analysis import research
+from app.analysis.signals import MODEL_SCORE
 from app.core.config import Settings
 from app.core.errors import PermanentStageError, RetryableStageError
 from app.documents import protect
@@ -88,13 +94,18 @@ class Step:
 
 # The algorithm, in one place: which role performs each step.
 STEPS: dict[str, Step] = {
-    "analyse": Step("lead", Stage.ANALYSING, "analyse-v2", 12000),
+    "analyse": Step("lead", Stage.ANALYSING, "analyse-v3", 12000),
+    "analyse_peer": Step("writer", Stage.ANALYSING, "analyse-v3", 12000),
+    "analyse_after": Step("lead", Stage.EXPORTING, "analyse-v3", 12000),
+    "analyse_after_peer": Step("writer", Stage.EXPORTING, "analyse-v3", 12000),
     "academic": Step("lead", Stage.ANALYSING, "academic-v1", 8000),
     "plan": Step("lead", Stage.PLANNING, "plan-v2", 12000),
     "critique": Step("writer", Stage.PLANNING, "critique-v2", 8000),
-    "finalise": Step("lead", Stage.PLANNING, "finalise-v2", 12000),
+    "guide": Step("writer", Stage.PLANNING, "guide-v1", 8000),
+    "finalise": Step("lead", Stage.PLANNING, "finalise-v4", 12000),
     "refine": Step("writer", Stage.REFINING, "refine-v3", 16000),
-    "review": Step("lead", Stage.AUDITING, "review-v2", 8000),
+    "review": Step("lead", Stage.AUDITING, "review-v3", 8000),
+    "review_peer": Step("writer", Stage.AUDITING, "review-v3", 8000),
     "repair": Step("writer", Stage.AUDITING, "repair-v3", 16000),
     "redraft": Step("writer", Stage.REDRAFTING, "redraft-v1", 16000),
     "redraft_fix": Step("writer", Stage.AUDITING, "redraft-fix-v1", 16000),
@@ -102,9 +113,11 @@ STEPS: dict[str, Step] = {
     "research": Step("lead", Stage.RESEARCHING, "research-v1", 4000),
     "verify": Step("writer", Stage.RESEARCHING, "verify-v1", 6000),
     "spec_plan": Step("lead", Stage.FORMATTING, "spec-plan-v1", 8000),
-    "spec_critique": Step("writer", Stage.FORMATTING, "spec-critique-v1", 6000),
-    "spec_finalise": Step("lead", Stage.FORMATTING, "spec-finalise-v1", 8000),
-    "spec_review": Step("lead", Stage.FORMATTING, "spec-review-v1", 6000),
+    "spec_critique": Step("writer", Stage.FORMATTING, "spec-critique-v2", 6000),
+    "spec_guide": Step("writer", Stage.FORMATTING, "spec-guide-v1", 6000),
+    "spec_finalise": Step("lead", Stage.FORMATTING, "spec-finalise-v3", 8000),
+    "spec_review": Step("lead", Stage.FORMATTING, "spec-review-v2", 6000),
+    "spec_review_peer": Step("writer", Stage.FORMATTING, "spec-review-v2", 6000),
     "spec_fix": Step("writer", Stage.FORMATTING, "spec-fix-v1", 8000),
     # Proposal projects (Proposal V1, owner decision 2026-09-28): the same two roles and loop.
     # Evidence: lead plans the needs, reads abstracts or searches; writer checks each finding (verify).
@@ -113,27 +126,55 @@ STEPS: dict[str, Step] = {
     "p_search": Step("lead", Stage.RESEARCHING, "p-search-v1", 4000),
     # Plan, and each chapter's section briefs: lead drafts → writer critiques → lead finalises.
     "p_plan": Step("lead", Stage.PLANNING, "p-plan-v2", 12000),  # v2: the research-gap builder
-    "p_brief": Step("lead", Stage.PLANNING, "p-brief-v1", 12000),
+    "p_brief": Step("lead", Stage.PLANNING, "p-brief-v2", 12000),
     "p_critique": Step("writer", Stage.PLANNING, "p-critique-v1", 8000),
-    "p_finalise": Step("lead", Stage.PLANNING, "p-finalise-v2", 12000),
+    "p_guide": Step("writer", Stage.PLANNING, "p-guide-v1", 8000),
+    "p_finalise": Step("lead", Stage.PLANNING, "p-finalise-v4", 12000),
+    "p_plan_review": Step("lead", Stage.PLANNING, "p-plan-review-v2", 8000),
+    "p_plan_review_peer": Step("writer", Stage.PLANNING, "p-plan-review-v2", 8000),
     # Chapter: writer drafts → code checks → lead reviews → writer fixes (bounded rounds) → lead readiness.
-    "p_draft": Step("writer", Stage.DRAFTING, "p-draft-v1", 16000),
-    "p_review": Step("lead", Stage.AUDITING, "p-review-v1", 8000),
-    "p_fix": Step("writer", Stage.AUDITING, "p-fix-v1", 16000),
+    "p_draft": Step("writer", Stage.DRAFTING, "p-draft-v2", 16000),
+    "p_review": Step("lead", Stage.AUDITING, "p-review-v3", 8000),
+    "p_review_peer": Step("writer", Stage.AUDITING, "p-review-v3", 8000),
+    "p_fix": Step("writer", Stage.AUDITING, "p-fix-v2", 16000),
     "p_readiness": Step("lead", Stage.AUDITING, "p-readiness-v1", 8000),
     # An institution profile from an uploaded guide (Proposal V2): lead drafts → writer critiques → lead finalises.
     "p_profile": Step("lead", Stage.PLANNING, "p-profile-v1", 12000),
     "p_profile_critique": Step("writer", Stage.PLANNING, "p-profile-critique-v1", 6000),
-    "p_profile_finalise": Step("lead", Stage.PLANNING, "p-profile-finalise-v1", 12000),
+    "p_profile_guide": Step("writer", Stage.PLANNING, "p-profile-guide-v1", 6000),
+    "p_profile_finalise": Step("lead", Stage.PLANNING, "p-profile-finalise-v3", 12000),
+    "p_profile_review": Step("lead", Stage.PLANNING, "p-profile-review-v1", 8000),
+    "p_profile_review_peer": Step("writer", Stage.PLANNING, "p-profile-review-v1", 8000),
     # Review of an uploaded proposal: the lead audits it against the rulebook (it is never rewritten).
     "p_audit": Step("lead", Stage.ANALYSING, "p-audit-v1", 12000),
 }
 
 
 
+ROUTINE_TASKS = {"academic", "plan", "claims", "research", "spec_plan", "p_needs", "p_extract", "p_search", "p_plan", "p_brief", "p_profile", "p_audit"}
+DRAFTING_TASKS = {"critique", "refine", "repair", "redraft", "redraft_fix", "verify", "spec_critique", "spec_fix", "p_critique", "p_draft", "p_fix", "p_profile_critique"}
+
+
+def model_for_engine(engine: Engine, task: str) -> str:
+    """One routing rule shared by execution and the cost projection, using frozen run settings."""
+    if task in ("analyse", "analyse_after"):
+        return engine.ai_check_model or engine.lead_model
+    if task in ("analyse_peer", "analyse_after_peer"):
+        return engine.ai_check_peer_model or engine.writer_model
+    if task in ROUTINE_TASKS and engine.routine_model:
+        return engine.routine_model
+    if task in DRAFTING_TASKS and engine.drafting_model:
+        return engine.drafting_model
+    return engine.lead_model if STEPS[task].role == "lead" else engine.writer_model
+
+
 def current_engine(settings: Settings) -> Engine:
     """The engine a run priced now will execute with (see `Engine`)."""
-    return Engine(lead_model=settings.lead_model, writer_model=settings.writer_model, prompts={task: step.prompt for task, step in STEPS.items()})
+    return Engine(lead_model=settings.lead_model, writer_model=settings.writer_model, ai_check_model=settings.ai_check_model,
+                  ai_check_peer_model=settings.ai_check_peer_model, routine_model=settings.routine_model, drafting_model=settings.drafting_model,
+                  require_dual_approval=settings.require_dual_approval, explicit_coverage=True, frontier_guidance=settings.frontier_guidance,
+                  partial_chapters=settings.partial_chapters,
+                  prompts={task: step.prompt for task, step in STEPS.items()})
 
 
 REASONS = ["GENERIC_PHRASING", "UNIFORM_STRUCTURE", "LOW_SPECIFICITY", "FORMULAIC_TRANSITIONS", "OVER_HEDGING", "UNSUPPORTED_SUMMARY", "REPETITION", "STYLE_SHIFT"]
@@ -280,6 +321,16 @@ class _Analysis(BaseModel):
     blocks: list[_AnalysisBlock]
 
 
+@dataclass
+class Judgment:
+    """One passage's model judgement, combined by code from every checker that answered: never a
+    field a provider can fill (Claude audit 2026-09-29 F6)."""
+
+    answer: _AnalysisBlock  # the findings shown for the passage (the stronger checker's)
+    score: float  # the mean of the checkers' band scores
+    bands: list[str]  # each checker's band, in routing order
+
+
 class AcademicItem(BaseModel):
     id: str
     category: Literal["ACADEMIC", "EVIDENCE", "METHOD"]
@@ -417,8 +468,8 @@ class _SpecCritique(BaseModel):
 class _SpecReview(BaseModel):
     model_config = {"populate_by_name": True}
 
-    passed: bool = Field(alias="pass")
-    problems: list[dict[str, str]] = []
+    passed: StrictBool = Field(alias="pass")  # "yes" or 1 is not an approval (F7)
+    problems: list[dict[str, str]]
 
 
 class ResponseCache(Protocol):
@@ -494,7 +545,12 @@ class AIRunner:
         self._heartbeat = heartbeat or (lambda: None)
 
     def model_for(self, task: str) -> str:
-        return self._engine.lead_model if STEPS[task].role == "lead" else self._engine.writer_model
+        return model_for_engine(self._engine, task)
+
+    @property
+    def guided(self) -> bool:
+        """Whether plans get the frontier guidance step (frozen with the engine)."""
+        return self._engine.require_dual_approval and self._engine.frontier_guidance
 
     def _prompt_for(self, task: str) -> str:
         # Every executed step must be in the engine the run was priced with (Codex audit 56c4f83 M28).
@@ -628,7 +684,34 @@ class AIRunner:
 
     # --- 1. analysis (lead) ------------------------------------------------------------
 
-    def analyse(self, passages: list[dict[str, Any]], outline: list[str], evidence: dict[str, Any]) -> tuple[dict[str, _AnalysisBlock], set[str]]:
+    def analyse(self, passages: list[dict[str, Any]], outline: list[str], evidence: dict[str, Any], after: bool = False) -> tuple[dict[str, Judgment], set[str]]:
+        """Every checker's judgement per passage, combined by code. Returns ({block_id: judgement},
+        the ids every checker judged): with a peer checker, an overall score needs BOTH answers."""
+        first, seen = self._analyse_one("analyse_after" if after else "analyse", passages, outline, evidence)
+        if not self._engine.ai_check_peer_model:
+            return {bid: Judgment(a, MODEL_SCORE[a.riskBand], [a.riskBand]) for bid, a in first.items()}, seen
+        # Independent reviews: identical paper data, neither sees the other's answer.
+        second, peer_seen = self._analyse_one("analyse_after_peer" if after else "analyse_peer", passages, outline, evidence)
+        merged: dict[str, Judgment] = {}
+        for bid in set(first) | set(second):
+            a, b = first.get(bid), second.get(bid)
+            if a is None or b is None:  # one answer only: kept for its findings, never counted as covered
+                one = a or b
+                assert one is not None
+                merged[bid] = Judgment(one, MODEL_SCORE[one.riskBand], [one.riskBand])
+                continue
+            stronger = max((a, b), key=lambda r: MODEL_SCORE[r.riskBand])
+            answer = stronger.model_copy(update={
+                "confirmed": sorted(set(a.confirmed) | set(b.confirmed)),
+                "rejected": sorted((set(a.rejected) & set(b.rejected)) - set(a.confirmed) - set(b.confirmed)),
+                "reasons": list(dict.fromkeys([*a.reasons, *b.reasons])),
+                "preserve": a.preserve or b.preserve,
+                "risk": " ".join(dict.fromkeys(r for r in (a.risk, b.risk) if r)),
+            })
+            merged[bid] = Judgment(answer, (MODEL_SCORE[a.riskBand] + MODEL_SCORE[b.riskBand]) / 2, [a.riskBand, b.riskBand])
+        return merged, seen & peer_seen
+
+    def _analyse_one(self, task: str, passages: list[dict[str, Any]], outline: list[str], evidence: dict[str, Any]) -> tuple[dict[str, _AnalysisBlock], set[str]]:
         """The lead's judgement per passage, given PaperAid's measurements (each passage carries its
         "signals"; `evidence` is the document-level bundle). Returns ({block_id: result}, the ids
         the lead actually saw): a seen passage it did not return has no problem in its view."""
@@ -638,11 +721,27 @@ class AIRunner:
         items = [{**p, "_words": p["text"]} for p in passages]
         results: dict[str, _AnalysisBlock] = {}
         seen: set[str] = set()
-        for batch, answer in self._batched_with_items("analyse", items, lambda b: {"outline": outline, "document": evidence, "blocks": b}, _ANALYSIS, _Analysis):
-            seen.update(i["id"] for i in batch)
+        explicit = self._engine.explicit_coverage  # frozen per run, not inferred from a prompt name (F5)
+        stop = self._engine.ai_check_peer_model is not None
+        for batch, answer in self._batched_with_items(task, items, lambda b: {"outline": outline, "document": evidence, "blocks": b}, _ANALYSIS, _Analysis, stop_on_budget=stop):
+            batch_ids = {i["id"] for i in batch}
+            if not explicit:  # released older prompts allowed unflagged passages to be omitted
+                seen.update(batch_ids)
             for item in answer.blocks:
-                if item.id in known:  # unknown IDs from a model are discarded, never trusted
+                if item.id in (batch_ids if explicit else known):
                     results[item.id] = item
+                    if explicit:
+                        seen.add(item.id)  # sent is not reviewed: only an explicit judgment counts
+        missing = [i for i in items if i["id"] not in seen] if explicit and not self.budget_reached else []
+        if missing:
+            # One more request for exactly the passages still without a judgement. "attempt" gives it
+            # its own request identity, so a saved incomplete answer is never replayed in its place.
+            for batch, answer in self._batched_with_items(task, missing, lambda b: {"outline": outline, "document": evidence, "blocks": b, "attempt": 2}, _ANALYSIS, _Analysis, stop_on_budget=stop):
+                batch_ids = {i["id"] for i in batch}
+                for item in answer.blocks:
+                    if item.id in batch_ids and item.id not in seen:
+                        results[item.id] = item
+                        seen.add(item.id)
         return results, seen
 
     # --- 1b. academic review (lead): problems other than writing style --------------------
@@ -692,14 +791,26 @@ class AIRunner:
             critique.update({c.id: c for c in answer.blocks if c.id in planned})
             overall.append(answer.overall)
 
+        guidance: dict[str, CritiqueItem] = {}
+        guided = self.guided
+        if guided:
+            for answer in self._batched("guide", with_draft, lambda b: {**brief, "passages": b}, _CRITIQUE, _Critique):
+                guidance.update({c.id: c for c in answer.blocks if c.id in planned})
+                overall.append(answer.overall)
+
         with_critique = [
-            {**item, "critique": critique[item["id"]].model_dump(exclude={"id"}) if item["id"] in critique else None} for item in with_draft
+            {**item, "critique": critique[item["id"]].model_dump(exclude={"id"}) if item["id"] in critique else None,
+             **({"frontierGuidance": guidance[item["id"]].model_dump(exclude={"id"}) if item["id"] in guidance else None} if guided else {})} for item in with_draft
         ]
+        if self._engine.require_dual_approval:  # a passage is finalised only with every required comment
+            planned &= set(critique) & (set(guidance) if guided else set(critique))
+            with_critique = [p for p in with_critique if p["id"] in planned]
         final: dict[str, PlanItem] = {}
         for answer in self._batched("finalise", with_critique, lambda b: {**brief, "outline": outline, "passages": b}, _PLAN, _Plan):
             final.update({p.id: p for p in answer.blocks if p.id in planned})  # only passages the writer saw
-        for item in with_draft:  # a passage the lead dropped from the final plan keeps its draft instruction
-            final.setdefault(item["id"], draft[item["id"]])
+        for item in with_draft:
+            fallback = PlanItem(id=item["id"], action="leave", instruction="", preserve="") if self._engine.require_dual_approval else draft[item["id"]]
+            final.setdefault(item["id"], fallback)
         return Negotiation(draft=draft, critique=critique, final=final, critique_overall=" ".join(o for o in overall if o))
 
     # --- 5. write (writer) -------------------------------------------------------------
@@ -764,6 +875,21 @@ class AIRunner:
     def review(
         self, revisions: list[Revision], instructions: dict[str, str], brief: dict[str, str], context: dict[str, dict[str, Any]] | None = None
     ) -> ReviewOutcome:
+        first = self._review_one("review", revisions, instructions, brief, context)
+        if not self._engine.require_dual_approval:
+            return first
+        second = self._review_one("review_peer", revisions, instructions, brief, context)
+        for bid, issues in second.issues.items():
+            first.issues[bid] = list(dict.fromkeys([*first.issues.get(bid, []), *issues]))
+        for bid, note in second.warnings.items():
+            first.warnings[bid] = " ".join(dict.fromkeys(n for n in (first.warnings.get(bid, ""), note) if n))
+        for bid, band in second.risk.items():
+            first.risk[bid] = max((first.risk.get(bid, band), band), key=lambda b: MODEL_SCORE[b])
+        return first  # rejection or omission by either reviewer remains a rejection
+
+    def _review_one(
+        self, task: str, revisions: list[Revision], instructions: dict[str, str], brief: dict[str, str], context: dict[str, dict[str, Any]] | None = None
+    ) -> ReviewOutcome:
         """The lead's review of changed passages, each with its neighbours, linked passages and
         PaperAid's post-scan (`context`, by block id)."""
         changed = [r for r in revisions if r.revised != r.original and not r.problems]
@@ -775,13 +901,13 @@ class AIRunner:
             words = " ".join([r.original, r.revised, *(str(v) for v in extra.get("context", {}).values()), *linked])
             items.append({"id": r.id, "original": r.original, "revised": r.revised, "instruction": instructions.get(r.id, ""), **extra, "_words": words})
         outcome = ReviewOutcome()
-        ids = {r.id for r in changed}
-        for answer in self._batched("review", items, lambda b: {**brief, "pairs": b}, _REVIEW, _Review, stop_on_budget=True):
+        for batch, answer in self._batched_with_items(task, items, lambda b: {**brief, "pairs": b}, _REVIEW, _Review, stop_on_budget=True):
+            batch_ids = {item["id"] for item in batch}
             for result in answer.results:
-                if result.id not in ids:
+                if result.id not in batch_ids:
                     continue
                 outcome.risk[result.id] = result.riskBand
-                if result.grade == "REPAIR":
+                if result.grade == "REPAIR" or (self._engine.require_dual_approval and result.issues):
                     issues: list[str] = list(result.issues) or ["MEANING_DRIFT"]
                     outcome.issues[result.id] = issues + ([f"NOTE: {result.note}"] if result.note else [])
                 elif result.grade == "PASS_WITH_WARNINGS" and result.note:
@@ -856,15 +982,23 @@ class AIRunner:
         spec answer (SPEC_SCHEMA shape) plus the trail under '_trail'."""
         draft = self._spec("spec_plan", {"guide": guide}, _SpecAnswer, SPEC_SCHEMA)
         critique = self._spec("spec_critique", {"guide": guide, "draft": draft}, _SpecCritique, _SPEC_CRITIQUE)
+        if self.guided:
+            guidance = self._spec("spec_guide", {"guide": guide, "draft": draft}, _SpecCritique, _SPEC_CRITIQUE)
+            critique = {"items": [*critique["items"], *guidance["items"]], "overall": critique["overall"] + " " + guidance["overall"]}
         final = self._spec("spec_finalise", {"guide": guide, "draft": draft, "review": critique}, _SpecAnswer, SPEC_SCHEMA)
         return {**final, "_trail": {"draft": draft, "critique": critique}}
 
     def review_spec(self, guide: str, applied: dict[str, Any]) -> list[dict[str, str]]:
         """Lead reviews the rules as actually applied. Returns problems; empty = pass."""
-        answer = self._call("spec_review", {"guide": guide, "applied": applied}, _SPEC_REVIEW, _SpecReview)
-        if answer is None:
-            return [{"field": "review", "problem": "The review could not be completed.", "fix": ""}]
-        return [] if answer.passed else (answer.problems or [{"field": "review", "problem": "Rejected without details.", "fix": ""}])
+        tasks = ["spec_review", "spec_review_peer"] if self._engine.require_dual_approval else ["spec_review"]
+        problems = []
+        for task in tasks:
+            answer = self._call(task, {"guide": guide, "applied": applied}, _SPEC_REVIEW, _SpecReview)
+            if answer is None:
+                problems.append({"field": "review", "problem": "The review could not be completed.", "fix": ""})
+            elif not answer.passed or (self._engine.require_dual_approval and answer.problems):
+                problems.extend(answer.problems or [{"field": "review", "problem": "Rejected without details.", "fix": ""}])
+        return problems
 
     def fix_spec(self, guide: str, spec: dict[str, Any], problems: list[dict[str, str]]) -> dict[str, Any]:
         return self._spec("spec_fix", {"guide": guide, "spec": spec, "problems": problems}, _SpecAnswer, SPEC_SCHEMA)

@@ -69,7 +69,7 @@ export function HomePage() {
               </h2>
             </div>
             <ButtonLink to="/features" variant="ghost" className="self-start sm:self-auto">
-              Service details <ArrowRight className="size-4" aria-hidden />
+              What each section does <ArrowRight className="size-4" aria-hidden />
             </ButtonLink>
           </div>
           <div className="mt-10">
@@ -114,8 +114,8 @@ export function HomePage() {
               every change is shown to you before you submit anything.
             </p>
             <p className="mt-6 rounded-xl bg-white/5 p-4 text-sm leading-relaxed text-brand-100/80 ring-1 ring-white/10">
-              Our AI-likeness check is an estimate of writing patterns. No detector — ours or anyone else&rsquo;s — can prove who wrote a text, and we
-              never promise a result on another service.
+              Our writing check is feedback on how your paper reads, not an AI detector. No detector — ours or anyone else&rsquo;s — can prove who
+              wrote a text, and we never promise a result on another service.
             </p>
           </div>
           <ul className="grid gap-4 sm:grid-cols-2">

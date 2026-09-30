@@ -68,8 +68,19 @@ def package(docx: bytes) -> tuple[bytes, Result, bool, str]:
     compile problem)."""
     result = convert(docx)
     pdf, problem = compile_pdf(result)
+    return _zip(result, pdf, problem), result, pdf is not None, problem
+
+
+def project(docx: bytes) -> tuple[bytes, Result]:
+    """The LaTeX project alone, not compiled (a proposal's PDF is its own download), with the conversion
+    result, whose `omitted` says whether anything was left out."""
+    result = convert(docx)
+    return _zip(result, None, ""), result
+
+
+def _zip(result: Result, pdf: bytes | None, problem: str) -> bytes:
     notes = "\n".join(f"- {w}" for w in result.warnings)
-    readme = README + (f"\nThings to check\n{notes}\n" if notes else "") + (f"\nNot compiled: {problem}.\n" if pdf is None else "")
+    readme = README + (f"\nThings to check\n{notes}\n" if notes else "") + (f"\nNot compiled: {problem}.\n" if pdf is None and problem else "")
     out = io.BytesIO()
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("main.tex", result.tex)
@@ -78,7 +89,7 @@ def package(docx: bytes) -> tuple[bytes, Result, bool, str]:
             archive.writestr(name, blob)
         if pdf is not None:
             archive.writestr("main.pdf", pdf)
-    return out.getvalue(), result, pdf is not None, problem
+    return out.getvalue()
 
 
 def self_test() -> None:

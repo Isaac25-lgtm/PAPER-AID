@@ -47,6 +47,7 @@ from app.jobs.models import (
     ModelCall,
     RefinementResult,
     ResearchResult,
+    ServiceId,
     Source,
     Stage,
     StoredOutput,
@@ -60,7 +61,7 @@ from app.pricing.billing import refund_job, settle_completed
 from app.pricing.quote import Passage, bound_quote, to_ugx
 from app.proposals import pipeline as proposal_pipeline
 from app.proposals import review as proposal_review
-from app.reports.builder import change_report, writing_report
+from app.reports.builder import change_report, source_report, writing_report
 from app.runtime import Runtime
 
 logger = logging.getLogger("paperaid.worker")
@@ -255,9 +256,16 @@ def stage_analysing(ctx: StageContext) -> None:
         if coverage_warning:
             j.outcome = "PARTIAL"
             _add_warnings(j, [coverage_warning])
+        if result.coverage_complete is False and j.selection.writing == "AI_CHECK":
+            # no complete result, no charge for the check (owner decision 2026-09-29); other parts still count
+            j.delivery = {**j.delivery, "AI_CHECK": 0.0}
+            _add_warnings(j, [NOT_CHARGED_CHECK])
         return j
 
     ctx.update(save)
+
+
+NOT_CHARGED_CHECK = "You were not charged for the writing check, because it could not assess every passage."
 
 
 def _runs_academic(job: Job) -> bool:
@@ -306,7 +314,7 @@ def _academic_review(ctx: StageContext, model: DocumentModel) -> tuple[list[Find
     return findings, warning
 
 
-def _analyse(ctx: StageContext, model: DocumentModel) -> tuple[AnalysisResult, str | None]:
+def _analyse(ctx: StageContext, model: DocumentModel, saved_name: str = "analysis.json") -> tuple[AnalysisResult, str | None]:
     """Stages 2–4 of the revised algorithm: PaperAid measures writing signals, then the lead
     confirms or rejects each one in context, adds what the rules missed and marks passages that
     must not be rewritten. Saves analysis.json. The estimate runs this too (without showing the
@@ -318,28 +326,32 @@ def _analyse(ctx: StageContext, model: DocumentModel) -> tuple[AnalysisResult, s
         {"id": s.block.id, "section": s.block.section or "Body", "sectionType": s.kind, "text": s.block.masked or s.block.text, "signals": s.evidence()}
         for s in block_signals
     ]
-    model_results, seen = runner.analyse(passages, model.outline(), found.evidence())
+    model_results, seen = runner.analyse(passages, model.outline(), found.evidence(), after=saved_name != "analysis.json")
     result = signals.aggregate(block_signals, found.excluded_words, _method(ctx, "analysis"))
     submitted, covered = len(block_signals), len(seen)
     coverage_warning = None
+    if submitted == 0:
+        coverage_warning = "This paper has no body passages of at least 25 words, so its writing could not be assessed."
     if covered < submitted:
         coverage_warning = (
-            f"PaperAid's AI could assess only {covered} of {submitted} passages; the rest were scored on writing-pattern signals alone."
+            f"PaperAid could fully assess only {covered} of {submitted} passages. The findings for the assessed passages are listed."
             if covered
-            else "PaperAid's AI could not assess this paper, so every passage was scored on writing-pattern signals alone."
+            else "PaperAid could not assess this paper's writing this time."
         )
         method = f"PaperAid writing-pattern signals and AI analysis ({covered} of {submitted} passages)" if covered else "PaperAid writing-pattern signals only"
         result = result.model_copy(update={"method": method})
     rejected: dict[str, list[str]] = {}
     scores: dict[str, float] = {}
     if seen:
-        # A passage the lead saw but did not return has no problem in its view.
+        # New engines count only explicit judgments by every required checker. Older frozen
+        # prompts permitted omitted LOW passages; only those engines retain that interpretation.
         scores = {bid: signals.MODEL_SCORE["low"] for bid in seen}
         for s in block_signals:
-            item = model_results.get(s.block.id)
-            if item is None:
+            judgment = model_results.get(s.block.id)
+            if judgment is None:
                 continue
-            scores[s.block.id] = signals.MODEL_SCORE[item.riskBand]
+            item = judgment.answer
+            scores[s.block.id] = judgment.score
             dropped = {h.rule for h in s.hits} & set(item.rejected)
             if dropped:  # false positives in context: they no longer count or show
                 rejected[s.block.id] = sorted(dropped)
@@ -363,16 +375,28 @@ def _analyse(ctx: StageContext, model: DocumentModel) -> tuple[AnalysisResult, s
                     )
                 )
         result = signals.aggregate(block_signals, found.excluded_words, result.method, scores)
+    complete = submitted > 0 and covered == submitted
+    # Every difference between the checkers is kept (reviewerBands, below); only low against high is
+    # shown to the student as uncertainty, and it lowers confidence (owner decision 2026-09-29).
+    disagreements = sorted(bid for bid, j in model_results.items() if {"low", "high"} <= set(j.bands))
+    confidence = result.confidence
+    if disagreements:
+        words = {s.block.id: s.block.words for s in block_signals}
+        share = sum(words.get(bid, 0) for bid in disagreements) / max(1, sum(words.values()))
+        confidence = "LOW" if share >= signals.DISAGREEMENT_SHARE else "MEDIUM" if confidence == "HIGH" else confidence
+    result = result.model_copy(update={"coverage_complete": complete, "disagreement_blocks": disagreements, "confidence": confidence,
+                                     **({"percent": None, "confidence": "LOW"} if not complete else {})})
     ctx.put_json(
-        "analysis.json",
+        saved_name,
         {
             "result": result.model_dump(),
             "scores": {s.block.id: s.score for s in block_signals},
             "modelScores": scores,
+            "reviewerBands": {bid: j.bands for bid, j in model_results.items()},
             "rejected": rejected,
             "hits": {s.block.id: s.evidence() for s in block_signals if s.hits},
-            "preserve": sorted(bid for bid, r in model_results.items() if r.preserve),
-            "risks": {bid: r.risk for bid, r in model_results.items() if r.risk},
+            "preserve": sorted(bid for bid, j in model_results.items() if j.answer.preserve),
+            "risks": {bid: j.answer.risk for bid, j in model_results.items() if j.answer.risk},
             "document": found.evidence(),
         },
     )
@@ -390,7 +414,7 @@ def _brief(ctx: StageContext) -> dict[str, str]:
 
 # --- the source check (phase 4 of the revised algorithm) --------------------------------------
 
-RESEARCH_METHOD = "Claims found by PaperAid's AI, checked against live web sources, and each source checked again by a second AI model"
+RESEARCH_METHOD = "Claims found by PaperAid, checked against live web sources, and each source checked again against its claim"
 
 
 def stage_researching(ctx: StageContext) -> None:
@@ -563,11 +587,12 @@ def _run_estimate_task(rt: Runtime, job_id: str) -> None:
             if j.estimate is None or j.estimate.id != run_id or j.estimate.status != "RUNNING":
                 return None
             j.estimate.lease_until = None
+            j.events.append(JobEvent(label="Continuing the estimate in a new task"))
             return j
 
         released = rt.store.update(job_id, release)
-        if released is not None:  # named by progress (paid calls so far), so every hand-off is a distinct task
-            rt.queue.enqueue(job_id, f"{job_id}-e{run_id}-c{len(released.model_calls)}")
+        if released is not None:  # the model-call display is capped at 200; event count keeps increasing
+            rt.queue.enqueue(job_id, f"{job_id}-e{run_id}-h{len(released.events)}")
         return
     except StageError as exc:
         _estimate_failed(rt, job_id, run_id, exc.code, exc.user_message, exc.detail, exc.retryable)
@@ -927,7 +952,11 @@ def stage_formatting(ctx: StageContext) -> None:
     job = ctx.job
     base = ctx.get_bytes("refined.docx") if ctx.has("refined.docx") else ctx.rt.files.get(job.source.path)  # type: ignore[union-attr]
     if job.selection.formatting == "TEMPLATE_FORMAT":
-        formatted, result, partial = _format_from_guide(ctx, base)
+        approved = _format_from_guide(ctx, base)
+        if approved is None:  # the rules were not approved by both reviewers: none are applied
+            _skip_template(ctx)
+            return
+        formatted, result, partial = approved
     else:
         formatted, result = apply_formatting(base, with_custom(PRESETS[job.selection.preset], job.selection.custom), read_docx(base))
         partial = False
@@ -945,10 +974,35 @@ def stage_formatting(ctx: StageContext) -> None:
     ctx.update(save)
 
 
-def _format_from_guide(ctx: StageContext, base: bytes) -> tuple[bytes, FormattingResult, bool]:
+TEMPLATE_SKIPPED = (
+    "PaperAid could not confirm your university's formatting rules, so they were not applied: your paper keeps its own layout. "
+    "You were not charged for university template formatting."
+)
+
+
+def _skip_template(ctx: StageContext) -> None:
+    """Unapproved university rules (owner decision 2026-09-29): the rest of the job is delivered
+    without them and that part is refunded. A job that asked only for the template has nothing else
+    to deliver, so it fails without charge."""
+    selection = ctx.job.selection
+    if selection.services() == [ServiceId.TEMPLATE_FORMAT]:  # the academic review needs a writing service
+        raise PermanentStageError(
+            "TEMPLATE_NOT_APPROVED", "PaperAid could not confirm your university's formatting rules, so none were applied and nothing was charged.", "template rules not approved"
+        )
+
+    def save(j: Job) -> Job:
+        j.delivery = {**j.delivery, "TEMPLATE_FORMAT": 0.0}
+        j.outcome = "PARTIAL"
+        return _add_warnings(j, [TEMPLATE_SKIPPED])
+
+    ctx.update(save)
+
+
+def _format_from_guide(ctx: StageContext, base: bytes) -> tuple[bytes, FormattingResult, bool] | None:
     """The algorithm applied to formatting rules: lead drafts rules from the guide, writer
     critiques, lead finalises; code applies them (wording cannot change); lead reviews what was
-    applied; writer fixes the rules; code re-applies — for a bounded number of rounds."""
+    applied; writer fixes the rules; code re-applies — for a bounded number of rounds. None when an
+    engine requiring both approvals ends without them."""
     guide = ctx.get_json("guide.json")["text"]
     runner = ctx.ai()
     label = f"Your guide ({ctx.job.guideline.name})" if ctx.job.guideline else "Your guide"
@@ -976,6 +1030,8 @@ def _format_from_guide(ctx: StageContext, base: bytes) -> tuple[bytes, Formattin
             unresolved = problems
             break
     ctx.put_json("spec.json", {"final": answer, "trail": trail, "reviews": reviews})
+    if unresolved and runner._engine.require_dual_approval:
+        return None
     warnings = notes + checks + [f"Check this rule yourself: {p.get('field', '')} — {p.get('problem', '')}" for p in unresolved]
     warnings += [w for w in result.warnings if w not in warnings]
     result = result.model_copy(update={"evidence": evidence, "warnings": warnings, "method": _method(ctx, "formatting")})
@@ -1021,10 +1077,21 @@ def stage_exporting(ctx: StageContext) -> None:
     after = None
     if job.analysis:
         if job.refinement and job.refinement.refined_blocks:
-            after = _analysis_after(ctx, job.analysis.method)
-        output(
-            "writing-report", "Writing report (Word)", "writing report", writing_report(job.source.name if job.source else "", utcnow(), job.analysis, after, job.paper_checks, job.research)
+            if ctx.ai()._engine.ai_check_peer_model:
+                after, coverage_warning = _analyse(ctx, read_docx(ctx.get_bytes("refined.docx")), "analysis_after.json")
+                if coverage_warning:
+                    ctx.update(lambda j: _add_warnings(j, [coverage_warning]))
+            else:
+                after = _analysis_after(ctx, job.analysis.method)
+        shown = after or job.analysis  # the passages named are those of the paper the score describes
+        paper = read_docx(ctx.get_bytes("refined.docx")) if after is not None and ctx.has("refined.docx") else ctx.document()
+        report = writing_report(
+            job.source.name if job.source else "", utcnow(), job.analysis, after, job.paper_checks, job.research, _passage_labels(paper, shown.disagreement_blocks),
+            show_score=ctx.rt.settings.show_ai_score,
         )
+        output("writing-report", "Writing report (Word)", "writing report", report)
+    elif job.research is not None:  # a source check on its own
+        output("source-report", "Source check report (Word)", "source check", source_report(job.source.name if job.source else "", utcnow(), job.research))
     if job.refinement:
         full = job.refinement
         if ctx.has("changes_full.json"):  # the record may hold shortened passages; the report has every word
@@ -1070,6 +1137,12 @@ def _fit_record(changes: list[ChangedBlock]) -> tuple[list[ChangedBlock], bool]:
     ], True
 
 
+def _passage_labels(model: DocumentModel, block_ids: list[str]) -> list[str]:
+    """Passages a student can find in their own paper: the section and the opening words, never an id."""
+    blocks = model.by_id()
+    return [f"{b.section or 'Body'}: “{' '.join(b.text.split()[:12])}…”" for bid in block_ids if (b := blocks.get(bid)) is not None]
+
+
 def _analysis_after(ctx: StageContext, method: str) -> AnalysisResult:
     """The after-refinement band, by the same method as the before band: PaperAid's signals on the
     refined paper, blended with the lead's judgement: its original judgement for untouched
@@ -1087,7 +1160,10 @@ def _analysis_after(ctx: StageContext, method: str) -> AnalysisResult:
             s.rescore()
     scores = {bid: v for bid, v in saved.get("modelScores", {}).items() if bid not in refined_ids}
     scores.update({bid: signals.MODEL_SCORE[band] for bid, band in review_risk.items() if bid in refined_ids})
-    return signals.aggregate(found.blocks, found.excluded_words, method, scores)
+    result = signals.aggregate(found.blocks, found.excluded_words, method, scores)
+    if ctx.job.analysis is not None and ctx.job.analysis.coverage_complete is False:
+        result = result.model_copy(update={"coverage_complete": False, "percent": None, "confidence": "LOW"})
+    return result
 
 
 def _redraft_after(ctx: StageContext, method: str, saved: dict[str, Any]) -> AnalysisResult:
@@ -1112,7 +1188,10 @@ def _redraft_after(ctx: StageContext, method: str, saved: dict[str, Any]) -> Ana
                 scores[s.block.id] = model_scores[original]
         elif s.block.section in group_sections and section_risk is not None:
             scores[s.block.id] = section_risk
-    return signals.aggregate(found.blocks, found.excluded_words, method, scores)
+    result = signals.aggregate(found.blocks, found.excluded_words, method, scores)
+    if ctx.job.analysis is not None and ctx.job.analysis.coverage_complete is False:
+        result = result.model_copy(update={"coverage_complete": False, "percent": None, "confidence": "LOW"})
+    return result
 
 
 def _review_context(model: DocumentModel, targets: dict[str, Target], revisions: list[Revision], groups: dict[str, Any] | None = None) -> dict[str, dict[str, Any]]:

@@ -119,7 +119,11 @@ class FakeModels:
 
     @staticmethod
     def default(task: str, payload: dict[str, Any]) -> dict[str, Any]:
-        if task == "analyse":  # confirms every PaperAid signal; returns only passages that have one
+        task = {"analyse_peer": "analyse", "analyse_after": "analyse", "analyse_after_peer": "analyse", "guide": "critique", "review_peer": "review", "spec_guide": "spec_critique",
+                "spec_review_peer": "spec_review", "p_guide": "p_critique", "p_review_peer": "p_review", "p_profile_guide": "p_profile_critique"}.get(task, task)
+        if task in ("p_plan_review", "p_plan_review_peer", "p_profile_review", "p_profile_review_peer"):
+            return {"approved": True, "issues": []}
+        if task == "analyse":  # confirms the signals and explicitly reviews every passage
             return {
                 "blocks": [
                     {
@@ -127,7 +131,6 @@ class FakeModels:
                         "confirmed": [s["rule"] for s in b["signals"]], "rejected": [], "preserve": False, "risk": "",
                     }
                     for b in payload["blocks"]
-                    if b["signals"]
                 ]
             }
         if task == "academic":  # one rewordable finding on the first passage of each batch

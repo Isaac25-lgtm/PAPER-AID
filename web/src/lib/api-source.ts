@@ -223,6 +223,7 @@ export function createApiSource({ config, getAuthHeaders }: Options): DataSource
       evidence: (id) => request<EvidenceItem[]>(`/api/projects/${id}/evidence`),
       download: (id, final, fileName) => saveFile(`/api/projects/${id}/export${query({ final: final ? 'true' : null })}`, fileName),
       downloadPdf: (id, final, fileName) => saveFile(`/api/projects/${id}/export.pdf${query({ final: final ? 'true' : null })}`, fileName),
+      downloadLatex: (id, final, fileName) => saveFile(`/api/projects/${id}/export.zip${query({ final: final ? 'true' : null })}`, fileName),
       remove: (id) => request<void>(`/api/projects/${id}`, { method: 'DELETE' }),
       compare: (id, number, older, newer) => request<Comparison>(`/api/projects/${id}/chapters/${number}/compare${query({ older, newer })}`),
       addFeedback: (id, text) => request<Project>(`/api/projects/${id}/feedback`, { method: 'POST', body: JSON.stringify({ text }) }),

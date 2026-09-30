@@ -5,7 +5,21 @@ export type Level = 'BACHELORS' | 'PGD' | 'MASTERS' | 'PHD'
 export type StudyType = 'QUANTITATIVE' | 'QUALITATIVE' | 'MIXED' | 'SECONDARY' | 'NON_EMPIRICAL'
 export type CitationStyle = 'APA6' | 'APA7'
 export type SampleMethod = 'YAMANE' | 'COCHRAN' | 'KREJCIE_MORGAN' | 'CENSUS' | 'SATURATION' | 'AUTHOR_STATED' | 'NOT_APPLICABLE'
-export type StepId = 'PLAN' | 'CHAPTER_1' | 'CHAPTER_2' | 'CHAPTER_3' | 'CONCEPT' | 'REVISE_1' | 'REVISE_2' | 'REVISE_3' | 'REVISE_4' | 'PROFILE'
+export type StepId =
+  | 'PLAN'
+  | 'CHAPTER_1'
+  | 'CHAPTER_2'
+  | 'CHAPTER_3'
+  | 'CONCEPT'
+  | 'REVISE_1'
+  | 'REVISE_2'
+  | 'REVISE_3'
+  | 'REVISE_4'
+  | 'COMPLETE_1'
+  | 'COMPLETE_2'
+  | 'COMPLETE_3'
+  | 'COMPLETE_4'
+  | 'PROFILE'
 export type ReadinessStatus = 'PASS' | 'NEEDS_REVIEW' | 'MISSING' | 'NOT_APPLICABLE' | 'BLOCKED'
 
 export interface ProposalInputs {
@@ -192,6 +206,8 @@ export interface ChapterView {
   references: string[]
   /** Chapter One's conceptual framework, drawn from the plan's variables. */
   framework: { label: string; items: string[] }[]
+  /** Sections not written yet ("1.3 Heading"): the chapter is a draft until they are finished. */
+  missing?: string[]
 }
 
 export interface EvidenceItem {

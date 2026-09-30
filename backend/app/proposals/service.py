@@ -30,6 +30,7 @@ from app.jobs.models import Job, JobEvent, JobStatus, JobView, Quote, QuoteLine,
 from app.jobs.service import ACCOUNT_CLOSING, User, _erase_project, _rate_limit, availability, current_engine, step_running, submit
 from app.latex.convert import convert as to_latex
 from app.latex.package import compile_pdf
+from app.latex.package import project as latex_project
 from app.pricing.quote import bound_quote, fixed_price, proposal_usd, with_margin
 from app.proposals import decisions, evidence, feedback, rulebook, sampling
 from app.proposals import export as proposal_export
@@ -55,7 +56,7 @@ from app.proposals.pipeline import INPUT, _confirmed_gap, load_library
 from app.runtime import Runtime
 
 logger = logging.getLogger("paperaid.proposals")
-Step = Literal["PLAN", "CHAPTER_1", "CHAPTER_2", "CHAPTER_3", "CONCEPT", "REVISE_1", "REVISE_2", "REVISE_3", "REVISE_4", "PROFILE"]
+Step = Literal["PLAN", "CHAPTER_1", "CHAPTER_2", "CHAPTER_3", "CONCEPT", "REVISE_1", "REVISE_2", "REVISE_3", "REVISE_4", "COMPLETE_1", "COMPLETE_2", "COMPLETE_3", "COMPLETE_4", "PROFILE"]
 CONCEPT = 4  # the concept paper is stored like a chapter, as number 4
 PDF_SLOTS = threading.BoundedSemaphore(2)  # PDF compilations at once on one API instance (Codex audit 56c4f83 M27)
 
@@ -270,6 +271,12 @@ def take_candidate(rt: Runtime, user: User, project_id: str, accept: bool) -> Pr
 def set_chapter(rt: Runtime, user: User, project_id: str, number: int, version: int, approved: bool) -> ProjectView:
     """Show (and export) an earlier version, or approve the current one."""
 
+    if approved:  # a chapter with sections still to write is a workspace draft, not a chapter to approve
+        chosen = next((v for v in _owned(rt, user, project_id).chapter(number).versions if v.version == version), None)
+        doc = ChapterDocument.model_validate_json(rt.files.get(chosen.path if rt.files.exists(chosen.path) else moved_path(chosen.path))) if chosen else None
+        if doc is not None and doc.missing:
+            raise AppError("Finish this chapter before approving it: some sections are not written yet.", code="CHAPTER_INCOMPLETE")
+
     def apply(p: Project) -> Project:
         chapter = p.chapter(number)
         if not any(v.version == version for v in chapter.versions):
@@ -308,6 +315,7 @@ class ChapterView(BaseModel):
     words: int
     references: list[str]
     framework: list[FrameworkColumn] = []  # Chapter One's conceptual framework figure, from the plan
+    missing: list[str] = []  # sections not written yet ("1.3 Heading"): Finish chapter writes them
 
 
 def _citer(rt: Runtime, p: Project) -> evidence.Citer:
@@ -345,6 +353,7 @@ def chapter(rt: Runtime, user: User, project_id: str, number: int, version: int 
         references=evidence.reference_list(sources, p.citation),
         framework=[FrameworkColumn(label=label, items=items) for label, items in proposal_export.framework_columns(p.plan)]
         if number in (1, CONCEPT) and any(s.key == "framework" for s in doc.sections) else [],
+        missing=[f"{s.number} {s.heading}" for s in rulebook.sections(p.rulebook, number, p.inputs.level, p.plan) if s.key in doc.missing] if p.plan and doc.missing else [],
     )
 
 
@@ -398,6 +407,23 @@ def export_pdf(rt: Runtime, user: User, project_id: str, final: bool) -> tuple[b
     return pdf, name.removesuffix(".docx") + ".pdf"
 
 
+def export_latex(rt: Runtime, user: User, project_id: str, final: bool) -> tuple[bytes, str]:
+    """The proposal as a LaTeX project (owner decision 2026-09-29: LaTeX is a finishing choice, not
+    a service of its own): the same Word export converted by code, no AI, nothing charged."""
+    p = _owned(rt, user, project_id)
+    data, name = _export(rt, user, p, final)
+    _rate_limit(rt, user, "pdf", rt.settings.uploads_per_hour)
+    archive, result = latex_project(data)
+    if result.omitted:  # a complete proposal is never offered with content missing (Codex review #5)
+        if final:
+            raise AppError(
+                f"{result.omitted} part{'s' if result.omitted != 1 else ''} of your proposal could not be converted to LaTeX. Download the Word or PDF file instead.",
+                code="LATEX_INCOMPLETE",
+            )
+        return archive, name.removesuffix(".docx") + " (LaTeX, incomplete).zip"
+    return archive, name.removesuffix(".docx") + " (LaTeX).zip"
+
+
 def export_concept(rt: Runtime, user: User, project_id: str) -> tuple[bytes, str]:
     """The concept paper as its own Word file, with its annotated references."""
     p = _owned(rt, user, project_id)
@@ -446,9 +472,27 @@ def quote_step(rt: Runtime, user: User, project_id: str, step: Step, note: str, 
     note = note.strip()[:1000]
     if step == "PROFILE":
         return _quote_profile(rt, user, p)
+    if p.guide is not None and not any(c.versions for c in p.chapters) and not _guide_read(p):
+        # the student decides which structure is written to: their guide, read, or the standard one
+        raise AppError(GUIDE_UNREAD, code="GUIDE_UNREAD")
     chapter = 0 if step == "PLAN" else CONCEPT if step == "CONCEPT" else int(step[-1])
     revising = step.startswith("REVISE_")
+    completing = step.startswith("COMPLETE_")
     base, revise, comment_ids, revised_words, base_version, base_sha = "", {}, [], 0, 0, ""
+    only: list[str] = []
+    remaining: int | None = None
+    if completing:  # "Finish chapter": only the sections the current version is missing
+        stored = p.chapter(chapter)
+        doc = _chapter_doc(rt, stored)
+        if doc is None or not doc.missing:
+            raise AppError("Every section of this chapter is written.", code="NOTHING_TO_FINISH")
+        if doc.plan_version != p.plan_version:
+            raise AppError("Your plan changed after this draft was written. Write the chapter again so all of it follows your current plan.", code="PLAN_CHANGED")
+        base = next(v.path for v in stored.versions if v.version == stored.current)
+        base_version = stored.current
+        base_sha = hashlib.sha256(rt.files.get(base if rt.files.exists(base) else moved_path(base))).hexdigest()
+        only = list(doc.missing)
+        remaining = max(0, doc.full_price - doc.paid) if doc.full_price else None
     if revising:
         stored = p.chapter(chapter)
         doc = _chapter_doc(rt, stored)
@@ -491,22 +535,28 @@ def quote_step(rt: Runtime, user: User, project_id: str, step: Step, note: str, 
         # the other proposal chapters, for consistency checks (the concept paper is a separate document)
         chapters={c.number: next(v.path for v in c.versions if v.version == c.current) for c in p.chapters if c.current and c.number not in (chapter, CONCEPT) and chapter != CONCEPT},
         private=[w for w in " ".join([p.title_page.student_name, p.title_page.reg_number, p.title_page.supervisor]).split() if len(w) > 2],
-        step="REVISE" if revising else "PLAN" if chapter == 0 else "CHAPTER",
+        step="REVISE" if revising else "COMPLETE" if completing else "PLAN" if chapter == 0 else "CHAPTER",
         base=base,
         base_version=base_version,
         base_sha=base_sha,
         revise=revise,
         comment_ids=list(dict.fromkeys(comment_ids)),
         comment_signatures={c.id: c.signature() for c in p.feedback if c.id in set(comment_ids)},
+        only=only,
     )
     data = inp.model_dump_json(by_alias=True).encode()
     sha = hashlib.sha256(data).hexdigest()
     now = utcnow()
-    words = revised_words
+    words, part = revised_words, 1.0
     if chapter and not revising:
         assert p.plan is not None
-        words = sum(s.words for s in rulebook.sections(p.rulebook, chapter, p.inputs.level, p.plan))
-    selection = ServiceSelection(proposal=step)
+        planned = rulebook.sections(p.rulebook, chapter, p.inputs.level, p.plan)
+        words = sum(s.words for s in planned)
+        if completing:  # priced as the missing share of the chapter: with the first draft, never more than one chapter
+            finish = sum(s.words for s in planned if s.key in only)
+            part, words = (finish / words if words else 1.0), finish
+    # a finish is its chapter's step with the finish flag: a record the released code can still read
+    selection = ServiceSelection(proposal="CONCEPT" if chapter == CONCEPT else f"CHAPTER_{chapter}", finish=True) if completing else ServiceSelection(proposal=step)
     job = Job(
         id=f"job_{secrets.token_hex(6)}",
         status=JobStatus.DRAFT,
@@ -517,10 +567,10 @@ def quote_step(rt: Runtime, user: User, project_id: str, step: Step, note: str, 
         selection=selection,
         created_at=now,
         expires_at=now + timedelta(days=rt.settings.retention_days),
-        events=[JobEvent(at=now, label=f"{'Plan' if chapter == 0 else 'Concept paper' if chapter == CONCEPT else f'Chapter {chapter} revision' if revising else f'Chapter {chapter}'} step priced for proposal {p.id}")],
+        events=[JobEvent(at=now, label=f"{'Plan' if chapter == 0 else 'Concept paper' if chapter == CONCEPT else f'Chapter {chapter} revision' if revising else f'Chapter {chapter} finish' if completing else f'Chapter {chapter}'} step priced for proposal {p.id}")],
     )
     rt.files.put(f"{job.storage_prefix()}/internal/{INPUT}", data, "application/json")
-    job.quote = bound_quote(rt.settings, selection, sha, words, current_engine(rt.settings))
+    job.quote = bound_quote(rt.settings, selection, sha, words, current_engine(rt.settings), part=part, cap=remaining)
     state.transition(job, JobStatus.QUOTED, "Quote issued")
     if not rt.store.create_if_open(job):
         rt.files.delete_prefix(job.storage_prefix())
@@ -599,20 +649,56 @@ def upload_guide(rt: Runtime, user: User, project_id: str, filename: str, data: 
 
 
 def use_default_rulebook(rt: Runtime, user: User, project_id: str) -> ProjectView:
-    """Go back to the default structure (before any chapter is written)."""
+    """Go back to the standard structure (before any chapter is written). This is also the
+    student's confirmation when their guide could not be used: the unread guide is removed, so
+    writing can continue (Codex plan review 2026-09-29)."""
+    removed: list[str] = []
 
     def apply(q: Project) -> Project:
         # always allowed when the profile is gone: the proposal must stay usable (Codex audit 56c4f83 M17)
         if any(c.versions for c in q.chapters) and rulebook.available(q.rulebook):
             raise AppError("Your chapters already follow the current structure.", code="CHAPTERS_WRITTEN")
         q.rulebook = rulebook.DEFAULT
+        if q.guide is not None and not any(c.versions for c in q.chapters):
+            removed[:] = [q.guide.path]
+            q.guide = None
         return q
 
-    return view(rt, _change(rt, user, project_id, apply))
+    changed = _change(rt, user, project_id, apply)
+    for path in removed:  # a priced profile step reading it fails with GUIDE_EXPIRED and is not charged
+        rt.files.delete(path)
+    return view(rt, changed)
+
+
+GUIDE_UNREAD = "Your institution's guide is uploaded but not read yet. Read it, or choose the standard structure, before PaperAid writes your proposal."
+
+
+def _guide_read(p: Project) -> bool:
+    """Whether the project's current profile was read from its current guide."""
+    try:
+        book = rulebook.load(p.rulebook)
+    except AppError as exc:
+        if exc.code != "PROFILE_MISSING":
+            raise
+        return False
+    return p.guide is not None and book.get("guide_sha256") == p.guide.sha256
+
+
+def _structure_current(p: Project, inp: StepInput) -> bool:
+    """The guide a profile step was priced on, or the structure any other step was priced on, is
+    still the project's, and no unread guide is waiting (Codex review 2026-09-30 #2)."""
+    if inp.step == "PROFILE":
+        return p.guide is not None and p.guide.path in (inp.guide, moved_path(inp.guide))
+    if p.rulebook != inp.rulebook:
+        return False
+    return p.guide is None or any(c.versions for c in p.chapters) or _guide_read(p)
 
 
 def _revision_current(p: Project, inp: StepInput) -> bool:
-    """A revision runs only on the version and comments it was priced for."""
+    """A revision runs only on the version and comments it was priced for; finishing a chapter only on
+    the version whose missing sections it was priced for (a second tab cannot buy it twice)."""
+    if inp.step == "COMPLETE":
+        return p.chapter(inp.chapter).current == inp.base_version
     if inp.step != "REVISE":
         return True
     comments = {c.id: c for c in p.feedback}
@@ -635,6 +721,8 @@ def submit_step(rt: Runtime, user: User, project_id: str, job_id: str, quote_id:
             raise Conflict("Your plan changed after this step was priced. Price it again so it uses your latest plan.", code="QUOTE_MISMATCH")
         if not _revision_current(p, inp):
             raise Conflict("Your chapter or your supervisor's comments changed after this revision was priced. Price it again.", code="QUOTE_MISMATCH")
+        if not _structure_current(p, inp):
+            raise Conflict("Your institution's guide or proposal structure changed after this step was priced. Price it again.", code="QUOTE_MISMATCH")
         if p.active_job != job_id and step_running(rt, p):
             raise Conflict("A step is already running for this proposal. Wait for it to finish.", code="STEP_RUNNING")
     seen_active = p.active_job  # finished (or none): the claim may replace only this value
@@ -644,8 +732,8 @@ def submit_step(rt: Runtime, user: User, project_id: str, job_id: str, quote_id:
             return None
         if q.active_job not in (seen_active, j.id):
             return None  # another step was claimed after we looked
-        if not _revision_current(q, inp):
-            return None  # the chapter version or a comment changed after pricing (Codex audit 56c4f83 H07, M09)
+        if not _revision_current(q, inp) or not _structure_current(q, inp):
+            return None  # the chapter version, a comment, the guide or the structure changed after pricing
         q.active_job = j.id
         q.jobs = q.jobs if j.id in q.jobs else (q.jobs + [j.id])[-100:]
         if inp.step == "PLAN" and not q.chapter(1).versions:

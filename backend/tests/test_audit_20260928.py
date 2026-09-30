@@ -221,11 +221,15 @@ def test_07_tables_and_captions_are_checked_and_rendered(client):
 
     client.models.overrides["p_draft"] = bad_table
     job = _run(client, pid, "CHAPTER_3")
-    assert job["outcome"] == "PARTIAL"
+    assert job["status"] == "COMPLETED" and job["outcome"] == "PARTIAL"
     doc = Document(io.BytesIO(client.get(f"/api/projects/{pid}/export", headers=STUDENT).content))
     text = " ".join(p.text for p in doc.paragraphs) + " " + " ".join(c.text for t in doc.tables for r in t.rows for c in r.cells)
     assert "73%" not in text and "⟦" not in text and "Smith" not in text
     assert "Month 5" in text  # a month of the student's own timeline is not an invented figure
+    # cleaned before the final approval: both reviewers approved the table that was delivered
+    for task in ("p_review", "p_review_peer"):
+        last = [r for t, r in zip(client.models.tasks, client.models.requests, strict=True) if t == task][-1]
+        assert "73%" not in last and "Month 5" in last
 
 
 # --- 8: a complete export needs every required section and no integrity failures --------------
@@ -253,7 +257,7 @@ def test_08_complete_export_refuses_empty_chapters_and_integrity_failures(client
 # --- 10, 11, 16: review coverage, repair bounds and reviewer notes -----------------------------
 
 
-def test_10_an_unreviewed_chapter_is_partial_and_says_so(client, monkeypatch):
+def test_10_an_unreviewed_new_chapter_is_not_released(client, monkeypatch):
     pid = _chapter_ready(client)
 
     def no_review(self, *args, **kwargs):
@@ -262,9 +266,8 @@ def test_10_an_unreviewed_chapter_is_partial_and_says_so(client, monkeypatch):
 
     monkeypatch.setattr(ProposalRunner, "grade", no_review)
     job = _run(client, pid, "CHAPTER_1")
-    assert job["outcome"] == "PARTIAL" and any("could not fully check" in w for w in job["warnings"])
-    chapter = client.get(f"/api/projects/{pid}/chapters/1", headers=STUDENT).json()
-    assert next(r for r in chapter["readiness"] if r["id"] == "C1-REVIEWED")["status"] == "NEEDS_REVIEW"
+    assert job["status"] == "FAILED" and job["failure"]["code"] == "DOCUMENT_NOT_APPROVED"
+    assert job["outputs"] == [] and job["billing"]["charged"] == 0
 
 
 def test_11_there_are_at_most_two_fixes_and_the_last_text_is_reviewed(client, monkeypatch):
@@ -276,7 +279,8 @@ def test_11_there_are_at_most_two_fixes_and_the_last_text_is_reviewed(client, mo
     monkeypatch.setattr(ProposalRunner, "fix", lambda self, *a, **k: (sequence.append("fix"), fix(self, *a, **k))[1])
     job = _run(client, pid, "CHAPTER_1")
     assert sequence == ["review", "fix", "review", "fix", "review"]
-    assert job["outcome"] == "PARTIAL" and any("still need your attention" in w for w in job["warnings"])
+    assert job["status"] == "FAILED" and job["failure"]["code"] == "DOCUMENT_NOT_APPROVED"
+    assert job["outputs"] == [] and job["billing"]["charged"] == 0
 
 
 def test_16_reviewer_notes_reach_the_student(client):

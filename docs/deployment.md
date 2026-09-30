@@ -151,6 +151,42 @@ firebase deploy --only hosting,firestore:rules,firestore:indexes --project PROJE
 
   Do the same for the worker, then run `firebase hosting:rollback` if the website also needs to go back.
 
+### Rolling back the four-model release
+
+Checked on 2026-09-29 by reading records the new code writes with the models of the release before it
+(`1d573b6`, image `studio-1d573b6`, `sha256:be9c08f6828ed8913bb70b3ea0dfa2df1269071e595ebb7800016b56045e6b83`):
+
+- **Records stay readable.** Jobs priced on the new engine, a source check on its own, a "Finish chapter"
+  job (stored as its chapter's step with a `finish` flag for this reason) and a chapter with sections not
+  yet written are all read by the older code: it ignores the fields it does not know. History pages and
+  the admin console keep working after a rollback.
+- **Work in flight cannot run on the older image.** A job priced on the new engine names prompt versions
+  the older image does not have (`analyse-v3`, `finalise-v4`, `guide-v1`, `review-v3` and others), and a
+  finish's step input (`COMPLETE`) is unknown to it. The older worker treats that as an unexpected error:
+  it retries, then fails the job and refunds it. Nothing is charged, but the student must start again.
+- **Chapters with sections not yet written** exist only if `PARTIAL_CHAPTERS` was turned on. It ships off
+  (owner decision 2026-09-30) because the older release would let such a chapter be approved. While it is
+  off, a rollback affects no chapter. Before turning it on, accept that a later rollback to `1d573b6` would
+  show those chapters without their "Finish chapter" button (the complete proposal still refuses them).
+
+Procedure:
+
+1. In the admin console, **Pause processing**. Nothing new starts; running stages finish.
+2. Wait until the admin list shows no job PROCESSING. Jobs still QUEUED will fail and be refunded after the
+   rollback (step 4); tell those students to start again, or leave them paused until you roll forward.
+3. Move traffic back, worker first:
+
+   ```bash
+   gcloud run services update-traffic paperaid-worker --to-revisions=paperaid-worker-00017-szd=100 --region europe-west1
+   gcloud run services update-traffic paperaid-api --to-revisions=paperaid-api-00017-6wr=100 --region europe-west1
+   firebase hosting:rollback --project paperaid-ca172
+   ```
+
+   The model settings travel with each revision, so the older revisions keep their own (Sol and Opus).
+4. **Resume processing.** Check one AI Check and one Refine on the live site.
+5. To roll forward again, move traffic back to the new revisions and deploy hosting again; nothing else
+   needs undoing.
+
 ## Release log
 
 | Date | Commit | Image | API revision | Worker revision | Hosting release |

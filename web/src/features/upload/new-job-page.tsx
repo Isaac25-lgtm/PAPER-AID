@@ -387,7 +387,7 @@ function NewJobForm({ type }: { type: JobType | null }) {
   }
 
   const set = (patch: Partial<ServiceSelection>) => setSelection((s) => ({ ...s, ...patch }))
-  const pdfReason = isPdf ? 'Needs a Word file — PDFs support AI Check only.' : undefined
+  const pdfReason = isPdf ? 'Needs a Word file — a PDF can be checked only.' : undefined
   const chosen: ServiceId[] = [
     ...(selection.writing !== 'NONE' ? [selection.writing] : []),
     ...(selection.formatting !== 'NONE' ? [selection.formatting] : []),
@@ -438,7 +438,7 @@ function NewJobForm({ type }: { type: JobType | null }) {
       )}
       <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
         <div className="space-y-5">
-          <Step n={1} title="Your paper" description="Word (.docx) works with every service. Text-based PDFs work with AI Check.">
+          <Step n={1} title="Your paper" description="Word (.docx) works with every service. A text-based PDF can be checked.">
             {!source || source.error ? (
               <>
                 <FileDropzone label="Choose your paper" hint="DOCX or PDF · up to 20 MB" accept={ACCEPT} onFile={(file) => upload('source', file)} />

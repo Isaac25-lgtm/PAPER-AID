@@ -417,6 +417,9 @@ def post_scan(original: str, revised: str, section: str, elsewhere: set[str]) ->
 
 # The lead model's band for a passage, as a score on the same 0–1 scale as the signals.
 MODEL_SCORE = {"low": 0.1, "moderate": 0.45, "high": 0.85}
+# Low-against-high disagreements covering this share of analysed words make confidence LOW
+# (fewer make it at most MEDIUM). Provisional and uncalibrated (owner decision 2026-09-29).
+DISAGREEMENT_SHARE = 0.15
 
 
 def band_for(score: float) -> str:

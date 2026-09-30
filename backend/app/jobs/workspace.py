@@ -61,10 +61,10 @@ def document(rt: Runtime, user: User, job_id: str) -> dict[str, Any]:
     groups = {g.id: g.block_ids for g in paragraph_groups.groups(model)} if job.refinement and job.refinement.mode == "REDRAFT" else {}
     changes = [ChangedBlock.model_validate(c).model_dump(by_alias=True) for c in _internal(rt, job, "changes_full.json") or []]
     percent = job.analysis.percent if job.analysis else None
-    if job.analysis is not None and percent is None and raw is not None:
+    if job.analysis is not None and job.analysis.coverage_complete is not False and percent is None and raw is not None:
         percent = _saved_percent(rt, job, model)
     percent_after = job.analysis_after.percent if job.analysis_after else None
-    if job.analysis_after is not None and percent_after is None:
+    if job.analysis_after is not None and job.analysis_after.coverage_complete is not False and percent_after is None:
         if job.refinement is not None and job.refinement.refined_blocks == 0:
             percent_after = percent
         elif (
@@ -259,7 +259,7 @@ def continue_from(rt: Runtime, user: User, job_id: str, origin: str, instruction
     rt.files.put(path, data, DOCX_TYPE if ext == "docx" else "application/pdf")
     new.source = StoredFile(
         name=name, format=model.format, size_bytes=len(data), word_count=model.word_count, page_estimate=model.page_count or 1,
-        heading_count=model.heading_count, path=path, sha256=digest,
+        heading_count=model.heading_count, path=path, sha256=digest, scorable_words=sum(b.words for b in signals.analysable(model)),
     )
     if not rt.store.create_if_open(new):
         rt.files.delete_prefix(new.storage_prefix())
@@ -273,7 +273,7 @@ def fix_draft(rt: Runtime, user: User, job_id: str, finding_ids: list[str], safe
     the passages those findings are in. It is priced and started like any job."""
     job = _readable(rt, _owned(rt, user, job_id))
     if job.analysis is None or job.source is None:
-        raise Conflict("Run an AI Check first.", code="NO_ANALYSIS")
+        raise Conflict("Check your writing first.", code="NO_ANALYSIS")
     if job.source.format != "DOCX":
         raise AppError("Fixing passages needs the Word file. Upload the .docx version of this paper.", code="PDF_AI_CHECK_ONLY")
     raw = _internal(rt, job, "document.json")

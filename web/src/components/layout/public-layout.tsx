@@ -134,8 +134,8 @@ function SiteFooter() {
       </div>
       <div className="border-t border-line">
         <p className="mx-auto max-w-6xl px-4 py-5 text-xs text-fg-subtle sm:px-6">
-          © 2026 PaperAid. AI-likeness results are estimates; no AI detector can prove who wrote a text. PaperAid is not affiliated with any detection
-          service.
+          © 2026 PaperAid. PaperAid gives feedback on how writing reads; it does not detect AI, and no detector can prove who wrote a text. PaperAid is
+          not affiliated with any detection service.
         </p>
       </div>
     </footer>

@@ -15,7 +15,7 @@ import { DISCLAIMER } from '../results/report'
 
 /** What the panel beside the paper offers: the first check, a full redraft, formatting, or a
  *  prepared draft (passages chosen to fix, or the student's own request for changes). */
-export type Mode = 'check' | 'redraft' | 'format' | 'prepared'
+export type Mode = 'check' | 'redraft' | 'format' | 'prepared' | 'sources'
 
 const BASE: ServiceSelection = { writing: 'NONE', intensity: 'STANDARD', style: 'PRESERVE_VOICE', sourceCheck: false, formatting: 'NONE', preset: 'apa7', latex: false, proposal: 'NONE', level: 'MASTERS' }
 const ACCEPT = '.docx,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf'
@@ -27,16 +27,22 @@ export function startingSelection(mode: Mode, job: Job, service: string | null):
   if (mode === 'prepared') return { ...BASE, ...job.selection, writing: 'REFINE', style }
   if (job.quote) return { ...BASE, ...job.selection } // coming back to a priced draft: the same choices
   if (mode === 'check') return { ...BASE, writing: 'AI_CHECK', academic: true, sourceCheck: service === 'SOURCE_CHECK' }
+  if (mode === 'sources') return { ...BASE, sourceCheck: true } // the results action: the claims only, no new check
   if (mode === 'format')
     return { ...BASE, formatting: service === 'TEMPLATE_FORMAT' ? 'TEMPLATE_FORMAT' : service === 'LATEX' ? 'NONE' : 'FORMAT', latex: service === 'LATEX' }
   return { ...BASE, writing: service === 'REDRAFT' ? 'REDRAFT' : 'REFINE', style, academic: true }
 }
 
 const TITLES: Record<Mode, { title: string; body: string; start: string }> = {
-  check: { title: 'Check for AI', body: 'PaperAid reads your paper and marks what reads as AI-written, with the reasons. Your paper is not changed.', start: 'Check for AI' },
+  check: {
+    title: 'Check my writing',
+    body: 'PaperAid reads your paper and marks generic, formulaic or repetitive passages, with the reasons and suggestions. Your paper is not changed.',
+    start: 'Check my writing',
+  },
   redraft: { title: 'Redraft', body: 'Choose how PaperAid should redraft your paper. You see every change and can keep your own wording for any of them.', start: 'Start redraft' },
   format: { title: 'Format', body: 'Lay your paper out in an academic style. Your wording is not changed.', start: 'Format my paper' },
   prepared: { title: 'Your changes', body: 'PaperAid rewrites only the passages below, following your request, and checks every change.', start: 'Make these changes' },
+  sources: { title: 'Check my sources', body: 'PaperAid finds the key factual claims in your paper and checks them against live public sources. Your paper is not changed.', start: 'Check my sources' },
 }
 
 interface Pricing {
@@ -295,7 +301,7 @@ export function JobOptions({ job, mode, initial }: { job: Job; mode: Mode; initi
           <div className="mt-2 grid gap-2">
             {mode !== 'format' && <OptionCard name="formatting" checked={selection.formatting === 'NONE'} onSelect={() => set({ formatting: 'NONE' })} title="Keep my layout" body="Leave the layout as it is." />}
             <OptionCard name="formatting" checked={selection.formatting === 'FORMAT'} onSelect={() => set({ formatting: 'FORMAT' })} title="APA, Harvard or another style" body="Headings, spacing, page numbers. Wording untouched." disabledReason={pdfReason} />
-            <OptionCard name="formatting" checked={selection.formatting === 'TEMPLATE_FORMAT'} onSelect={() => set({ formatting: 'TEMPLATE_FORMAT' })} title="My university's guide" body="Upload your department's formatting guide." badge={badgeFor('TEMPLATE_FORMAT')} disabledReason={reasonFor('TEMPLATE_FORMAT', pdfReason)} />
+            <OptionCard name="formatting" checked={selection.formatting === 'TEMPLATE_FORMAT'} onSelect={() => set({ formatting: 'TEMPLATE_FORMAT' })} title="My university's guide" body="Upload your department's formatting guide. PaperAid reads it with AI, so it is priced separately." badge={badgeFor('TEMPLATE_FORMAT')} disabledReason={reasonFor('TEMPLATE_FORMAT', pdfReason)} />
           </div>
           {selection.formatting === 'FORMAT' && (
             <>

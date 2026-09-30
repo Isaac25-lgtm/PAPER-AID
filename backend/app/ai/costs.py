@@ -8,9 +8,11 @@ PRICE_TABLE_VERSION = "2026-09"
 # an explicit price is unavailable: a guessed rate would make the cost guard unreliable.
 PRICES: dict[str, tuple[float, float, float]] = {
     "openai:gpt-6-sol": (2.0, 10.0, 0.20),
+    "openai:gpt-6-luna": (0.10, 0.50, 0.01),
     "anthropic:claude-opus-5-5": (4.0, 20.0, 0.20),
     "anthropic:claude-opus-5": (5.0, 25.0, 0.50),
     "anthropic:claude-sonnet-5": (2.0, 10.0, 0.20),
+    "anthropic:claude-sonnet-5-5": (2.0, 10.0, 0.20),
     "anthropic:claude-haiku-4-5": (1.0, 5.0, 0.10),
 }
 Prices = dict[str, tuple[float, float, float]]

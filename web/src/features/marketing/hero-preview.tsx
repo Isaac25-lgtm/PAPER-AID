@@ -337,12 +337,12 @@ export function HeroPreview() {
 
         <div className="flex flex-wrap items-center gap-x-6 gap-y-3 border-t border-line bg-white px-5 py-3.5">
           <div>
-            <p className="text-[10px] font-medium tracking-wide text-fg-subtle uppercase">Estimated AI-likeness</p>
+            <p className="text-[10px] font-medium tracking-wide text-fg-subtle uppercase">Formulaic passages</p>
             <p className="mt-0.5 text-sm font-semibold">
               {scene.scanning ? (
                 <span className="text-fg-subtle">Checking…</span>
               ) : (
-                <span className={clsx('transition-colors duration-700', scene.improved ? 'text-amber-600' : 'text-rose-600')}>{scene.improved ? 'Moderate' : 'High'}</span>
+                <span className={clsx('transition-colors duration-700', scene.improved ? 'text-amber-600' : 'text-rose-600')}>{scene.improved ? '2 marked' : '6 marked'}</span>
               )}
             </p>
           </div>

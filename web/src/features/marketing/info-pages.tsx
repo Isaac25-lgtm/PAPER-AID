@@ -4,7 +4,7 @@ import { Badge, Card, Eyebrow } from '../../components/ui/primitives'
 import { useData } from '../../lib/data'
 import { formatTokenNumber } from '../../lib/format'
 import type { ServiceId } from '../../lib/types'
-import { AVAILABILITY_BADGE, SERVICES, SERVICE_ORDER } from '../../lib/services'
+import { AVAILABILITY_BADGE, SECTIONS } from '../../lib/services'
 import { useTitle } from '../../lib/use-title'
 import { FinalCta, PricingModel } from './sections'
 
@@ -25,15 +25,15 @@ export function FeaturesPage() {
   const { config } = useData()
   return (
     <>
-      <PageHero eyebrow="Features" title="Every service, and exactly what it changes.">
-        Each PaperAid service has a defined job. You always know what will be changed, what will be left alone and what you get back.
+      <PageHero eyebrow="Features" title="Three sections, and exactly what each one changes.">
+        Check and finish a paper, write a research proposal, or format a finished paper. You always know what will be changed, what will be left alone and what you
+        get back.
       </PageHero>
       <div className="mx-auto max-w-5xl space-y-6 px-4 py-14 sm:px-6">
-        {SERVICE_ORDER.map((id) => {
-          const s = SERVICES[id]
-          const availability = config.availability[id]
+        {SECTIONS.map((s) => {
+          const availability = config.availability[s.service]
           return (
-            <Card key={id} className="p-6 sm:p-8">
+            <Card key={s.id} className="p-6 sm:p-8">
               <div className="flex flex-col gap-6 md:flex-row">
                 <div className="md:w-72 md:shrink-0">
                   <div className="flex items-center gap-3">
@@ -120,7 +120,7 @@ const FAQ = [
 ]
 
 const PRICE_ROWS: { key: string; name: string; note?: string; service: ServiceId }[] = [
-  { key: 'AI_CHECK', name: 'AI Check', service: 'AI_CHECK' },
+  { key: 'AI_CHECK', name: 'Writing check', service: 'AI_CHECK' },
   { key: 'ACADEMIC', name: 'Academic, evidence and method review', note: 'added to a check of academic work', service: 'AI_CHECK' },
   { key: 'REFINE_LIGHT', name: 'Check + Refine, light', service: 'REFINE' },
   { key: 'REFINE', name: 'Check + Refine, standard', service: 'REFINE' },

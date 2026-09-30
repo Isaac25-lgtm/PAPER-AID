@@ -4,6 +4,8 @@ Date: 2026-09-29. Completed by Codex against the working changes on top of `667c
 
 ## Release status
 
+Superseded: the owner released these fixes as `1d573b6` (record `51b6f42`); see `deployment.md`. The paragraph below describes the state when this report was written.
+
 The source changes are completed locally. **This is not a confirmation of a new live release.** This session cannot reach Google's token service: the connection to `oauth2.googleapis.com` fails with Windows socket error 10013 under the sandbox's network permissions. Re-authentication would not fix that restriction. Git staging also fails because the sandbox cannot create `.git/index.lock`; the changes remain uncommitted in the working tree. The release script handles committing and pushing from the normal terminal.
 
 The last release recorded in `deployment.md` remains v16 (`6f39072`). No cloud permissions, secrets, payment settings or owner jobs were changed for this verification. Browser jobs used a separate temporary directory, test providers and ports 5002/8002.

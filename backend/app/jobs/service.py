@@ -12,6 +12,7 @@ from pathlib import PurePosixPath
 from typing import Literal
 
 from app.ai.orchestration import current_engine
+from app.analysis import signals
 from app.core.config import Settings
 from app.core.errors import AppError, Conflict, Forbidden, InvalidDocument, LimitExceeded, NotFound
 from app.core.logging import log
@@ -101,6 +102,7 @@ def public_config(rt: Runtime, user: "User | None" = None) -> dict:
         "paymentsEnabled": rt.settings.payments_enabled,
         "availability": availability(rt.settings, user),
         "creditsEnabled": rt.settings.credits_enabled,
+        "aiScore": rt.settings.show_ai_score,  # the AI-likeness percentage and band are shown only when on
         "minTopUpUgx": rt.settings.min_top_up_ugx,
         "ugxPerUsd": rt.settings.ugx_per_usd,
         "ugxPerToken": rt.settings.ugx_per_token,
@@ -191,6 +193,7 @@ def task_name(job: Job, suffix: str = "") -> str:
 
 
 ACCOUNT_CLOSING = "This account is being deleted, so nothing new can be started."
+NOT_SCORABLE = "This paper has no passage long enough (25 words or more) for a writing check to assess, so it cannot be checked."
 
 
 def create_draft(rt: Runtime, user: User) -> JobView:
@@ -249,6 +252,7 @@ def upload_file(rt: Runtime, user: User, job_id: str, role: FileRole, filename: 
         heading_count=model.heading_count,
         path=path,
         sha256=digest,
+        scorable_words=sum(b.words for b in signals.analysable(model)),
     )
     previous: list[str] = []
 
@@ -388,15 +392,16 @@ def request_quote(rt: Runtime, user: User, job_id: str, selection: ServiceSelect
         raise AppError("Proposal steps are started from the proposal's page.", code="PROPOSAL_STEP")
     if selection.proposal == "REVIEW" and (len(services) > 1 or selection.writing != "NONE"):
         raise AppError("A proposal review runs on its own. Start another job for other services.", code="REVIEW_ALONE")
+    if selection.writing == "AI_CHECK" and job.source.scorable_words == 0:  # refused before it is priced
+        raise AppError(NOT_SCORABLE, code="NOT_SCORABLE")
     if selection.proposal == "REVIEW" and job.source.word_count > rt.settings.proposal_review_max_words:
         raise AppError(f"Proposal review accepts up to {rt.settings.proposal_review_max_words:,} words.", code="DOCUMENT_TOO_LONG")
     if selection.only_blocks and (selection.writing != "REFINE" or not all(re.fullmatch(r"b\d{5}", b) for b in selection.only_blocks)):
-        raise AppError("Choose the passages to fix from your AI Check.", code="INVALID_SELECTION")
+        raise AppError("Choose the passages to fix from your writing check.", code="INVALID_SELECTION")
     scope = _fix_scope(rt, job, selection.only_blocks) if selection.only_blocks else None
-    if selection.source_check and selection.writing not in ("AI_CHECK", "REFINE", "REDRAFT"):
-        raise AppError("Source check comes with AI Check, Check + Refine or Deep Redraft.", code="SOURCE_CHECK_NEEDS_CHECK")
+    # a source check may also run on its own: the "Check my sources" action on a paper's results
     if job.source.format == "PDF" and any(s.value not in ("AI_CHECK", "SOURCE_CHECK", "PROPOSAL") for s in services):
-        raise AppError("PDF files can use AI Check (and Source check) only. Upload the Word file to refine or format it.", code="PDF_AI_CHECK_ONLY")
+        raise AppError("A PDF can be checked (writing and sources) only. Upload the Word file to redraft or format it.", code="PDF_AI_CHECK_ONLY")
     if selection.formatting == "TEMPLATE_FORMAT" and job.guideline is None:
         raise AppError("Upload your university's formatting guide to use University templates.", code="NO_GUIDELINE")
     guideline_sha = job.guideline.sha256 if selection.formatting == "TEMPLATE_FORMAT" and job.guideline else None
@@ -477,7 +482,7 @@ def _fix_scope(rt: Runtime, job: Job, blocks: list[str]) -> int:
     model = read_docx(rt.files.get(job.source.path))
     editable = {b.id: b for b in model.blocks if b.editable and b.kind in ("paragraph", "list_item")}
     if len(set(blocks)) != len(blocks) or any(b not in editable for b in blocks):
-        raise AppError("Choose the passages to fix from your AI Check.", code="INVALID_SELECTION")
+        raise AppError("Choose the passages to fix from your writing check.", code="INVALID_SELECTION")
     return sum(editable[b].words for b in blocks)
 
 

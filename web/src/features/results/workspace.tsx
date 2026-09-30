@@ -1,5 +1,5 @@
 import { clsx } from 'clsx'
-import { ArrowRight, Check, CheckCircle2, ChevronRight, Info, LayoutTemplate, Lightbulb, Loader2, MessageSquarePlus, PenLine, RotateCcw, ShieldCheck, Sparkles, Undo2, Wand2, X } from 'lucide-react'
+import { ArrowRight, BookCheck, Check, CheckCircle2, ChevronRight, Info, LayoutTemplate, Lightbulb, Loader2, MessageSquarePlus, PenLine, RotateCcw, ShieldCheck, Sparkles, Undo2, Wand2, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { Button } from '../../components/ui/button'
@@ -9,7 +9,7 @@ import { DataError, useData } from '../../lib/data'
 import { formatNumber } from '../../lib/format'
 import { CATEGORY_LABELS, REASON_LABELS } from '../../lib/services'
 import type { Band, ChangedBlock, Finding, FindingCategory, Job, JobDocument, PaperCheck, ReferenceCheck, ReferenceVerification } from '../../lib/types'
-import { DISCLAIMER, DownloadList } from './report'
+import { DownloadList, SCORE_DISCLAIMER } from './report'
 
 type Category = FindingCategory | 'REFERENCES'
 const ORDER: Category[] = ['AI_LIKE', 'ACADEMIC', 'EVIDENCE', 'REFERENCES', 'METHOD', 'FORMATTING']
@@ -22,7 +22,7 @@ const SEVERITY_TINT = { minor: 'bg-sky-50 ring-sky-200', moderate: 'bg-amber-50 
 const SEVERITY_BAR = { minor: 'bg-sky-400', moderate: 'bg-amber-400', major: 'bg-rose-500' }
 const RANK = { minor: 0, moderate: 1, major: 2 }
 type Severity = Finding['severity']
-const STRENGTH: Record<Severity, string> = { major: 'Strong AI patterns', moderate: 'Moderate AI patterns', minor: 'Weak AI patterns' }
+const STRENGTH: Record<Severity, string> = { major: 'Strongly formulaic', moderate: 'Formulaic', minor: 'Slightly formulaic' }
 const STRENGTH_CHIP: Record<Severity, string> = { major: 'Strong', moderate: 'Moderate', minor: 'Weak' }
 const markLabel = (f: Finding) => (f.category === 'AI_LIKE' ? STRENGTH[f.severity] : CATEGORY_LABELS[f.category])
 const CHECK_TITLES: Record<PaperCheck['kind'], string> = {
@@ -68,6 +68,8 @@ export function Workspace({ job: initial }: { job: Job }) {
   }, [data, job.id])
 
   const analysis = job.analysis
+  // the passages marked are those of the paper shown: the finished paper once it has its own check
+  const uncertain = new Set((job.analysisAfter ?? analysis)?.disagreementBlocks ?? [])
   const dismissed = new Set(job.dismissed ?? [])
   const rejected = new Set(job.rejectedChanges ?? [])
   const findings = useMemo(() => [...(analysis?.findings ?? []), ...(analysis?.review ?? [])], [analysis])
@@ -135,11 +137,17 @@ export function Workspace({ job: initial }: { job: Job }) {
   // The next step on the same paper: a new draft opens with the paper and its options beside it.
   const origin = job.refinement || job.formatting ? 'result' : 'original'
   const canPick = !(job.refinement?.mode === 'REDRAFT') // a deep redraft changes the paragraphs, so the whole paper is asked about
-  const next = (key: string, mode: 'redraft' | 'format') =>
+  const next = (key: string, mode: 'redraft' | 'format' | 'sources') =>
     act(key, async () => {
       const draft = await data.workspace.continueFrom(job.id, mode === 'redraft' ? 'original' : origin)
       navigate(`/app/jobs/${draft.id}?next=${mode}`)
     })
+  // Source check is a step of Paper Check: offered on results that do not have one yet.
+  const checkSources = !job.research && !job.selection.sourceCheck && (
+    <Button className="w-full" variant="secondary" loading={busy === 'sources'} onClick={() => next('sources', 'sources')}>
+      <BookCheck className="size-4" aria-hidden /> Check my sources
+    </Button>
+  )
   const askForChanges = () =>
     act('ask', async () => {
       const blocks = scope === 'picked' && canPick ? [...picked] : []
@@ -172,7 +180,7 @@ export function Workspace({ job: initial }: { job: Job }) {
 
   return (
     <div className="space-y-6">
-      {job.refinement && <ReadySummary job={job} />}
+      {job.refinement && <ReadySummary job={job} aiScore={!!data.config.aiScore} />}
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_24rem]">
         {/* The paper */}
         <Card className="order-2 min-w-0 p-5 sm:p-8 lg:order-1 lg:max-h-[calc(100dvh-7rem)] lg:overflow-y-auto">
@@ -208,6 +216,7 @@ export function Workspace({ job: initial }: { job: Job }) {
                 const picking = asking && scope === 'picked' && canPick && (b.kind === 'paragraph' || b.kind === 'list_item')
                 return (
                   <div key={b.id} ref={(el) => void (blockRefs.current[b.id] = el)}>
+                    {uncertain.has(b.id) && <span className="mb-1 inline-block rounded bg-amber-100 px-1.5 py-0.5 font-sans text-[11px] font-semibold text-amber-900">Uncertain estimate — read this passage yourself</span>}
                     {top && !picking && (
                       <span className={clsx('mb-1 inline-block rounded px-1.5 py-0.5 font-sans text-[11px] font-semibold', top.category !== 'AI_LIKE' ? 'bg-violet-100 text-violet-800' : top.severity === 'major' ? 'bg-rose-100 text-rose-800' : top.severity === 'moderate' ? 'bg-amber-100 text-amber-900' : 'bg-sky-100 text-sky-800')}>
                         {markLabel(top)}
@@ -235,7 +244,8 @@ export function Workspace({ job: initial }: { job: Job }) {
 
         {/* The review panel */}
         <aside className="order-1 space-y-4 lg:sticky lg:top-20 lg:order-2 lg:max-h-[calc(100dvh-6rem)] lg:overflow-y-auto">
-          {analysis && <ScoreCard job={job} percent={analysis.percent ?? doc?.percent ?? null} percentAfter={doc?.percentAfter ?? null} />}
+          {analysis &&
+            (data.config.aiScore ? <ScoreCard job={job} percent={analysis.percent ?? doc?.percent ?? null} percentAfter={doc?.percentAfter ?? null} /> : <WritingCard job={job} />)}
           <Card className="space-y-2 p-4">
             <p className="text-sm font-semibold">What next?</p>
             {job.source?.format === 'DOCX' ? (
@@ -276,9 +286,13 @@ export function Workspace({ job: initial }: { job: Job }) {
                 <Button className="w-full" variant="secondary" loading={busy === 'format'} onClick={() => next('format', 'format')}>
                   <LayoutTemplate className="size-4" aria-hidden /> {job.refinement ? 'Format the finished paper' : 'Format my paper'}
                 </Button>
+                {checkSources}
               </>
             ) : (
-              <p className="text-sm text-fg-muted">Upload the Word (.docx) version to redraft, change or format it.</p>
+              <>
+                <p className="text-sm text-fg-muted">Upload the Word (.docx) version to redraft, change or format it.</p>
+                {checkSources}
+              </>
             )}
           </Card>
 
@@ -330,7 +344,7 @@ export function Workspace({ job: initial }: { job: Job }) {
           ) : (
             <Card className="p-4">
               {aiLike.length > 0 && (
-                <div className="mb-3 flex flex-wrap items-center gap-1.5" role="group" aria-label="AI patterns by strength">
+                <div className="mb-3 flex flex-wrap items-center gap-1.5" role="group" aria-label="Writing patterns by strength">
                   {(['major', 'moderate', 'minor'] as Severity[])
                     .filter((s) => strengthCount(s) > 0)
                     .map((s) => (
@@ -465,13 +479,44 @@ export function Workspace({ job: initial }: { job: Job }) {
   )
 }
 
-/** The headline, compact: the estimated AI-likeness score and its band. What it means sits behind the i. */
+/** Writing-pattern feedback (owner decision 2026-09-30): what was marked in the paper, never a verdict
+ *  on who wrote it. A real-model pilot scored human and AI-written papers alike, so no score is shown. */
+function WritingCard({ job }: { job: Job }) {
+  const a = job.analysis!
+  const marked = new Set(a.findings.map((f) => f.blockId)).size
+  const uncertain = (job.analysisAfter ?? a).disagreementBlocks?.length ?? 0
+  return (
+    <Card className="p-4">
+      <p className="text-xs font-semibold tracking-wide text-fg-subtle uppercase">Writing patterns</p>
+      <p className="mt-1 text-2xl font-bold tracking-tight">
+        {marked} passage{marked === 1 ? '' : 's'} marked
+      </p>
+      <p className="mt-1 text-xs leading-relaxed text-fg-muted">
+        Passages that read as generic, formulaic or repetitive are marked in your paper, with the reasons. This is feedback on how your writing reads: it does
+        not detect AI.
+      </p>
+      {a.coverageComplete === false && (
+        <p className="mt-2 text-xs text-fg-muted">
+          PaperAid could not assess every passage this time.{job.selection.writing === 'AI_CHECK' ? ' You were not charged for this check.' : ''}
+        </p>
+      )}
+      {uncertain > 0 && (
+        <p className="mt-2 text-xs text-fg-muted">
+          PaperAid&rsquo;s assessment is uncertain for {uncertain} passage{uncertain === 1 ? '' : 's'}, marked in your paper.
+        </p>
+      )}
+    </Card>
+  )
+}
+
+/** The headline, compact: the estimated AI-likeness score and its band, shown only when switched on. */
 function ScoreCard({ job, percent, percentAfter }: { job: Job; percent: number | null; percentAfter: number | null }) {
   const [about, setAbout] = useState(false)
   const a = job.analysis!
   const after = job.analysisAfter
   const now = after ?? a
-  const shown = after ? (after.percent ?? percentAfter) : percent
+  const complete = now.coverageComplete !== false
+  const shown = complete ? (after ? (after.percent ?? percentAfter) : percent) : null
   return (
     <Card className="p-4">
       <div className="flex items-center justify-between gap-2">
@@ -481,21 +526,23 @@ function ScoreCard({ job, percent, percentAfter }: { job: Job; percent: number |
         </button>
       </div>
       <div className="mt-1 flex items-baseline gap-2">
-        {after && <span className="text-lg font-semibold text-fg-subtle line-through decoration-1">{percent != null ? `${percent}%` : label(a.band)}</span>}
-        <span className="text-4xl font-bold tracking-tight">{shown != null ? `${shown}%` : label(now.band)}</span>
-        <span className={clsx('ml-auto rounded-lg px-2.5 py-1 text-xs font-bold ring-1 ring-inset', BAND_STYLE[now.band])}>{label(now.band)}</span>
+        {after && <span className="text-lg font-semibold text-fg-subtle line-through decoration-1">{a.coverageComplete === false ? 'Check incomplete' : percent != null ? `${percent}%` : label(a.band)}</span>}
+        <span className={clsx('font-bold tracking-tight', complete ? 'text-4xl' : 'text-2xl')}>{!complete ? 'Check incomplete' : shown != null ? `${shown}%` : label(now.band)}</span>
+        {complete && <span className={clsx('ml-auto rounded-lg px-2.5 py-1 text-xs font-bold ring-1 ring-inset', BAND_STYLE[now.band])}>{label(now.band)}</span>}
       </div>
       {shown != null && (
         <div className="mt-2 h-2 overflow-hidden rounded-full bg-surface-muted" aria-hidden>
           <div className={clsx('h-full rounded-full', now.band === 'HIGH' ? 'bg-rose-500' : now.band === 'MODERATE' ? 'bg-amber-400' : 'bg-brand-500')} style={{ width: `${Math.max(shown, 2)}%` }} />
         </div>
       )}
+      {!complete && <p className="mt-2 text-xs text-fg-muted">PaperAid could not assess every passage, so no overall percentage is shown.{job.selection.writing === 'AI_CHECK' ? ' You were not charged for this check.' : ''}</p>}
+      {!!now.disagreementBlocks?.length && <p className="mt-2 text-xs text-fg-muted">PaperAid's estimate is uncertain for {now.disagreementBlocks.length} passage{now.disagreementBlocks.length === 1 ? '' : 's'}, marked in your paper.</p>}
       {about && (
         <div className="mt-3 space-y-1.5 text-xs leading-relaxed text-fg-muted">
           <p>
             Scored across {formatNumber(now.analysedWords)} words{now.excludedWords > 0 ? `; ${formatNumber(now.excludedWords)} words in headings, references, quotations and short passages were not scored` : ''}. Confidence: {now.confidence.toLowerCase()}.
           </p>
-          <p>{DISCLAIMER} This is a weighted writing-pattern score on a 0–100 scale, displayed as a percentage. It is not proof of how your paper was written, and the percentage is not the share of words written by AI. Fresh checks can differ.</p>
+          <p>{SCORE_DISCLAIMER} This is a weighted writing-pattern score on a 0–100 scale, displayed as a percentage. It is not proof of how your paper was written, and the percentage is not the share of words written by AI. Fresh checks can differ.</p>
         </div>
       )}
     </Card>
@@ -573,12 +620,14 @@ function ProtectedCard({ job }: { job: Job }) {
 }
 
 /** "Your document is ready": the outcome at a glance, with what still needs the student. */
-function ReadySummary({ job }: { job: Job }) {
+function ReadySummary({ job, aiScore }: { job: Job; aiScore: boolean }) {
   const r = job.refinement!
   const findings = [...(job.analysis?.findings ?? []), ...(job.analysis?.review ?? [])]
   const needsYou = findings.filter((f) => !f.safe && !(job.dismissed ?? []).includes(f.id)).length
+  const beforeLabel = job.analysis?.coverageComplete === false ? 'Check incomplete' : job.analysis ? label(job.analysis.band) : '—'
+  const afterLabel = job.analysisAfter?.coverageComplete === false ? 'Check incomplete' : job.analysisAfter ? label(job.analysisAfter.band) : null
   const items = [
-    { label: 'Estimated AI-likeness', value: job.analysis ? (job.analysisAfter ? `${label(job.analysis.band)} → ${label(job.analysisAfter.band)}` : label(job.analysis.band)) : '—' },
+    ...(aiScore ? [{ label: 'Estimated AI-likeness', value: afterLabel ? `${beforeLabel} → ${afterLabel}` : beforeLabel }] : []),
     { label: r.mode === 'REDRAFT' ? 'Passages redrafted' : 'Passages refined', value: String(r.refinedBlocks) },
     { label: 'Kept your wording', value: String(r.keptOriginal) },
     { label: 'Need your review', value: String(needsYou) },

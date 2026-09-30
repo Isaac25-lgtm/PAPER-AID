@@ -470,10 +470,10 @@ def _analyse_all(payload):
     }
 
 
-def _submit(client, selection, name="simple_essay.docx"):
+def _submit(client, selection, name="simple_essay.docx", timeout=60):
     job_id, quote = start_job(client, name=name, selection=selection)
     assert client.post(f"/api/jobs/{job_id}/submit", headers=STUDENT, json={"quoteId": quote["id"]}).status_code == 200
-    return job_id, wait(client, job_id)
+    return job_id, wait(client, job_id, timeout=timeout)
 
 
 def test_a_passage_the_writer_never_returned_is_kept_and_reported(real_client):
@@ -495,10 +495,11 @@ def test_a_passage_the_writer_never_returned_is_kept_and_reported(real_client):
     assert any("kept their original wording" in w for w in job["warnings"])
 
 
-def test_a_lead_that_found_nothing_is_not_a_missing_analysis(real_client):
-    real_client.models.overrides["analyse"] = lambda payload: {"blocks": []}  # saw every passage, no problems
+def test_explicit_low_judgments_are_a_complete_analysis(real_client):
+    real_client.models.overrides["analyse"] = _judge_all(lambda b: {"rejected": [s["rule"] for s in b["signals"]]})
     _, job = _submit(real_client, {"writing": "AI_CHECK"})
     assert job["status"] == "COMPLETED" and job["outcome"] == "FULL"
+    assert job["analysis"]["coverageComplete"] is True
     assert not any("could not assess" in w for w in job["warnings"])
 
 
@@ -516,7 +517,7 @@ def test_real_mode_runs_every_step_of_the_algorithm_in_order(real_client):
     assert job["status"] == "COMPLETED", job
     tasks = list(dict.fromkeys(real_client.models.tasks))
     # the free estimate analyses and drafts the plan; the paid job adds the academic review, replays both from the cache, then refines
-    assert tasks == ["analyse", "plan", "academic", "critique", "finalise", "refine", "review"]
+    assert tasks == ["analyse", "analyse_peer", "plan", "academic", "critique", "guide", "finalise", "refine", "review", "review_peer", "analyse_after", "analyse_after_peer"]
 
 
 def test_a_long_stage_continues_in_a_new_delivery_without_paying_twice(real_client, monkeypatch):
@@ -609,7 +610,7 @@ def test_an_old_ai_quote_cannot_be_submitted_after_keys_are_removed(client, monk
 
 # --- prepaid credits (owner decision 2026-09-24) -----------------------------------------------
 
-REAL_PRICES = {"fake:gpt-6-sol": (2.0, 10.0, 0.2), "fake:claude-opus-5-5": (4.0, 20.0, 0.2)}
+REAL_PRICES = {"fake:gpt-6-sol": (2.0, 10.0, 0.2), "fake:gpt-6-luna": (0.1, 0.5, 0.01), "fake:claude-sonnet-5-5": (2.0, 10.0, 0.2), "fake:claude-opus-5-5": (4.0, 20.0, 0.2)}
 
 
 def _priced_models(client, monkeypatch, tokens=(2000, 800)):
@@ -1046,8 +1047,9 @@ def _judge_all(judgement):
     return analyse
 
 
-def test_the_lead_can_reject_every_signal_as_a_false_positive(real_client):
+def test_both_checkers_can_reject_every_signal_as_a_false_positive(real_client):
     real_client.models.overrides["analyse"] = _judge_all(lambda b: {"rejected": [s["rule"] for s in b["signals"]]})
+    real_client.models.overrides["analyse_peer"] = real_client.models.overrides["analyse"]
     _, job = _submit(real_client, {"writing": "AI_CHECK"})
     assert job["analysis"]["findings"] == [] and job["analysis"]["band"] == "LOW"
 
@@ -1102,13 +1104,14 @@ def test_the_reviewer_sees_the_post_scan_and_linked_passages_and_its_warnings_re
     assert delivered and all(c["note"].startswith("Reviewer note:") for c in delivered)
 
 
-def test_the_after_band_uses_the_reviewers_judgement_of_each_rewrite(real_client):
+def test_the_after_band_uses_both_checkers_judgments_of_the_finished_paper(real_client):
     models = real_client.models
     models.overrides["analyse"] = _analyse_all
     order = ["LOW", "MODERATE", "HIGH"]
     bands = []
     for risk in ("low", "high"):
-        models.overrides["review"] = lambda payload, risk=risk: {"results": [{"id": p["id"], "grade": "PASS", "issues": [], "note": "", "riskBand": risk} for p in payload["pairs"]]}
+        models.overrides["analyse_after"] = _judge_all(lambda b, risk=risk: {"riskBand": risk})
+        models.overrides["analyse_after_peer"] = models.overrides["analyse_after"]
         _, job = _submit(real_client, REFINE_FORMAT)
         bands.append(order.index(job["analysisAfter"]["band"]))
     assert bands[1] > bands[0]
@@ -1229,7 +1232,7 @@ def test_source_check_rules_and_privacy(client):
     job_id = client.post("/api/jobs", headers=STUDENT).json()["id"]
     client.post(f"/api/jobs/{job_id}/files/source", headers=STUDENT, files={"file": ("c.docx", _claims_paper(), "application/octet-stream")})
     alone = client.post(f"/api/jobs/{job_id}/quote", headers=STUDENT, json={"selection": {"formatting": "FORMAT", "preset": "apa7", "sourceCheck": True}})
-    assert alone.status_code == 400 and alone.json()["code"] == "SOURCE_CHECK_NEEDS_CHECK"
+    assert alone.status_code == 200 and {line["service"] for line in alone.json()["quote"]["lines"]} == {"SOURCE_CHECK", "FORMAT"}
     job_id, _, job = _source_check_job(client)
     admin = client.get(f"/api/admin/jobs/{job_id}", headers=ADMIN).json()["job"]
     assert all(c["claim"] == "" and c["note"] == "" for c in admin["research"]["claims"])
@@ -1425,7 +1428,7 @@ def test_running_out_of_budget_mid_review_delivers_what_was_verified(real_client
         return models.default("review", payload)
 
     models.overrides["review"] = review
-    _, job = _submit(real_client, REFINE_FORMAT, name="dissertation_long.docx")
+    _, job = _submit(real_client, REFINE_FORMAT, name="dissertation_long.docx", timeout=180)
     assert len(reviews) >= 2, "the paper must need more than one review batch"
     assert job["status"] == "COMPLETED" and job["outcome"] == "PARTIAL"
     assert job["refinement"]["refinedBlocks"] >= 1 and job["refinement"]["keptOriginal"] >= 1

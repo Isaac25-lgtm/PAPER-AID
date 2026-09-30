@@ -67,6 +67,8 @@ try {
 
   // M25: rejecting a Deep Redraft group shows every original paragraph again.
   const workspace = await context.newPage()
+  // the AI score, kept for a validated detector, is exercised here with its switch on (it is off for students)
+  await workspace.route('**/api/config', async (r) => r.fulfill({ json: { ...(await (await r.fetch()).json()), aiScore: true } }))
   const job = await api('/api/jobs', {})
   job.status = 'COMPLETED'
   job.outcome = 'FULL'
@@ -106,6 +108,20 @@ try {
   await workspace.locator('aside').getByText('9%', { exact: true }).waitFor()
   await workspace.locator('aside').getByText('33%', { exact: true }).waitFor()
   console.log('✓ recovered before and after percentages render on an older refined result')
+  job.analysis.coverageComplete = false
+  job.analysisAfter.coverageComplete = false
+  await workspace.reload()
+  await workspace.locator('aside').getByText('Check incomplete', { exact: true }).first().waitFor()
+  assert.equal(await workspace.locator('aside').getByText('9%', { exact: true }).count(), 0)
+  assert.equal(await workspace.locator('aside').getByText('33%', { exact: true }).count(), 0)
+  console.log('✓ incomplete reviews cannot show stale recovered percentages')
+  job.analysis.coverageComplete = true
+  job.analysis.disagreementBlocks = ['b00001']
+  job.analysisAfter = null
+  await workspace.reload()
+  await workspace.locator('article').getByText('Uncertain estimate — read this passage yourself', { exact: true }).waitFor()
+  await workspace.locator('aside').getByText(/uncertain for 1 passage, marked in your paper/).waitFor()
+  console.log('✓ scoring disagreement identifies the passage and is disclosed beside the score')
 } catch (e) {
   failed = true
   console.error(`audit journey failed: ${e.message}`)
