@@ -202,7 +202,7 @@ def test_a_section_table_counts_toward_the_word_limit():
     assert within[0] == "PASS" and over[0] == "FAIL"
 
 
-def test_references_count_when_the_scope_names_them_and_are_flagged_when_it_is_silent(monkeypatch):
+def test_references_count_when_the_scope_names_them_and_are_shown_when_it_is_silent(monkeypatch):
     from app.proposals import evidence as ev
 
     monkeypatch.setattr(ev, "reference_list", lambda sources, style="APA7": ["ref " * 300])
@@ -214,7 +214,8 @@ def test_references_count_when_the_scope_names_them_and_are_flagged_when_it_is_s
         return check(Context(spec=spec, stage="FINAL", inputs=WorkInputs(title="A work"), doc=_doc(950)), {"id": "SH-004"})
 
     assert result(["core_narrative", "references"])[0] == "FAIL"  # 950 + 300 against an all-inclusive 1,000
-    assert result(["core"])[0] == "NEEDS_REVIEW"  # the instructions do not say: counted conservatively and flagged
+    silent = result(["core"])  # the instructions do not say: the text itself is held to the limit, the total with them is shown
+    assert silent[0] == "PASS" and "1,250 with the references" in silent[1]
     assert result(["core_narrative"])[0] == "PASS"  # the references are stated not to count
 
 
@@ -327,3 +328,17 @@ def test_a_quote_verifies_its_number_and_unit_not_just_its_words():
             "location": "", "weight": None, "countsToward": [], "amends": False}
     found, _ = requirements_from({"requirements": [item]}, [source], {"s1": "The concept note has a 5-page maximum."})
     assert not found[0].verified  # shown to the student to confirm, never locked as read
+
+
+def test_a_web_found_article_is_cited_by_its_authors_from_its_registered_record(monkeypatch):
+    """Real-model pilot 2026-09-30: web-found journal pages were cited by journal name ("BMC Pregnancy
+    and Childbirth, 2016"). Crossref's record for the same title and year gives the authors."""
+    from app.analysis import fetch
+    from app.proposals import pipeline as proposal_pipeline
+
+    record = {"doi": "10.1186/s12884-016-1000-1", "title": "Effect of a community health worker intervention on facility delivery in Uganda",
+              "authors": "Nsibambi, K.; Okello, J.", "year": "2016", "container": "BMC Pregnancy and Childbirth"}
+    monkeypatch.setattr(fetch, "crossref_search", lambda text, rows=3: [dict(record)])
+    assert proposal_pipeline._registered_by_title("Effect of a Community Health Worker Intervention on Facility Delivery in Uganda", "2016")["authors"].startswith("Nsibambi")
+    assert proposal_pipeline._registered_by_title("Effect of a community health worker intervention on facility delivery in Uganda", "2019") is None  # another year
+    assert proposal_pipeline._registered_by_title("A different article about maternal health in Uganda", "2016") is None

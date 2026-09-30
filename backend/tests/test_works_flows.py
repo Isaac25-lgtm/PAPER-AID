@@ -173,17 +173,21 @@ def test_deleting_an_account_erases_its_works_and_their_steps(works_client):
     assert not rt.files.exists(stored.spec_path) and prefix.startswith("works/")
 
 
-def test_work_services_are_offered_only_with_every_price(tmp_path, monkeypatch):
-    """No invented prices: a work service without its token prices shows as coming soon."""
-    monkeypatch.setenv("WORKS_ENABLED", '["COURSEWORK"]')
-    for client in _client(tmp_path, monkeypatch, "fixed"):
-        assert client.get("/api/config").json()["availability"]["COURSEWORK"] == "soon"
+def test_work_services_are_offered_only_when_switched_on_priced_and_to_testers():
+    """A work service shows as coming soon until it is switched on and every price is set; while
+    testing is limited to invited testers, the work services are too."""
     from app.core.config import Settings
-    from app.jobs.service import availability
+    from app.jobs.service import User, availability
 
-    tokens = {**Settings().fixed_tokens, "WORK_READ": 1, "CW_PLAN": 2, "CW_1500": 4, "CW_3000": 6, "CW_5000": 9, "CW_8000": 12, "WORK_REVISE": 2}
-    settings = Settings(fixed_tokens=tokens, works_enabled=["COURSEWORK"], pricing_mode="fixed", openai_api_key="k", anthropic_api_key="k", gemini_api_key="k")
+    keys = {"openai_api_key": "k", "anthropic_api_key": "k", "gemini_api_key": "k", "pricing_mode": "fixed"}
+    assert availability(Settings(works_enabled=[], **keys))["COURSEWORK"] == "soon"
+    unpriced = {k: v for k, v in Settings().fixed_tokens.items() if k != "CW_1500"}
+    assert availability(Settings(fixed_tokens=unpriced, works_enabled=["COURSEWORK"], **keys))["COURSEWORK"] == "soon"
+    settings = Settings(works_enabled=["COURSEWORK"], **keys)
     assert availability(settings)["COURSEWORK"] == "available" and availability(settings)["FUNDING_PROPOSAL"] == "soon"
+    testing = Settings(works_enabled=["COURSEWORK"], tester_emails=["tester@example.com"], **keys)
+    assert availability(testing, User(uid="u1", email="someone@example.com", is_admin=False))["COURSEWORK"] == "invite_only"
+    assert availability(testing, User(uid="u2", email="Tester@example.com", is_admin=False))["COURSEWORK"] == "available"
 
 
 def test_a_quote_freezes_roles_tier_price_table_and_content(works_client):

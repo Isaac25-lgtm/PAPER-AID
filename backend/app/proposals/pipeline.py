@@ -186,6 +186,21 @@ def _scholarly_source(work: dict[str, str]) -> EvidenceSource:
     )
 
 
+def _registered_by_title(title: str, published: str) -> dict[str, str] | None:
+    """A web page that is a registered article (a journal's own page without a DOI in its address):
+    its authors, journal and DOI from Crossref, taken only for the same title and, when the page gives
+    one, the same year, so it is cited by its authors rather than its journal's name."""
+    wanted = re.sub(r"[^a-z0-9]", "", title.casefold())
+    if len(wanted) < 20:
+        return None
+    year = YEAR.search(published)
+    for record in fetch.crossref_search(title, rows=3) or []:
+        same_year = not year or not record.get("year") or record["year"] == year.group(0)
+        if record.get("doi") and record.get("authors") and re.sub(r"[^a-z0-9]", "", record.get("title", "").casefold()) == wanted and same_year:
+            return record
+    return None
+
+
 def _from_web(runner: ProposalRunner, need: str, query: str, chapter: int, today: str, searches: int, safe) -> list[EvidenceItem]:
     items = []
     for finding in runner.search(need, query, searches, safe):
@@ -198,6 +213,9 @@ def _from_web(runner: ProposalRunner, need: str, query: str, chapter: int, today
                 verified, access = True, "ABSTRACT"
         doi = fetch.resolve_doi(finding.url)
         record = fetch.crossref_work(doi) if doi else None
+        if not record:
+            record = _registered_by_title(finding.title, finding.published)
+            doi = record["doi"] if record else doi
         if record and record.get("title"):
             source = EvidenceSource(
                 url=finding.url, title=record["title"], authors=_authors(record["authors"]), year=record["year"], container=record["container"],
@@ -284,10 +302,34 @@ def stage_planning(ctx: "StageContext") -> None:
     ctx.put_json("briefs.json", {"briefs": briefs, "draft": draft, "critique": critique.model_dump()})
 
 
+SAMPLING_DEFAULTS = {"margin": (0.0, 0.5, 0.05), "proportion": (0.0, 1.0, 0.5)}
+
+
+def _sane_sampling(data: dict[str, Any]) -> None:
+    """A sampling setting outside its range (a margin or proportion of 0, for a qualitative study)
+    takes its standard value instead of discarding the whole plan; a population or stated size that
+    is not a positive whole number is left for the student to give. Sizes are the student's anyway
+    (`_student_figures_only`)."""
+    size = data.get("sampleSize")
+    if not isinstance(size, dict):
+        return
+    for key, (low, high, default) in SAMPLING_DEFAULTS.items():
+        value = size.get(key)
+        if value is not None and not (isinstance(value, int | float) and low < value < high):
+            size[key] = default
+    for key in ("population", "stated"):
+        value = size.get(key)
+        if value is not None and not (isinstance(value, int) and value >= 1):
+            size[key] = None
+    if size.get("confidence") not in (90, 95, 99):
+        size["confidence"] = 95
+
+
 def _plan_from_model(data: dict[str, Any]) -> ProposalPlan:
     """The model's plan as a ProposalPlan. The schema has no length limits (providers cannot
     enforce them), so an over-long field is shortened to the plan's limit rather than failing the
     step; anything else invalid fails it once, since a retry would replay the same saved answer."""
+    _sane_sampling(data)
     for _ in range(3):
         try:
             return ProposalPlan.model_validate(data)

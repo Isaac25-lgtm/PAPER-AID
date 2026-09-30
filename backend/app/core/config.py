@@ -62,9 +62,10 @@ class Settings(BaseSettings):
     }
     # Which reviewers run behind each service's price. Students never choose or see a tier.
     service_tiers: dict[str, str] = {"CONCEPT_NOTE": "STANDARD", "COURSEWORK": "STANDARD", "FUNDING_PROPOSAL": "PREMIUM"}
-    # The most one step of each service may spend on providers (USD); past it the step stops
-    # escalating and what is left is marked for review, never overspent (B5).
-    work_budget_cap_usd: dict[str, float] = {"CONCEPT_NOTE": 1.5, "COURSEWORK": 2.5, "FUNDING_PROPOSAL": 6.0}
+    # The most one step of each service may spend on providers (USD), whatever its band's projection;
+    # past it the step stops escalating and what is left is marked for review, never overspent (B5).
+    # Above every band's worst case, so each band runs on its own projection (2026-09-30).
+    work_budget_cap_usd: dict[str, float] = {"CONCEPT_NOTE": 8.0, "COURSEWORK": 15.0, "FUNDING_PROPOSAL": 40.0}
     # New services are switched on here, one by one, once their token prices are set (owner).
     works_enabled: list[str] = []
     # Rendered page counts with LibreOffice in the worker (Workstream H). Off: page limits are
@@ -127,6 +128,12 @@ class Settings(BaseSettings):
         "REVISE": 2,  # a chapter revised from supervisor comments, per band of revised text: to be confirmed
         "CONCEPT": 2,  # the concept paper (at most five pages): to be confirmed
         "PROFILE": 2,  # an institution profile from the student's guide: to be confirmed
+        # Works, for testing (owner, 2026-09-30): the worst-case projection x 2, rounded; to be
+        # confirmed against real spend before students pay.
+        "WORK_READ": 1, "WORK_REVISE": 17,
+        "CW_PLAN": 3, "CW_1500": 20, "CW_3000": 35, "CW_5000": 60, "CW_8000": 90,
+        "CN_PLAN": 3, "CN_BRIEF": 20, "CN_STANDARD": 34, "CN_EXTENDED": 44,
+        "FP_PLAN": 7, "FP_COMPACT": 57, "FP_STANDARD": 122, "FP_COMPREHENSIVE": 247,
     }
     band_pages: int = 10
     band_step: float = 0.75

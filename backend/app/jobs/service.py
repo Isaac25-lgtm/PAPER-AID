@@ -76,7 +76,7 @@ def availability(settings: Settings, user: "User | None" = None) -> dict[str, st
             result[service] = "soon"  # no invented prices: a work service without its token prices is not offered
         elif service in NEEDS_AI and not settings.ai_configured or service in WORKS and not settings.roles_configured:
             result[service] = "not_configured"
-        elif service in NEEDS_AI and not may_use_ai(settings, user):
+        elif (service in NEEDS_AI or service in WORKS) and not may_use_ai(settings, user):  # works are limited to testers too
             result[service] = "invite_only"
         else:
             result[service] = "available"

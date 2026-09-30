@@ -497,3 +497,15 @@ def test_a_review_runs_alone(client):
     assert mixed.status_code == 400 and mixed.json()["code"] == "REVIEW_ALONE"
     step = client.post(f"/api/jobs/{job_id}/quote", headers=STUDENT, json={"selection": {"proposal": "PLAN"}})
     assert step.status_code == 400 and step.json()["code"] == "PROPOSAL_STEP"
+
+
+def test_a_sampling_setting_out_of_range_takes_its_standard_value_not_the_plan(client):
+    """A qualitative plan with a margin or proportion of 0 lost the whole plan on the live site
+    (PLAN_INVALID greater_than, 2026-09-30); the settings now fall back to their standard values."""
+    sampled = {**PLAN, "sampleSize": {**PLAN.get("sampleSize", {}), "method": "SATURATION", "margin": 0, "proportion": 0, "confidence": 80, "population": 0}}
+    client.models.overrides["p_finalise"] = lambda payload: sampled
+    project = _create(client)
+    job = _run(client, project["id"], "PLAN")
+    assert job["status"] == "COMPLETED", job
+    size = client.get(f"/api/projects/{project['id']}", headers=STUDENT).json()["plan"]["sampleSize"]
+    assert size["margin"] == 0.05 and size["proportion"] == 0.5 and size["confidence"] == 95 and size["population"] is None

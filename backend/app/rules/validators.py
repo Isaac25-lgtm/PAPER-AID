@@ -150,7 +150,7 @@ def _hidden(ctx: Context, rule: dict[str, Any]) -> Result:
 def _limits_hard_max(ctx: Context, rule: dict[str, Any]) -> Result:
     if ctx.doc is None:
         return None
-    problems, unsure, notes = [], [], []
+    problems, notes = [], []
     for limit in ctx.spec.limits:
         if limit.type == "WORD":
             counted, possible = ctx.limit_texts(limit)
@@ -159,8 +159,8 @@ def _limits_hard_max(ctx: Context, rule: dict[str, Any]) -> Result:
             notes.append(f"{words:,} words against a limit of {int(limit.max):,}")
             if words > allowed:
                 problems.append(f"{words:,} words is over the {int(limit.max):,}-word limit")
-            elif words + extra > allowed:
-                unsure.append(f"{words + extra:,} words if the references and tables count toward the {int(limit.max):,}-word limit; your instructions do not say. Check whether they count")
+            elif words + extra > allowed:  # usually they do not count; the student is told the total if they do
+                notes.append(f"{words + extra:,} with the references and tables, if your instructions count them (they do not say)")
         elif limit.type == "CHARACTER":
             counted, possible = ctx.limit_texts(limit)
             chars, extra = _count_chars(counted, limit.includes_spaces), _count_chars(possible, limit.includes_spaces)
@@ -168,7 +168,7 @@ def _limits_hard_max(ctx: Context, rule: dict[str, Any]) -> Result:
             if chars > limit.max:
                 problems.append(f"{chars:,} characters is over the {int(limit.max):,}-character limit")
             elif chars + extra > limit.max:
-                unsure.append(f"{chars + extra:,} characters if the references and tables count toward the {int(limit.max):,}-character limit; your instructions do not say")
+                notes.append(f"{chars + extra:,} with the references and tables, if your instructions count them (they do not say)")
         elif limit.type == "PAGE":
             if ctx.pages is None:
                 counted, possible = ctx.limit_texts(limit)
@@ -181,8 +181,6 @@ def _limits_hard_max(ctx: Context, rule: dict[str, Any]) -> Result:
         return None
     if problems:
         return ("FAIL", "; ".join(problems), "")
-    if unsure:
-        return ("NEEDS_REVIEW", "; ".join(unsure) + ".", "")
     return _ok("; ".join(notes) + ".")
 
 
