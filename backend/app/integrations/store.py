@@ -18,6 +18,7 @@ from pydantic import ValidationError
 from app.core.errors import PermanentStageError
 from app.jobs.models import Job, JobStatus, LedgerEntry, Wallet
 from app.proposals.models import Project
+from app.works.models import Work
 
 Mutator = Callable[[Job], Job | None]
 WalletMutator = Callable[[Wallet], Wallet | None]
@@ -25,6 +26,9 @@ PairMutator = Callable[[Job, Wallet], tuple[Job, Wallet] | None]
 ProjectMutator = Callable[[Project], Project | None]
 # A proposal step's job, its owner's wallet and its project, changed as one unit (Codex audit #4).
 TripleMutator = Callable[[Job, Wallet, Project | None], tuple[Job, Wallet, Project] | None]
+WorkMutator = Callable[[Work], Work | None]
+# A work step's job, its owner's wallet and its work, changed as one unit.
+WorkTripleMutator = Callable[[Job, Wallet, Work | None], tuple[Job, Wallet, Work] | None]
 
 
 class JobStore(Protocol):
@@ -58,6 +62,14 @@ class JobStore(Protocol):
     def expired_project_ids(self, before: datetime) -> list[str]: ...
     def delete_project(self, project_id: str) -> None: ...
     def all_projects(self) -> list[Project]: ...
+    # works (concept notes, coursework, funding proposals): their own collection, same guarantees
+    def create_work_if_open(self, work: Work) -> bool: ...
+    def get_work(self, work_id: str) -> Work | None: ...
+    def update_work(self, work_id: str, mutate: WorkMutator) -> Work | None: ...
+    def update_job_wallet_and_work(self, job_id: str, work_id: str, mutate: WorkTripleMutator) -> tuple[Job, Wallet, Work] | None: ...
+    def list_works(self, owner_uid: str) -> list[Work]: ...
+    def expired_work_ids(self, before: datetime) -> list[str]: ...
+    def delete_work(self, work_id: str) -> None: ...
 
 
 # Firestore stores at most 1 MiB per document. Job records are kept well under that (long change
@@ -90,7 +102,7 @@ def _after_cursor(entry: LedgerEntry, before: str | None) -> bool:
     return key < (at, entry_id or "\uffff")
 
 
-def _dump(job: Job | Project) -> str:
+def _dump(job: Job | Project | Work) -> str:
     data = job.model_dump_json(by_alias=True)
     size = len(data.encode("utf-8"))
     if size > MAX_RECORD_BYTES:
@@ -112,6 +124,8 @@ class LocalJobStore:
         self._journal = root / "pending-pair.json"
         self._projects = root / "projects"
         self._projects.mkdir(parents=True, exist_ok=True)
+        self._works = root / "works"
+        self._works.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._hits: dict[str, list[float]] = {}
         with self._lock:
@@ -126,6 +140,8 @@ class LocalJobStore:
             self._write(Job.model_validate(pending["job"]))
         if pending.get("project"):
             self._write_project(Project.model_validate(pending["project"]))
+        if pending.get("work"):
+            self._write_work(Work.model_validate(pending["work"]))
         self._journal.unlink()
 
     def _path(self, job_id: str) -> Path:
@@ -397,6 +413,70 @@ class LocalJobStore:
         with self._lock:
             return [Project.model_validate_json(p.read_text(encoding="utf-8")) for p in self._projects.glob("*.json")]
 
+    # works: one file each in their own directory, replaced atomically under the same lock
+    def _work_path(self, work_id: str) -> Path:
+        if not work_id.replace("_", "").isalnum():
+            raise ValueError("invalid work id")
+        return self._works / f"{work_id}.json"
+
+    def _write_work(self, work: Work) -> None:
+        self._works.mkdir(parents=True, exist_ok=True)
+        tmp = self._work_path(work.id).with_suffix(".tmp")
+        tmp.write_text(_dump(work), encoding="utf-8")
+        tmp.replace(self._work_path(work.id))
+
+    def _all_works(self) -> list[Work]:
+        with self._lock:
+            return [Work.model_validate_json(p.read_text(encoding="utf-8")) for p in self._works.glob("*.json")]
+
+    def create_work_if_open(self, work: Work) -> bool:
+        with self._lock:
+            wallet = self.get_wallet(work.owner_uid)
+            if wallet is not None and wallet.closing:
+                return False
+            self._write_work(work)
+            return True
+
+    def get_work(self, work_id: str) -> Work | None:
+        path = self._work_path(work_id)
+        with self._lock:
+            return Work.model_validate_json(path.read_text(encoding="utf-8")) if path.exists() else None
+
+    def update_work(self, work_id: str, mutate: WorkMutator) -> Work | None:
+        with self._lock:
+            work = self.get_work(work_id)
+            if work is None:
+                return None
+            result = mutate(work)
+            if result is not None:
+                self._write_work(result)
+            return result
+
+    def update_job_wallet_and_work(self, job_id: str, work_id: str, mutate: WorkTripleMutator) -> tuple[Job, Wallet, Work] | None:
+        with self._lock:
+            job = self.get(job_id)
+            if job is None:
+                return None
+            wallet = self.get_wallet(job.owner_uid) or Wallet(uid=job.owner_uid, email=job.owner_email)
+            result = mutate(job, wallet, self.get_work(work_id))
+            if result is not None:
+                tmp = self._journal.with_suffix(".tmp")
+                triple = {"job": json.loads(_dump(result[0])), "wallet": json.loads(result[1].model_dump_json(by_alias=True)), "work": json.loads(_dump(result[2]))}
+                tmp.write_text(json.dumps(triple), encoding="utf-8")
+                tmp.replace(self._journal)  # durable as one unit, applied (or re-applied) by _recover
+                self._recover()
+            return result
+
+    def list_works(self, owner_uid: str) -> list[Work]:
+        return sorted((w for w in self._all_works() if w.owner_uid == owner_uid), key=lambda w: w.updated_at, reverse=True)
+
+    def expired_work_ids(self, before: datetime) -> list[str]:
+        return [w.id for w in sorted((w for w in self._all_works() if w.expires_at < before), key=lambda w: (w.expires_at, w.id))]
+
+    def delete_work(self, work_id: str) -> None:
+        with self._lock:
+            self._work_path(work_id).unlink(missing_ok=True)
+
 
 class FirestoreJobStore:
     """Production store: jobs/{jobId} documents, transactions for every update."""
@@ -409,6 +489,7 @@ class FirestoreJobStore:
         self._jobs = self._db.collection("jobs")
         self._wallets = self._db.collection("wallets")
         self._projects = self._db.collection("projects")
+        self._works = self._db.collection("works")
 
     def create(self, job: Job) -> None:
         self._jobs.document(job.id).create(json.loads(_dump(job)))
@@ -656,3 +737,72 @@ class FirestoreJobStore:
 
     def delete_project(self, project_id: str) -> None:
         self._projects.document(project_id).delete()
+
+    def create_work_if_open(self, work: Work) -> bool:
+        wallet_ref, work_ref = self._wallets.document(work.owner_uid), self._works.document(work.id)
+
+        @self._fs.transactional
+        def run(transaction) -> bool:
+            snap = wallet_ref.get(transaction=transaction)
+            if snap.exists and Wallet.model_validate(snap.to_dict()).closing:
+                return False
+            transaction.create(work_ref, json.loads(_dump(work)))
+            return True
+
+        return run(self._db.transaction())
+
+    def get_work(self, work_id: str) -> Work | None:
+        snap = self._works.document(work_id).get()
+        return Work.model_validate(snap.to_dict()) if snap.exists else None
+
+    def update_work(self, work_id: str, mutate: WorkMutator) -> Work | None:
+        ref = self._works.document(work_id)
+
+        @self._fs.transactional
+        def run(transaction) -> Work | None:
+            snap = ref.get(transaction=transaction)
+            if not snap.exists:
+                return None
+            result = mutate(Work.model_validate(snap.to_dict()))
+            if result is not None:
+                transaction.set(ref, json.loads(_dump(result)))
+            return result
+
+        return run(self._db.transaction())
+
+    def update_job_wallet_and_work(self, job_id: str, work_id: str, mutate: WorkTripleMutator) -> tuple[Job, Wallet, Work] | None:
+        job_ref, work_ref = self._jobs.document(job_id), self._works.document(work_id)
+
+        @self._fs.transactional
+        def run(transaction) -> tuple[Job, Wallet, Work] | None:
+            job_snap = job_ref.get(transaction=transaction)
+            if not job_snap.exists:
+                return None
+            job = Job.model_validate(job_snap.to_dict())
+            wallet_ref = self._wallets.document(job.owner_uid)
+            wallet_snap = wallet_ref.get(transaction=transaction)  # every read before any write
+            work_snap = work_ref.get(transaction=transaction)
+            wallet = Wallet.model_validate(wallet_snap.to_dict()) if wallet_snap.exists else Wallet(uid=job.owner_uid, email=job.owner_email)
+            work = Work.model_validate(work_snap.to_dict()) if work_snap.exists else None
+            seen = {e.id for e in wallet.entries}
+            result = mutate(job, wallet, work)
+            if result is not None:
+                transaction.set(job_ref, json.loads(_dump(result[0])))
+                transaction.set(wallet_ref, json.loads(result[1].model_dump_json(by_alias=True)))
+                transaction.set(work_ref, json.loads(_dump(result[2])))
+                for entry in _new_entries(seen, result[1]):
+                    transaction.set(wallet_ref.collection("ledger").document(entry.id), _entry_json(entry))
+            return result
+
+        return run(self._db.transaction())
+
+    def list_works(self, owner_uid: str) -> list[Work]:
+        docs = self._works.where(filter=self._fs.FieldFilter("ownerUid", "==", owner_uid)).stream()
+        return sorted((Work.model_validate(d.to_dict()) for d in docs), key=lambda w: w.updated_at, reverse=True)
+
+    def expired_work_ids(self, before: datetime) -> list[str]:
+        iso = before.isoformat().replace("+00:00", "Z")
+        return [d.id for d in self._works.where(filter=self._fs.FieldFilter("expiresAt", "<", iso)).select([]).stream()]
+
+    def delete_work(self, work_id: str) -> None:
+        self._works.document(work_id).delete()

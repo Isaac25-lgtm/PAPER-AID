@@ -46,6 +46,7 @@ class _Store(FirestoreJobStore):
         self._fs = firestore
         self._jobs = _Query(shapes)
         self._projects = _Query(shapes)
+        self._works = _Query(shapes)
 
     def delete_wallet(self, uid: str) -> None:
         pass

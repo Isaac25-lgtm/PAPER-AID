@@ -57,6 +57,7 @@ from app.pricing.billing import hold_for_job, refund_job, release_hold
 from app.pricing.quote import ai_cap_usd, bound_quote, estimate_charged, estimate_scan_usd, needs_estimate, with_margin
 from app.proposals.models import Project, moved_path
 from app.runtime import Runtime
+from app.works.models import Work
 
 logger = logging.getLogger("paperaid.jobs")
 
@@ -68,7 +69,8 @@ def availability(settings: Settings, user: "User | None" = None) -> dict[str, st
     """"soon" = not built yet; "not_configured" = built, but the AI keys are not set;
     "invite_only" = testing is limited to invited testers and this user isn't one."""
     result = {}
-    for service in ("AI_CHECK", "REFINE", "FORMAT", "TEMPLATE_FORMAT", "REDRAFT", "LATEX", "SOURCE_CHECK", "PROPOSAL"):
+    # The work services are not in this release: they are listed, never offered (a rollback target).
+    for service in ("AI_CHECK", "REFINE", "FORMAT", "TEMPLATE_FORMAT", "REDRAFT", "LATEX", "SOURCE_CHECK", "PROPOSAL", "CONCEPT_NOTE", "COURSEWORK", "FUNDING_PROPOSAL"):
         if service not in BUILT:
             result[service] = "soon"
         elif service in NEEDS_AI and not settings.ai_configured:
@@ -122,6 +124,14 @@ def public_config(rt: Runtime, user: "User | None" = None) -> dict:
 
 
 def pipeline_for(selection: ServiceSelection) -> list[Stage]:
+    if selection.work == "READ":
+        return [Stage.ANALYSING, Stage.EXPORTING]
+    if selection.work == "PLAN":
+        return [Stage.RESEARCHING, Stage.PLANNING, Stage.EXPORTING]
+    if selection.work == "DRAFT":
+        return [Stage.RESEARCHING, Stage.DRAFTING, Stage.AUDITING, Stage.EXPORTING]
+    if selection.work == "REVISE":
+        return [Stage.AUDITING, Stage.EXPORTING]
     if selection.proposal == "REVIEW":
         return [Stage.EXTRACTING, Stage.ANALYSING, Stage.EXPORTING]
     if selection.proposal == "PLAN":
@@ -553,7 +563,7 @@ def _priced_input_intact(j: Job) -> bool:
     the project input frozen when it was priced."""
     if j.quote is None:
         return False
-    if j.project_id:
+    if j.project_id or j.work_id:
         return j.input_sha256 is not None and j.quote.source_sha256 == j.input_sha256
     return j.source is not None and j.quote.source_sha256 == j.source.sha256
 
@@ -569,6 +579,8 @@ def submit(rt: Runtime, user: User, job_id: str, quote_id: str, project_gate: Pr
     job = _owned(rt, user, job_id)
     if job.project_id and project_gate is None:
         raise AppError("Start this step from the proposal's page.", code="PROPOSAL_STEP")
+    if job.work_id:  # a work step priced by a later release: this release cannot run it
+        raise AppError("This service is not available right now.", code="SERVICE_UNAVAILABLE")
     if job.status in state.SUBMITTED and job.quote and job.quote.id == quote_id:
         return job.view()  # double click or retried request: the same submission, nothing new
     if job.status != JobStatus.QUOTED or job.quote is None or job.quote.id != quote_id:
@@ -647,7 +659,7 @@ def list_jobs(rt: Runtime, user: User, status: str | None, service: str | None, 
     else:
         statuses = {JobStatus(status)} if status and status != "ALL" else state.SUBMITTED
     jobs, next_cursor = rt.store.list(user.uid, statuses, service if service and service != "ALL" else None, cursor, min(limit, 50))
-    jobs = [j for j in jobs if not j.project_id]  # proposal steps are shown on their project
+    jobs = [j for j in jobs if not j.project_id and not j.work_id]  # project and work steps are shown on their own page
     if status == "DRAFT":
         jobs = [j for j in jobs if j.source is not None and not j.deleting and not j.files_deleted]
     return Page[JobView](items=[j.view() for j in jobs], next_cursor=next_cursor)
@@ -795,6 +807,8 @@ def delete_account(rt: Runtime, user: User) -> int:
     # created (the account is closing), so each is claimed and erased with its chapters and evidence.
     for project in rt.store.list_projects(user.uid):
         _erase_project(rt, project)
+    for work in rt.store.list_works(user.uid):
+        _erase_work(rt, work)
 
     def tombstone(w: Wallet) -> Wallet:
         return Wallet(uid=w.uid, email="", closing=True, grant_ops=w.grant_ops)
@@ -888,7 +902,7 @@ SUPPORT_FIELDS = frozenset(
     {
         "id", "status", "stage", "payment_status", "selection", "services", "pipeline", "source", "guideline", "logo", "quote", "estimate",
         "billing", "outcome", "warnings", "protected", "dismissed", "rejected_changes", "source_job", "latex", "formatting", "scope_words",
-        "project_id", "outputs", "failure", "created_at", "queued_at", "completed_at", "expires_at",
+        "project_id", "work_id", "outputs", "failure", "created_at", "queued_at", "completed_at", "expires_at",
         "owner_uid", "owner_email", "completed_stages", "generation", "attempts", "lease_until", "cost_usd", "estimate_cost_usd",
         "refine_cost_usd", "budget_usd", "model_calls", "events", "admin_actions", "failure_detail", "files_deleted", "deleting", "retiring",
         "input_sha256", "delivery",
@@ -1099,7 +1113,7 @@ def cleanup_expired(rt: Runtime) -> int:
     return cleaned
 
 
-def step_running(rt: Runtime, p: Project) -> bool:
+def step_running(rt: Runtime, p: Project | Work) -> bool:
     """A step of this project is queued or running. Its claim (`active_job`) is set in the same
     transaction that holds the step's credits (app.jobs.service.submit)."""
     return bool(p.active_job) and (step := rt.store.get(p.active_job or "")) is not None and step.status in ACTIVE
@@ -1196,6 +1210,45 @@ def cleanup_expired_projects(rt: Runtime) -> int:
         project = rt.store.get_project(project_id)
         if project is not None:
             erased += _erase_project(rt, project, expired_before=cutoff)
+    return erased
+
+
+def _erase_work(rt: Runtime, work: Work, expired_before: datetime | None = None) -> bool:
+    """Delete a work (a later release's concept note, coursework or funding proposal): its record,
+    its files and every job run for it. Claimed first, like a proposal project."""
+
+    def mark(k: Work) -> Work | None:
+        if k.deleting:
+            return k
+        if expired_before is not None and k.expires_at >= expired_before:
+            return None
+        if step_running(rt, k):
+            return None
+        k.deleting = True
+        return k
+
+    if rt.store.update_work(work.id, mark) is None:
+        return False
+    for job in every_job(rt, work.owner_uid, None):
+        if job.work_id != work.id:
+            continue
+        claimed = _mark_deleting(rt, job.id)
+        if claimed is None:
+            if rt.store.get(job.id) is not None:
+                return False
+            continue
+        _erase(rt, claimed)
+    rt.files.delete_prefix(work.storage_prefix())
+    rt.store.delete_work(work.id)
+    return True
+
+
+def cleanup_expired_works(rt: Runtime) -> int:
+    cutoff, erased = utcnow(), 0
+    for work_id in rt.store.expired_work_ids(cutoff):
+        work = rt.store.get_work(work_id)
+        if work is not None:
+            erased += _erase_work(rt, work, expired_before=cutoff)
     return erased
 
 

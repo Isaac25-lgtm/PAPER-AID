@@ -293,6 +293,7 @@ def task_cleanup(rt: Runtime = Depends(get_runtime)) -> dict:
     return {
         "expired": service.cleanup_expired(rt),
         "projectsExpired": service.cleanup_expired_projects(rt),
+        "worksExpired": service.cleanup_expired_works(rt),
         "projectsMigrated": service.migrate_legacy_project_files(rt),
         "ledgersBackfilled": service.backfill_ledgers(rt),
     }

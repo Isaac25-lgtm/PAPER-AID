@@ -1243,6 +1243,12 @@ STAGES = {
 # --- the step runner -----------------------------------------------------------------------
 
 
+def _work_unavailable(ctx: StageContext) -> None:
+    raise PermanentStageError(
+        "SERVICE_UNAVAILABLE", "This step cannot run on this version of PaperAid, so nothing was charged. Please start it again later.", "work step without the works pipeline"
+    )
+
+
 def run_step(rt: Runtime, job_id: str) -> None:
     token = job_id_var.set(job_id)
     try:
@@ -1284,7 +1290,9 @@ def _run_step(rt: Runtime, job_id: str) -> None:
 
     started = utcnow()
     ctx = StageContext(rt, job)
-    if job.selection.proposal == "REVIEW":
+    if job.selection.work != "NONE":
+        run = _work_unavailable
+    elif job.selection.proposal == "REVIEW":
         run = proposal_review.STAGES.get(stage) or STAGES[stage]
     elif job.selection.proposal != "NONE":
         run = proposal_pipeline.STAGES[stage]

@@ -108,6 +108,11 @@ def approve_plan(project_id: str, base_version: int = Body(..., embed=True, alia
     return projects.approve_plan(rt, user, project_id, base_version)
 
 
+@router.post("/{project_id}/continue", response_model=ProjectView)
+def continue_full(project_id: str, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> ProjectView:
+    return projects.continue_to_full(rt, user, project_id)
+
+
 @router.post("/{project_id}/plan/candidate", response_model=ProjectView)
 def candidate(project_id: str, accept: bool = Body(..., embed=True), user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> ProjectView:
     return projects.take_candidate(rt, user, project_id, accept)

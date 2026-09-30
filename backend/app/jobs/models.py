@@ -27,6 +27,15 @@ class ServiceId(StrEnum):
     LATEX = "LATEX"
     SOURCE_CHECK = "SOURCE_CHECK"
     PROPOSAL = "PROPOSAL"
+    # Works (owner decision 2026-09-30, rulebook v1.0): each step is an ordinary job linked to a work.
+    CONCEPT_NOTE = "CONCEPT_NOTE"  # funding and project concept notes
+    COURSEWORK = "COURSEWORK"
+    FUNDING_PROPOSAL = "FUNDING_PROPOSAL"
+
+
+WORK_SERVICES = (ServiceId.CONCEPT_NOTE, ServiceId.COURSEWORK, ServiceId.FUNDING_PROPOSAL)
+WorkStep = Literal["NONE", "READ", "PLAN", "DRAFT", "REVISE"]
+WorkKind = Literal["NONE", "CONCEPT_NOTE", "COURSEWORK", "FUNDING_PROPOSAL"]
 
 
 class JobStatus(StrEnum):
@@ -98,6 +107,11 @@ class ServiceSelection(Camel):
     proposal: Literal["NONE", "PLAN", "CHAPTER_1", "CHAPTER_2", "CHAPTER_3", "CONCEPT", "REVISE_1", "REVISE_2", "REVISE_3", "REVISE_4", "PROFILE", "REVIEW"] = "NONE"
     finish: bool = False  # "Finish chapter": only the sections still to write, priced at their share
     level: Literal["BACHELORS", "PGD", "MASTERS", "PHD"] = "MASTERS"  # the proposal's level (REVIEW only)
+    # A step of a work (concept note, coursework, funding proposal) and the price key it is priced on
+    # (its kind, and for a draft its length mode or word band). Older releases ignore these fields.
+    work: WorkStep = "NONE"
+    work_kind: WorkKind = "NONE"
+    work_band: str = ""
 
     def services(self) -> list[ServiceId]:
         ids = []
@@ -111,6 +125,8 @@ class ServiceSelection(Camel):
             ids.append(ServiceId.SOURCE_CHECK)
         if self.proposal != "NONE":
             ids.append(ServiceId.PROPOSAL)
+        if self.work != "NONE" and self.work_kind != "NONE":
+            ids.append(ServiceId(self.work_kind))
         return ids
 
 
@@ -179,6 +195,12 @@ class Engine(Camel):
     frontier_guidance: bool = True  # with dual approval: the guidance step before each plan is finalised
     partial_chapters: bool = False  # a new chapter may be delivered without its unapproved sections
     prompts: dict[str, str]  # step → prompt version (released prompt files never change)
+    # Works (roles and tiers, owner decision 2026-09-30). Empty on every older engine.
+    roles: dict[str, str] = {}  # role → "provider:model" (ANALYST, WRITER, INTEGRITY, EVALUATOR_STANDARD, ...)
+    tier: str = ""  # STANDARD or PREMIUM: which reviewers run behind the price
+    price_table: str = ""  # the dated model price table the spend projection and cap use ("" = live prices)
+    rules_version: str = ""  # the rule files the step runs on
+    content: dict[str, str] = {}  # sha256 of each prompt, rule file, validator set and render profile the run executes
 
 
 class Passage(Camel):
@@ -477,6 +499,8 @@ class ReadinessItem(Camel):
     note: str = ""
     where: str = ""  # the section it concerns, when there is one
     chapter: int = 0
+    # Works: how much a failure matters (rulebook v1.0 §2.2). BLOCKING keeps a work "Not ready".
+    severity: Literal["BLOCKING", "WARNING", "INFO"] = "WARNING"
 
 
 class ReviewFinding(Camel):
@@ -527,6 +551,8 @@ class ModelCall(Camel):
     cached_tokens: int
     cache_write_tokens: int = 0
     search_calls: int = 0  # web searches made during the call (billed per search)
+    task: str = ""  # the algorithm step (STEPS key)
+    role: str = ""  # who made it: lead, writer, or a works role (EVALUATOR_PREMIUM, WRITER, ...)
     latency_ms: int
     cost_usd: float
     at: datetime = Field(default_factory=utcnow)
@@ -577,6 +603,7 @@ class JobView(Camel):
     scope_words: int | None = None  # "Fix selected": the words in the chosen passages (priced by these)
     fix_notes: dict[str, list[str]] = {}  # "Fix selected": the AI Check's findings on each chosen passage
     project_id: str | None = None  # a step of a proposal project: its result is saved to the project
+    work_id: str | None = None  # a step of a work (concept note, coursework, funding proposal)
     outputs: list[OutputFile] = []
     failure: JobFailure | None = None
     created_at: datetime = Field(default_factory=utcnow)

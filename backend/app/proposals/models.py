@@ -270,6 +270,7 @@ class ProjectView(Camel):
     plan_problems: list[str] = []  # what must be fixed before the plan can be approved (computed for the view)
     candidate_plan: ProposalPlan | None = None  # a plan PaperAid produced while the student was editing theirs
     auto_chapter_one: bool = False  # the student started the plan with Chapter One to follow on approval
+    goal: Literal["FULL", "CONCEPT"] = "FULL"  # CONCEPT: the concept paper first; never starts a chapter by itself
     feedback: list[FeedbackComment] = []  # supervisor comments, oldest first
     written: list[WrittenSection] = []  # the current chapters' sections (computed for the view)
     institution: str = ""  # the rulebook's institution (computed for the view)

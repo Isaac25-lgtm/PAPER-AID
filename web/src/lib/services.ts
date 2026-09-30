@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { BookCheck, Braces, FileCheck2, GraduationCap, PenLine, Search, Shuffle } from 'lucide-react'
+import { BookCheck, Braces, FileCheck2, GraduationCap, HandCoins, Lightbulb, NotebookPen, PenLine, Search, Shuffle } from 'lucide-react'
 import type { Availability, FindingCategory, JobStatus, ReasonCode, ServiceId, Stage, WritingStyle } from './types'
 
 interface ServiceInfo {
@@ -127,6 +127,30 @@ export const SERVICES: Record<ServiceId, ServiceInfo> = {
     accepts: 'Your topic and study details, or your proposal as DOCX or PDF',
     youGet: ['A readiness checklist of what examiners look for', 'Every claim traced to a source PaperAid confirmed', 'A properly formatted Word file'],
     untouched: ['Facts only you can give: population sizes, instruments and approvals are asked for, never invented'],
+  },
+  CONCEPT_NOTE: {
+    name: 'Concept notes',
+    short: 'A funding or project concept note planned with you, drafted and checked against the call.',
+    icon: Lightbulb,
+    accepts: 'Your idea, plus the call or template as DOCX or PDF if you have one',
+    youGet: ['What PaperAid understood from the call, for you to confirm', 'A plan you edit and approve first', 'The concept note in Word, with its compliance report'],
+    untouched: ["Facts only you can give: budgets, dates and your organisation's track record are asked for, never invented"],
+  },
+  COURSEWORK: {
+    name: 'Coursework',
+    short: 'Essays, reports, case studies, literature reviews, short research papers and reflective work, planned from your brief.',
+    icon: NotebookPen,
+    accepts: 'Your assignment question, plus the brief and rubric as DOCX or PDF if you have them',
+    youGet: ['Every part of the question found and planned', 'A draft written from confirmed sources in your referencing style', "A check of each rubric criterion (PaperAid's assessment, not a grade)"],
+    untouched: ['Your own experience in reflective work: asked for, never invented', 'Quotations and figures you give'],
+  },
+  FUNDING_PROPOSAL: {
+    name: 'Funding proposals',
+    short: 'A full funding proposal built on one Results Model, with the budget and tables checked by code.',
+    icon: HandCoins,
+    accepts: 'The call and template as DOCX or PDF, plus your project details',
+    youGet: ['Eligibility and requirements read from the call', 'Logframe, workplan and M&E table from your Results Model', 'Every budget sum checked'],
+    untouched: ['Your figures: budget lines, targets and dates are yours, never invented'],
   },
   LATEX: {
     name: 'LaTeX conversion',

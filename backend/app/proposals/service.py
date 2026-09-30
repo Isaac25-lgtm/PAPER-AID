@@ -256,6 +256,14 @@ def _start_chapter_one(rt: Runtime, user: User, project: Project) -> ProjectView
     return out
 
 
+def continue_to_full(rt: Runtime, user: User, project_id: str) -> ProjectView:
+    def apply(p: Project) -> Project:
+        p.goal = "FULL"
+        return p
+
+    return view(rt, _change(rt, user, project_id, apply))
+
+
 def take_candidate(rt: Runtime, user: User, project_id: str, accept: bool) -> ProjectView:
     """Use or discard a plan PaperAid produced while the student was editing theirs."""
 
@@ -528,6 +536,8 @@ def quote_step(rt: Runtime, user: User, project_id: str, step: Step, note: str, 
     if chapter:
         if p.plan is None or p.plan_status != "APPROVED":
             raise AppError("Approve your plan before writing chapters.", code="PLAN_NOT_APPROVED")
+        if p.goal == "CONCEPT" and chapter != CONCEPT:
+            raise AppError("This is a concept note. Continue to the full proposal before writing chapters.", code="CONCEPT_ONLY")
         blockers = rulebook.chapter_blockers(p.plan, chapter)
         if blockers:
             raise AppError(" ".join(blockers), code="AUTHOR_INPUT_NEEDED")
@@ -590,7 +600,7 @@ def quote_step(rt: Runtime, user: User, project_id: str, step: Step, note: str, 
         rt.files.delete_prefix(job.storage_prefix())
         rt.store.delete(job.id)
         raise NotFound("We couldn't find this proposal.")
-    then = [chapter_one_estimate(rt.settings, p.inputs.level)] if chapter == 0 and not p.chapter(1).versions else []
+    then = [chapter_one_estimate(rt.settings, p.inputs.level)] if chapter == 0 and not p.chapter(1).versions and p.goal == "FULL" else []
     return StepQuote(job=job.view(), quote=Quote.model_validate(job.quote.model_dump()), then=then)
 
 
@@ -731,7 +741,7 @@ def submit_step(rt: Runtime, user: User, project_id: str, job_id: str, quote_id:
             return None  # the chapter version, a comment, the guide or the structure changed after pricing
         q.active_job = j.id
         q.jobs = q.jobs if j.id in q.jobs else (q.jobs + [j.id])[-100:]
-        if inp.step == "PLAN" and not q.chapter(1).versions:
+        if inp.step == "PLAN" and not q.chapter(1).versions and q.goal == "FULL":
             q.auto_chapter_one = True  # agreed with the plan's price: starts when the plan is approved
         return _renew(rt, q)
 
