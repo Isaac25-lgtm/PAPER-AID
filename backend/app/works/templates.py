@@ -86,7 +86,60 @@ def skeleton(spec: ResolvedSpec) -> list[PlanSection]:
                                         required=r.get("required", True), brief=r["purpose"]))
     if spec.template_headings:
         sections = _follow_template(sections, spec.template_headings, target)
+    sections = _name_required(sections, [r.value for r in spec.requirements if r.key == "section.required"], target)
     return rebalance(sections, spec)
+
+
+# Words calls use for parts PaperAid's templates name differently.
+SAME_PART = {
+    "intervention": {"approach", "activities", "solution", "strategy"}, "proposed": {"approach"}, "implementation": {"management", "timeline", "workplan", "delivery"},
+    "arrangements": {"management", "implementation"}, "results": {"outcomes", "outputs", "impact"}, "budget": {"cost", "costs", "financial"},
+    "applicant": {"organisation", "organization", "capacity", "experience"}, "organisation": {"applicant", "capacity"}, "problem": {"need", "needs", "context"},
+    "monitoring": {"mel", "evaluation", "learning"}, "sustainability": {"exit", "continuity"}, "beneficiaries": {"target", "group"},
+    "workplan": {"timeline", "schedule", "implementation"}, "work": {"timeline"}, "timeline": {"workplan", "schedule"}, "schedule": {"timeline", "workplan"},
+}
+
+
+def _name_required(sections: list[PlanSection], required: list[str], target: int) -> list[PlanSection]:
+    """Each section the call requires by name gets a heading with that name, locked: a section whose
+    heading already has it keeps it; otherwise the section that covers it is renamed (the same words
+    first, then usual equivalents: a call's "intervention" is PaperAid's "approach"), carrying both
+    names when it already carries one; failing that, a section is added (real-model pilot 2026-09-30:
+    "Proposed intervention" was written under "Approach" and the draft failed the required check)."""
+    out = list(sections)
+    names = [n for n in dict.fromkeys(" ".join(r.split()) for r in required if r.strip()) if _words_of(n)]
+    carried: dict[int, list[str]] = {}  # section → the required names its heading must carry
+    left = []
+    for name in names:
+        index = next((n for n, s in enumerate(out) if _words_of(name) <= _words_of(s.heading)), None)
+        if index is None:
+            left.append(name)
+        else:
+            carried.setdefault(index, []).append(name)
+    kept = set(carried)  # headings that already name what the call asks: kept as written unless more is added
+    template_locked = {n for n, s in enumerate(sections) if s.locked}
+    for loose in (False, True):
+        for name in list(left):
+            words = _words_of(name)
+            wanted = words.union(*(SAME_PART.get(w, set()) for w in words)) if loose else words
+            scored = [(len(wanted & _words_of(sections[n].heading + " " + s.key.replace("_", " "))), n) for n, s in enumerate(out) if n not in template_locked]
+            score, index = max(scored, default=(0, -1))
+            if score > 0:
+                carried.setdefault(index, []).append(name)
+                kept.discard(index)
+                left.remove(name)
+    for index, carried_names in carried.items():
+        heading = out[index].heading if index in kept else " and ".join(carried_names)
+        out[index] = out[index].model_copy(update={"heading": (heading[0].upper() + heading[1:])[:200], "locked": True, "required": True})
+    for name in left:
+        heading = (name[0].upper() + name[1:])[:200]
+        each = max(100, round(target / max(1, len(out) + 1)))
+        out.append(PlanSection(key=f"required{len(out) + 1}", heading=heading, words=each, min_words=round(each * 0.6), max_words=round(each * 1.5),
+                               locked=True, brief=f"What the call asks for under \"{heading}\"."))
+    if not left:
+        return out
+    total = sum(s.words for s in out) or 1
+    return [s.model_copy(update={"words": round(s.words * target / total), "min_words": round(s.min_words * target / total), "max_words": round(s.max_words * target / total)}) for s in out]
 
 
 STOP = {"and", "the", "of", "for", "to", "in", "a", "an", "on", "with", "your", "its", "their"}

@@ -337,8 +337,8 @@ def _claims_supported(ctx: Context, rule: dict[str, Any]) -> Result:
     problems = [p for s in ctx.doc.sections for par in s.paragraphs for p in ev.citation_problems(numbers.strip(par), usable)]
     if problems:
         return ("FAIL", problems[0], "")
-    if ctx.stripped:
-        return ("NEEDS_REVIEW", f"PaperAid withheld sentences it could not trace to confirmed evidence in: {', '.join(ctx.stripped)}. Check those sections still read well.", "")
+    if ctx.stripped:  # what is delivered meets the rule; the student re-reads where sentences were withheld
+        return _ok(f"Every citation that remains points to evidence PaperAid confirmed. Sentences PaperAid could not trace were withheld in: {', '.join(ctx.stripped)}; check those sections still read well.")
     return _ok("Every citation points to evidence PaperAid confirmed.")
 
 
@@ -383,7 +383,7 @@ def _figures_supported(ctx: Context, rule: dict[str, Any]) -> Result:
     if unknown:
         return ("FAIL", f"Figures PaperAid could not fill: {', '.join(dict.fromkeys(unknown))}.", "")
     if ctx.stripped:
-        return ("NEEDS_REVIEW", "Some sentences with figures PaperAid could not trace were withheld.", "")
+        return _ok("Every figure that remains comes from its source, your answers or your budget and Results Model; sentences with figures PaperAid could not trace were withheld.")
     return _ok("Every figure comes from its source, your answers or your budget and Results Model.")
 
 

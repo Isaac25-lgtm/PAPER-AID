@@ -441,7 +441,11 @@ def stage_drafting(ctx: "StageContext") -> None:
     inp = step_input(ctx)
     runner = _runner(ctx)
     items = _section_items(inp, _library(ctx, inp))
-    drafted = runner.draft(items, _common(inp))
+    common = _common(inp)
+    drafted = runner.draft(items, common)
+    for item in items:  # a writer that leaves a section out of a batch is asked for it on its own, once
+        if item["key"] not in drafted and not runner.budget_reached:
+            drafted.update(runner.draft([item], common))
     ctx.put_json("drafted.json", {k: v.model_dump() for k, v in drafted.items()})
 
 

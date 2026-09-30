@@ -122,3 +122,18 @@ def test_equal_authority_documents_that_disagree_block_until_the_student_chooses
     assert spec.gate == "BLOCK" and spec.conflicts and spec.ceiling is None
     chosen = _spec("FUNDING_PROPOSAL", "NGO_PROJECT", reqs=reqs, sources=[_source("CALL", "s1"), _source("TEMPLATE", "s2")], answers={"conflict:ceiling": reqs[1].id})
     assert chosen.ceiling == 12000 and chosen.conflicts[0].chosen == reqs[1].id
+
+
+def test_sections_a_call_requires_by_name_are_headed_with_that_name():
+    """Real-model pilot 2026-09-30: the call required "Proposed intervention" and "Implementation
+    arrangements"; the plan kept its own headings and the draft failed the required-sections check."""
+    reqs = [_req("section.required", name) for name in ("problem statement", "proposed intervention", "expected results", "implementation arrangements", "indicative budget")]
+    spec = _spec("CONCEPT_NOTE", "FUNDING_CONCEPT", reqs=reqs, answers={"budget_envelope": "48000"})
+    headings = [s.heading for s in templates.skeleton(spec)]
+    for name in ("Proposed intervention", "Implementation arrangements", "Expected results", "Indicative budget"):
+        assert any(name.lower() in h.lower() for h in headings), (name, headings)
+    assert sum(s.words for s in templates.skeleton(spec)) <= spec.target_words * 1.02
+    doc = WorkDocument(kind="CONCEPT_NOTE", variant="FUNDING_CONCEPT", title="t", spec_version=1, plan_version=1,
+                       sections=[WorkSection(key=s.key, heading=s.heading, paragraphs=["Text."]) for s in templates.skeleton(spec)])
+    result = VALIDATORS["structure.required_sections"](Context(spec=spec, stage="FINAL", inputs=WorkInputs(title="A work"), doc=doc), {"id": "SH-019"})
+    assert result[0] == "PASS", result
