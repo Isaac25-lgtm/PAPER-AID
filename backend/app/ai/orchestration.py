@@ -168,7 +168,7 @@ STEPS: dict[str, Step] = {
     "w_evaluate": Step("EVALUATOR", Stage.AUDITING, "w-evaluate-v1", 8000),
     "w_repair": Step("WRITER", Stage.AUDITING, "w-repair-v1", 16000),
     "w_adjudicate": Step("ADJUDICATOR", Stage.AUDITING, "w-adjudicate-v1", 4000),
-    "w_final": Step("EVALUATOR", Stage.AUDITING, "w-final-v1", 8000),
+    "w_final": Step("EVALUATOR", Stage.AUDITING, "w-final-v2", 8000),  # v2: the exact deliverable, every verdict required (Sol with one final reviewer)
     "w_compress": Step("WRITER", Stage.AUDITING, "w-compress-v1", 12000),
 }
 
@@ -178,11 +178,25 @@ ROUTINE_TASKS = {"academic", "plan", "claims", "research", "spec_plan", "p_needs
 DRAFTING_TASKS = {"critique", "refine", "repair", "redraft", "redraft_fix", "verify", "spec_critique", "spec_fix", "p_critique", "p_draft", "p_fix", "p_profile_critique"}
 
 
+# With one accountable final reviewer (engine.single_reviewer), these finalisations move from Sol to
+# Sonnet, so Sol never approves wording it finalised itself (owner decision 2026-09-30) ...
+FINALISED_BY_DRAFTER = {"p_finalise", "p_profile_finalise", "spec_finalise"}
+# ... and these works reviews are Sol's final decisions instead of the evaluator's.
+FINAL_REVIEW_TASKS = {"w_plan_review", "w_results_review", "w_final"}
+REVIEW_REPAIRS = 2  # targeted repairs after a final-review objection, each reviewed again (owner decision 2026-09-30)
+FINAL_PART_WORDS = 7000  # the most one works final-review call reads; a longer deliverable is reviewed in parts
+
+
 def model_for_engine(engine: Engine, task: str) -> str:
     """One routing rule shared by execution and the cost projection, using frozen run settings."""
     role = STEPS[task].role
+    if engine.single_reviewer and task in FINALISED_BY_DRAFTER:
+        return engine.drafting_model or engine.writer_model
     if role in WORK_ROLES:
-        key = ("EVALUATOR_PREMIUM" if engine.tier == "PREMIUM" else "EVALUATOR_STANDARD") if role == "EVALUATOR" else role
+        if role == "EVALUATOR" and engine.single_reviewer and task in FINAL_REVIEW_TASKS:
+            key = "FINAL"
+        else:
+            key = ("EVALUATOR_PREMIUM" if engine.tier == "PREMIUM" else "EVALUATOR_STANDARD") if role == "EVALUATOR" else role
         model = engine.roles.get(key, "")
         if not model:
             raise PermanentStageError("ENGINE_CHANGED", "PaperAid was updated after this step was priced. Nothing was charged; please start it again.", f"role {key} not in engine")
@@ -220,7 +234,9 @@ def content_now() -> dict[str, str]:
     """The hash of every prompt, rule file, validator set and render profile this release runs."""
     from app.rules import library
 
-    content = {f"prompt:{v}": hashlib.sha256(PROMPTS[v].replace("\r\n", "\n").encode()).hexdigest()[:16] for v in sorted({s.prompt for s in STEPS.values()})}
+    # Every released prompt, not only those current steps use: a step priced before a prompt version
+    # was superseded still finds its own prompt unchanged and runs.
+    content = {f"prompt:{v}": hashlib.sha256(PROMPTS[v].replace("\r\n", "\n").encode()).hexdigest()[:16] for v in sorted(PROMPTS)}
     content.update(library.content_hashes())
     return content
 
@@ -243,7 +259,7 @@ def current_engine(settings: Settings) -> Engine:
     return Engine(lead_model=settings.lead_model, writer_model=settings.writer_model, ai_check_model=settings.ai_check_model,
                   ai_check_peer_model=settings.ai_check_peer_model, routine_model=settings.routine_model, drafting_model=settings.drafting_model,
                   require_dual_approval=settings.require_dual_approval, explicit_coverage=True, frontier_guidance=settings.frontier_guidance,
-                  partial_chapters=settings.partial_chapters,
+                  partial_chapters=settings.partial_chapters, single_reviewer=settings.single_reviewer,
                   prompts={task: step.prompt for task, step in STEPS.items()})
 
 
@@ -950,7 +966,7 @@ class AIRunner:
         self, revisions: list[Revision], instructions: dict[str, str], brief: dict[str, str], context: dict[str, dict[str, Any]] | None = None
     ) -> ReviewOutcome:
         first = self._review_one("review", revisions, instructions, brief, context)
-        if not self._engine.require_dual_approval:
+        if not self._engine.require_dual_approval or self._engine.single_reviewer:  # one accountable reviewer: no second veto
             return first
         second = self._review_one("review_peer", revisions, instructions, brief, context)
         for bid, issues in second.issues.items():
@@ -1064,7 +1080,7 @@ class AIRunner:
 
     def review_spec(self, guide: str, applied: dict[str, Any]) -> list[dict[str, str]]:
         """Lead reviews the rules as actually applied. Returns problems; empty = pass."""
-        tasks = ["spec_review", "spec_review_peer"] if self._engine.require_dual_approval else ["spec_review"]
+        tasks = ["spec_review", "spec_review_peer"] if self._engine.require_dual_approval and not self._engine.single_reviewer else ["spec_review"]
         problems = []
         for task in tasks:
             answer = self._call(task, {"guide": guide, "applied": applied}, _SPEC_REVIEW, _SpecReview)

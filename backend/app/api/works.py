@@ -136,8 +136,9 @@ def save_plan(work_id: str, body: PlanEdit, user: User = Depends(current_user), 
 
 
 @router.post("/{work_id}/plan/approve", response_model=WorkView)
-def approve_plan(work_id: str, base_version: int = Body(..., embed=True, alias="baseVersion"), user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> WorkView:
-    return works.approve_plan(rt, user, work_id, base_version)
+def approve_plan(work_id: str, base_version: int = Body(..., embed=True, alias="baseVersion"), acknowledge: list[str] = Body(default=[], embed=True, max_length=4),
+                 user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> WorkView:
+    return works.approve_plan(rt, user, work_id, base_version, acknowledge)
 
 
 @router.post("/{work_id}/plan/candidate", response_model=WorkView)
@@ -151,8 +152,9 @@ def save_results(work_id: str, body: ResultsEdit, user: User = Depends(current_u
 
 
 @router.post("/{work_id}/results/approve", response_model=WorkView)
-def approve_results(work_id: str, base_version: int = Body(..., embed=True, alias="baseVersion"), user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> WorkView:
-    return works.approve_results(rt, user, work_id, base_version)
+def approve_results(work_id: str, base_version: int = Body(..., embed=True, alias="baseVersion"), acknowledge: list[str] = Body(default=[], embed=True, max_length=4),
+                    user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> WorkView:
+    return works.approve_results(rt, user, work_id, base_version, acknowledge)
 
 
 @router.post("/{work_id}/budget", response_model=WorkView)

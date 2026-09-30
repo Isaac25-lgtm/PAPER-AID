@@ -105,8 +105,9 @@ def save_plan(project_id: str, body: PlanEdit, user: User = Depends(current_user
 
 
 @router.post("/{project_id}/plan/approve", response_model=ProjectView)
-def approve_plan(project_id: str, base_version: int = Body(..., embed=True, alias="baseVersion"), user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> ProjectView:
-    return projects.approve_plan(rt, user, project_id, base_version)
+def approve_plan(project_id: str, base_version: int = Body(..., embed=True, alias="baseVersion"), acknowledge: list[str] = Body(default=[], embed=True, max_length=4),
+                 user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> ProjectView:
+    return projects.approve_plan(rt, user, project_id, base_version, acknowledge)
 
 
 @router.post("/{project_id}/continue", response_model=ProjectView)

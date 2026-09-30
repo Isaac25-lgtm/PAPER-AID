@@ -212,7 +212,7 @@ export function createApiSource({ config, getAuthHeaders }: Options): DataSource
       updateDetails: (id, inputs, titlePage, citation) =>
         request<Project>(`/api/projects/${id}/details`, { method: 'POST', body: JSON.stringify({ inputs, titlePage, citation }) }),
       savePlan: (id, plan, baseVersion) => request<Project>(`/api/projects/${id}/plan`, { method: 'POST', body: JSON.stringify({ plan, baseVersion }) }),
-      approvePlan: (id, baseVersion) => request<Project>(`/api/projects/${id}/plan/approve`, { method: 'POST', body: JSON.stringify({ baseVersion }) }),
+      approvePlan: (id, baseVersion, acknowledge = []) => request<Project>(`/api/projects/${id}/plan/approve`, { method: 'POST', body: JSON.stringify({ baseVersion, acknowledge }) }),
       takeCandidate: (id, accept) => request<Project>(`/api/projects/${id}/plan/candidate`, { method: 'POST', body: JSON.stringify({ accept }) }),
       sampleSize: (id, sample) => request<{ size: number | null; steps: string; missing: string }>(`/api/projects/${id}/sample-size`, { method: 'POST', body: JSON.stringify(sample) }),
       quoteStep: (id, step, note, comments) => request<StepQuote>(`/api/projects/${id}/steps`, { method: 'POST', body: JSON.stringify({ step, note, comments: comments ?? [] }) }),
@@ -271,10 +271,10 @@ export function createApiSource({ config, getAuthHeaders }: Options): DataSource
       pasteSource: (id, role, name, text) => request<Work>(`/api/works/${id}/sources/text`, { method: 'POST', body: JSON.stringify({ role, name, text }) }),
       removeSource: (id, sourceId) => request<Work>(`/api/works/${id}/sources/${sourceId}`, { method: 'DELETE' }),
       savePlan: (id, plan, baseVersion) => request<Work>(`/api/works/${id}/plan`, { method: 'POST', body: JSON.stringify({ plan, baseVersion }) }),
-      approvePlan: (id, baseVersion) => request<Work>(`/api/works/${id}/plan/approve`, { method: 'POST', body: JSON.stringify({ baseVersion }) }),
+      approvePlan: (id, baseVersion, acknowledge = []) => request<Work>(`/api/works/${id}/plan/approve`, { method: 'POST', body: JSON.stringify({ baseVersion, acknowledge }) }),
       takeCandidate: (id, accept) => request<Work>(`/api/works/${id}/plan/candidate`, { method: 'POST', body: JSON.stringify({ accept }) }),
       saveResults: (id, results, baseVersion) => request<Work>(`/api/works/${id}/results`, { method: 'POST', body: JSON.stringify({ results, baseVersion }) }),
-      approveResults: (id, baseVersion) => request<Work>(`/api/works/${id}/results/approve`, { method: 'POST', body: JSON.stringify({ baseVersion }) }),
+      approveResults: (id, baseVersion, acknowledge = []) => request<Work>(`/api/works/${id}/results/approve`, { method: 'POST', body: JSON.stringify({ baseVersion, acknowledge }) }),
       saveBudget: (id, budget, baseVersion) => request<Work>(`/api/works/${id}/budget`, { method: 'POST', body: JSON.stringify({ budget, baseVersion }) }),
       quoteStep: (id, step, note) => request<WorkStepQuote>(`/api/works/${id}/steps`, { method: 'POST', body: JSON.stringify({ step, note }) }),
       submitStep: async (id, jobId, quoteId) => {

@@ -93,10 +93,10 @@ def test_the_same_finish_cannot_be_bought_twice(fixed_client, partial):
 
 def test_nothing_to_finish_and_nothing_written_are_not_charged(fixed_client, partial):
     pid, _, _, _ = partial
-    fixed_client.models.overrides["p_review_peer"] = lambda payload: {"results": [{"key": s["key"], "grade": "REPAIR", "issues": ["No."], "note": ""} for s in payload["sections"]]}
-    job = _run(fixed_client, pid, "COMPLETE_1")
+    fixed_client.models.overrides["p_review"] = lambda payload: {"results": [{"key": s["key"], "grade": "REPAIR", "issues": ["No."], "note": ""} for s in payload["sections"]]}
+    job = _run(fixed_client, pid, "COMPLETE_1")  # the final reviewer approves nothing
     assert job["status"] == "FAILED" and job["failure"]["code"] == "NOTHING_WRITTEN" and job["billing"]["charged"] == 0
-    fixed_client.models.overrides.pop("p_review_peer")
+    fixed_client.models.overrides.pop("p_review")
     assert _run(fixed_client, pid, "COMPLETE_1")["status"] == "COMPLETED"
     refused = fixed_client.post(f"/api/projects/{pid}/steps", headers=STUDENT, json={"step": "COMPLETE_1"})
     assert refused.status_code == 400 and refused.json()["code"] == "NOTHING_TO_FINISH"

@@ -40,7 +40,11 @@ async function understood(answers) {
   for (const [label, value, kind] of answers) {
     const field = page.getByLabel(label, { exact: false }).first()
     if (kind === 'select') await field.selectOption({ label: value })
-    else await field.fill(value)
+    else {
+      await field.fill(value)
+      await field.blur() // each answer saves as soon as the student leaves the box
+    }
+    await page.getByText('Saving…').first().waitFor({ state: 'detached' }).catch(() => {})
   }
   const confirm = page.getByRole('button', { name: 'This is right: confirm' })
   const defaults = page.getByRole('button', { name: "Use PaperAid's defaults for the rest" })
@@ -51,10 +55,6 @@ async function understood(answers) {
       if ((await defaults.count()) && (await defaults.isEnabled())) return
       await page.waitForTimeout(200)
     }
-  }
-  if (answers.length) {
-    await page.getByRole('button', { name: 'Save answers' }).click()
-    await page.getByRole('button', { name: 'Save answers' }).waitFor({ state: 'detached' }).catch(() => {})
   }
   await settled()
   if (!(await confirm.isEnabled()) && (await defaults.count())) {
@@ -92,11 +92,12 @@ try {
   await page.getByRole('button', { name: 'Continue' }).click()
   await page.waitForURL(/\/app\/works\/wrk_/)
   await understood([
-    ['What word limit did your lecturer give you?', '1500', 'fill'],
+    ['What word limit did your lecturer give you?', '1,500 words', 'fill'], // live case wrk_64b3b916e144: a limit typed with words
     ['What level is this work?', 'Later ug', 'select'],
     ['Does your assignment say anything about using AI?', 'Banned', 'select'],
   ])
-  step('what PaperAid understood was answered and confirmed')
+  await page.getByText('at most 1,500 words', { exact: false }).first().waitFor() // the limit typed as "1,500 words" was saved and applied
+  step('what PaperAid understood was answered (a limit typed with words, saved as it was given) and confirmed')
   await shot('w1-understood')
   await run('Make my plan')
   await aside().getByText('Review and approve your plan').waitFor()

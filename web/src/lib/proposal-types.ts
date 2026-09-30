@@ -93,6 +93,8 @@ export interface ProposalPlan {
   researchGap: ResearchGap
   gaps: string[]
   questionsForStudent: string[]
+  /** Standard sampling settings PaperAid assumed; approving needs the student's acknowledgment. */
+  samplingAssumed?: string[]
 }
 
 export interface ChapterVersion {
@@ -147,6 +149,13 @@ export interface Comparison {
   sections: { number: string; heading: string; status: 'SAME' | 'CHANGED' | 'ADDED' | 'REMOVED'; pieces: { op: 'same' | 'added' | 'removed'; text: string }[] }[]
 }
 
+/** The one accountable final reviewer's decision on a plan PaperAid delivered. */
+export interface ReviewDecision {
+  outcome: 'APPROVED' | 'OBJECTIONS' | 'NOT_REVIEWED'
+  reason: string
+  objections: string[]
+}
+
 export interface Project {
   id: string
   kind: 'PROPOSAL'
@@ -159,6 +168,7 @@ export interface Project {
   planVersion: number
   planProblems: string[]
   candidatePlan: ProposalPlan | null
+  planReview?: ReviewDecision | null
   autoChapterOne: boolean
   /** CONCEPT: the concept paper first (Research Proposals → Concept note); FULL: the whole proposal. */
   goal: 'FULL' | 'CONCEPT'
@@ -196,6 +206,8 @@ export interface ReadinessItem {
   chapter: number
   /** Works: how much a failure matters; a blocking one keeps the work "Not ready". */
   severity?: 'BLOCKING' | 'WARNING' | 'INFO'
+  reason?: string // why it is not settled (REVIEW_OBJECTION, PAGE_COUNT_UNMEASURED, ...)
+  action?: string // what the student can do next
 }
 
 export interface ChapterView {

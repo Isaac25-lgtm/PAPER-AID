@@ -194,6 +194,10 @@ class Engine(Camel):
     explicit_coverage: bool = False  # a passage counts as checked only when judged explicitly (older runs: omission meant LOW)
     frontier_guidance: bool = True  # with dual approval: the guidance step before each plan is finalised
     partial_chapters: bool = False  # a new chapter may be delivered without its unapproved sections
+    # One accountable final reviewer (owner decision 2026-09-30, superseding the dual veto): Sol alone
+    # approves generated wording, after bounded repair and re-review; finalising moves to Sonnet so
+    # Sol never approves what it finalised. False on every older engine, which keeps its two reviewers.
+    single_reviewer: bool = False
     prompts: dict[str, str]  # step → prompt version (released prompt files never change)
     # Works (roles and tiers, owner decision 2026-09-30). Empty on every older engine.
     roles: dict[str, str] = {}  # role → "provider:model" (ANALYST, WRITER, INTEGRITY, EVALUATOR_STANDARD, ...)
@@ -501,6 +505,10 @@ class ReadinessItem(Camel):
     chapter: int = 0
     # Works: how much a failure matters (rulebook v1.0 §2.2). BLOCKING keeps a work "Not ready".
     severity: Literal["BLOCKING", "WARNING", "INFO"] = "WARNING"
+    # Why an item is not settled, and what the student can do (owner decision 2026-09-30): REVIEW_OBJECTION,
+    # REVIEW_UNAVAILABLE, SPEND_CAP, CODE_RULE, STUDENT_INFO_MISSING or PAGE_COUNT_UNMEASURED.
+    reason: str = ""
+    action: str = ""
 
 
 class ReviewFinding(Camel):

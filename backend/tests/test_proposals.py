@@ -290,8 +290,9 @@ def test_invented_figures_and_typed_citations_never_reach_the_chapter(client):
     assert "73%" not in text and "Smith" not in text and "The study will follow the plan." in text
     trace = next(r for r in chapter["readiness"] if r["id"] == "C1-TRACE")
     assert trace["status"] == "NEEDS_REVIEW"
-    # the removal happened before the final approval: both reviewers approved the delivered wording
-    for task in ("p_review", "p_review_peer"):
+    # the removal happened before the final approval: the one accountable final reviewer approved the delivered wording
+    assert "p_review_peer" not in client.models.tasks  # no second veto (owner decision 2026-09-30)
+    for task in ("p_review",):
         last = [r for t, r in zip(client.models.tasks, client.models.requests, strict=True) if t == task][-1]
         assert "73%" not in last and "Smith" not in last and "The study will follow the plan." in last
 

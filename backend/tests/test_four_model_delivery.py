@@ -20,6 +20,19 @@ from tests.test_api import STUDENT, get_quote, wait
 from tests.test_profiles import _guide
 from tests.test_proposals import _create, _run
 
+
+@pytest.fixture(autouse=True)
+def dual_approval_engine(monkeypatch):
+    """This file pins the policy of jobs priced before one accountable final reviewer (owner decision
+    2026-09-30): both approvals and Opus's guidance, which those jobs keep."""
+    monkeypatch.setenv("SINGLE_REVIEWER", "false")
+    monkeypatch.setenv("FRONTIER_GUIDANCE", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
 # --- P1: a skipped passage is asked about once more, with its own request identity ---------------
 
 

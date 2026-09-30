@@ -32,8 +32,9 @@ from app.latex.package import compile_pdf
 from app.pricing.quote import bound_quote
 from app.proposals import evidence as ev
 from app.proposals.pipeline import load_library
-from app.rules import compliance
-from app.rules.resolve import SKIPPED, resolve
+from app.rules import compliance, library
+from app.rules.extract import first_number
+from app.rules.resolve import NO_LIMIT, SKIPPED, resolve
 from app.rules.validators import Context
 from app.runtime import Runtime
 from app.works import budget as budget_engine
@@ -48,9 +49,11 @@ from app.works.models import (
     Requirement,
     ResolvedSpec,
     ResultsModel,
+    ReviewDecision,
     SourceFile,
     SourceRole,
     Work,
+    WorkAcknowledgment,
     WorkDocument,
     WorkInputs,
     WorkPlan,
@@ -200,6 +203,7 @@ def create(rt: Runtime, user: User, kind: str, variant: str, mode: str, inputs: 
         raise AppError("Choose a length.", code="INVALID_MODE")
     _require(rt, user, kind)
     _rate_limit(rt, user, "work", rt.settings.quotes_per_hour)
+    inputs = inputs.model_copy(update={"answers": _normalised(kind, inputs.answers)})
     if kind == "COURSEWORK" and "citation_style" not in inputs.answers:  # the style chosen on the first screen is the student's answer
         inputs = inputs.model_copy(update={"answers": {**inputs.answers, "citation_style": citation}})
     now = utcnow()
@@ -239,11 +243,11 @@ def update_inputs(rt: Runtime, user: User, work_id: str, inputs: WorkInputs, mod
             if mode not in KIND_MODES[k.kind]:
                 raise AppError("Choose a length.", code="INVALID_MODE")
             k.mode = mode  # type: ignore[assignment]
-        given = inputs
+        given = inputs.model_copy(update={"answers": _normalised(k.kind, inputs.answers)})
         if citation is not None:
             k.citation = citation
             if k.kind == "COURSEWORK":
-                given = inputs.model_copy(update={"answers": {**inputs.answers, "citation_style": citation}})
+                given = given.model_copy(update={"answers": {**given.answers, "citation_style": citation}})
         k.inputs = given
         return respec(rt, k)
 
@@ -257,7 +261,8 @@ def answer(rt: Runtime, user: User, work_id: str, answers: dict[str, str], base_
 
     def apply(k: Work) -> Work:
         _expect(k.spec_version, base_version, "requirements")
-        merged = {**k.inputs.answers, **{a: v.strip()[:3000] for a, v in answers.items() if a and isinstance(v, str)}}
+        given = _normalised(k.kind, {a: v.strip()[:3000] for a, v in answers.items() if a and isinstance(v, str)})
+        merged = {**k.inputs.answers, **given}
         if skip_rest:
             spec = spec_of(rt, k)
             for q in spec.questions if spec else []:
@@ -267,6 +272,27 @@ def answer(rt: Runtime, user: User, work_id: str, answers: dict[str, str], base_
         return respec(rt, k)
 
     return view(rt, _change(rt, user, work_id, apply))
+
+
+def _normalised(kind: str, answers: dict[str, str]) -> dict[str, str]:
+    """A number question's answer is saved as the number it gives ("3,000 words" → "3000", "2 years"
+    → "24" for a duration); one that gives no number is refused with the reason, never saved or
+    silently dropped (live case wrk_64b3b916e144, 2026-09-30). "No word limit was given" is kept as
+    such: PaperAid never invents a lecturer's limit. Applied to every way answers arrive."""
+    questions = {q["id"]: q for q in library.book(kind).get("questions", [])}
+    out = {}
+    for key, value in answers.items():
+        question = questions.get(key)
+        if value == NO_LIMIT and key != "word_limit":
+            raise AppError("Only the word limit can be marked as not given.", code="INVALID_ANSWER")
+        if question is None or question.get("kind") != "NUMBER" or not value or value in (SKIPPED, NO_LIMIT):
+            out[key] = value
+            continue
+        number = first_number(value, months=key == "duration_months")
+        if number is None or number <= 0:
+            raise AppError(f"\"{question['label']}\": enter a number, for example {'3,000' if key == 'word_limit' else '12'}.", code="INVALID_ANSWER")
+        out[key] = str(int(number)) if number == int(number) else str(number)
+    return out
 
 
 def confirm_spec(rt: Runtime, user: User, work_id: str, base_version: int) -> WorkView:
@@ -400,7 +426,19 @@ def save_plan(rt: Runtime, user: User, work_id: str, plan: WorkPlan, base_versio
     return view(rt, _change(rt, user, work_id, apply))
 
 
-def approve_plan(rt: Runtime, user: User, work_id: str, base_version: int) -> WorkView:
+def _acknowledge(k: Work, decision: ReviewDecision | None, kind: str, version: int, given: set[str]) -> None:
+    """Approving what PaperAid's final reviewer did not approve needs the student's explicit
+    acknowledgment of the exact objections shown, recorded with the version and the text."""
+    if decision is None or decision.outcome == "APPROVED":
+        return
+    if kind not in given:
+        what = "plan" if kind == "PLAN_OBJECTIONS" else "Results Model"
+        raise AppError(f"PaperAid's final reviewer did not approve this {what}: confirm you have checked what it raised before approving.", code="ACKNOWLEDGMENT_NEEDED")
+    text = "\n".join(decision.objections) or decision.outcome
+    k.acknowledgments = [*k.acknowledgments, WorkAcknowledgment(kind=kind, version=version, text_sha256=hashlib.sha256(text.encode()).hexdigest())][-50:]  # type: ignore[arg-type]
+
+
+def approve_plan(rt: Runtime, user: User, work_id: str, base_version: int, acknowledge: list[str] | None = None) -> WorkView:
     def apply(k: Work) -> Work:
         _expect(k.plan_version, base_version, "plan")
         spec = spec_of(rt, k)
@@ -409,6 +447,7 @@ def approve_plan(rt: Runtime, user: User, work_id: str, base_version: int) -> Wo
         problems = _plan_problems(k.plan, spec)
         if problems:
             raise AppError("Fix the plan before approving it: " + " ".join(problems), code="PLAN_INCOMPLETE")
+        _acknowledge(k, k.plan_review, "PLAN_OBJECTIONS", k.plan_version, set(acknowledge or []))
         k.plan_status = "APPROVED"
         return k
 
@@ -419,7 +458,8 @@ def take_candidate(rt: Runtime, user: User, work_id: str, accept: bool) -> WorkV
     def apply(k: Work) -> Work:
         if k.candidate_plan is not None and accept:
             k.plan, k.plan_status, k.plan_version = k.candidate_plan, "DRAFT", k.plan_version + 1
-        k.candidate_plan = None
+            k.plan_review = k.candidate_review.model_copy(update={"version": k.plan_version}) if k.candidate_review else None
+        k.candidate_plan, k.candidate_review = None, None
         return k
 
     return view(rt, _change(rt, user, work_id, apply))
@@ -438,11 +478,12 @@ def save_results(rt: Runtime, user: User, work_id: str, model: ResultsModel, bas
     return view(rt, _change(rt, user, work_id, apply))
 
 
-def approve_results(rt: Runtime, user: User, work_id: str, base_version: int) -> WorkView:
+def approve_results(rt: Runtime, user: User, work_id: str, base_version: int, acknowledge: list[str] | None = None) -> WorkView:
     def apply(k: Work) -> Work:
         _expect(k.results_version, base_version, "Results Model")
         if k.results is None or not k.results.goal.statement.strip() or not k.results.outcomes:
             raise AppError("Build the Results Model first.", code="NO_RESULTS")
+        _acknowledge(k, k.results_review, "RESULTS_OBJECTIONS", k.results_version, set(acknowledge or []))
         k.results_status = "APPROVED"
         return k
 
@@ -792,8 +833,12 @@ def export_docx(rt: Runtime, user: User, work_id: str, version: int | None = Non
         raise AppError("Write the document before downloading it.", code="NOTHING_TO_EXPORT")
     spec = doc.spec_snapshot or spec_of(rt, k)
     assert spec is not None
-    data = export.build(doc, spec, doc.results_snapshot, doc.budget_snapshot, load_library(rt.files, k.evidence_files),
-                        {key: (v[0], v[1]) for key, v in doc.number_values.items()}, draft=doc.status == "NOT_READY")
+    entry = next((d for d in k.documents if d.version == (version or k.current)), None)
+    if entry is not None and entry.docx_path and rt.files.exists(entry.docx_path):
+        data = rt.files.get(entry.docx_path)  # exactly the Word file built and checked when the step completed
+    else:  # a version written before Word files were kept: built again from the same stored content
+        data = export.build(doc, spec, doc.results_snapshot, doc.budget_snapshot, load_library(rt.files, k.evidence_files),
+                            {key: (v[0], v[1]) for key, v in doc.number_values.items()}, draft=doc.status == "NOT_READY")
     _change(rt, user, work_id, lambda w: w)  # downloading renews the work
     safe = "".join(c for c in doc.title[:80] if c.isalnum() or c in " -_").strip() or "Document"
     return data, f"{safe}{' – exploratory draft' if doc.exploratory else ''}.docx"

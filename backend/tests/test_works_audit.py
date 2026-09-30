@@ -101,7 +101,9 @@ def test_text_compressed_after_the_whole_document_review_is_reviewed_again(works
     assert doc["words"] <= 1500
 
 
-def test_a_compressed_draft_that_loses_part_of_the_question_is_not_delivered_or_charged(works_client):
+def test_a_draft_the_final_reviewer_still_objects_to_after_two_repairs_is_not_delivered_or_charged(works_client):
+    """The final review runs on the exact (compressed) deliverable; an objection is repaired and the
+    whole reviewed again, at most twice; still objecting, nothing is delivered or charged."""
     from app.runtime import get_runtime
 
     client = works_client
@@ -110,16 +112,24 @@ def test_a_compressed_draft_that_loses_part_of_the_question_is_not_delivered_or_
 
     def final(payload):
         finals.append(1)
-        answered = len(finals) == 1  # the review before compression passes; the one after finds a part lost
         return {"rules": [{"rule": r["rule"], "status": "PASS", "note": "Met.", "where": ""} for r in payload["rules"]],
-                "coverage": [{"id": c["id"], "answered": answered, "where": ""} for c in payload["coverage"]],
+                "coverage": [{"id": c["id"], "answered": False, "where": ""} for c in payload["coverage"]],
                 "priorities": [{"priority": p, "addressed": True, "where": ""} for p in payload["priorities"]]}
 
+    def repair(payload):  # every repair really changes the sections it was given
+        answer = fake_works.repair(payload)
+        for s in answer["sections"]:
+            s["paragraphs"] = [*s["paragraphs"], f"This part is now addressed ({len(finals)})."]
+        return answer
+
     client.models.overrides["w_final"] = final
+    client.models.overrides["w_repair"] = repair
     work = _approved(client, _coursework(client))
     _, job = _run(client, work["id"], "DRAFT")
-    assert len(finals) == 2 and job["status"] == "FAILED" and job["failure"]["code"] == "DOCUMENT_NOT_READY"
+    assert len(finals) == 3 and job["status"] == "FAILED" and job["failure"]["code"] == "DOCUMENT_NOT_READY"
     assert get_runtime().store.get(job["id"]).billing.state == "RELEASED" and not _work(client, work["id"])["documents"]
+    tasks = client.models.tasks
+    assert tasks.index("w_compress") < tasks.index("w_final")  # reviewed after compression, on what would be delivered
 
 
 # --- #3: a paid plan can always be approved ---------------------------------------------------------

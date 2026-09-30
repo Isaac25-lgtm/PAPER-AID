@@ -86,7 +86,7 @@ export interface DataSource {
     updateDetails(id: string, inputs: ProposalInputs, titlePage: TitlePage, citation: CitationStyle): Promise<Project>
     /** `baseVersion` is the plan version the edit started from; a stale edit is refused (409). */
     savePlan(id: string, plan: ProposalPlan, baseVersion: number): Promise<Project>
-    approvePlan(id: string, baseVersion: number): Promise<Project>
+    approvePlan(id: string, baseVersion: number, acknowledge?: string[]): Promise<Project>
     takeCandidate(id: string, accept: boolean): Promise<Project>
     sampleSize(id: string, sample: SampleSize): Promise<{ size: number | null; steps: string; missing: string }>
     quoteStep(id: string, step: StepId, note: string, comments?: string[]): Promise<StepQuote>
@@ -127,10 +127,10 @@ export interface DataSource {
     pasteSource(id: string, role: SourceRole, name: string, text: string): Promise<Work>
     removeSource(id: string, sourceId: string): Promise<Work>
     savePlan(id: string, plan: WorkPlan, baseVersion: number): Promise<Work>
-    approvePlan(id: string, baseVersion: number): Promise<Work>
+    approvePlan(id: string, baseVersion: number, acknowledge?: string[]): Promise<Work>
     takeCandidate(id: string, accept: boolean): Promise<Work>
     saveResults(id: string, results: ResultsModel, baseVersion: number): Promise<Work>
-    approveResults(id: string, baseVersion: number): Promise<Work>
+    approveResults(id: string, baseVersion: number, acknowledge?: string[]): Promise<Work>
     saveBudget(id: string, budget: Budget, baseVersion: number): Promise<Work>
     quoteStep(id: string, step: WorkStep, note: string): Promise<WorkStepQuote>
     submitStep(id: string, jobId: string, quoteId: string): Promise<void>

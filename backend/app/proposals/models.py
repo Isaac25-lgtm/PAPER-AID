@@ -137,6 +137,9 @@ class ProposalPlan(Camel):
     research_gap: ResearchGap = Field(default_factory=ResearchGap)
     gaps: list[str] = []  # where the evidence found so far is thin
     questions_for_student: list[str] = []  # what the student should confirm or decide
+    # Standard sampling settings PaperAid put in because the plan gave none, for a method that calculates
+    # a sample from them: the student acknowledges them before approving (Codex audit 2026-09-30).
+    sampling_assumed: list[str] = []
 
 
 class EvidenceSource(Camel):
@@ -255,6 +258,27 @@ PlanStatus = Literal["NONE", "DRAFT", "APPROVED"]
 CitationStyle = Literal["APA6", "APA7"]
 
 
+class PlanReview(Camel):
+    """The final reviewer's decision on the plan PaperAid delivered (owner decision 2026-09-30): approved,
+    or still objecting after two targeted repairs, or not reviewed (the review could not complete).
+    A plan without approval is kept for the student to edit, never charged for, and never starts
+    Chapter One by itself."""
+
+    outcome: Literal["APPROVED", "OBJECTIONS", "NOT_REVIEWED"]
+    reason: str = ""  # REVIEW_OBJECTION, REVIEW_UNAVAILABLE or SPEND_CAP
+    objections: list[str] = []
+    plan_version: int = 0  # the plan version it was given for
+
+
+class Acknowledgment(Camel):
+    """A student's explicit acknowledgment, tied to the exact plan version and text it was given for."""
+
+    kind: Literal["OBJECTIONS", "SAMPLING"]
+    plan_version: int
+    text_sha256: str
+    at: datetime = Field(default_factory=utcnow)
+
+
 class ProjectView(Camel):
     """What the owner's browser sees."""
 
@@ -270,6 +294,9 @@ class ProjectView(Camel):
     plan_problems: list[str] = []  # what must be fixed before the plan can be approved (computed for the view)
     candidate_plan: ProposalPlan | None = None  # a plan PaperAid produced while the student was editing theirs
     auto_chapter_one: bool = False  # the student started the plan with Chapter One to follow on approval
+    plan_review: PlanReview | None = None  # the final reviewer's decision on the delivered plan (None: older plans)
+    candidate_review: PlanReview | None = None  # the same for a candidate plan
+    acknowledgments: list[Acknowledgment] = []  # what the student acknowledged when approving, per plan version
     # What the student is preparing (owner decision 2026-09-30): the full proposal, or the concept paper
     # first (Research Proposals → Concept note). A concept project never starts a chapter by itself;
     # "Continue to the full proposal" turns it into a full one, keeping its plan, evidence and paper.

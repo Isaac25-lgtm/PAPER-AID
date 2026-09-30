@@ -1,4 +1,7 @@
-"""Owner's four-model routing: independent checks and two mandatory frontier approvals."""
+"""Owner's four-model routing: independent checks and two mandatory frontier approvals. Since the
+owner's decision of 2026-09-30 (one accountable final reviewer), new runs have one approval; this file
+pins the earlier policy, which jobs priced before that decision keep (tests/test_single_reviewer.py
+covers the new one)."""
 
 import io
 import json
@@ -16,6 +19,18 @@ from tests.test_ai_coverage import _judgment, _passage
 from tests.test_api import STUDENT, _submit, enable_score
 
 BRIEF = writing_brief("PRESERVE_VOICE", "STANDARD")
+
+
+@pytest.fixture(autouse=True)
+def dual_approval_engine(monkeypatch):
+    """The engine of jobs priced before one final reviewer: two approvals and Opus's guidance."""
+    monkeypatch.setenv("SINGLE_REVIEWER", "false")
+    monkeypatch.setenv("FRONTIER_GUIDANCE", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 @pytest.fixture

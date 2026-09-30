@@ -17,7 +17,7 @@ BRIEF = writing_brief("PRESERVE_VOICE", "STANDARD")
 
 def real_settings(**overrides) -> Settings:
     # Keep the original algorithm covered for already quoted jobs; test_four_models covers new runs.
-    defaults = {"ai_check_peer_model": None, "routine_model": None, "drafting_model": None, "require_dual_approval": False}
+    defaults = {"ai_check_peer_model": None, "routine_model": None, "drafting_model": None, "require_dual_approval": False, "single_reviewer": False, "frontier_guidance": True}
     defaults.update(overrides)
     return Settings(
         anthropic_api_key="sk-test",

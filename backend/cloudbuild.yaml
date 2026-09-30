@@ -1,0 +1,15 @@
+# The backend image with LibreOffice for rendered page counts (owner decision 2026-09-30: a page-limited
+# work is never "Ready" from an estimate). `gcloud builds submit --tag` cannot pass the build argument,
+# hence this file:
+#   gcloud builds submit --project paperaid-ca172 --config cloudbuild.yaml --substitutions _IMAGE=europe-west1-docker.pkg.dev/paperaid-ca172/paperaid/backend:TAG
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args: ["build", "--build-arg", "WITH_LIBREOFFICE=true", "-t", "${_IMAGE}", "."]
+  # Prove, in the image itself, that a Word file renders and its pages are counted; the build fails otherwise.
+  - name: gcr.io/cloud-builders/docker
+    args: ["run", "--rm", "--entrypoint", "python", "${_IMAGE}", "-m", "app.works.render"]
+images: ["${_IMAGE}"]
+substitutions:
+  _IMAGE: europe-west1-docker.pkg.dev/paperaid-ca172/paperaid/backend:manual
+options:
+  machineType: E2_HIGHCPU_8

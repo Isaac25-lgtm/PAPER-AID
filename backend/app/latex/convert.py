@@ -53,6 +53,7 @@ TEXT_MAP = {
     "°": r"\textdegree{}", "×": r"\texttimes{}", "÷": r"\textdiv{}", "±": r"\textpm{}", "€": r"\texteuro{}", "™": r"\texttrademark{}",
     "≤": r"$\leq$", "≥": r"$\geq$", "≠": r"$\neq$", "≈": r"$\approx$", "→": r"$\rightarrow$", "←": r"$\leftarrow$", "∞": r"$\infty$",
     "µ": r"$\mu$", "•": r"\textbullet{}", "√": r"$\surd$",
+    "■": r"\rule{1.2ex}{1.2ex}", "▪": r"\rule{0.9ex}{0.9ex}",  # a funding workplan's active months (app.works.results.workplan)
 }
 GREEK = {
     "α": "alpha", "β": "beta", "γ": "gamma", "δ": "delta", "ε": "epsilon", "ζ": "zeta", "η": "eta", "θ": "theta", "ι": "iota", "κ": "kappa",

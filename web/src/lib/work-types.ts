@@ -1,3 +1,4 @@
+import type { ReviewDecision } from './proposal-types'
 // Works (concept notes, coursework, funding proposals): mirrors backend/app/works/models.py and the
 // views in app/works/service.py. The browser only displays what the server decides.
 import type { ReadinessItem } from './proposal-types'
@@ -247,6 +248,8 @@ export interface Work {
   planStatus: Status
   planVersion: number
   candidatePlan: WorkPlan | null
+  planReview?: ReviewDecision | null
+  resultsReview?: ReviewDecision | null
   results: ResultsModel | null
   resultsStatus: Status
   resultsVersion: number

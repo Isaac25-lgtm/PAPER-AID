@@ -2,11 +2,11 @@ import { clsx } from 'clsx'
 import { ArrowRight, CheckCircle2, CircleDashed, Loader2, MinusCircle, TriangleAlert, User, XCircle } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Button } from '../../components/ui/button'
-import { TextArea } from '../../components/ui/field'
+import { Checkbox, TextArea } from '../../components/ui/field'
 import { Alert, Badge } from '../../components/ui/primitives'
 import { DataError, useData } from '../../lib/data'
 import { formatTokens } from '../../lib/format'
-import type { ReadinessItem, ReadinessStatus, StepId, StepQuote } from '../../lib/proposal-types'
+import type { ReadinessItem, ReadinessStatus, ReviewDecision, StepId, StepQuote } from '../../lib/proposal-types'
 import type { Job, Stage } from '../../lib/types'
 import { walletChanged } from '../../lib/use-wallet'
 
@@ -46,6 +46,7 @@ export function ReadinessList({ items }: { items: ReadinessItem[] }) {
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-fg">{item.question}</p>
                 {item.note && <p className="mt-0.5 text-xs leading-relaxed text-fg-muted">{item.note}</p>}
+                {item.action && <p className="mt-0.5 text-xs font-medium text-fg">Next: {item.action}</p>}
                 {item.where && <p className="mt-0.5 text-xs text-fg-subtle">{item.where}</p>}
               </div>
               <div className="flex shrink-0 flex-col items-end gap-1 text-right">
@@ -229,4 +230,30 @@ export function PlanStatusBadge({ status }: { status: 'NONE' | 'DRAFT' | 'APPROV
   if (status === 'APPROVED') return <Badge tone="brand">Approved</Badge>
   if (status === 'DRAFT') return <Badge tone="warning">Draft: review and approve</Badge>
   return <Badge>Not started</Badge>
+}
+
+
+/** What PaperAid's final reviewer decided about a plan it delivered, when it did not approve it: the
+ * exact objections (or that the review could not complete), and the acknowledgment approving needs. */
+export function ReviewNotice({ review, what, acknowledged, onAcknowledge }: { review: ReviewDecision | null | undefined; what: string; acknowledged: boolean; onAcknowledge: (on: boolean) => void }) {
+  if (!review || review.outcome === 'APPROVED') return null
+  return (
+    <Alert tone="warning" title={review.outcome === 'NOT_REVIEWED' ? `PaperAid could not finish reviewing this ${what}` : `PaperAid's reviewer did not approve this ${what}`}>
+      <p>
+        {review.outcome === 'NOT_REVIEWED'
+          ? `Its final review could not be completed, so this ${what} was not charged. Check it carefully before you approve it.`
+          : `These points remained after two rounds of repair, so this ${what} was not charged. Edit it to address them before you approve it.`}
+      </p>
+      {review.objections.length > 0 && (
+        <ul className="mt-2 list-disc pl-5">
+          {review.objections.map((o) => (
+            <li key={o}>{o}</li>
+          ))}
+        </ul>
+      )}
+      <div className="mt-3">
+        <Checkbox label={`I have checked these points and want to approve this ${what}`} checked={acknowledged} onChange={(e) => onAcknowledge(e.target.checked)} />
+      </div>
+    </Alert>
+  )
 }

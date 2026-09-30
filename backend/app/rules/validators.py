@@ -64,7 +64,13 @@ class Context:
             if self.results is not None or self.stage == "FINAL":
                 self.measured.update({rid: (status, note) for rid, status, note in results_engine.checks(self.results, self.spec)})
             if self.budget is not None:
-                self.measured.update({rid: (status, note) for rid, status, note in budget_engine.checks(self.budget, self.spec, self.results)})
+                budget = self.budget
+                if budget.requested is None:  # the amount the student said they request, when the budget itself does not state one
+                    from app.rules.extract import first_number
+
+                    answered = first_number(self.inputs.answers.get("amount_requested", ""))
+                    budget = budget.model_copy(update={"requested": answered}) if answered else budget
+                self.measured.update({rid: (status, note) for rid, status, note in budget_engine.checks(budget, self.spec, self.results)})
         elif self.budget is not None and self.budget.lines:
             self.measured.update({rid: (status, note) for rid, status, note in budget_engine.checks(self.budget, self.spec, self.results) if rid == "CN-022"})
         elif self.spec.ceiling is not None and self.spec.kind == "CONCEPT_NOTE":

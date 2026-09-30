@@ -271,6 +271,26 @@ class WorkRunner(AIRunner):
     def review_plan(self, payload: dict[str, Any]) -> PlanReview:
         return _whole(self._call("w_plan_review", payload, REVIEW_PLAN_SCHEMA, PlanReview), "w_plan_review")
 
+    def final_review_plan(self, payload: dict[str, Any]) -> PlanReview | None:
+        """The final reviewer's decision on the exact plan; None when it could not be completed
+        (cut off, refused or unaffordable): "not reviewed", never approval."""
+        try:
+            return self._call("w_plan_review", payload, REVIEW_PLAN_SCHEMA, PlanReview)
+        except PermanentStageError as exc:
+            if exc.code != "BUDGET_EXCEEDED":
+                raise
+            self.budget_reached = True
+            return None
+
+    def final_review_results(self, payload: dict[str, Any]) -> "ResultsReview | None":
+        try:
+            return self._call("w_results_review", payload, REVIEW_RESULTS_SCHEMA, ResultsReview)
+        except PermanentStageError as exc:
+            if exc.code != "BUDGET_EXCEEDED":
+                raise
+            self.budget_reached = True
+            return None
+
     def results(self, payload: dict[str, Any]) -> dict[str, Any]:
         return _whole(self._call("w_results", payload, RESULTS_SCHEMA, ResultsAnswer), "w_results").model_dump()
 

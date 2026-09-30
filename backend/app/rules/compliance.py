@@ -13,6 +13,26 @@ from app.rules.validators import VALIDATORS, Context
 AUTHOR_VALIDATORS = {"eligibility.thresholds", "eligibility.evaluated", "gate.core_inputs", "gate.task_present", "gate.experience_present", "requirements.conflict"}
 
 
+PAGE_VALIDATORS = {"limits.rendered_pages", "limits.hard_max"}
+ACTIONS = {
+    "PAGE_COUNT_UNMEASURED": "Open the Word file and check the page count against the limit before you submit.",
+    "STUDENT_INFO_MISSING": "Only you can settle this: give or confirm the details it names.",
+    "CODE_RULE": "Check what it names; if it is PaperAid's wording, ask for changes.",
+    "REVIEW_OBJECTION": "Read the point raised and edit the text, or ask for changes.",
+}
+
+
+def _reason(validator: str, basis: str, status: str, note: str, ctx: Context) -> str:
+    """Why an item is not settled, so the student sees a next action instead of a bare "Not ready"."""
+    if status in ("PASS", "NOT_APPLICABLE"):
+        return ""
+    if validator in PAGE_VALIDATORS and ctx.pages is None and "page" in note.lower() and "estimated" in note.lower():
+        return "PAGE_COUNT_UNMEASURED"
+    if basis == "AUTHOR":
+        return "STUDENT_INFO_MISSING"
+    return "REVIEW_OBJECTION" if basis == "AI" else "CODE_RULE"
+
+
 def _status(result: str, severity: str) -> str:
     if result == "PASS":
         return "PASS"
@@ -49,7 +69,10 @@ def report(ctx: Context, stages: tuple[str, ...]) -> list[ReadinessItem]:
         # "WARN": a point the student should check that does not hold the document back (an uncertainty
         # such as whether references count toward a limit): shown as needing review, at warning level.
         severity = "WARNING" if result == "WARN" and rule["severity"] == "BLOCKING" else rule["severity"]
-        item = ReadinessItem(id=rule["id"], question=rule["ui_message"], status=_status(result, rule["severity"]), basis=basis, note=note[:600], where=where, severity=severity)  # type: ignore[arg-type]
+        status = _status(result, rule["severity"])
+        reason = _reason(validator, basis, status, note, ctx)
+        item = ReadinessItem(id=rule["id"], question=rule["ui_message"], status=status, basis=basis, note=note[:600], where=where, severity=severity,  # type: ignore[arg-type]
+                             reason=reason, action=ACTIONS.get(reason, ""))
         key = (validator, note) if validator != "semantic" else (rule["id"], "")
         if key in seen:
             first = seen[key]

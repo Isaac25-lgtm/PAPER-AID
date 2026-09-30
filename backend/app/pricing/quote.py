@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 
 from app.ai import costs
-from app.ai.orchestration import BATCH_WORDS, PROMPTS, STEPS, current_engine, model_for_engine
+from app.ai.orchestration import BATCH_WORDS, FINAL_PART_WORDS, PROMPTS, REVIEW_REPAIRS, STEPS, current_engine, model_for_engine
 from app.analysis import research
 from app.core.config import Settings
 from app.jobs.models import BoundQuote, Engine, Passage, QuoteLine, ServiceSelection, utcnow
@@ -119,7 +119,7 @@ def refinement_usd(settings: Settings, passages: list[Passage], deep: bool = Fal
         usd += _step_usd(settings, write, rw_chars + n * (800 + 200 + ITEM_OVERHEAD) + BRIEF_CHARS * _batches_for(rw_words), rw_words, e)
         rounds = settings.repair_attempts
         usd += (rounds + 1) * _step_usd(settings, "review", review_chars, review_words, e)
-        if e.require_dual_approval:
+        if e.require_dual_approval and not e.single_reviewer:
             usd += (rounds + 1) * _step_usd(settings, "review_peer", review_chars, review_words, e)
         usd += rounds * _step_usd(settings, fix, 2 * rw_chars + n * (400 + ITEM_OVERHEAD) + BRIEF_CHARS * _batches_for(rw_words), rw_words, e)
     return usd
@@ -153,7 +153,7 @@ def template_usd(settings: Settings, guide_words: int, engine: Engine | None = N
         usd += _step_usd(settings, "spec_guide", guide + 4000, 0, e)
     usd += _step_usd(settings, "spec_finalise", guide + 8000, 0, e)
     usd += (rounds + 1) * _step_usd(settings, "spec_review", guide + 3000, 0, e)
-    if e.require_dual_approval:
+    if e.require_dual_approval and not e.single_reviewer:
         usd += (rounds + 1) * _step_usd(settings, "spec_review_peer", guide + 3000, 0, e)
     usd += rounds * _step_usd(settings, "spec_fix", guide + 6000, 0, e)
     return usd
@@ -188,7 +188,9 @@ def proposal_usd(settings: Settings, step: str, words: int, engine: Engine | Non
     if e.require_dual_approval and e.frontier_guidance:
         usd += _step_usd(settings, "p_guide", base + 10000, 0, e)
     if chapter == 0:
-        if e.require_dual_approval:
+        if e.single_reviewer:  # the final review, and up to two targeted repairs each reviewed again
+            usd += (REVIEW_REPAIRS + 1) * _step_usd(settings, "p_plan_review", base + 20000, 0, e) + REVIEW_REPAIRS * _step_usd(settings, "p_finalise", base + 24000, 0, e)
+        elif e.require_dual_approval:
             usd += _step_usd(settings, "p_plan_review", base + 20000, 0, e) + _step_usd(settings, "p_plan_review_peer", base + 20000, 0, e)
         return usd
     batches = _batches_for(words)
@@ -197,8 +199,10 @@ def proposal_usd(settings: Settings, step: str, words: int, engine: Engine | Non
     rounds = settings.repair_attempts
     review_input = batches * (PLAN_CHARS + 6000) + words * CHARS_PER_WORD * 2 + found * EVIDENCE_ITEM_CHARS * 2
     usd += (rounds + 1) * _step_usd(settings, "p_review", review_input, words * 2, e)
-    if e.require_dual_approval:  # plus one review by both of any section code cleaned after the rounds
+    if e.require_dual_approval and not e.single_reviewer:  # plus one review by both of any section code cleaned after the rounds
         usd += (rounds + 2) * _step_usd(settings, "p_review_peer", review_input, words * 2, e) + _step_usd(settings, "p_review", review_input, words * 2, e)
+    elif e.require_dual_approval:  # one final reviewer: plus its review of any section code cleaned after the rounds
+        usd += _step_usd(settings, "p_review", review_input, words * 2, e)
     usd += rounds * _step_usd(settings, "p_fix", draft_input + words * CHARS_PER_WORD, words, e)
     usd += _step_usd(settings, "p_readiness", PLAN_CHARS + words * CHARS_PER_WORD + 2 * 2500 * 12 + 4000, 0, e)
     return usd
@@ -236,9 +240,10 @@ def work_usd(settings: Settings, step: str, kind: str, words: int, engine: Engin
     evidence_chars = (8 * 3 + LIBRARY_ITEMS) * EVIDENCE_ITEM_CHARS
     if step == "PLAN":
         plan_chars = base + evidence_chars + 6000
-        usd += 2 * _step_usd(settings, "w_plan", plan_chars, 0, e) + _step_usd(settings, "w_plan_review", plan_chars + 8000, 0, e)
+        drafts, reviews = (REVIEW_REPAIRS + 1, REVIEW_REPAIRS + 1) if e.single_reviewer else (2, 1)
+        usd += drafts * _step_usd(settings, "w_plan", plan_chars, 0, e) + reviews * _step_usd(settings, "w_plan_review", plan_chars + 8000, 0, e)
         if kind == "FUNDING_PROPOSAL":
-            usd += 2 * _step_usd(settings, "w_results", plan_chars + 12000, 0, e) + _step_usd(settings, "w_results_review", plan_chars + 20000, 0, e)
+            usd += drafts * _step_usd(settings, "w_results", plan_chars + 12000, 0, e) + reviews * _step_usd(settings, "w_results_review", plan_chars + 20000, 0, e)
         return usd
     batches = _batches_for(words)
     section_input = batches * (base + BRIEF_CHARS) + evidence_chars * 2 + words * 2
@@ -248,11 +253,22 @@ def work_usd(settings: Settings, step: str, kind: str, words: int, engine: Engin
         usd += _step_usd(settings, "w_draft", section_input, words, e)
     else:  # REVISE: the requested changes first
         usd += _step_usd(settings, "w_repair", section_input + words * CHARS_PER_WORD, words, e)
-    for _ in range(2):  # the audit, and the audit again after the whole-document review's repairs
+    audits = REVIEW_REPAIRS + 1 if e.single_reviewer else 2
+    for _ in range(audits):  # the audit, and the audit again after each of the final review's repairs
         usd += (rounds + 1) * (_step_usd(settings, "w_integrity", review_input, words * 2, e) + _step_usd(settings, "w_evaluate", review_input, words * 2, e))
         usd += rounds * _step_usd(settings, "w_repair", section_input + words * CHARS_PER_WORD, words, e)
         if e.roles.get("ADJUDICATOR"):
             usd += (rounds + 1) * _step_usd(settings, "w_adjudicate", review_input, words, e)
+    if e.single_reviewer:
+        # The final review of the whole deliverable (tables, references and notes included), in parts of
+        # at most FINAL_PART_WORDS, after every change; up to two targeted repairs; compression and a
+        # check of what it changed before each final review.
+        parts = max(1, math.ceil(words * 1.3 / FINAL_PART_WORDS))
+        final_chars = base + words * CHARS_PER_WORD * 1.5 / parts + 9000
+        usd += (REVIEW_REPAIRS + 1) * parts * _step_usd(settings, "w_final", final_chars, 0, e) + REVIEW_REPAIRS * _step_usd(settings, "w_repair", section_input, words, e)
+        usd += (REVIEW_REPAIRS + 1) * 2 * _step_usd(settings, "w_compress", section_input + words * CHARS_PER_WORD, words, e)
+        usd += (REVIEW_REPAIRS + 1) * (_step_usd(settings, "w_integrity", review_input, words * 2, e) + _step_usd(settings, "w_evaluate", review_input, words * 2, e))
+        return usd
     usd += 2 * _step_usd(settings, "w_final", base + words * CHARS_PER_WORD * 1.2 + 6000, 0, e) + _step_usd(settings, "w_repair", section_input, words, e)
     usd += 2 * _step_usd(settings, "w_compress", section_input + words * CHARS_PER_WORD, words, e)
     # What compression or withholding changed is reviewed again, as it will be published (Codex audit 2026-09-30 #2).
@@ -270,8 +286,10 @@ def revise_usd(settings: Settings, words: int, engine: Engine | None = None) -> 
     usd = (rounds + 1) * _step_usd(settings, "p_fix", fix_input, words, e)
     review_input = batches * (PLAN_CHARS + 6000) + words * CHARS_PER_WORD * 2 + LIBRARY_ITEMS * EVIDENCE_ITEM_CHARS
     usd += (rounds + 1) * _step_usd(settings, "p_review", review_input, words * 2, e)
-    if e.require_dual_approval:  # plus one review by both of any section code cleaned after the rounds
+    if e.require_dual_approval and not e.single_reviewer:  # plus one review by both of any section code cleaned after the rounds
         usd += (rounds + 2) * _step_usd(settings, "p_review_peer", review_input, words * 2, e) + _step_usd(settings, "p_review", review_input, words * 2, e)
+    elif e.require_dual_approval:  # one final reviewer: plus its review of any section code cleaned after the rounds
+        usd += _step_usd(settings, "p_review", review_input, words * 2, e)
     usd += _step_usd(settings, "p_readiness", PLAN_CHARS + 12000 * CHARS_PER_WORD + 2 * 2500 * 12 + 4000, 0, e)
     return usd
 
@@ -284,8 +302,10 @@ def profile_usd(settings: Settings, guide_words: int, engine: Engine | None = No
     usd = _step_usd(settings, "p_profile", guide, 0, e) + _step_usd(settings, "p_profile_critique", guide + 8000, 0, e) + _step_usd(settings, "p_profile_finalise", guide + 12000, 0, e)
     if e.require_dual_approval and e.frontier_guidance:
         usd += _step_usd(settings, "p_profile_guide", guide + 8000, 0, e)
-    if e.require_dual_approval:  # both approvals of the finished profile
-        usd += _step_usd(settings, "p_profile_review", guide + 16000, 0, e) + _step_usd(settings, "p_profile_review_peer", guide + 16000, 0, e)
+    if e.require_dual_approval:  # the approval of the finished profile (both reviewers on older engines)
+        usd += _step_usd(settings, "p_profile_review", guide + 16000, 0, e)
+        if not e.single_reviewer:
+            usd += _step_usd(settings, "p_profile_review_peer", guide + 16000, 0, e)
     return usd
 
 

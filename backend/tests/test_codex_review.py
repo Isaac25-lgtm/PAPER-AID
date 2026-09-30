@@ -146,7 +146,8 @@ def test_a_finish_sees_the_approved_sections(fixed_client, monkeypatch):
     start = len(fixed_client.models.tasks)
     assert _run(fixed_client, pid, "COMPLETE_1")["status"] == "COMPLETED"
     sent = dict(zip(fixed_client.models.tasks[start:], fixed_client.models.requests[start:], strict=True))
-    for task in ("p_brief", "p_draft", "p_review", "p_review_peer"):
+    assert "p_review_peer" not in sent  # one accountable final reviewer (owner decision 2026-09-30)
+    for task in ("p_brief", "p_draft", "p_review"):
         assert '"approvedSections": [{' in sent[task], task
 
 

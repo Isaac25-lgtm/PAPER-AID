@@ -17,7 +17,7 @@ import json
 import re
 from typing import TYPE_CHECKING, Any
 
-from app.ai.orchestration import check_content
+from app.ai.orchestration import FINAL_PART_WORDS, REVIEW_REPAIRS, check_content
 from app.analysis import fetch, research
 from app.core.errors import PermanentStageError
 from app.jobs import state
@@ -31,7 +31,7 @@ from app.rules import compliance, library
 from app.rules.extract import KEYS, requirements_from
 from app.rules.validators import Context
 from app.works import directives, numbers, templates
-from app.works.ai import Evaluation, WorkRunner
+from app.works.ai import Covered, Evaluation, Final, FinalRule, Priority, WorkRunner
 from app.works.models import (
     AI_NOTE,
     Budget,
@@ -39,6 +39,7 @@ from app.works.models import (
     PlanSection,
     ResolvedSpec,
     ResultsModel,
+    ReviewDecision,
     StoredDocVersion,
     Work,
     WorkDocument,
@@ -51,6 +52,7 @@ if TYPE_CHECKING:
     from app.jobs.pipeline import StageContext
 
 INPUT = "work_input.json"
+DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 DISCLOSURE = "Disclosure: this document was drafted with the assistance of an AI writing service (PaperAid)."
 READING_CHUNK = 3000
 READING_CHUNKS = 12  # the parts of a reading searched for one need: the most relevant, from anywhere in it
@@ -354,27 +356,97 @@ def stage_planning(ctx: "StageContext") -> None:
     }
     answer = runner.plan(payload).model_dump()
     plan = _plan_from(answer, skeleton, spec)
-    review = runner.review_plan({**payload, "plan": plan.model_dump(by_alias=True), "rules": plan_rules,
-                                 "paperaidChecks": _plan_problems(plan, spec)})
-    if review.verdict == "REPAIR" or _plan_problems(plan, spec):
-        answer = runner.plan({**payload, "draft": plan.model_dump(by_alias=True), "critique": [*review.issues, *_plan_problems(plan, spec)]}).model_dump()
-        plan = _plan_from(answer, skeleton, spec)
+    if not runner._engine.single_reviewer:  # older engines: one review and one repair, as they were priced
+        review = runner.review_plan({**payload, "plan": plan.model_dump(by_alias=True), "rules": plan_rules, "paperaidChecks": _plan_problems(plan, spec)})
+        if review.verdict == "REPAIR" or _plan_problems(plan, spec):
+            answer = runner.plan({**payload, "draft": plan.model_dump(by_alias=True), "critique": [*review.issues, *_plan_problems(plan, spec)]}).model_dump()
+            plan = _plan_from(answer, skeleton, spec)
+        plan_decision = None
+    else:
+        plan, plan_decision = _final_plan(runner, payload, plan, skeleton, spec, plan_rules)
     if _plan_problems(plan, spec):  # never charge for a plan the student could not approve
         raise PermanentStageError("PLAN_INCOMPLETE", "PaperAid could not make a plan that fits your requirements this time. Nothing was charged; please try again.",
                                   "plan: " + "; ".join(_plan_problems(plan, spec))[:300])
-    out: dict[str, Any] = {"plan": plan.model_dump(by_alias=True), "review": review.model_dump()}
+    out: dict[str, Any] = {"plan": plan.model_dump(by_alias=True)}
+    if plan_decision is not None:
+        out["planReview"] = plan_decision.model_dump(by_alias=True)
+    results_decision = None
     if spec.kind == "FUNDING_PROPOSAL":
         results_payload = {"spec": _compact_spec(spec), "student": _student(inp), "plan": plan.model_dump(by_alias=True), "evidence": _for_model(usable), "note": inp.note}
         model, lines = _results_from(runner.results(results_payload))
         results_rules = [{"rule": r["id"], "requirement": r["requirement"]} for r in library.scoped_rules(rules, "RESULTS")]
-        checked = runner.review_results({**results_payload, "results": model.model_dump(by_alias=True), "rules": results_rules})
-        wrong = [c for c in checked.classified if c.reads != c.statedAs.lower()]
-        if wrong or checked.issues:
-            critique = [*checked.issues, *[f"{c.id} is stated as a {c.statedAs} but reads as a {c.reads}: {c.note}" for c in wrong]]
-            model, lines = _results_from(runner.results({**results_payload, "draft": model.model_dump(by_alias=True), "critique": critique}))
+        if not runner._engine.single_reviewer:
+            checked = runner.review_results({**results_payload, "results": model.model_dump(by_alias=True), "rules": results_rules})
+            wrong = [c for c in checked.classified if c.reads != c.statedAs.lower()]
+            if wrong or checked.issues:
+                critique = [*checked.issues, *[f"{c.id} is stated as a {c.statedAs} but reads as a {c.reads}: {c.note}" for c in wrong]]
+                model, lines = _results_from(runner.results({**results_payload, "draft": model.model_dump(by_alias=True), "critique": critique}))
+        else:
+            model, lines, results_decision = _final_results(runner, results_payload, model, lines, results_rules)
+            out["resultsReview"] = results_decision.model_dump(by_alias=True)
         out["results"] = model.model_dump(by_alias=True)
         out["budgetLines"] = [li.model_dump(by_alias=True) for li in lines]
     ctx.put_json("plan.json", out)
+    unapproved = [d for d in (plan_decision, results_decision) if d is not None and d.outcome != "APPROVED"]
+    if unapproved:  # kept for the student to edit, never charged for (owner decision 2026-09-30)
+        ctx.update(lambda j: _unapproved(j, unapproved))
+
+
+def _decision(review_issues: list[str] | None, problems: list[str], reason: str) -> ReviewDecision:
+    if review_issues is None:
+        return ReviewDecision(outcome="NOT_REVIEWED", reason=reason, objections=["PaperAid could not complete its final review."])
+    return ReviewDecision(outcome="OBJECTIONS", reason="CODE_RULE" if not review_issues and problems else "REVIEW_OBJECTION",
+                          objections=list(dict.fromkeys([*review_issues, *problems]))[:20])
+
+
+def _final_plan(runner: WorkRunner, payload: dict[str, Any], plan: WorkPlan, skeleton: list[PlanSection], spec: ResolvedSpec,
+                plan_rules: list[dict[str, Any]]) -> tuple[WorkPlan, ReviewDecision]:
+    """The one accountable final review of the exact plan (owner decision 2026-09-30): an objection is
+    repaired by the writer (only what was named) and the repaired plan reviewed again, at most twice;
+    the decision always concerns the plan that is delivered."""
+    decision = ReviewDecision(outcome="NOT_REVIEWED", reason="REVIEW_UNAVAILABLE")
+    for round_ in range(REVIEW_REPAIRS + 1):
+        problems = _plan_problems(plan, spec)
+        review = runner.final_review_plan({**payload, "plan": plan.model_dump(by_alias=True), "rules": plan_rules, "paperaidChecks": problems})
+        if review is not None and review.verdict == "PASS" and not problems:
+            return plan, ReviewDecision(outcome="APPROVED")
+        failed = [f"{r.rule}: {r.note}" for r in review.rules if r.status == "FAIL"] if review else []
+        decision = _decision([*review.issues, *failed] if review else None, problems, "SPEND_CAP" if runner.budget_reached else "REVIEW_UNAVAILABLE")
+        if round_ == REVIEW_REPAIRS or runner.budget_reached or review is None:
+            break
+        answer = runner.plan({**payload, "draft": plan.model_dump(by_alias=True), "critique": decision.objections}).model_dump()
+        plan = _plan_from(answer, skeleton, spec)
+    return plan, decision
+
+
+def _final_results(runner: WorkRunner, payload: dict[str, Any], model: ResultsModel, lines: list[BudgetLine],
+                   rules: list[dict[str, Any]]) -> tuple[ResultsModel, list[BudgetLine], ReviewDecision]:
+    """The same final review loop for a funding Results Model: every result's level read correctly and
+    every issue repaired, reviewed again after each repair."""
+    decision = ReviewDecision(outcome="NOT_REVIEWED", reason="REVIEW_UNAVAILABLE")
+    for round_ in range(REVIEW_REPAIRS + 1):
+        checked = runner.final_review_results({**payload, "results": model.model_dump(by_alias=True), "rules": rules})
+        wrong = [c for c in checked.classified if c.reads != c.statedAs.lower()] if checked else []
+        if checked is not None and not wrong and not checked.issues:
+            return model, lines, ReviewDecision(outcome="APPROVED")
+        issues = [*checked.issues, *[f"{c.id} is stated as a {c.statedAs} but reads as a {c.reads}: {c.note}" for c in wrong]] if checked else None
+        decision = _decision(issues, [], "SPEND_CAP" if runner.budget_reached else "REVIEW_UNAVAILABLE")
+        if round_ == REVIEW_REPAIRS or runner.budget_reached or checked is None:
+            break
+        model, lines = _results_from(runner.results({**payload, "draft": model.model_dump(by_alias=True), "critique": decision.objections}))
+    return model, lines, decision
+
+
+def _unapproved(j: Job, decisions: list[ReviewDecision]) -> Job:
+    """A plan the final reviewer did not approve is delivered for editing and charged nothing."""
+    j.delivery[j.selection.work_band] = 0.0
+    j.outcome = "PARTIAL"
+    if any(d.outcome == "NOT_REVIEWED" for d in decisions):
+        message = "PaperAid could not complete its final review, so this plan is not approved and you were not charged. Check it, then approve it yourself, or make it again."
+    else:
+        message = ("PaperAid's final reviewer still had objections after two rounds of repair, so this plan is not approved and you were not charged. "
+                   "The objections are shown with it: edit it to address them, then approve it, or make it again.")
+    return _warn(j, [message])
 
 
 def _plan_problems(plan: WorkPlan, spec: ResolvedSpec) -> list[str]:
@@ -626,6 +698,89 @@ def _final(ctx: "StageContext", runner: WorkRunner, inp: WorkStepInput, current:
     return runner.final(payload), doc_rules
 
 
+def _document_rules(spec: ResolvedSpec) -> list[dict[str, Any]]:
+    rules = [r for r in library.rules_for(spec.kind) if r["id"] in set(spec.active_rules)]
+    return library.scoped_rules(rules, "DOCUMENT")
+
+
+def deliverable(inp: WorkStepInput, document: WorkDocument, library_items: dict[str, EvidenceItem], tokens: dict[str, tuple[str, str]]) -> dict[str, Any]:
+    """Exactly what the student receives, as the Word file shows it: each section's paragraphs and its
+    table and caption with citations and figures filled in, the tables code renders from the Results
+    Model and budget, the reference list and the last-page note (owner decision 2026-09-30)."""
+    from app.works.export import generated_tables
+
+    spec = _spec(inp)
+    citer = ev.Citer(library_items, spec.citation_style)
+
+    def show(text: str) -> str:
+        return numbers.render(citer.render(text), tokens)[0]
+
+    sections = []
+    for s in document.sections:
+        entry: dict[str, Any] = {"key": s.key, "heading": s.heading, "text": [show(p) for p in s.paragraphs]}
+        if s.table:
+            entry["table"] = {"caption": show(s.table_caption), "rows": [[show(c) for c in row] for row in s.table]}
+        sections.append(entry)
+    tables = [{"after": key, "caption": caption, "rows": rows} for key, _, rows, caption in generated_tables(document, spec, inp.results, inp.budget)]
+    cited = [i for i in document.cited if i in library_items]
+    return {"title": document.title, "sections": sections, "tables": tables,
+            "references": ev.reference_list([library_items[i].source for i in cited], spec.citation_style),
+            "notes": [document.ai_note] if document.ai_note else []}
+
+
+def _words_of_entry(entry: dict[str, Any]) -> int:
+    return len(" ".join(entry.get("text", [])).split()) + len(" ".join(c for row in entry.get("table", {}).get("rows", []) for c in row).split())
+
+
+def _final_review(runner: WorkRunner, inp: WorkStepInput, document: WorkDocument, library_items: dict[str, EvidenceItem],
+                  tokens: dict[str, tuple[str, str]], doc_rules: list[dict[str, Any]]) -> "Final | None":
+    """Sol's review of the exact deliverable, with a verdict required for every document rule, every
+    part of the question and every funder priority. A long document is reviewed in bounded parts, each
+    with a manifest of the whole; a rule fails if any part fails it, and a part of the question is
+    answered if any part answers it. Any verdict missing, cut off or unaffordable: None (not reviewed)."""
+    spec = _spec(inp)
+    whole = deliverable(inp, document, library_items, tokens)
+    parts: list[list[dict[str, Any]]] = [[]]
+    for entry in whole["sections"]:
+        if parts[-1] and sum(_words_of_entry(e) for e in parts[-1]) + _words_of_entry(entry) > FINAL_PART_WORDS:
+            parts.append([])
+        parts[-1].append(entry)
+    manifest = [{"key": e["key"], "heading": e["heading"], "words": _words_of_entry(e), "part": n}
+                for n, part in enumerate(parts, start=1) for e in part]
+    base = {"spec": _compact_spec(spec), "student": _student(inp), "position": inp.plan.position if inp.plan else "",
+            "rules": [{"rule": r["id"], "requirement": r["requirement"], "severity": r["severity"]} for r in doc_rules],
+            "coverage": [c.model_dump(by_alias=True) for c in spec.coverage], "priorities": spec.priorities}
+    answers = []
+    for n, part in enumerate(parts, start=1):
+        last = n == len(parts)
+        document_part = {"title": whole["title"], "sections": part, "tables": whole["tables"] if last else [],
+                         "references": whole["references"] if last else [], "notes": whole["notes"] if last else []}
+        answer = runner.final({**base, "document": document_part, "manifest": manifest, "part": f"{n} of {len(parts)}"})
+        if answer is None:
+            return None
+        answers.append(answer)
+    rules: dict[str, FinalRule] = {}
+    for answer in answers:
+        for r in answer.rules:
+            seen = rules.get(r.rule)
+            if seen is None or r.status == "FAIL" or (r.status == "PASS" and seen.status == "NOT_APPLICABLE"):
+                rules[r.rule] = r if seen is None or seen.status != "FAIL" else seen
+    coverage: dict[str, Covered] = {}
+    for answer in answers:
+        for c in answer.coverage:
+            if c.id not in coverage or (c.answered and not coverage[c.id].answered):
+                coverage[c.id] = c
+    priorities: dict[str, Priority] = {}
+    for answer in answers:
+        for pr in answer.priorities:
+            if pr.priority not in priorities or (pr.addressed and not priorities[pr.priority].addressed):
+                priorities[pr.priority] = pr
+    expected_rules = {r["id"] for r in doc_rules}
+    if expected_rules - set(rules) or {c.id for c in spec.coverage} - set(coverage) or set(spec.priorities) - set(priorities):
+        return None  # a verdict is missing: not reviewed, never approval
+    return Final(rules=[rules[i] for i in sorted(expected_rules)], coverage=list(coverage.values()), priorities=list(priorities.values()))
+
+
 def _where_keys(where: str, plan_sections: list[PlanSection]) -> list[str]:
     text = where.lower()
     return [s.key for s in plan_sections if s.key in text or s.heading.lower() in text or text in s.heading.lower()]
@@ -789,40 +944,77 @@ def stage_auditing(ctx: "StageContext") -> None:
                                           "revise: nothing resolved")
 
     review(targets)
-    # The whole document: rules judged across sections, every part of the question, every priority.
-    final, doc_rules = _final(ctx, runner, inp, current, library_items, tokens)
-    judged_document = dict(current)
-    blocking_ids = {r["id"] for r in doc_rules if r["severity"] == "BLOCKING"}
-    failed_blocking = [r for r in (final.rules if final else []) if r.status == "FAIL" and r.rule in blocking_ids]
-    missed_coverage = [c for c in (final.coverage if final else []) if not c.answered]
-    if final is not None and (failed_blocking or missed_coverage):
+    stripped: list[str] = []
+    fix_notes: list[str] = []
+
+    def repair_for(final: "Final", doc_rules: list[dict[str, Any]]) -> dict[str, list[str]]:
+        """Which sections a final-review objection concerns, and what to fix in each."""
+        blocking_ids = {r["id"] for r in doc_rules if r["severity"] == "BLOCKING"}
         fix: dict[str, list[str]] = {}
 
         def fixable(keys: list[str]) -> list[str]:
             return [k for k in keys if k in editable] or editable[-1:]
 
-        for r in failed_blocking:
-            for key in fixable(_where_keys(r.where, inp.plan.sections)):
-                fix.setdefault(key, []).append(f"{r.rule}: {r.note}")
+        for r in final.rules:
+            if r.status == "FAIL" and r.rule in blocking_ids:
+                for key in fixable(_where_keys(r.where, inp.plan.sections)):
+                    fix.setdefault(key, []).append(f"{r.rule}: {r.note}")
         texts = {c.id: c.text for c in spec.coverage}
-        for c in missed_coverage:
-            for key in fixable([s.key for s in inp.plan.sections if c.id in s.coverage] or _where_keys(c.where, inp.plan.sections)):
-                fix.setdefault(key, []).append(f"Answer this part of the question explicitly: {texts.get(c.id, c.id)}")
-        repaired = runner.repair(
-            [{"key": k, "heading": headings.get(k, k), "text": current[k].paragraphs, "table": current[k].table.model_dump(),
-              "issues": v, "_words": " ".join(current[k].paragraphs)} for k, v in fix.items() if k in current], _common(inp))
-        current.update({k: v for k, v in repaired.items() if k in fix})
-        review(list(fix))
-    _compress_to_limits(ctx, runner, inp, current, tokens, library_items, editable)
-    stripped: list[str] = []
-    for key in list(editable):
-        cleaned = _strip(inp, current[key], library_items, allowed)
-        if cleaned != current[key]:
-            stripped.append(key)
-            current[key] = cleaned
-    review([k for k in editable if current[k] != reviewed_text.get(k)], rounds=0)  # changed after its review: reviewed again, not repaired
-    if current != judged_document:
+        for c in final.coverage:
+            if not c.answered:
+                for key in fixable([s.key for s in inp.plan.sections if c.id in s.coverage] or _where_keys(c.where, inp.plan.sections)):
+                    fix.setdefault(key, []).append(f"Answer this part of the question explicitly: {texts.get(c.id, c.id)}")
+        return fix
+
+    def settle_wording() -> None:
+        """Compression and withholding, then whatever they changed is checked again (not repaired)."""
+        _compress_to_limits(ctx, runner, inp, current, tokens, library_items, editable)
+        for key in list(editable):
+            cleaned = _strip(inp, current[key], library_items, allowed)
+            if cleaned != current[key]:
+                stripped.append(key)
+                current[key] = cleaned
+        review([k for k in editable if current[k] != reviewed_text.get(k)], rounds=0)
+
+    if runner._engine.single_reviewer:
+        # One accountable final reviewer (owner decision 2026-09-30): Sol reviews the exact deliverable
+        # after every change; an objection is repaired (only the sections concerned) and the whole
+        # deliverable reviewed again, at most twice. A review that cannot complete is never approval.
+        final: Final | None = None
+        doc_rules = _document_rules(spec)
+        for round_ in range(REVIEW_REPAIRS + 1):
+            settle_wording()
+            final = _final_review(runner, inp, _document(inp, current, set()), library_items, tokens, doc_rules)
+            if final is None:
+                raise PermanentStageError(
+                    "SPEND_CAP" if runner.budget_reached else "REVIEW_UNAVAILABLE",
+                    "PaperAid could not complete its final review of this draft, so nothing was delivered and you were not charged. Please try again.",
+                    "final review incomplete" + (" (spend cap)" if runner.budget_reached else ""),
+                )
+            fix = repair_for(final, doc_rules)
+            if not fix or round_ == REVIEW_REPAIRS or runner.budget_reached:
+                break
+            fix_notes.append(f"round {round_ + 1}: " + ", ".join(fix))
+            repaired = runner.repair(
+                [{"key": k, "heading": headings.get(k, k), "text": current[k].paragraphs, "table": current[k].table.model_dump(),
+                  "issues": v, "_words": " ".join(current[k].paragraphs)} for k, v in fix.items() if k in current], _common(inp))
+            current.update({k: v for k, v in repaired.items() if k in fix})
+            review(list(fix))
+    else:
+        # Older engines: the whole-document review and its repair, as they were priced.
         final, doc_rules = _final(ctx, runner, inp, current, library_items, tokens)
+        judged_document = dict(current)
+        if final is not None:
+            fix = repair_for(final, doc_rules)
+            if fix:
+                repaired = runner.repair(
+                    [{"key": k, "heading": headings.get(k, k), "text": current[k].paragraphs, "table": current[k].table.model_dump(),
+                      "issues": v, "_words": " ".join(current[k].paragraphs)} for k, v in fix.items() if k in current], _common(inp))
+                current.update({k: v for k, v in repaired.items() if k in fix})
+                review(list(fix))
+        settle_wording()
+        if current != judged_document:
+            final, doc_rules = _final(ctx, runner, inp, current, library_items, tokens)
     stripped = [headings.get(k, k) for k in stripped if k not in reverted]
     empty = [s.heading for s in inp.plan.sections if s.required and s.key in current and not current[s.key].paragraphs]
     if empty:
@@ -862,11 +1054,12 @@ def stage_auditing(ctx: "StageContext") -> None:
     concerns = [f"{next((s.heading for s in inp.plan.sections if s.key == k), k)}: " + "; ".join(v[:3]) for k, v in unresolved.items() if v != [NOT_REVIEWED]]
     if concerns:
         items.append(ReadinessItem(id="W-OPEN", question="Points PaperAid's reviewers raised that still need your attention", status="NEEDS_REVIEW", basis="AI",
-                                   note=" | ".join(concerns)[:600], severity="WARNING"))
+                                   note=" | ".join(concerns)[:600], severity="WARNING", reason="REVIEW_OBJECTION", action="Read each point and edit the text, or ask for changes."))
     unreviewed = [k for k, v in unresolved.items() if NOT_REVIEWED in v]
     if unreviewed or final is None:
         items.append(ReadinessItem(id="W-REVIEWED", question="Every section was reviewed after its last change", status="NEEDS_REVIEW", basis="CODE", severity="WARNING",
-                                   note="Not fully reviewed within this step's limits: " + ", ".join(unreviewed or ["the whole-document review"])))
+                                   note="Not fully reviewed within this step's limits: " + ", ".join(unreviewed or ["the whole-document review"]),
+                                   reason="SPEND_CAP" if runner.budget_reached else "REVIEW_UNAVAILABLE", action="Read these sections carefully before you use them."))
     # PaperAid's own output breaking a blocking rule after its repairs is never delivered. What only
     # the student can settle (eligibility, their facts) or PaperAid cannot measure (an estimated page
     # count) stays visible as "Not ready" instead.
@@ -883,7 +1076,7 @@ def stage_auditing(ctx: "StageContext") -> None:
 
     # The Word file is built once before the step can complete and be charged: a document that cannot
     # be exported fails here, without charge, never at the student's download (Codex audit, second round).
-    export.build(document, spec, inp.results, inp.budget, library_items, tokens, draft=document.status == "NOT_READY")
+    ctx.put_bytes("document.docx", export.build(document, spec, inp.results, inp.budget, library_items, tokens, draft=document.status == "NOT_READY"))
     warnings = []
     if stripped:
         warnings.append(f"PaperAid withheld sentences it could not trace to confirmed evidence or your own details in: {', '.join(stripped)}.")
@@ -928,12 +1121,15 @@ def stage_exporting(ctx: "StageContext") -> None:
     if ctx.has("evidence.json"):
         evidence_path = f"{work.storage_prefix()}/evidence/{job_id}.json"
         ctx.rt.files.put(evidence_path, ctx.get_bytes("evidence.json"), "application/json")
-    doc_path = ""
+    doc_path = docx_path = ""
     document: WorkDocument | None = None
     if inp.step in ("DRAFT", "REVISE"):
         document = WorkDocument.model_validate(ctx.get_json("document.json"))
         doc_path = f"{work.storage_prefix()}/documents/{job_id}.json"
         ctx.rt.files.put(doc_path, document.model_dump_json(by_alias=True).encode(), "application/json")
+        if ctx.has("document.docx"):  # the Word file built and checked before completion: every download serves exactly it
+            docx_path = f"{work.storage_prefix()}/documents/{job_id}.docx"
+            ctx.rt.files.put(docx_path, ctx.get_bytes("document.docx"), DOCX)
     planned = ctx.get_json("plan.json") if inp.step == "PLAN" else None
     read = ctx.get_json("read.json") if inp.step == "READ" else None
     requirements_path = ""
@@ -958,15 +1154,19 @@ def stage_exporting(ctx: "StageContext") -> None:
             work_service.respec(ctx.rt, k)
         if planned is not None:
             plan = WorkPlan.model_validate(planned["plan"])
+            plan_review = ReviewDecision.model_validate(planned["planReview"]) if planned.get("planReview") else None
             if k.plan_version == inp.plan_version:
                 k.plan, k.plan_status, k.plan_version = plan, "DRAFT", k.plan_version + 1
-                k.candidate_plan = None
+                k.candidate_plan, k.candidate_review = None, None
+                k.plan_review = plan_review.model_copy(update={"version": k.plan_version}) if plan_review else None
             else:
-                k.candidate_plan = plan
+                k.candidate_plan, k.candidate_review = plan, plan_review
                 notes.append("You edited your plan while PaperAid was drafting one, so the new plan is kept alongside yours for you to compare.")
             if "results" in planned:
+                results_review = ReviewDecision.model_validate(planned["resultsReview"]) if planned.get("resultsReview") else None
                 if k.results_version == inp.results_version:
                     k.results, k.results_status, k.results_version = ResultsModel.model_validate(planned["results"]), "DRAFT", k.results_version + 1
+                    k.results_review = results_review.model_copy(update={"version": k.results_version}) if results_review else None
                 else:
                     notes.append("You edited your Results Model meanwhile, so PaperAid's suggestion was not applied.")
                 if (k.budget is None or not k.budget.lines) and planned.get("budgetLines"):
@@ -974,7 +1174,7 @@ def stage_exporting(ctx: "StageContext") -> None:
                     k.budget_version += 1
         if document is not None:
             version = len(k.documents) + 1
-            k.documents.append(StoredDocVersion(version=version, job_id=job_id, words=document.words, status=document.status, path=doc_path,
+            k.documents.append(StoredDocVersion(version=version, job_id=job_id, words=document.words, status=document.status, path=doc_path, docx_path=docx_path,
                                                 note=(inp.note or ("Your requested changes" if inp.step == "REVISE" else ""))[:300]))
             if inp.step == "REVISE" and k.current != inp.base_version:
                 notes.append("You chose another version while PaperAid was revising, so the revision is saved without replacing your choice.")

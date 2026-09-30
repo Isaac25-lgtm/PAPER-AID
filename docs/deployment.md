@@ -211,6 +211,13 @@ Rollback from the full release: pause processing, wait for no job PROCESSING, mo
 API to the tolerant revisions, roll hosting back to the tolerant release, resume processing. Work steps
 still queued then fail with a refund; every record stays readable; nothing else needs undoing.
 
+### Releasing one accountable final reviewer (2026-09-30) and rolling back
+
+- **Build** with LibreOffice through `backend/cloudbuild.yaml` (the plain `--tag` build cannot pass the build argument). Its second step renders a Word file inside the built image and counts the pages; the build fails if LibreOffice cannot:
+  `cd backend && gcloud builds submit --project paperaid-ca172 --config cloudbuild.yaml --substitutions _IMAGE=europe-west1-docker.pkg.dev/paperaid-ca172/paperaid/backend:TAG`
+- **Deploy** the worker, then the API, by digest, with `--update-env-vars RENDER_PAGES=true,FRONTIER_GUIDANCE=false` (the live services had `FRONTIER_GUIDANCE=true` set explicitly). `SINGLE_REVIEWER` defaults to true; `REQUIRE_DUAL_APPROVAL=true` stays (it now means "nothing generated without approval"). `TESTER_EMAILS`, `WORKS_ENABLED`, `CREDITS_ENABLED=false` are unchanged; `WORKS_PUBLIC` stays unset (tester-only, fail-closed). Then the website.
+- **Rollback**: pause processing, wait for no job PROCESSING, move the worker then the API back to the previous revisions (`paperaid-worker-00024-dvd`, `paperaid-api-00024-25d`) and roll hosting back, resume. The previous release reads every record this one writes (plan reviews, acknowledgments, stored Word paths, readiness reasons and the engine's `singleReviewer` are extra fields it ignores). A step priced on the new engine and run by the old code is reviewed by both reviewers, which is stricter, never looser. `RENDER_PAGES=true` is harmless on the old image: without LibreOffice the page count stays "Needs review".
+
 ## Release log
 
 | Date | Commit | Image | API revision | Worker revision | Hosting release |

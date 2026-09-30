@@ -100,6 +100,7 @@ SAME_PART = {
 }
 
 
+REQUIRED_SHARE = 0.08  # the least of the length each part a call requires by name is planned at
 # Words that say nothing about which part a heading is ("Proposed budget" is a budget, not the
 # proposal's approach): never used to match a required name to a section.
 GENERIC = {"proposed", "indicative", "statement", "description", "overview", "detailed", "brief", "section", "plan", "key", "main", "outline", "full"}
@@ -127,8 +128,8 @@ def _name_required(sections: list[PlanSection], required: list[str], target: int
             left.append(name)
         else:
             carried.setdefault(index, []).append(name)
-    kept = set(carried)  # headings that already name what the call asks: kept as written unless more is added
     template_locked = {n for n, s in enumerate(sections) if s.locked}
+    kept = set(carried) & template_locked  # an official template's own heading is kept as written; any other takes the call's exact label
     for level in ("same", "alike", "purpose"):
         for name in list(left):
             core = _core(name)
@@ -144,19 +145,24 @@ def _name_required(sections: list[PlanSection], required: list[str], target: int
                 carried.setdefault(index, []).append(name)
                 kept.discard(index)
                 left.remove(name)
+    floor_each = round(target * REQUIRED_SHARE)  # every required part gets room to be written (real-model pilot 2026-09-30)
     for index, carried_names in carried.items():
         heading = out[index].heading if index in kept else " and ".join(carried_names)
         heading = (heading[0].upper() + heading[1:])[:200]
         brief = out[index].brief if index in kept else f"{out[index].brief} The call asks for this under \"{heading}\"; write what that heading asks for."[:1500]
-        out[index] = out[index].model_copy(update={"heading": heading, "brief": brief, "locked": True, "required": True})
+        section = out[index]
+        floor = floor_each * len(carried_names)
+        words = max(section.words, floor)
+        out[index] = section.model_copy(update={"heading": heading, "brief": brief, "locked": True, "required": True, "words": words,
+                                                "min_words": max(section.min_words, round(floor * 0.7)), "max_words": max(section.max_words, round(words * 1.5))})
     for name in left:
         heading = (name[0].upper() + name[1:])[:200]
         each = max(100, round(target / max(1, len(out) + 1)))
         out.append(PlanSection(key=f"required{len(out) + 1}", heading=heading, words=each, min_words=round(each * 0.6), max_words=round(each * 1.5),
                                locked=True, brief=f"What the call asks for under \"{heading}\"."))
-    if not left:
-        return out
     total = sum(s.words for s in out) or 1
+    if not left and total <= target:
+        return out
     return [s.model_copy(update={"words": round(s.words * target / total), "min_words": round(s.min_words * target / total), "max_words": round(s.max_words * target / total)}) for s in out]
 
 

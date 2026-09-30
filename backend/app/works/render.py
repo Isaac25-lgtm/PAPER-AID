@@ -50,3 +50,22 @@ def page_count(docx: bytes) -> float | None:
             return float(len(PdfReader(io.BytesIO(pdf.read_bytes())).pages))
         except PdfReadError:
             return None
+
+
+def self_check() -> int:
+    """Run in the built image (cloudbuild.yaml): a Word file of known length must render and count as
+    more than one page, or the build fails before the image can be deployed."""
+    from docx import Document
+
+    doc = Document()
+    for n in range(120):
+        doc.add_paragraph(f"Paragraph {n}: " + "a sentence that fills the line with ordinary words. " * 6)
+    buffer = io.BytesIO()
+    doc.save(buffer)
+    pages = page_count(buffer.getvalue())
+    print(f"LibreOffice: {executable()}; rendered pages: {pages}")
+    return 0 if pages is not None and pages > 1 else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(self_check())

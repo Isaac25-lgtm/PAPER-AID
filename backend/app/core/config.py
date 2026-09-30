@@ -35,8 +35,12 @@ class Settings(BaseSettings):
     ai_check_peer_model: str | None = "anthropic:claude-sonnet-5-5"
     routine_model: str | None = "openai:gpt-6-luna"
     drafting_model: str | None = "anthropic:claude-sonnet-5-5"
-    require_dual_approval: bool = True
-    frontier_guidance: bool = True  # Opus guides each plan before Sol finalises it (a cost lever; both approvals stay)
+    require_dual_approval: bool = True  # nothing generated is delivered without approval (older engines: by both reviewers)
+    # One accountable final reviewer (owner decision 2026-09-30, superseding the dual veto): Sol alone
+    # approves generated wording, after bounded targeted repair and re-review; no second automatic veto.
+    single_reviewer: bool = True
+    # Opus's advisory guidance before a plan is finalised: optional, off by default, never a veto.
+    frontier_guidance: bool = False
     # A new chapter delivers its approved sections and "Finish chapter" writes the rest. Off until a
     # rollback to 1d573b6 (which cannot protect a partly written chapter) is no longer needed (owner, 2026-09-30).
     partial_chapters: bool = False
@@ -56,8 +60,9 @@ class Settings(BaseSettings):
         "ANALYST": "openai:gpt-6-luna",  # reads documents, extracts requirements, plans research, classifies
         "WRITER": "google:gemini-3.8-flash",  # plans, drafts and repairs
         "INTEGRITY": "openai:gpt-6-luna",  # checks meaning is kept and nothing is invented; checks evidence
-        "EVALUATOR_STANDARD": "anthropic:claude-sonnet-5-5",
-        "EVALUATOR_PREMIUM": "anthropic:claude-opus-5-5",
+        "EVALUATOR_STANDARD": "anthropic:claude-sonnet-5-5",  # judges each section against its rules (a check, not the release decision)
+        "EVALUATOR_PREMIUM": "anthropic:claude-sonnet-5-5",  # was Opus: Opus now only advises (owner decision 2026-09-30)
+        "FINAL": "openai:gpt-6-sol",  # the one accountable final reviewer of plans, Results Models and documents
         "ADJUDICATOR": "",  # none configured: an unresolved disagreement becomes "Needs review"
     }
     # Which reviewers run behind each service's price. Students never choose or see a tier.

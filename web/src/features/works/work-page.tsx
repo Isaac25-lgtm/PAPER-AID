@@ -1,6 +1,6 @@
 import * as TabsPrimitive from '@radix-ui/react-tabs'
 import { CheckCircle2, CircleAlert, Download, FileText, Plus, Quote, Trash2 } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router'
 import { Button } from '../../components/ui/button'
 import { Checkbox, Input, Select, TextArea } from '../../components/ui/field'
@@ -10,11 +10,12 @@ import { Alert, Badge, Card, PageHeader, Skeleton } from '../../components/ui/pr
 import { DataError, useData } from '../../lib/data'
 import { useTitle } from '../../lib/use-title'
 import type { Budget, BudgetLine, Question, ResolvedSpec, ResultsModel, SourceRole, Work, WorkDocumentView, WorkPlan } from '../../lib/work-types'
-import { ReadinessList } from '../proposals/shared'
+import { ReadinessList, ReviewNotice } from '../proposals/shared'
 import { KIND_LABELS, ReadinessBadge, SOURCE_ROLES, VARIANT_LABELS, WorkProgress, WorkStepRunner, money } from './shared'
 
 type Tab = 'documents' | 'understood' | 'plan' | 'results' | 'budget' | 'draft'
 const SKIPPED = 'SKIPPED'
+const NO_LIMIT = 'NO_LIMIT' // the brief gives no word limit: PaperAid never invents one
 
 function useAction(onDone: (work: Work) => void) {
   const [busy, setBusy] = useState(false)
@@ -206,12 +207,43 @@ function UnderstoodPanel({ work, onChange }: { work: Work; onChange: (w: Work) =
   const { busy, error, run } = useAction(onChange)
   const spec = work.spec
   const [answers, setAnswers] = useState<Record<string, string>>({})
+  const [touched, setTouched] = useState<string[]>([])
+  const [saving, setSaving] = useState<Record<string, string>>({}) // question → "saving", "saved" or the reason it was not saved
   const [details, setDetails] = useState(work.inputs)
   useEffect(() => setDetails(work.inputs), [work.inputs])
+  const version = useRef(work.specVersion)
+  useEffect(() => {
+    version.current = work.specVersion
+  }, [work.specVersion])
+  const queue = useRef<Promise<void>>(Promise.resolve())
   if (!spec) return <Alert tone="info">PaperAid is working out the requirements.</Alert>
   const value = (id: string) => answers[id] ?? work.inputs.answers[id] ?? ''
   const set = (id: string, v: string) => setAnswers((a) => ({ ...a, [id]: v }))
-  const open = spec.questions.filter((q) => !q.answered || q.id in answers)
+  // Each answer is saved as soon as it is given (on leaving the box, or on choosing), one save after
+  // another on the latest version, so none is lost or refused as stale.
+  const save = (id: string, v: string) => {
+    setTouched((t) => (t.includes(id) ? t : [...t, id]))
+    if (v === (work.inputs.answers[id] ?? '') && !(id in answers)) return
+    queue.current = queue.current.then(async () => {
+      setSaving((st) => ({ ...st, [id]: 'saving' }))
+      try {
+        const updated = await data.works.answer(work.id, { [id]: v }, version.current)
+        version.current = updated.specVersion
+        onChange(updated)
+        setAnswers((a) => Object.fromEntries(Object.entries(a).filter(([k]) => k !== id)))
+        setSaving((st) => ({ ...st, [id]: 'saved' }))
+      } catch (e) {
+        setSaving((st) => ({ ...st, [id]: e instanceof DataError ? e.message : 'Not saved. Try again.' }))
+      }
+    })
+  }
+  const open = spec.questions.filter((q) => !q.answered || q.id in answers || touched.includes(q.id))
+  const waiting = spec.questions.filter((q) => !q.answered && q.id !== 'experience')
+  const whyNot = [
+    ...(work.needsRead ? ['PaperAid has not read your latest documents yet: choose "Read my documents" first.'] : []),
+    ...spec.blockers,
+    ...waiting.filter((q) => q.gate === 'ASK_ONCE').map((q) => `Answer "${q.label}", or choose "Use PaperAid's defaults for the rest".`),
+  ]
   const external = spec.requirements.filter((r) => r.authority === 'EXTERNAL_MANDATORY')
   const summary: [string, string][] = [
     ['Type', VARIANT_LABELS[spec.variant]],
@@ -293,14 +325,19 @@ function UnderstoodPanel({ work, onChange }: { work: Work; onChange: (w: Work) =
       {open.length > 0 && (
         <Card className="space-y-4 p-5">
           <p className="text-base font-semibold">Questions</p>
+          <p className="text-xs text-fg-subtle">Each answer is saved as soon as you give it.</p>
           {open.filter((q) => q.id !== 'experience').map((q) => (
-            <QuestionField key={q.id} spec={spec} question={q} value={value(q.id)} onChange={(v) => set(q.id, v)} />
+            <div key={q.id}>
+              <QuestionField spec={spec} question={q} value={value(q.id)} onChange={(v) => set(q.id, v)} onCommit={(v) => save(q.id, v)} />
+              {saving[q.id] && (
+                <p className={`mt-1 text-xs ${saving[q.id] === 'saved' || saving[q.id] === 'saving' ? 'text-fg-subtle' : 'text-amber-700'}`} role="status">
+                  {saving[q.id] === 'saving' ? 'Saving…' : saving[q.id] === 'saved' ? 'Saved.' : saving[q.id]}
+                </p>
+              )}
+            </div>
           ))}
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" loading={busy} onClick={() => run(() => data.works.answer(work.id, answers, work.specVersion)).then(() => setAnswers({}))}>
-              Save answers
-            </Button>
-            <Button size="sm" variant="secondary" loading={busy} onClick={() => run(() => data.works.answer(work.id, answers, work.specVersion, true)).then(() => setAnswers({}))}>
+            <Button size="sm" variant="secondary" loading={busy} onClick={() => run(() => data.works.answer(work.id, answers, version.current, true)).then(() => setAnswers({}))}>
               Use PaperAid's defaults for the rest
             </Button>
           </div>
@@ -317,9 +354,21 @@ function UnderstoodPanel({ work, onChange }: { work: Work; onChange: (w: Work) =
       )}
       {error && <Alert tone="warning">{error}</Alert>}
       {work.specStatus !== 'CONFIRMED' ? (
-        <Button loading={busy} disabled={spec.gate !== 'PASS' || work.needsRead} onClick={() => run(() => data.works.confirm(work.id, work.specVersion))}>
-          This is right: confirm
-        </Button>
+        <div className="space-y-2">
+          <Button loading={busy} disabled={spec.gate !== 'PASS' || work.needsRead} onClick={() => run(() => data.works.confirm(work.id, version.current))}>
+            This is right: confirm
+          </Button>
+          {(spec.gate !== 'PASS' || work.needsRead) && whyNot.length > 0 && (
+            <div className="text-sm text-fg-muted" role="note">
+              <p>You can confirm once:</p>
+              <ul className="list-disc pl-5">
+                {whyNot.map((w) => (
+                  <li key={w}>{w}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
       ) : (
         <Alert tone="success">You confirmed what PaperAid understood.</Alert>
       )}
@@ -327,13 +376,33 @@ function UnderstoodPanel({ work, onChange }: { work: Work; onChange: (w: Work) =
   )
 }
 
-function QuestionField({ spec, question: q, value, onChange }: { spec: ResolvedSpec; question: Question; value: string; onChange: (v: string) => void }) {
+function QuestionField({
+  spec,
+  question: q,
+  value,
+  onChange,
+  onCommit,
+}: {
+  spec: ResolvedSpec
+  question: Question
+  value: string
+  onChange: (v: string) => void
+  onCommit: (v: string) => void
+}) {
   const hint = [q.help, q.gate === 'ASK_ONCE' && q.fallback ? `If you skip it: ${q.fallback}` : ''].filter(Boolean).join(' ')
   const label = `${q.label}${q.gate === 'BLOCK' ? ' (needed)' : ''}`
   if (value === SKIPPED) return <p className="text-sm text-fg-muted">{q.label}: skipped. {q.fallback}</p>
   if (q.kind === 'CHOICE' || q.kind === 'BOOL')
     return (
-      <Select label={label} value={value} hint={hint} onChange={(e) => onChange(e.target.value)}>
+      <Select
+        label={label}
+        value={value}
+        hint={hint}
+        onChange={(e) => {
+          onChange(e.target.value)
+          onCommit(e.target.value)
+        }}
+      >
         <option value="">Choose…</option>
         {(q.kind === 'BOOL' ? ['yes', 'no'] : q.choices).map((c) => (
           <option key={c} value={c}>
@@ -342,8 +411,38 @@ function QuestionField({ spec, question: q, value, onChange }: { spec: ResolvedS
         ))}
       </Select>
     )
-  if (q.kind === 'LONG') return <TextArea label={label} hint={hint} rows={3} maxLength={3000} value={value} onChange={(e) => onChange(e.target.value)} />
-  return <Input label={label} hint={hint} type={q.kind === 'NUMBER' ? 'number' : 'text'} value={value} onChange={(e) => onChange(e.target.value)} />
+  if (q.kind === 'LONG')
+    return <TextArea label={label} hint={hint} rows={3} maxLength={3000} value={value} onChange={(e) => onChange(e.target.value)} onBlur={(e) => onCommit(e.target.value)} />
+  if (q.kind === 'NUMBER') {
+    const noLimit = q.id === 'word_limit' && value === NO_LIMIT
+    return (
+      <div className="space-y-2">
+        {!noLimit && (
+          <Input
+            label={label}
+            hint={hint || (q.id === 'word_limit' ? 'For example 3,000 or "3,000 words".' : undefined)}
+            inputMode="decimal"
+            placeholder={q.id === 'word_limit' ? 'e.g. 3,000' : undefined}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            onBlur={(e) => onCommit(e.target.value.trim())}
+          />
+        )}
+        {q.id === 'word_limit' && (
+          <Checkbox
+            label="My brief gives no word limit"
+            checked={noLimit}
+            onChange={(e) => {
+              const next = e.target.checked ? NO_LIMIT : ''
+              onChange(next)
+              if (next) onCommit(next)
+            }}
+          />
+        )}
+      </div>
+    )
+  }
+  return <Input label={label} hint={hint} value={value} onChange={(e) => onChange(e.target.value)} onBlur={(e) => onCommit(e.target.value.trim())} />
 }
 
 // --- the plan ---------------------------------------------------------------------------------------------
@@ -352,6 +451,7 @@ function PlanPanel({ work, onChange }: { work: Work; onChange: (w: Work) => void
   const data = useData()
   const { busy, error, run } = useAction(onChange)
   const [plan, setPlan] = useState<WorkPlan>(work.plan!)
+  const [ackPlan, setAckPlan] = useState(false)
   useEffect(() => setPlan(work.plan!), [work.plan])
   const total = plan.sections.reduce((sum, s) => sum + s.words, 0)
   const target = work.spec?.targetWords ?? total
@@ -393,14 +493,15 @@ function PlanPanel({ work, onChange }: { work: Work; onChange: (w: Work) => void
           </ul>
         </Alert>
       )}
+      {work.planStatus !== 'APPROVED' && <ReviewNotice review={work.planReview} what="plan" acknowledged={ackPlan} onAcknowledge={setAckPlan} />}
       {error && <Alert tone="warning">{error}</Alert>}
       <div className="flex flex-wrap gap-2">
         <Button variant="secondary" loading={busy} onClick={() => run(() => data.works.savePlan(work.id, plan, work.planVersion))}>
           Save changes
         </Button>
-        <Button loading={busy} disabled={work.planStatus === 'APPROVED'} onClick={() => run(async () => {
+        <Button loading={busy} disabled={work.planStatus === 'APPROVED' || (!!work.planReview && work.planReview.outcome !== 'APPROVED' && !ackPlan)} onClick={() => run(async () => {
           const saved = JSON.stringify(plan) === JSON.stringify(work.plan) ? work : await data.works.savePlan(work.id, plan, work.planVersion)
-          return data.works.approvePlan(work.id, saved.planVersion)
+          return data.works.approvePlan(work.id, saved.planVersion, ackPlan ? ['PLAN_OBJECTIONS'] : [])
         })}>
           {work.planStatus === 'APPROVED' ? 'Approved' : 'Approve the plan'}
         </Button>
@@ -415,6 +516,7 @@ function ResultsPanel({ work, onChange }: { work: Work; onChange: (w: Work) => v
   const data = useData()
   const { busy, error, run } = useAction(onChange)
   const [model, setModel] = useState<ResultsModel>(work.results!)
+  const [ackResults, setAckResults] = useState(false)
   useEffect(() => setModel(work.results!), [work.results])
   const num = (v: string) => (v.trim() === '' ? null : Number(v))
   const checks = work.checks.filter((c) => c.id.startsWith('FP-0') && Number(c.id.slice(3)) >= 14 && Number(c.id.slice(3)) <= 36)
@@ -456,14 +558,15 @@ function ResultsPanel({ work, onChange }: { work: Work; onChange: (w: Work) => v
         ))}
       </Card>
       {checks.length > 0 && <ReadinessList items={checks} />}
+      {work.resultsStatus !== 'APPROVED' && <ReviewNotice review={work.resultsReview} what="Results Model" acknowledged={ackResults} onAcknowledge={setAckResults} />}
       {error && <Alert tone="warning">{error}</Alert>}
       <div className="flex flex-wrap gap-2">
         <Button variant="secondary" loading={busy} onClick={() => run(() => data.works.saveResults(work.id, model, work.resultsVersion))}>
           Save changes
         </Button>
-        <Button loading={busy} disabled={work.resultsStatus === 'APPROVED'} onClick={() => run(async () => {
+        <Button loading={busy} disabled={work.resultsStatus === 'APPROVED' || (!!work.resultsReview && work.resultsReview.outcome !== 'APPROVED' && !ackResults)} onClick={() => run(async () => {
           const saved = JSON.stringify(model) === JSON.stringify(work.results) ? work : await data.works.saveResults(work.id, model, work.resultsVersion)
-          return data.works.approveResults(work.id, saved.resultsVersion)
+          return data.works.approveResults(work.id, saved.resultsVersion, ackResults ? ['RESULTS_OBJECTIONS'] : [])
         })}>
           {work.resultsStatus === 'APPROVED' ? 'Approved' : 'Approve the Results Model'}
         </Button>

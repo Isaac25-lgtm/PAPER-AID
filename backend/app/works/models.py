@@ -421,6 +421,7 @@ class DocVersion(Camel):
 
 class StoredDocVersion(DocVersion):
     path: str
+    docx_path: str = ""  # the Word file built and checked before the step completed ("" for older versions)
 
 
 class ChangeRequest(Camel):
@@ -434,6 +435,25 @@ class ChangeRequest(Camel):
 
 
 Status = Literal["NONE", "DRAFT", "APPROVED"]
+
+
+class ReviewDecision(Camel):
+    """The one accountable final reviewer's decision (owner decision 2026-09-30) on a plan or Results
+    Model PaperAid delivered: approved, still objecting after two targeted repairs, or not reviewed (the
+    review could not complete). Anything not approved is kept for the student to edit, never charged,
+    and approved only with the student's explicit acknowledgment of what is shown."""
+
+    outcome: Literal["APPROVED", "OBJECTIONS", "NOT_REVIEWED"]
+    reason: str = ""  # REVIEW_OBJECTION, REVIEW_UNAVAILABLE, SPEND_CAP or CODE_RULE
+    objections: list[str] = []
+    version: int = 0  # the plan or Results Model version it was given for
+
+
+class WorkAcknowledgment(Camel):
+    kind: Literal["PLAN_OBJECTIONS", "RESULTS_OBJECTIONS"]
+    version: int
+    text_sha256: str
+    at: datetime = Field(default_factory=utcnow)
 
 
 class WorkView(Camel):
@@ -454,9 +474,13 @@ class WorkView(Camel):
     plan_status: Status = "NONE"
     plan_version: int = 0
     candidate_plan: WorkPlan | None = None
+    plan_review: ReviewDecision | None = None  # None: planned before one final reviewer, or never reviewed
+    candidate_review: ReviewDecision | None = None
     results: ResultsModel | None = None
     results_status: Status = "NONE"
     results_version: int = 0
+    results_review: ReviewDecision | None = None
+    acknowledgments: list[WorkAcknowledgment] = []
     budget: Budget | None = None
     budget_version: int = 0
     documents: list[DocVersion] = []

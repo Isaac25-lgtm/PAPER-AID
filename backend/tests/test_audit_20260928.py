@@ -226,8 +226,9 @@ def test_07_tables_and_captions_are_checked_and_rendered(client):
     text = " ".join(p.text for p in doc.paragraphs) + " " + " ".join(c.text for t in doc.tables for r in t.rows for c in r.cells)
     assert "73%" not in text and "⟦" not in text and "Smith" not in text
     assert "Month 5" in text  # a month of the student's own timeline is not an invented figure
-    # cleaned before the final approval: both reviewers approved the table that was delivered
-    for task in ("p_review", "p_review_peer"):
+    # cleaned before the final approval: the one final reviewer approved the table that was delivered
+    assert "p_review_peer" not in client.models.tasks
+    for task in ("p_review",):
         last = [r for t, r in zip(client.models.tasks, client.models.requests, strict=True) if t == task][-1]
         assert "73%" not in last and "Month 5" in last
 

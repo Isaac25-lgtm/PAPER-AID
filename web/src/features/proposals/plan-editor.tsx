@@ -1,11 +1,11 @@
 import { Minus, Plus } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Button } from '../../components/ui/button'
-import { Input, Select, TextArea } from '../../components/ui/field'
+import { Checkbox, Input, Select, TextArea } from '../../components/ui/field'
 import { Alert, Card } from '../../components/ui/primitives'
 import { DataError, useData } from '../../lib/data'
 import type { AlignmentRow, EvidenceItem, Project, ProposalPlan, ResearchGap, SampleMethod, SampleSize, StudyType } from '../../lib/proposal-types'
-import { PlanStatusBadge, STUDY_TYPES } from './shared'
+import { PlanStatusBadge, ReviewNotice, STUDY_TYPES } from './shared'
 
 const METHODS: Record<SampleMethod, string> = {
   YAMANE: "Yamane's formula (needs your population size)",
@@ -141,11 +141,15 @@ export function PlanEditor({ project, onSaved }: { project: Project; onSaved: (p
       setBusy(false)
     }
   }
+  const [ackObjections, setAckObjections] = useState(false)
+  const [ackSampling, setAckSampling] = useState(false)
+  const acknowledge = [...(ackObjections ? ['OBJECTIONS'] : []), ...(ackSampling ? ['SAMPLING'] : [])]
+  const needsAck = (project.planReview && project.planReview.outcome !== 'APPROVED' && !ackObjections) || ((project.plan?.samplingAssumed?.length ?? 0) > 0 && !ackSampling)
   const approve = async () => {
     setBusy(true)
     setError(null)
     try {
-      onSaved(await data.projects.approvePlan(project.id, project.planVersion))
+      onSaved(await data.projects.approvePlan(project.id, project.planVersion, acknowledge))
     } catch (e) {
       setError(e instanceof DataError ? e.message : 'We could not approve your plan.')
     } finally {
@@ -165,7 +169,7 @@ export function PlanEditor({ project, onSaved }: { project: Project; onSaved: (p
           <Button variant="secondary" loading={busy} disabled={!dirty} onClick={save}>
             Save changes
           </Button>
-          <Button loading={busy} disabled={dirty || project.planStatus === 'APPROVED' || project.planProblems.length > 0} onClick={approve}>
+          <Button loading={busy} disabled={dirty || project.planStatus === 'APPROVED' || project.planProblems.length > 0 || !!needsAck} onClick={approve}>
             Approve plan
           </Button>
         </div>
@@ -201,6 +205,15 @@ export function PlanEditor({ project, onSaved }: { project: Project; onSaved: (p
               <li key={q}>{q}</li>
             ))}
           </ul>
+        </Alert>
+      )}
+      {project.planStatus !== 'APPROVED' && <ReviewNotice review={project.planReview} what="plan" acknowledged={ackObjections} onAcknowledge={setAckObjections} />}
+      {project.planStatus !== 'APPROVED' && (project.plan?.samplingAssumed?.length ?? 0) > 0 && (
+        <Alert tone="info" title="Sample size settings PaperAid assumed">
+          <p>The plan gave none, so PaperAid used the usual {project.plan?.samplingAssumed?.join(', ')}. Change them in the sample size settings, or confirm them.</p>
+          <div className="mt-2">
+            <Checkbox label="I confirm these sample size settings" checked={ackSampling} onChange={(e) => setAckSampling(e.target.checked)} />
+          </div>
         </Alert>
       )}
       {project.planStatus === 'APPROVED' && (

@@ -523,8 +523,9 @@ def test_real_mode_runs_every_step_of_the_algorithm_in_order(real_client):
     _, job = _submit(real_client, REFINE_FORMAT)
     assert job["status"] == "COMPLETED", job
     tasks = list(dict.fromkeys(real_client.models.tasks))
-    # the free estimate analyses and drafts the plan; the paid job adds the academic review, replays both from the cache, then refines
-    assert tasks == ["analyse", "analyse_peer", "plan", "academic", "critique", "guide", "finalise", "refine", "review", "review_peer", "analyse_after", "analyse_after_peer"]
+    # the free estimate analyses and drafts the plan; the paid job adds the academic review, replays both from the cache, then refines;
+    # one accountable final reviewer approves the rewrites, and Opus's optional guidance is off (owner decision 2026-09-30)
+    assert tasks == ["analyse", "analyse_peer", "plan", "academic", "critique", "finalise", "refine", "review", "analyse_after", "analyse_after_peer"]
 
 
 def test_a_long_stage_continues_in_a_new_delivery_without_paying_twice(real_client, monkeypatch):
@@ -534,10 +535,13 @@ def test_a_long_stage_continues_in_a_new_delivery_without_paying_twice(real_clie
 
     monkeypatch.setattr(pipeline, "STAGE_WORK_LIMIT", timedelta(0))  # hand off after every paid call
     real_client.models.overrides["analyse"] = _analyse_all
-    job_id, job = _submit(real_client, REFINE_FORMAT, name="dissertation_long.docx")
+    # Handing off after every call makes this long paper run about 70 deliveries, each re-preparing its
+    # stage (about 2 s in the estimate and the re-analysis) before one call: about 110 s on a laptop.
+    # The deadline allows for that (Codex audit 2026-09-30: 60 s timed out on slower machines).
+    job_id, job = _submit(real_client, REFINE_FORMAT, name="dissertation_long.docx", timeout=400)
     assert job["status"] == "COMPLETED", job
     admin = real_client.get(f"/api/admin/jobs/{job_id}", headers=ADMIN).json()
-    assert any(e["label"].startswith("Continuing") for e in admin["events"])
+    assert sum(e["label"].startswith("Continuing") for e in admin["events"]) >= 10  # it really continued, many times
     requests = real_client.models.requests
     assert len(requests) == len(set(requests))  # a continuation replays finished calls from the cache, never re-sends them
 

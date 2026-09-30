@@ -14,6 +14,7 @@ import math
 from typing import Any
 
 from app.rules import library
+from app.rules.extract import first_number
 from app.works import directives
 from app.works.models import (
     AI_NOTE,
@@ -30,6 +31,7 @@ from app.works.models import (
 )
 
 SKIPPED = "SKIPPED"
+NO_LIMIT = "NO_LIMIT"  # the student says their brief gives no word limit (never an invented one)
 YES = "yes"
 # The keys a work has at most one value for; every other key may have many (sections, criteria ...).
 SINGLE = ("limit.words", "limit.words_min", "limit.pages", "limit.characters", "tolerance", "ceiling", "minimum_request", "currency", "duration_months",
@@ -55,14 +57,12 @@ def _same(a: Requirement, b: Requirement) -> bool:
 
 def _answer(inputs: WorkInputs, key: str) -> str:
     value = inputs.answers.get(key, "").strip()
-    return "" if value == SKIPPED else value
+    return "" if value in (SKIPPED, NO_LIMIT) else value
 
 
 def _number(text: str) -> float | None:
-    try:
-        return float(text.replace(",", "").strip())
-    except ValueError:
-        return None
+    """A number the student gave ("3,000 words" as well as "3000"); answers are stored normalised."""
+    return first_number(text) if text.strip() else None
 
 
 def _yes(inputs: WorkInputs, key: str) -> bool:
@@ -278,7 +278,8 @@ def resolve(
         else:
             by_level = book.get("variant_words", {}).get(variant) or book["fallback_words"]
             target = int(by_level.get(level, 2000))
-            assumptions.append(f"No word limit given: planned at {target:,} words, the usual length for this level.")
+            said = "Your brief gives no word limit" if inputs.answers.get("word_limit") == NO_LIMIT else "No word limit given"
+            assumptions.append(f"{said}: planned at {target:,} words, the usual length for this level.")
     else:
         target = int(modes.get(mode) or modes.get("STANDARD") or 1800)
     if pages and pages.number and not (words_limit and words_limit.number):

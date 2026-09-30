@@ -104,8 +104,9 @@ NUMBER_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, 
                 "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19, "twenty": 20, "thirty": 30,
                 "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90}
 SCALES = {"hundred": 100, "thousand": 1_000, "k": 1_000, "million": 1_000_000, "m": 1_000_000, "billion": 1_000_000_000, "bn": 1_000_000_000}
-# A figure read whole: "1,500" is 1,500 (never 1 and 500) and "50k" is 50,000 (never 50).
-FIGURE = re.compile(r"(?<![\d.,])(\d{1,3}(?:,\d{3})+|\d+)(\.\d+)?(?:[ \u00a0]?(hundred|thousand|million|billion|bn|k|m)\b)?", re.IGNORECASE)
+# A figure read whole: "1,500" and "1 500" are 1,500 (never 1 or 500) and "50k" is 50,000 (never 50). An
+# ambiguous "Section 3 200 words" reads as 3,200, so a 200-word limit stays unverified: the student confirms it.
+FIGURE = re.compile(r"(?<![\d.,])(\d{1,3}(?:,\d{3})+|\d{1,3}(?:[ \u00a0\u202f]\d{3})+(?![\d,])|\d+)(\.\d+)?(?:[ \u00a0]?(hundred|thousand|million|billion|bn|k|m)\b)?", re.IGNORECASE)
 WORD = re.compile(r"[a-z]+")
 # What a quote must also name for its value to count as read (Codex audit 2026-09-30 #10).
 UNIT_WORDS = {"limit.words": ("word",), "limit.words_min": ("word",), "limit.pages": ("page", "side"), "limit.characters": ("character", "char")}
@@ -119,7 +120,8 @@ def _figures(text: str) -> list[tuple[float, int]]:
     ("1,500", "50k", "1.5 million") or in words ("two thousand five hundred")."""
     found: list[tuple[float, int]] = []
     for m in FIGURE.finditer(text):
-        value = float(m.group(1).replace(",", "") + (m.group(2) or ""))
+        whole = m.group(1)
+        value = float(re.sub(r"[,\s\u00a0\u202f]", "", whole) + (m.group(2) or ""))
         found.append((value * SCALES[m.group(3).lower()] if m.group(3) else value, m.end()))
     total, part, last = 0.0, 0.0, 0
     for m in WORD.finditer(text.casefold()):
@@ -140,6 +142,18 @@ def _figures(text: str) -> list[tuple[float, int]]:
 
 def _numbers_in(text: str) -> set[float]:
     return {value for value, _ in _figures(text)}
+
+
+def first_number(text: str, months: bool = False) -> float | None:
+    """The number a student's answer gives ("3,000 words", "3 000", "three thousand", "USD 48k"), or
+    None when it gives none. With `months`, "2 years" is 24."""
+    figures = sorted(_figures(text), key=lambda f: f[1])
+    if not figures:
+        return None
+    value, end = figures[0]
+    if months and "year" in text.casefold()[end : end + UNIT_GAP]:
+        return value * 12
+    return value
 
 
 def value_in_quote(key: str, value: str, number: float | None, quote: str) -> bool:

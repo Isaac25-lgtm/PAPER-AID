@@ -35,6 +35,7 @@ from app.pricing.quote import bound_quote, fixed_price, proposal_usd, with_margi
 from app.proposals import decisions, evidence, feedback, rulebook, sampling
 from app.proposals import export as proposal_export
 from app.proposals.models import (
+    Acknowledgment,
     ChapterDocument,
     CitationStyle,
     EvidenceItem,
@@ -209,15 +210,39 @@ def save_plan(rt: Runtime, user: User, project_id: str, plan: ProposalPlan, base
     def apply(p: Project) -> Project:
         if p.plan_version != base_version:
             raise Conflict("Your plan was changed elsewhere (another tab or a finished step). Reload it to see the latest version.", code="PLAN_CHANGED")
-        if p.plan is not None and not decisions.changed(p.plan, plan) and plan.questions_for_student == p.plan.questions_for_student:
+        # Standard sampling settings PaperAid assumed stay to be acknowledged until the student sets
+        # those settings themselves (never cleared by what the browser sends).
+        assumed = p.plan.sampling_assumed if p.plan is not None else []
+        if p.plan is not None and assumed:
+            before, after = p.plan.sample_size, plan.sample_size
+            if (before.margin, before.proportion, before.confidence) != (after.margin, after.proportion, after.confidence):
+                assumed = []
+        edited = plan.model_copy(update={"sampling_assumed": assumed})
+        if p.plan is not None and not decisions.changed(p.plan, edited) and edited.questions_for_student == p.plan.questions_for_student:
             return p  # nothing changed: keep the approval
-        p.plan, p.plan_status, p.plan_version = plan, "DRAFT", p.plan_version + 1
+        p.plan, p.plan_status, p.plan_version = edited, "DRAFT", p.plan_version + 1
         return p
 
     return view(rt, _change(rt, user, project_id, apply))
 
 
-def approve_plan(rt: Runtime, user: User, project_id: str, base_version: int) -> ProjectView:
+def needed_acknowledgments(p: Project) -> dict[str, str]:
+    """What the student must explicitly acknowledge before approving the current plan, with the exact
+    text: the final reviewer's remaining objections (or that its review could not complete), and
+    standard sampling settings PaperAid assumed for a calculated sample (owner decision 2026-09-30)."""
+    needed: dict[str, str] = {}
+    if p.plan is None:
+        return needed
+    if p.plan_review is not None and p.plan_review.outcome != "APPROVED":
+        needed["OBJECTIONS"] = "\n".join(p.plan_review.objections) or p.plan_review.outcome
+    if p.plan.sampling_assumed:
+        needed["SAMPLING"] = "; ".join(p.plan.sampling_assumed)
+    return needed
+
+
+def approve_plan(rt: Runtime, user: User, project_id: str, base_version: int, acknowledge: list[str] | None = None) -> ProjectView:
+    given = set(acknowledge or [])
+
     def apply(p: Project) -> Project:
         if p.plan is None:
             raise AppError("Create a plan first.", code="NO_PLAN")
@@ -226,6 +251,15 @@ def approve_plan(rt: Runtime, user: User, project_id: str, base_version: int) ->
         problems = rulebook.plan_problems(p.rulebook, p.plan)
         if problems:
             raise AppError("Fix the plan before approving it: " + " ".join(problems), code="PLAN_INCOMPLETE")
+        needed = needed_acknowledgments(p)
+        missing = [k for k in needed if k not in given]
+        if missing:
+            reasons = {"OBJECTIONS": "PaperAid's reviewer did not approve this plan: confirm you have checked its objections",
+                       "SAMPLING": "confirm the sample size settings PaperAid assumed"}
+            raise AppError("Before approving: " + "; ".join(reasons[k] for k in missing) + ".", code="ACKNOWLEDGMENT_NEEDED")
+        for kind, text in needed.items():
+            p.acknowledgments.append(Acknowledgment(kind=kind, plan_version=p.plan_version, text_sha256=hashlib.sha256(text.encode()).hexdigest()))  # type: ignore[arg-type]
+        p.acknowledgments = p.acknowledgments[-50:]
         p.plan_status = "APPROVED"
         return p
 
@@ -276,7 +310,8 @@ def take_candidate(rt: Runtime, user: User, project_id: str, accept: bool) -> Pr
             return p
         if accept:
             p.plan, p.plan_status, p.plan_version = p.candidate_plan, "DRAFT", p.plan_version + 1
-        p.candidate_plan = None
+            p.plan_review = p.candidate_review.model_copy(update={"plan_version": p.plan_version}) if p.candidate_review else None
+        p.candidate_plan, p.candidate_review = None, None
         return p
 
     return view(rt, _change(rt, user, project_id, apply))

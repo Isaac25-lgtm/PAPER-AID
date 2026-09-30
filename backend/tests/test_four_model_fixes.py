@@ -54,7 +54,7 @@ def test_a_chapter_with_double_spaces_and_line_breaks_is_delivered_as_written(cl
     rt = get_runtime()
     stored = json.loads(rt.files.get(f"{rt.store.get(job['id']).storage_prefix()}/internal/chapter.json"))
     assert all(s["paragraphs"][0] == spaced_text for s in stored["sections"])  # exactly the approved wording
-    last = [r for t, r in zip(client.models.tasks, client.models.requests, strict=True) if t == "p_review_peer"][-1]
+    last = [r for t, r in zip(client.models.tasks, client.models.requests, strict=True) if t == "p_review"][-1]  # the one final reviewer
     assert json.dumps(spaced_text)[1:-1] in last
 
 

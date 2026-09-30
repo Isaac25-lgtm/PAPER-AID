@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
 
+from app.ai.orchestration import REVIEW_REPAIRS
 from app.analysis import fetch, research
 from app.core.errors import PermanentStageError
 from app.jobs.models import Job, ReadinessItem, Stage, utcnow
@@ -27,6 +28,7 @@ from app.proposals.models import (
     ChapterSection,
     EvidenceItem,
     EvidenceSource,
+    PlanReview,
     Project,
     ProposalPlan,
     StepInput,
@@ -279,9 +281,19 @@ def stage_planning(ctx: "StageContext") -> None:
     if inp.step == "PLAN":
         payload = {"study": _study(inp), "level": inp.inputs.level, "rules": rules, "evidence": _for_model(usable), "note": inp.note}
         final, draft, critique = runner.negotiate("plan", payload)
-        plan = _confirmed_gap(_student_figures_only(_plan_from_model(final), inp), {i.id for i in usable})
-        runner.approve_plan({**payload, "finalPlan": plan.model_dump(by_alias=True)})
-        ctx.put_json("plan.json", {"plan": plan.model_dump(by_alias=True), "draft": draft, "critique": critique.model_dump()})
+
+        def settled(answer: dict[str, Any]) -> ProposalPlan:
+            return _confirmed_gap(_student_figures_only(_plan_from_model(answer), inp), {i.id for i in usable})
+
+        plan = settled(final)
+        if not runner._engine.single_reviewer:  # older engines: both approvals, as they were priced
+            runner.approve_plan({**payload, "finalPlan": plan.model_dump(by_alias=True)})
+            ctx.put_json("plan.json", {"plan": plan.model_dump(by_alias=True), "draft": draft, "critique": critique.model_dump()})
+            return
+        plan, review = _reviewed_plan(runner, payload, plan, usable, settled)
+        ctx.put_json("plan.json", {"plan": plan.model_dump(by_alias=True), "draft": draft, "critique": critique.model_dump(), "review": review.model_dump(by_alias=True)})
+        if review.outcome != "APPROVED":  # kept for the student to edit, never charged for (owner decision 2026-09-30)
+            ctx.update(lambda j: _unapproved_plan(j, review))
         return
     assert inp.plan is not None
     sections = [s for s in rulebook.sections(inp.rulebook, inp.chapter, inp.inputs.level, inp.plan) if not inp.only or s.key in inp.only]
@@ -300,6 +312,101 @@ def stage_planning(ctx: "StageContext") -> None:
     ids = {i.id for i in usable}
     briefs = {b["key"]: {"points": [p for p in b.get("points", []) if p.strip()], "evidence": [e for e in b.get("evidence", []) if e in ids]} for b in final.get("sections", [])}
     ctx.put_json("briefs.json", {"briefs": briefs, "draft": draft, "critique": critique.model_dump()})
+
+
+
+
+def _reviewed_plan(runner: ProposalRunner, payload: dict[str, Any], plan: ProposalPlan, usable: list[EvidenceItem], settled) -> tuple[ProposalPlan, PlanReview]:
+    """The one accountable final review of the exact plan (Sol), after code has converted any
+    hand-typed citation it can match to confirmed evidence. An objection is repaired (Sonnet, only
+    what was named) and the repaired plan reviewed again, at most twice. What remains is returned
+    as objections; a review that could not complete is "not reviewed", never approval."""
+    plan, code_issues = _typed_citations(plan, usable)
+    review = PlanReview(outcome="NOT_REVIEWED", reason="REVIEW_UNAVAILABLE")
+    for round_ in range(REVIEW_REPAIRS + 1):
+        approved, objections, reason = runner.review_plan({**payload, "finalPlan": _as_reviewed(plan)})
+        objections = [*code_issues, *objections]
+        if approved and not code_issues:
+            return plan, PlanReview(outcome="APPROVED")
+        review = PlanReview(outcome="OBJECTIONS" if reason == "REVIEW_OBJECTION" or code_issues else "NOT_REVIEWED",
+                            reason="CODE_RULE" if approved and code_issues else reason, objections=list(dict.fromkeys(objections))[:20])
+        if round_ == REVIEW_REPAIRS or runner.budget_reached or review.outcome == "NOT_REVIEWED":
+            break
+        plan = settled(runner.repair_plan(payload, plan.model_dump(by_alias=True), review.objections))
+        plan, code_issues = _typed_citations(plan, usable)
+    return plan, review
+
+
+def _as_reviewed(plan: ProposalPlan) -> dict[str, Any]:
+    """The plan as the reviewer judges it. Sampling settings a method does not calculate from (a
+    margin or proportion for a power analysis or a qualitative sample) are left out: they only hold
+    standard placeholder values, which read as contradictions (real-model pilot 2026-09-30)."""
+    data = plan.model_dump(by_alias=True)
+    if plan.sample_size.method not in QUANTITATIVE:
+        for key in ("margin", "proportion", "confidence"):
+            data["sampleSize"].pop(key, None)
+    return data
+
+
+def _unapproved_plan(j: Job, review: PlanReview) -> Job:
+    """A plan the final reviewer did not approve is delivered for editing, charged nothing and marked
+    partial, with the reason the student can act on."""
+    j.delivery["PLAN"] = 0.0
+    j.outcome = "PARTIAL"
+    if review.outcome == "NOT_REVIEWED":
+        message = ("PaperAid could not complete its final review of this plan, so it is not approved and you were not charged. "
+                   "You can edit it and approve it yourself once you have checked it, or make the plan again.")
+    else:
+        message = ("PaperAid's final reviewer still had objections after two rounds of repair, so this plan is not approved and you were not charged. "
+                   "The objections are shown with the plan: edit it to address them, then approve it, or make the plan again.")
+    j.warnings = list(dict.fromkeys([*j.warnings, message]))
+    return j
+
+
+def _typed_citations(plan: ProposalPlan, usable: list[EvidenceItem]) -> tuple[ProposalPlan, list[str]]:
+    """A citation typed by hand in the plan ("(Uganda Communications Commission, 2025)"; live case
+    prj_c704b0c370f7) is converted by code only when it matches exactly one confirmed source by author
+    and year: removed when that source's id already cites the same text, otherwise replaced by the id.
+    Any other is left for a targeted repair, named exactly. A source is never invented."""
+    issues: list[str] = []
+
+    def match(typed: str) -> EvidenceItem | None:
+        year = YEAR.search(typed)
+        if year is None:
+            return None
+        name = typed.split("(")[0] if not typed.startswith("(") else typed.strip("()").rsplit(",", 1)[0]
+        name = re.sub(r"\bet al\.?", "", re.sub(r"[,&]|\band\b", " ", name)).strip().casefold()
+        if not name:
+            return None
+        found = [i for i in usable if i.source.year == year.group(0) and (
+            (i.source.organisation and (name in i.source.organisation.casefold() or i.source.organisation.casefold() in name))
+            or any(a.split(",")[0].strip().casefold() == name.split()[0] for a in i.source.authors))]
+        return found[0] if len({i.id for i in found}) == 1 else None
+
+    def clean(text: str, where: str) -> str:
+        for typed in evidence.TYPED_CITATION.findall(evidence.ANY_TOKEN.sub(" ", text)):
+            item = match(typed)
+            if item is None:
+                issues.append(f"Remove the citation typed by hand \"{typed}\" in {where}: cite only with the evidence ids given, and only what that evidence supports.")
+            elif item.id in text:
+                text = text.replace(typed, "").replace("  ", " ").replace(" ,", ",").replace(" .", ".").replace("( )", "").replace("()", "")
+            elif typed.startswith("("):
+                text = text.replace(typed, f"({item.id})")
+            else:
+                text = text.replace(typed, re.sub(r"\((?:19|20)\d{2}[a-z]?\)", f"({item.id})", typed))
+        return " ".join(text.split())
+
+    def walk(value: Any, where: str) -> Any:
+        if isinstance(value, str):
+            return clean(value, where)
+        if isinstance(value, list):
+            return [walk(v, where) for v in value]
+        if isinstance(value, dict):
+            return {k: walk(v, k if where == "the plan" else where) for k, v in value.items()}
+        return value
+
+    data = walk(plan.model_dump(by_alias=True), "the plan")
+    return ProposalPlan.model_validate(data), list(dict.fromkeys(issues))
 
 
 SAMPLING_DEFAULTS = {"margin": (0.0, 0.5, 0.05), "proportion": (0.0, 1.0, 0.5)}
@@ -335,6 +442,7 @@ def _sane_sampling(data: dict[str, Any]) -> None:
         ask = (f"The sample size calculation needs values the plan did not give, so PaperAid used the usual {', '.join(assumed)}. "
                "Confirm these in the sample size settings, or change them, before approving the plan.")
         data["questionsForStudent"] = [*[q for q in data.get("questionsForStudent", []) if isinstance(q, str)], ask]
+        data["samplingAssumed"] = assumed  # approving the plan then needs the student's explicit acknowledgment
 
 
 def _plan_from_model(data: dict[str, Any]) -> ProposalPlan:
@@ -1005,7 +1113,9 @@ def stage_exporting(ctx: "StageContext") -> None:
         document = ChapterDocument.model_validate(ctx.get_json("chapter.json"))
         chapter_path = f"{project.storage_prefix()}/chapters/{inp.chapter}/{job_id}.json"
         ctx.rt.files.put(chapter_path, document.model_dump_json(by_alias=True).encode(), "application/json")
-    plan = ProposalPlan.model_validate(ctx.get_json("plan.json")["plan"]) if inp.step == "PLAN" else None
+    planned = ctx.get_json("plan.json") if inp.step == "PLAN" else None
+    plan = ProposalPlan.model_validate(planned["plan"]) if planned else None
+    review = PlanReview.model_validate(planned["review"]) if planned and planned.get("review") else None  # None: an older engine's plan
     book = ctx.get_json("profile.json")["profile"] if inp.step == "PROFILE" else None
     if book is not None:  # written once under its own id; a retry writes the same file again
         ctx.rt.files.put(rulebook.stored_path(book["id"]), json.dumps(book).encode(), "application/json")
@@ -1043,8 +1153,12 @@ def stage_exporting(ctx: "StageContext") -> None:
             if p.plan_version == inp.plan_version:
                 p.plan, p.plan_status, p.plan_version = plan, "DRAFT", p.plan_version + 1
                 p.candidate_plan = None
+                p.plan_review = review.model_copy(update={"plan_version": p.plan_version}) if review else None
             else:  # the student edited their plan meanwhile: never overwrite it
                 p.candidate_plan, candidate = plan, True
+                p.candidate_review = review
+            if review is not None and review.outcome != "APPROVED":
+                p.auto_chapter_one = False  # an unapproved plan never starts Chapter One by itself
         if document is not None:
             state = p.chapter(inp.chapter)
             version = len(state.versions) + 1

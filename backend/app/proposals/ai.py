@@ -303,7 +303,7 @@ class ProposalRunner(AIRunner):
     def grade(self, items: list[dict[str, Any]], common: dict[str, Any]) -> dict[str, Grade]:
         known = {i["key"] for i in items}
         out: dict[str, Grade] = {}
-        tasks = ["p_review", "p_review_peer"] if self._engine.require_dual_approval else ["p_review"]
+        tasks = ["p_review", "p_review_peer"] if self._engine.require_dual_approval and not self._engine.single_reviewer else ["p_review"]
         assessments = []
         for task in tasks:
             judged = {}
@@ -331,6 +331,30 @@ class ProposalRunner(AIRunner):
             "PaperAid could not approve this proposal plan. No document was released and nothing was charged. Please try again.",
         )
 
+    def review_plan(self, payload: dict[str, Any]) -> tuple[bool, list[str], str]:
+        """The one accountable final review of the exact plan (Sol; owner decision 2026-09-30):
+        (approved, objections, reason). An answer that is missing, cut off, refused or unaffordable
+        is "not reviewed", never approval."""
+        schema = _obj({"approved": {"type": "boolean"}, "issues": _STRS})
+        try:
+            answer = self._call("p_plan_review", payload, schema, Permission)
+        except PermanentStageError as exc:
+            if exc.code != "BUDGET_EXCEEDED":
+                raise
+            self.budget_reached = True
+            return False, ["PaperAid's review of this plan could not be completed within this step's limits."], "SPEND_CAP"
+        if answer is None:
+            return False, ["PaperAid's review of this plan could not be completed."], "REVIEW_UNAVAILABLE"
+        issues = [i.strip() for i in answer.issues if i.strip()]
+        return answer.approved and not issues, issues or ([] if answer.approved else ["Not approved, without a stated reason."]), "REVIEW_OBJECTION"
+
+    def repair_plan(self, payload: dict[str, Any], plan: dict[str, Any], objections: list[str]) -> dict[str, Any]:
+        """A targeted repair of the plan for exactly the objections given (Sonnet finalises again with
+        them as the critique); the repaired plan is then reviewed again."""
+        schema = PLAN_SCHEMA if self._prompt_for("p_plan") == "p-plan-v1" else PLAN_SCHEMA_V2
+        critique = {"items": [{"issue": o, "fix": "Fix exactly this, changing nothing else."} for o in objections], "overall": "Repair only what these points name."}
+        return self._raw("p_finalise", {**payload, "kind": "plan", "draft": plan, "critique": critique}, schema, None)
+
     def approve_profile(self, payload: dict[str, Any]) -> None:
         """Both approvals for an institution profile before any proposal is written to it."""
         self._approve(
@@ -343,7 +367,7 @@ class ProposalRunner(AIRunner):
         if not self._engine.require_dual_approval:
             return
         schema = _obj({"approved": {"type": "boolean"}, "issues": _STRS})
-        for task in tasks:
+        for task in tasks[:1] if self._engine.single_reviewer else tasks:  # one accountable reviewer: no second veto
             answer = self._call(task, payload, schema, Permission)
             if answer is None or not answer.approved or answer.issues:
                 raise PermanentStageError(code, message, f"{task}: not approved")
