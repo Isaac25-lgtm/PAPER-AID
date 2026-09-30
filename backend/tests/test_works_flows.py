@@ -179,15 +179,20 @@ def test_work_services_are_offered_only_when_switched_on_priced_and_to_testers()
     from app.core.config import Settings
     from app.jobs.service import User, availability
 
-    keys = {"openai_api_key": "k", "anthropic_api_key": "k", "gemini_api_key": "k", "pricing_mode": "fixed"}
+    keys = {"openai_api_key": "k", "anthropic_api_key": "k", "gemini_api_key": "k", "pricing_mode": "fixed", "works_public": True}
     assert availability(Settings(works_enabled=[], **keys))["COURSEWORK"] == "soon"
     unpriced = {k: v for k, v in Settings().fixed_tokens.items() if k != "CW_1500"}
     assert availability(Settings(fixed_tokens=unpriced, works_enabled=["COURSEWORK"], **keys))["COURSEWORK"] == "soon"
     settings = Settings(works_enabled=["COURSEWORK"], **keys)
     assert availability(settings)["COURSEWORK"] == "available" and availability(settings)["FUNDING_PROPOSAL"] == "soon"
-    testing = Settings(works_enabled=["COURSEWORK"], tester_emails=["tester@example.com"], **keys)
-    assert availability(testing, User(uid="u1", email="someone@example.com", is_admin=False))["COURSEWORK"] == "invite_only"
-    assert availability(testing, User(uid="u2", email="Tester@example.com", is_admin=False))["COURSEWORK"] == "available"
+    someone, tester = User(uid="u1", email="someone@example.com", is_admin=False), User(uid="u2", email="Tester@example.com", is_admin=False)
+    pilot = {**keys, "works_public": False}
+    testing = Settings(works_enabled=["COURSEWORK"], tester_emails=["tester@example.com"], **pilot)
+    assert availability(testing, someone)["COURSEWORK"] == "invite_only" and availability(testing, tester)["COURSEWORK"] == "available"
+    # The pilot fails closed: an empty tester list opens the work services to no one but admins.
+    empty = Settings(works_enabled=["COURSEWORK"], tester_emails=[], **pilot)
+    assert availability(empty, someone)["COURSEWORK"] == "invite_only" and availability(empty, None)["COURSEWORK"] == "invite_only"
+    assert availability(empty, User(uid="a", email="admin@example.com", is_admin=True))["COURSEWORK"] == "available"
 
 
 def test_a_quote_freezes_roles_tier_price_table_and_content(works_client):

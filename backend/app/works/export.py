@@ -70,10 +70,11 @@ def _table(doc, rows: list[list[str]], caption: str) -> None:
         return
     title = doc.add_paragraph()
     title.add_run(caption).bold = True
-    grid = doc.add_table(rows=len(rows), cols=len(rows[0]))
+    width = max(len(row) for row in rows)  # uneven rows are padded, never cut (Codex audit 2026-09-30, second round)
+    grid = doc.add_table(rows=len(rows), cols=width)
     grid.style = "Table Grid"
     for r, row in enumerate(rows):
-        for c, value in enumerate(row):
+        for c, value in enumerate([*row, *[""] * (width - len(row))]):
             cell = grid.cell(r, c)
             cell.text = value
             for paragraph in cell.paragraphs:

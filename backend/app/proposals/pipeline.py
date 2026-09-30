@@ -305,24 +305,36 @@ def stage_planning(ctx: "StageContext") -> None:
 SAMPLING_DEFAULTS = {"margin": (0.0, 0.5, 0.05), "proportion": (0.0, 1.0, 0.5)}
 
 
+QUANTITATIVE = ("YAMANE", "COCHRAN", "KREJCIE_MORGAN")  # the methods whose calculation uses these settings
+
+
 def _sane_sampling(data: dict[str, Any]) -> None:
     """A sampling setting outside its range (a margin or proportion of 0, for a qualitative study)
     takes its standard value instead of discarding the whole plan; a population or stated size that
     is not a positive whole number is left for the student to give. Sizes are the student's anyway
-    (`_student_figures_only`)."""
+    (`_student_figures_only`). When the method calculates a sample from these settings, the student
+    is asked to confirm the standard values, which they can change in the plan before approving it
+    (Codex audit 2026-09-30, second round: never a quiet quantitative assumption)."""
     size = data.get("sampleSize")
     if not isinstance(size, dict):
         return
+    assumed = []
     for key, (low, high, default) in SAMPLING_DEFAULTS.items():
         value = size.get(key)
         if value is not None and not (isinstance(value, int | float) and low < value < high):
             size[key] = default
+            assumed.append(f"{'a margin of error of 5%' if key == 'margin' else 'an expected proportion of 0.5'}")
     for key in ("population", "stated"):
         value = size.get(key)
         if value is not None and not (isinstance(value, int) and value >= 1):
             size[key] = None
     if size.get("confidence") not in (90, 95, 99):
         size["confidence"] = 95
+        assumed.append("a 95% confidence level")
+    if assumed and size.get("method") in QUANTITATIVE:
+        ask = (f"The sample size calculation needs values the plan did not give, so PaperAid used the usual {', '.join(assumed)}. "
+               "Confirm these in the sample size settings, or change them, before approving the plan.")
+        data["questionsForStudent"] = [*[q for q in data.get("questionsForStudent", []) if isinstance(q, str)], ask]
 
 
 def _plan_from_model(data: dict[str, Any]) -> ProposalPlan:

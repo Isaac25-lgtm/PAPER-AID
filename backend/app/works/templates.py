@@ -100,29 +100,45 @@ SAME_PART = {
 }
 
 
+# Words that say nothing about which part a heading is ("Proposed budget" is a budget, not the
+# proposal's approach): never used to match a required name to a section.
+GENERIC = {"proposed", "indicative", "statement", "description", "overview", "detailed", "brief", "section", "plan", "key", "main", "outline", "full"}
+
+
+def _core(text: str) -> set[str]:
+    words = _words_of(text)
+    return (words - GENERIC) or words
+
+
 def _name_required(sections: list[PlanSection], required: list[str], target: int) -> list[PlanSection]:
     """Each section the call requires by name gets a heading with that name, locked: a section whose
-    heading already has it keeps it; otherwise the section that covers it is renamed (the same words
-    first, then usual equivalents: a call's "intervention" is PaperAid's "approach"), carrying both
-    names when it already carries one; failing that, a section is added (real-model pilot 2026-09-30:
-    "Proposed intervention" was written under "Approach" and the draft failed the required check)."""
+    heading already has it keeps it; otherwise the section that covers it is renamed (its meaningful
+    words first, then usual equivalents, then the section's purpose: a call's "intervention" is
+    PaperAid's "approach", never a "proposed budget"), carrying both names when it already carries
+    one; failing that, a section is added. A renamed section's brief names the call's heading, so its
+    content follows it (real-model pilot and Codex audit 2026-09-30)."""
     out = list(sections)
     names = [n for n in dict.fromkeys(" ".join(r.split()) for r in required if r.strip()) if _words_of(n)]
     carried: dict[int, list[str]] = {}  # section → the required names its heading must carry
     left = []
     for name in names:
-        index = next((n for n, s in enumerate(out) if _words_of(name) <= _words_of(s.heading)), None)
+        index = next((n for n, s in enumerate(out) if _core(name) <= _words_of(s.heading)), None)
         if index is None:
             left.append(name)
         else:
             carried.setdefault(index, []).append(name)
     kept = set(carried)  # headings that already name what the call asks: kept as written unless more is added
     template_locked = {n for n, s in enumerate(sections) if s.locked}
-    for loose in (False, True):
+    for level in ("same", "alike", "purpose"):
         for name in list(left):
-            words = _words_of(name)
-            wanted = words.union(*(SAME_PART.get(w, set()) for w in words)) if loose else words
-            scored = [(len(wanted & _words_of(sections[n].heading + " " + s.key.replace("_", " "))), n) for n, s in enumerate(out) if n not in template_locked]
+            core = _core(name)
+            wanted = core if level == "same" else core.union(*(SAME_PART.get(w, set()) for w in core))
+
+            def about(n: int, s: PlanSection, level: str = level) -> set[str]:
+                label = _words_of(sections[n].heading + " " + s.key.replace("_", " ")) - GENERIC
+                return label | (_words_of(s.brief) - GENERIC) if level == "purpose" else label
+
+            scored = [(len(wanted & about(n, s)), n) for n, s in enumerate(out) if n not in template_locked]
             score, index = max(scored, default=(0, -1))
             if score > 0:
                 carried.setdefault(index, []).append(name)
@@ -130,7 +146,9 @@ def _name_required(sections: list[PlanSection], required: list[str], target: int
                 left.remove(name)
     for index, carried_names in carried.items():
         heading = out[index].heading if index in kept else " and ".join(carried_names)
-        out[index] = out[index].model_copy(update={"heading": (heading[0].upper() + heading[1:])[:200], "locked": True, "required": True})
+        heading = (heading[0].upper() + heading[1:])[:200]
+        brief = out[index].brief if index in kept else f"{out[index].brief} The call asks for this under \"{heading}\"; write what that heading asks for."[:1500]
+        out[index] = out[index].model_copy(update={"heading": heading, "brief": brief, "locked": True, "required": True})
     for name in left:
         heading = (name[0].upper() + name[1:])[:200]
         each = max(100, round(target / max(1, len(out) + 1)))

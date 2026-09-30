@@ -27,7 +27,7 @@ def main() -> None:
             "ANTHROPIC_API_KEY": "sk-e2e",
             "GEMINI_API_KEY": "gm-e2e",
             # Every work service on, with test prices, so the browser journeys can run them.
-            "WORKS_ENABLED": '["CONCEPT_NOTE","COURSEWORK","FUNDING_PROPOSAL"]',
+            "WORKS_ENABLED": '["CONCEPT_NOTE","COURSEWORK","FUNDING_PROPOSAL"]', "WORKS_PUBLIC": "true",
             "MODEL_PRICES": '{"fake:gpt-6-sol":[0,0,0],"fake:gpt-6-luna":[0,0,0],"fake:claude-sonnet-5-5":[0,0,0],"fake:claude-opus-5-5":[0,0,0],"fake:gemini-3.8-flash":[0,0,0]}',
             "ADMIN_EMAILS": '["demo@paperaid.app"]',
             "ENV": "local",

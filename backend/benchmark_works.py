@@ -36,7 +36,7 @@ def main() -> int:
         return 1
     data = Path(tempfile.mkdtemp(prefix="paperaid-bench-"))
     os.environ.update({"DATA_DIR": str(data), "CREDITS_ENABLED": "false", "PRICING_MODE": "cost", "QUOTES_PER_HOUR": "1000", "SUBMITS_PER_HOUR": "1000",
-                       "WORKS_ENABLED": '["CONCEPT_NOTE","COURSEWORK","FUNDING_PROPOSAL"]', "UPLOADS_PER_HOUR": "1000", "LOG_LEVEL": "ERROR"})
+                       "WORKS_ENABLED": '["CONCEPT_NOTE","COURSEWORK","FUNDING_PROPOSAL"]', "WORKS_PUBLIC": "true", "UPLOADS_PER_HOUR": "1000", "LOG_LEVEL": "ERROR"})
     from fastapi.testclient import TestClient
 
     from app.main import create_app

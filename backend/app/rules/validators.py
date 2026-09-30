@@ -3,7 +3,8 @@
 that hold by construction, such as "references are rendered by code"). Semantic rules are judged by
 the evaluator; their verdicts arrive through `Context.semantic`.
 
-Statuses: PASS, FAIL, NEEDS_REVIEW (a check PaperAid cannot settle alone), NOT_APPLICABLE."""
+Statuses: PASS, FAIL, NEEDS_REVIEW (a check PaperAid cannot settle alone), WARN (a point to check that
+does not hold the document back), NOT_APPLICABLE."""
 
 import re
 from collections.abc import Callable
@@ -148,9 +149,13 @@ def _hidden(ctx: Context, rule: dict[str, Any]) -> Result:
 
 
 def _limits_hard_max(ctx: Context, rule: dict[str, Any]) -> Result:
+    """Every hard limit, each counted over its scope. A limit over its maximum fails; a page count
+    that is only estimated needs review; a total that goes over only if references and tables count,
+    when the instructions do not say, is a warning. Every finding is kept, never only the first
+    (Codex audit 2026-09-30, second round)."""
     if ctx.doc is None:
         return None
-    problems, notes = [], []
+    problems, review, unsure, notes = [], [], [], []
     for limit in ctx.spec.limits:
         if limit.type == "WORD":
             counted, possible = ctx.limit_texts(limit)
@@ -159,8 +164,9 @@ def _limits_hard_max(ctx: Context, rule: dict[str, Any]) -> Result:
             notes.append(f"{words:,} words against a limit of {int(limit.max):,}")
             if words > allowed:
                 problems.append(f"{words:,} words is over the {int(limit.max):,}-word limit")
-            elif words + extra > allowed:  # usually they do not count; the student is told the total if they do
-                notes.append(f"{words + extra:,} with the references and tables, if your instructions count them (they do not say)")
+            elif words + extra > allowed:  # usually they do not count; the student checks their instructions
+                unsure.append(f"{words:,} words, or {words + extra:,} with the references and tables, against the {int(limit.max):,}-word limit: "
+                              "your instructions do not say whether those count. Check before you submit")
         elif limit.type == "CHARACTER":
             counted, possible = ctx.limit_texts(limit)
             chars, extra = _count_chars(counted, limit.includes_spaces), _count_chars(possible, limit.includes_spaces)
@@ -168,19 +174,25 @@ def _limits_hard_max(ctx: Context, rule: dict[str, Any]) -> Result:
             if chars > limit.max:
                 problems.append(f"{chars:,} characters is over the {int(limit.max):,}-character limit")
             elif chars + extra > limit.max:
-                notes.append(f"{chars + extra:,} with the references and tables, if your instructions count them (they do not say)")
+                unsure.append(f"{chars:,} characters, or {chars + extra:,} with the references and tables, against the {int(limit.max):,}-character limit: "
+                              "your instructions do not say whether those count")
         elif limit.type == "PAGE":
             if ctx.pages is None:
                 counted, possible = ctx.limit_texts(limit)
                 estimate = _count_words(counted + possible) / 500
-                return ("NEEDS_REVIEW", f"About {estimate:.1f} pages at single spacing, estimated from its words. Check the page count in Word against the {int(limit.max)}-page limit.", "")
+                review.append(f"About {estimate:.1f} pages at single spacing, estimated from its words. Check the page count in Word against the {int(limit.max)}-page limit")
+                continue
             notes.append(f"{ctx.pages:g} pages (counted by PaperAid's renderer) against {int(limit.max)}")
             if ctx.pages > limit.max:
                 problems.append(f"{ctx.pages:g} pages is over the {int(limit.max)}-page limit")
-    if not notes and not problems:
+    if not notes and not problems and not review:
         return None
     if problems:
-        return ("FAIL", "; ".join(problems), "")
+        return ("FAIL", "; ".join(problems + review + unsure) + ".", "")
+    if review:
+        return ("NEEDS_REVIEW", "; ".join(review + unsure) + ".", "")
+    if unsure:
+        return ("WARN", "; ".join(unsure) + ".", "")
     return _ok("; ".join(notes) + ".")
 
 
@@ -224,6 +236,11 @@ def _field_count(ctx: Context, rule: dict[str, Any]) -> Result:
         return None
     by_field = {s.field_id: s for s in ctx.doc.sections if s.field_id}
     rendered = {k: t for k, _, t in ctx.sections()}
+    citer = ev.Citer(ctx.library, ctx.spec.citation_style)
+    for s in ctx.doc.sections:  # a box holds everything written in it, its table included (Codex audit, second round)
+        if s.field_id and s.table:
+            cells = [s.table_caption, *[c for row in s.table for c in row]]
+            rendered[s.key] = " ".join([rendered.get(s.key, ""), *[numbers.render(citer.render(c), ctx.tokens)[0] for c in cells if c]]).strip()
     over = []
     for f in ctx.spec.fields:
         section = by_field.get(f.id)
@@ -338,7 +355,7 @@ def _claims_supported(ctx: Context, rule: dict[str, Any]) -> Result:
     if problems:
         return ("FAIL", problems[0], "")
     if ctx.stripped:  # what is delivered meets the rule; the student re-reads where sentences were withheld
-        return _ok(f"Every citation that remains points to evidence PaperAid confirmed. Sentences PaperAid could not trace were withheld in: {', '.join(ctx.stripped)}; check those sections still read well.")
+        return ("WARN", f"Every citation that remains points to evidence PaperAid confirmed. Sentences PaperAid could not trace were withheld in: {', '.join(ctx.stripped)}; check those sections still read well.", "")
     return _ok("Every citation points to evidence PaperAid confirmed.")
 
 
@@ -383,7 +400,7 @@ def _figures_supported(ctx: Context, rule: dict[str, Any]) -> Result:
     if unknown:
         return ("FAIL", f"Figures PaperAid could not fill: {', '.join(dict.fromkeys(unknown))}.", "")
     if ctx.stripped:
-        return _ok("Every figure that remains comes from its source, your answers or your budget and Results Model; sentences with figures PaperAid could not trace were withheld.")
+        return ("WARN", "Every figure that remains comes from its source, your answers or your budget and Results Model; sentences with figures PaperAid could not trace were withheld: check those sections still read well.", "")
     return _ok("Every figure comes from its source, your answers or your budget and Results Model.")
 
 

@@ -46,7 +46,10 @@ def report(ctx: Context, stages: tuple[str, ...]) -> list[ReadinessItem]:
                 continue
             result, note, where = outcome
             basis = "AUTHOR" if validator in AUTHOR_VALIDATORS else "CODE"
-        item = ReadinessItem(id=rule["id"], question=rule["ui_message"], status=_status(result, rule["severity"]), basis=basis, note=note[:600], where=where, severity=rule["severity"])  # type: ignore[arg-type]
+        # "WARN": a point the student should check that does not hold the document back (an uncertainty
+        # such as whether references count toward a limit): shown as needing review, at warning level.
+        severity = "WARNING" if result == "WARN" and rule["severity"] == "BLOCKING" else rule["severity"]
+        item = ReadinessItem(id=rule["id"], question=rule["ui_message"], status=_status(result, rule["severity"]), basis=basis, note=note[:600], where=where, severity=severity)  # type: ignore[arg-type]
         key = (validator, note) if validator != "semantic" else (rule["id"], "")
         if key in seen:
             first = seen[key]

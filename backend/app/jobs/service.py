@@ -76,11 +76,19 @@ def availability(settings: Settings, user: "User | None" = None) -> dict[str, st
             result[service] = "soon"  # no invented prices: a work service without its token prices is not offered
         elif service in NEEDS_AI and not settings.ai_configured or service in WORKS and not settings.roles_configured:
             result[service] = "not_configured"
-        elif (service in NEEDS_AI or service in WORKS) and not may_use_ai(settings, user):  # works are limited to testers too
+        elif service in NEEDS_AI and not may_use_ai(settings, user) or service in WORKS and not may_use_works(settings, user):
             result[service] = "invite_only"
         else:
             result[service] = "available"
     return result
+
+
+def may_use_works(settings: Settings, user: "User | None") -> bool:
+    """The work services' pilot fails closed: only listed testers and admins, even with an empty
+    list, until `works_public` opens them (then the usual tester rule applies)."""
+    if settings.works_public:
+        return may_use_ai(settings, user)
+    return user is not None and (user.is_admin or user.email.lower() in {e.strip().lower() for e in settings.tester_emails})
 
 
 def may_use_ai(settings: Settings, user: "User | None") -> bool:

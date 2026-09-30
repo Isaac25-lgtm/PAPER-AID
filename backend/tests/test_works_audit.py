@@ -214,8 +214,8 @@ def test_references_count_when_the_scope_names_them_and_are_shown_when_it_is_sil
         return check(Context(spec=spec, stage="FINAL", inputs=WorkInputs(title="A work"), doc=_doc(950)), {"id": "SH-004"})
 
     assert result(["core_narrative", "references"])[0] == "FAIL"  # 950 + 300 against an all-inclusive 1,000
-    silent = result(["core"])  # the instructions do not say: the text itself is held to the limit, the total with them is shown
-    assert silent[0] == "PASS" and "1,250 with the references" in silent[1]
+    silent = result(["core"])  # the instructions do not say: a visible warning that does not hold the draft back
+    assert silent[0] == "WARN" and "1,250 with the references" in silent[1]
     assert result(["core_narrative"])[0] == "PASS"  # the references are stated not to count
 
 
@@ -276,7 +276,7 @@ def test_names_from_the_students_experience_never_reach_a_search(works_client):
     from app.works.models import WorkStepInput
 
     client = works_client
-    experience = "On placement I supported Sister Namuli at the clinic. The midwife Achieng showed me how referrals work in Kamuli."
+    experience = "On placement I supported Sister Namuli at the clinic. The midwife Achieng showed me how referrals work in Kamuli, Uganda."
     work = client.post("/api/works", headers=STUDENT, json={"kind": "COURSEWORK", "variant": "REFLECTIVE",
                                                             "inputs": {"title": "My placement in Kamuli",
                                                                        "description": "Reflect on your clinical placement in Kamuli and explain what it taught you about referrals.",
@@ -289,7 +289,8 @@ def test_names_from_the_students_experience_never_reach_a_search(works_client):
     rt = get_runtime()
     job = rt.store.get(quoted["job"]["id"])
     inp = WorkStepInput.model_validate_json(rt.files.get(f"{job.storage_prefix()}/internal/work_input.json"))
-    assert {"namuli", "achieng", "student"} <= set(inp.private) and "kamuli" not in inp.private  # the topic's own place stays searchable
+    # A name in the student's own account is protected even when the topic names it too; a country stays searchable.
+    assert {"namuli", "achieng", "student", "kamuli"} <= set(inp.private) and "uganda" not in inp.private
 
 
 # --- #9: frozen content is enforced -------------------------------------------------------------------
@@ -316,6 +317,13 @@ def test_a_step_priced_before_a_rule_changed_fails_without_charge(works_client, 
 
 
 def test_a_quote_verifies_its_number_and_unit_not_just_its_words():
+    # Codex audit, second round: a figure is read whole, and a limit's number is the one next to its unit.
+    assert not value_in_quote("ceiling", "USD 50", 50, "Grants of up to USD 50k are available.")
+    assert value_in_quote("ceiling", "USD 50,000", 50000, "Grants of up to USD 50k are available.")
+    assert not value_in_quote("limit.pages", "50 pages", 50, "A 5-page limit applies to all 50 applicants.")
+    assert value_in_quote("limit.pages", "5 pages", 5, "A 5-page limit applies to all 50 applicants.")
+    assert not value_in_quote("limit.words", "500", 500, "Essays must not exceed 1,500 words.")
+    assert not value_in_quote("ceiling", "1.5", 1.5, "Up to USD 1.5 million.")
     assert value_in_quote("limit.pages", "5 pages", 5, "The concept note has a 5-page maximum.")
     assert not value_in_quote("limit.pages", "50 pages", 50, "The concept note has a 5-page maximum.")
     assert not value_in_quote("limit.words", "1500", 1500, "No more than 1,500 characters.")

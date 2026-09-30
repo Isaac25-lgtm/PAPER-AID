@@ -509,3 +509,18 @@ def test_a_sampling_setting_out_of_range_takes_its_standard_value_not_the_plan(c
     assert job["status"] == "COMPLETED", job
     size = client.get(f"/api/projects/{project['id']}", headers=STUDENT).json()["plan"]["sampleSize"]
     assert size["margin"] == 0.05 and size["proportion"] == 0.5 and size["confidence"] == 95 and size["population"] is None
+    plan = client.get(f"/api/projects/{project['id']}", headers=STUDENT).json()["plan"]
+    assert not any("sample size calculation" in q for q in plan["questionsForStudent"])  # nothing is calculated from them
+
+
+
+def test_a_quantitative_plan_missing_its_sampling_settings_asks_the_student_to_confirm_them(client):
+    """Codex audit 2026-09-30, second round: a Cochran plan with a margin and proportion of 0 is never
+    quietly calculated on assumed values; the student is asked to confirm them before approving."""
+    sampled = {**PLAN, "sampleSize": {**PLAN.get("sampleSize", {}), "method": "COCHRAN", "margin": 0, "proportion": 0}}
+    client.models.overrides["p_finalise"] = lambda payload: sampled
+    project = _create(client)
+    job = _run(client, project["id"], "PLAN")
+    assert job["status"] == "COMPLETED", job
+    plan = client.get(f"/api/projects/{project['id']}", headers=STUDENT).json()["plan"]
+    assert any("margin of error of 5%" in q and "expected proportion of 0.5" in q for q in plan["questionsForStudent"])

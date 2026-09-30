@@ -144,8 +144,10 @@ def stage_analysing(ctx: "StageContext") -> None:
     inp = step_input(ctx)
     runner = _runner(ctx)
     texts = {s.id: ctx.rt.files.get(s.path).decode("utf-8") for s in inp.sources if ctx.rt.files.exists(s.path)}
-    if not texts:
-        raise PermanentStageError("SOURCES_MISSING", "Your documents are no longer stored. Upload them again. Nothing was charged.", "no source text")
+    gone = [s.name for s in inp.sources if s.id not in texts]
+    if gone:  # a document that cannot be read is never marked read (Codex audit 2026-09-30, second round)
+        raise PermanentStageError("SOURCES_MISSING", "Some of your documents are no longer stored: " + ", ".join(gone)[:300] + ". Upload them again. Nothing was charged.",
+                                  f"{len(gone)} source(s) missing")
     found: list[Any] = []
     unclear: list[str] = []
     readings: dict[str, Any] = {}
@@ -545,6 +547,9 @@ def _audit(ctx: "StageContext", runner: WorkRunner, inp: WorkStepInput, current:
     unresolved: dict[str, list[str]] = {}
     pending = [k for k in targets if k in current]
     for round_ in range(rounds + 1):
+        for key in pending:  # verdicts on earlier wording never carry over to repaired text (Codex audit, second round)
+            integrity.pop(key, None)
+            evaluations.pop(key, None)
         problems = {k: _checks(inp, sections[k], current[k], library_items, allowed, tokens) for k in pending}
         items = _review_items(inp, sections, current, problems, pending)
         integrity.update(runner.integrity([{**i, "lockedFacts": common["student"]} for i in items], {"spec": common["spec"], "student": common["student"]}))
@@ -684,7 +689,9 @@ def _document(inp: WorkStepInput, current: dict[str, SectionText], reviewed: set
         if text is None or not text.paragraphs:
             continue
         rows = [[c.strip() for c in r] for r in text.table.rows if any(c.strip() for c in r)]
-        table = rows if len(rows) >= 2 and len(rows[0]) >= 2 else None
+        width = max((len(r) for r in rows), default=0)
+        rows = [r + [""] * (width - len(r)) for r in rows]  # rectangular: a writer's uneven rows are padded, never cut
+        table = rows if len(rows) >= 2 and width >= 2 else None
         for field in [*text.paragraphs, *(_cells(text) if table else [])]:
             cited += [i for i in ev.cited_ids(field) if i not in cited]
         sections.append(WorkSection(key=s.key, heading=s.heading, paragraphs=text.paragraphs, table=table, table_caption=text.table.caption if table else "",
@@ -734,7 +741,14 @@ def stage_auditing(ctx: "StageContext") -> None:
         for key, revised in runner.repair(requests, _common(inp)).items():
             if key in targets:
                 current[key] = revised
+        # A requested section the writer did not return, or returned unchanged, was not revised: never
+        # charged for, and its request stays open (Codex audit 2026-09-30, second round).
+        unchanged = [k for k in targets if current[k] == original[k]]
+        if len(unchanged) == len(targets):
+            raise PermanentStageError("NOTHING_REVISED", "PaperAid could not make these changes this time, so your document is unchanged and nothing was charged.",
+                                      "revise: nothing returned changed")
     else:
+        unchanged = []
         current = {k: SectionText.model_validate(v) for k, v in ctx.get_json("drafted.json").items()}
         targets = [s.key for s in inp.plan.sections if s.key in current]
         missing = [s.heading for s in inp.plan.sections if s.required and s.key not in current]
@@ -742,12 +756,12 @@ def stage_auditing(ctx: "StageContext") -> None:
             raise PermanentStageError("DOCUMENT_INCOMPLETE", "PaperAid could not write every section of this draft within its limits. Nothing was charged; please try again.",
                                       f"not drafted: {', '.join(missing)}")
     library_items, tokens, allowed = _library(ctx, inp), _tokens(inp), _allowed_text(inp)
-    editable = list(targets)  # what this step may still change; a revision's other sections stay exactly as delivered
+    editable = [k for k in targets if k not in unchanged]  # what this step may still change; a revision's other sections stay exactly as delivered
     unresolved: dict[str, list[str]] = {}
     evaluations: dict[str, Evaluation] = {}
     integrity: dict[str, Any] = {}
     reviewed_text: dict[str, SectionText] = {}  # each section's text when it was last reviewed
-    reverted: list[str] = []
+    reverted: list[str] = list(unchanged)
 
     def review(keys: list[str], rounds: int | None = None) -> None:
         keys = [k for k in dict.fromkeys(keys) if k in current and k in editable]
@@ -814,6 +828,13 @@ def stage_auditing(ctx: "StageContext") -> None:
     if empty:
         raise PermanentStageError("DOCUMENT_NOT_VERIFIED", "PaperAid could not write parts of this draft that it could verify. Nothing was charged; please try again.",
                                   f"empty after checks: {', '.join(empty)}")
+    if base is not None:  # only sections whose saved text changed count as revised (and are charged for)
+        for key in [k for k in editable if current[k] == original[k]]:
+            editable.remove(key)
+            reverted.append(key)
+        if not editable:
+            raise PermanentStageError("NOTHING_REVISED", "PaperAid could not make these changes this time, so your document is unchanged and nothing was charged.",
+                                      "revise: nothing changed")
 
     document = _document(inp, current, set(evaluations) | set(integrity))
     if base is not None:
@@ -858,6 +879,11 @@ def stage_auditing(ctx: "StageContext") -> None:
     document.readiness = items
     document.status = compliance.overall(items, spec.exploratory)  # type: ignore[assignment]
     document.words = context.words()
+    from app.works import export
+
+    # The Word file is built once before the step can complete and be charged: a document that cannot
+    # be exported fails here, without charge, never at the student's download (Codex audit, second round).
+    export.build(document, spec, inp.results, inp.budget, library_items, tokens, draft=document.status == "NOT_READY")
     warnings = []
     if stripped:
         warnings.append(f"PaperAid withheld sentences it could not trace to confirmed evidence or your own details in: {', '.join(stripped)}.")

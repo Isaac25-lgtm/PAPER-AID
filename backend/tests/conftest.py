@@ -50,6 +50,7 @@ def _client(tmp_path, monkeypatch, pricing: str):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     monkeypatch.setenv("GEMINI_API_KEY", "gm-test")
+    monkeypatch.setenv("WORKS_PUBLIC", "true")  # the works tests use ordinary students, not invited testers
     monkeypatch.setenv("MODEL_PRICES", '{"fake:gpt-6-sol":[0,0,0],"fake:gpt-6-luna":[0,0,0],"fake:claude-sonnet-5-5":[0,0,0],"fake:claude-opus-5-5":[0,0,0],"fake:gemini-3.8-flash":[0,0,0]}')
     monkeypatch.setenv("ADMIN_EMAILS", '["demo@paperaid.app"]')
     monkeypatch.setenv("PRICING_MODE", pricing)

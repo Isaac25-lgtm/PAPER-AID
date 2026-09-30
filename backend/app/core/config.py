@@ -68,6 +68,9 @@ class Settings(BaseSettings):
     work_budget_cap_usd: dict[str, float] = {"CONCEPT_NOTE": 8.0, "COURSEWORK": 15.0, "FUNDING_PROPOSAL": 40.0}
     # New services are switched on here, one by one, once their token prices are set (owner).
     works_enabled: list[str] = []
+    # While false, the work services are open only to the invited testers and admins, even when the
+    # tester list is empty: the pilot fails closed (Codex audit 2026-09-30, second round).
+    works_public: bool = False
     # Rendered page counts with LibreOffice in the worker (Workstream H). Off: page limits are
     # estimated from words and shown as "Needs review".
     render_pages: bool = False

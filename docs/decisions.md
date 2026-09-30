@@ -307,3 +307,18 @@ Codex's review of the plan, adopted: nothing the student must settle is left to 
 - Testing prices (worst-case projection × 2): read 1; plan 3 (coursework, concept note) or 7 (funding); coursework 20 / 35 / 60 / 90 for up to 1,500 / 3,000 / 5,000 / 8,000 words; concept note 20 / 34 / 44; funding proposal 57 / 122 / 247; changes 17. To be set from real spend before students pay.
 - Real-model pilot (Gemini writer, Luna, Sonnet or Opus reviewers), actual spend: coursework plan $0.10, 1,500-word draft $0.32 (7.6 min), changes $0.04; concept note read $0.001, plan $0.15, standard draft $0.47 (10 min); funding plan $0.35, compact draft $1.66 (18 min). Actual spend is about a fifth of the worst-case projection or less.
 - Before public launch: credits on, a way to buy tokens (interim: mobile money confirmed by an admin; later a payment gateway), then the tester list removed.
+
+### 2026-09-30 — Codex's second audit of the works build: all 12 findings fixed
+
+1. **Requirement values:** a figure is read whole with its scale ("USD 50k" is 50,000, never 50; "1,500" never 1 or 500), and a limit's number must sit next to its unit ("a 5-page limit" is never 50 pages beside "50 applicants").
+2. **Word file before charging:** a writer's uneven table rows are padded (never cut), the Word writer tolerates uneven rows, and the Word file is built once before a step can complete, so an export fault fails the step without charge.
+3. **Revisions that change nothing:** a requested section the writer did not return, or returned unchanged, is not revised, charged or closed; if none changed, the step fails without charge.
+4. **Stale verdicts:** each review round clears the earlier verdicts of the sections it re-reviews, so repaired text is reviewed afresh or reported as not reviewed.
+5. **Sampling:** for a method that calculates a sample (Yamane, Cochran, Krejcie & Morgan), missing settings take the standard values and the plan asks the student to confirm them before approval; qualitative methods are filled quietly.
+6. **Required headings:** matching ignores generic words ("proposed", "indicative", "statement"...), then uses equivalents and the section's purpose; a renamed section's brief names the call's heading.
+7. **Pilot fails closed:** the work services are open only to listed testers and admins, even with an empty list, until `WORKS_PUBLIC=true` opens them for launch.
+8. **Uncertain limits:** when the instructions do not say whether references and tables count and they would exceed the limit, the item shows "Needs review" at warning level (new validator status WARN): visible, not blocking. The same applies to sections where untraceable sentences were withheld.
+9. **Missing documents:** a READ step with any stored document missing fails without charge and names it; nothing is marked read.
+10. **Private names:** capitalised names in the student's own account are private even when the topic names them; only countries and regions stay searchable.
+11. **Form boxes** count their table text.
+12. **Hard limits** keep every finding: an estimated page count no longer hides a word-limit failure.

@@ -607,13 +607,21 @@ def quote_step(rt: Runtime, user: User, work_id: str, step: Step, note: str) -> 
 TITLED = re.compile(r"\b(?:Dr|Mr|Mrs|Ms|Miss|Prof|Professor|Sister|Nurse|Pastor|Rev)\.?\s+([A-Z][a-z'’-]+(?:\s+[A-Z][a-z'’-]+)?)")
 
 
+# Countries and regions a student's experience may name that research searches need; no person is named so.
+PLACES = {
+    "africa", "african", "east", "west", "north", "south", "central", "sub", "saharan", "uganda", "ugandan", "kenya", "kenyan", "tanzania", "tanzanian", "rwanda",
+    "rwandan", "burundi", "ethiopia", "ethiopian", "somalia", "sudan", "congo", "drc", "zambia", "malawi", "mozambique", "zimbabwe", "nigeria", "nigerian", "ghana",
+    "ghanaian", "egypt", "morocco", "botswana", "namibia", "lesotho", "eswatini", "cameroon", "senegal", "europe", "asia", "america", "india", "china", "english",
+    "british", "american", "ministry", "health", "district", "hospital", "university", "national", "world", "organization", "organisation", "who", "unicef",
+}
+
+
 def _private_words(rt: Runtime, k: Work, user: User) -> list[str]:
     """Words that must never reach a web or scholarly search (Codex audit 2026-09-30 #8): the student's
     own name parts from their email, every titled name (Dr Okello, Sister Namuli) in their details and
     documents, and the capitalised names inside sentences of their own account of their experience,
-    except words of the topic itself, which the searches need. Checked on the queries proposed and on
-    those actually sent."""
-    topic = {w.lower() for w in re.findall(r"[A-Za-z'’-]+", " ".join([k.inputs.title, k.inputs.description]))}
+    even when the topic names them too (Codex audit, second round): only countries and regions stay
+    searchable. Checked on the queries proposed and on those actually sent."""
     words = {w.lower() for w in re.split(r"[^A-Za-z]+", user.email.split("@")[0]) if len(w) > 2}
     texts = [k.inputs.description, k.inputs.experience, *k.inputs.answers.values()]
     texts += [rt.files.get(s.path).decode("utf-8") for s in k.sources if rt.files.exists(s.path)]
@@ -622,7 +630,7 @@ def _private_words(rt: Runtime, k: Work, user: User) -> list[str]:
             words |= {w.lower() for w in match.group(1).split()}
     for sentence in re.split(r"(?<=[.!?])\s+|\n+", k.inputs.experience):
         inner = re.findall(r"[A-Za-z'’-]+", sentence)[1:]  # a sentence's first word is capitalised anyway
-        words |= {w.lower() for w in inner if w[0].isupper() and len(w) > 2} - topic
+        words |= {w.lower() for w in inner if w[0].isupper() and len(w) > 2} - PLACES
     return sorted(words - signals.STOPWORDS)[:500]
 
 

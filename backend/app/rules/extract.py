@@ -104,50 +104,63 @@ NUMBER_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, 
                 "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19, "twenty": 20, "thirty": 30,
                 "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90}
 SCALES = {"hundred": 100, "thousand": 1_000, "k": 1_000, "million": 1_000_000, "m": 1_000_000, "billion": 1_000_000_000, "bn": 1_000_000_000}
-FIGURE = re.compile(r"(\d{1,3}(?:[,  ]\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)\s*(hundred|thousand|million|billion|bn|k|m)?\b", re.IGNORECASE)
-PLAIN = re.compile(r"\d+(?:\.\d+)?")
+# A figure read whole: "1,500" is 1,500 (never 1 and 500) and "50k" is 50,000 (never 50).
+FIGURE = re.compile(r"(?<![\d.,])(\d{1,3}(?:,\d{3})+|\d+)(\.\d+)?(?:[ \u00a0]?(hundred|thousand|million|billion|bn|k|m)\b)?", re.IGNORECASE)
+WORD = re.compile(r"[a-z]+")
 # What a quote must also name for its value to count as read (Codex audit 2026-09-30 #10).
 UNIT_WORDS = {"limit.words": ("word",), "limit.words_min": ("word",), "limit.pages": ("page", "side"), "limit.characters": ("character", "char")}
+UNIT_GAP = 14  # characters between a limit's number and its unit ("1,500 words", "5-page", "2,000-word maximum")
 STYLE_WORDS = ("apa", "harvard", "mla", "chicago", "ieee", "vancouver", "oscola", "turabian")
 CURRENCY_MARKS = {"USD": ("usd", "$", "dollar"), "EUR": ("eur", "€", "euro"), "GBP": ("gbp", "£", "pound"), "UGX": ("ugx", "shilling"), "KES": ("kes", "shilling")}
 
 
-def _numbers_in(text: str) -> set[float]:
-    """Every number a quote states, in figures ("1,500", "50k", "1.5 million") or words ("two
-    thousand five hundred", "ten")."""
-    found: set[float] = {float(n) for n in PLAIN.findall(text)}  # each number on its own, and grouped ("2,000", "2 000")
+def _figures(text: str) -> list[tuple[float, int]]:
+    """Every number a quote states, each read whole with its scale, with where it ends: in figures
+    ("1,500", "50k", "1.5 million") or in words ("two thousand five hundred")."""
+    found: list[tuple[float, int]] = []
     for m in FIGURE.finditer(text):
-        value = float(re.sub(r"[,\s ]", "", m.group(1)))
-        found.add(value)
-        if m.group(2):
-            found.add(value * SCALES[m.group(2).lower()])
-    total, part = 0.0, 0.0
-    for word in re.findall(r"[a-z]+", text.casefold()):
+        value = float(m.group(1).replace(",", "") + (m.group(2) or ""))
+        found.append((value * SCALES[m.group(3).lower()] if m.group(3) else value, m.end()))
+    total, part, last = 0.0, 0.0, 0
+    for m in WORD.finditer(text.casefold()):
+        word = m.group(0)
         if word in NUMBER_WORDS:
-            part += NUMBER_WORDS[word]
+            part, last = part + NUMBER_WORDS[word], m.end()
         elif word == "hundred" and part:
-            part *= 100
+            part, last = part * 100, m.end()
         elif word in ("thousand", "million", "billion") and part:
-            total += part * SCALES[word]
-            part = 0.0
+            total, part, last = total + part * SCALES[word], 0.0, m.end()
         elif word != "and" and (total or part):
-            found.add(total + part)
+            found.append((total + part, last))
             total, part = 0.0, 0.0
     if total or part:
-        found.add(total + part)
+        found.append((total + part, last))
     return found
 
 
+def _numbers_in(text: str) -> set[float]:
+    return {value for value, _ in _figures(text)}
+
+
 def value_in_quote(key: str, value: str, number: float | None, quote: str) -> bool:
-    """The extracted value agrees with its own quote: its number is stated there (a duration in
-    months may be stated in years), a limit names its unit, a referencing style and a currency are
-    named. A value the quote does not show is shown to the student to confirm."""
+    """The extracted value agrees with its own quote (Codex audit 2026-09-30 #10, second round): its
+    number is stated there whole, with its scale ("USD 50k" is never 50); a limit's number is the one
+    next to its unit ("a 5-page limit" is never 50 pages, even beside "50 applicants"); a duration in
+    months may be stated in years; a referencing style and a currency are named. Anything else is
+    shown to the student to confirm."""
     words = quote.casefold()
     if number is not None:
-        stated = _numbers_in(quote)
-        if number not in stated and not (key == "duration_months" and number / 12 in stated):
+        figures = _figures(quote)
+        if key in UNIT_WORDS:
+            units = UNIT_WORDS[key]
+            if not any(v == number and any(u in words[end : end + UNIT_GAP] for u in units) for v, end in figures):
+                return False
+        elif key == "duration_months":
+            if not any(v == number or (v == number / 12 and "year" in words[end : end + UNIT_GAP]) for v, end in figures):
+                return False
+        elif number not in {v for v, _ in figures}:
             return False
-    if key in UNIT_WORDS and not any(u in words for u in UNIT_WORDS[key]):
+    elif key in UNIT_WORDS and not any(u in words for u in UNIT_WORDS[key]):
         return False
     if key == "citation_style":
         named = [s for s in STYLE_WORDS if s in value.casefold().replace(" ", "")]
