@@ -81,7 +81,11 @@ PROMPTS = {p.stem: p.read_text(encoding="utf-8") for p in (Path(__file__).parent
 BATCH_WORDS = 1500
 NOT_RETURNED = "NOT_RETURNED"  # the writer gave no rewrite for a planned passage
 
-Role = Literal["lead", "writer"]
+# lead / writer: the Paper Check and proposal algorithm (four models). The capitalised roles are the
+# works algorithm (owner decision 2026-09-30): each maps to a model in `Settings.role_models`, and
+# EVALUATOR resolves to the standard or premium evaluator of the service's tier.
+Role = Literal["lead", "writer", "ANALYST", "WRITER", "INTEGRITY", "EVALUATOR", "ADJUDICATOR"]
+WORK_ROLES = ("ANALYST", "WRITER", "INTEGRITY", "EVALUATOR", "ADJUDICATOR")
 
 
 @dataclass(frozen=True)
@@ -147,6 +151,25 @@ STEPS: dict[str, Step] = {
     "p_profile_review_peer": Step("writer", Stage.PLANNING, "p-profile-review-v1", 8000),
     # Review of an uploaded proposal: the lead audits it against the rulebook (it is never rewritten).
     "p_audit": Step("lead", Stage.ANALYSING, "p-audit-v1", 12000),
+    # Works (rulebook v1.0; worker → evaluator → repair, owner decision 2026-09-30). Cheap models read
+    # and check, the writer plans, drafts and repairs, the evaluator judges each section against the
+    # rules that apply to it, and only failing sections are repaired and judged again.
+    "w_read": Step("ANALYST", Stage.ANALYSING, "w-read-v1", 12000),
+    "w_needs": Step("ANALYST", Stage.RESEARCHING, "w-needs-v1", 4000),
+    "w_extract": Step("ANALYST", Stage.RESEARCHING, "p-extract-v1", 4000),
+    "w_search": Step("ANALYST", Stage.RESEARCHING, "p-search-v1", 4000),
+    "w_verify": Step("INTEGRITY", Stage.RESEARCHING, "verify-v1", 6000),
+    "w_plan": Step("WRITER", Stage.PLANNING, "w-plan-v1", 12000),
+    "w_plan_review": Step("EVALUATOR", Stage.PLANNING, "w-plan-review-v1", 6000),
+    "w_results": Step("WRITER", Stage.PLANNING, "w-results-v1", 16000),
+    "w_results_review": Step("EVALUATOR", Stage.PLANNING, "w-results-review-v1", 8000),
+    "w_draft": Step("WRITER", Stage.DRAFTING, "w-draft-v1", 16000),
+    "w_integrity": Step("INTEGRITY", Stage.AUDITING, "w-integrity-v1", 6000),
+    "w_evaluate": Step("EVALUATOR", Stage.AUDITING, "w-evaluate-v1", 8000),
+    "w_repair": Step("WRITER", Stage.AUDITING, "w-repair-v1", 16000),
+    "w_adjudicate": Step("ADJUDICATOR", Stage.AUDITING, "w-adjudicate-v1", 4000),
+    "w_final": Step("EVALUATOR", Stage.AUDITING, "w-final-v1", 8000),
+    "w_compress": Step("WRITER", Stage.AUDITING, "w-compress-v1", 12000),
 }
 
 
@@ -157,6 +180,13 @@ DRAFTING_TASKS = {"critique", "refine", "repair", "redraft", "redraft_fix", "ver
 
 def model_for_engine(engine: Engine, task: str) -> str:
     """One routing rule shared by execution and the cost projection, using frozen run settings."""
+    role = STEPS[task].role
+    if role in WORK_ROLES:
+        key = ("EVALUATOR_PREMIUM" if engine.tier == "PREMIUM" else "EVALUATOR_STANDARD") if role == "EVALUATOR" else role
+        model = engine.roles.get(key, "")
+        if not model:
+            raise PermanentStageError("ENGINE_CHANGED", "PaperAid was updated after this step was priced. Nothing was charged; please start it again.", f"role {key} not in engine")
+        return model
     if task in ("analyse", "analyse_after"):
         return engine.ai_check_model or engine.lead_model
     if task in ("analyse_peer", "analyse_after_peer"):
@@ -166,6 +196,46 @@ def model_for_engine(engine: Engine, task: str) -> str:
     if task in DRAFTING_TASKS and engine.drafting_model:
         return engine.drafting_model
     return engine.lead_model if STEPS[task].role == "lead" else engine.writer_model
+
+
+def work_engine(settings: Settings, service: str) -> Engine:
+    """The engine a work step priced now runs with: the current routes plus the work roles, the
+    service's tier, the dated price table in force, and a hash of every prompt, rule file, validator
+    set and render profile it executes (Codex review 2026-09-30 #5: freeze behaviour, not names)."""
+    from app.rules import library
+
+    engine = current_engine(settings)
+    return engine.model_copy(
+        update={
+            "roles": {k: v for k, v in settings.role_models.items() if v},
+            "tier": settings.service_tiers.get(service, "STANDARD"),
+            "price_table": costs.table_in_force(),
+            "rules_version": library.VERSION,
+            "content": content_now(),
+        }
+    )
+
+
+def content_now() -> dict[str, str]:
+    """The hash of every prompt, rule file, validator set and render profile this release runs."""
+    from app.rules import library
+
+    content = {f"prompt:{v}": hashlib.sha256(PROMPTS[v].replace("\r\n", "\n").encode()).hexdigest()[:16] for v in sorted({s.prompt for s in STEPS.values()})}
+    content.update(library.content_hashes())
+    return content
+
+
+def check_content(engine: Engine | None) -> None:
+    """A step runs only on exactly what it was priced with (Codex audit 2026-09-30 #9): a release that
+    changed any prompt, rule file, validator set or render profile its quote froze refuses it before
+    any paid call or rule is run, and the step fails without charge."""
+    if engine is None or not engine.content:
+        return
+    now = content_now()
+    changed = sorted(k for k, v in engine.content.items() if now.get(k) != v)
+    if changed:
+        raise PermanentStageError("ENGINE_CHANGED", "PaperAid was updated after this step was priced. Nothing was charged; please start it again.",
+                                  "content changed: " + ", ".join(changed)[:300])
 
 
 def current_engine(settings: Settings) -> Engine:
@@ -556,6 +626,7 @@ class AIRunner:
         # Every executed step must be in the engine the run was priced with (Codex audit 56c4f83 M28).
         if task not in self._engine.prompts:
             raise PermanentStageError("ENGINE_CHANGED", "PaperAid was updated after this job was priced. Nothing was charged; please start it again.", f"task {task} not in engine")
+        check_content(self._engine)
         return self._engine.prompts[task]
 
     def _call[T: BaseModel](
@@ -587,15 +658,16 @@ class AIRunner:
         self._heartbeat()
         provider, model = provider_for(model_ref, self.settings)
         prices = self.settings.model_prices
+        table = self._engine.price_table  # the projection and cap use the table the step was priced with
         prompt_chars = len(system) + len(json.dumps(payload))
         fee = 0.0
         if max_searches:  # the pages the searches read arrive as input, and each search has a fee
             prompt_chars += int(costs.SEARCH_INPUT_TOKENS_WORST * costs.CEILING_CHARS_PER_TOKEN) * max_searches
             fee = costs.search_fee_usd(provider.name, max_searches)
         spent = self._spent()
-        costs.ensure_within_budget(spent, costs.estimate_usd(provider.name, model, prompt_chars, step.max_tokens, prices) + fee, self._budget)
+        costs.ensure_within_budget(spent, costs.estimate_usd(provider.name, model, prompt_chars, step.max_tokens, prices, table) + fee, self._budget)
         # Hard ceiling: never allow more output than the remaining budget can pay for in the worst case.
-        max_tokens = costs.affordable_output_tokens(provider.name, model, prompt_chars, step.max_tokens, self._budget - spent - fee, prices)
+        max_tokens = costs.affordable_output_tokens(provider.name, model, prompt_chars, step.max_tokens, self._budget - spent - fee, prices, table)
         if max_tokens < min(costs.MIN_OUTPUT_TOKENS, step.max_tokens):
             costs.ensure_within_budget(spent, float("inf"), self._budget)  # raises BUDGET_EXCEEDED
         if max_searches:
@@ -615,6 +687,8 @@ class AIRunner:
                 cached_tokens=u.cached_tokens,
                 cache_write_tokens=u.cache_write_tokens,
                 search_calls=u.search_calls,
+                task=task,
+                role=("EVALUATOR_PREMIUM" if self._engine.tier == "PREMIUM" else "EVALUATOR_STANDARD") if step.role == "EVALUATOR" else step.role,
                 latency_ms=u.latency_ms,
                 cost_usd=costs.cost_usd(result.provider, result.model, u.input_tokens, u.output_tokens, u.cached_tokens, prices, u.cache_write_tokens, u.search_calls),
             )

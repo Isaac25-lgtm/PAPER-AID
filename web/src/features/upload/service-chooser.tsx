@@ -1,5 +1,5 @@
 import { clsx } from 'clsx'
-import { ArrowRight, Check, FilePen, FileSearch } from 'lucide-react'
+import { ArrowRight, Check, FilePen, FileSearch, HandCoins, Lightbulb, NotebookPen } from 'lucide-react'
 import { Link } from 'react-router'
 import { Badge, PageHeader } from '../../components/ui/primitives'
 import { useData } from '../../lib/data'
@@ -18,6 +18,7 @@ export interface JobType {
   selection?: Partial<ServiceSelection> // undefined: a link elsewhere (a proposal project)
   to?: string
   icon: typeof FilePen
+  soon?: string[]
 }
 
 const section = (info: SectionInfo, selection: Partial<ServiceSelection>): JobType => ({
@@ -29,6 +30,7 @@ const section = (info: SectionInfo, selection: Partial<ServiceSelection>): JobTy
   accepts: info.accepts,
   selection,
   icon: info.icon,
+  soon: info.soon,
 })
 const [PAPER_CHECK_INFO, PROPOSALS_INFO, FORMAT_INFO] = SECTIONS
 const PAPER_CHECK = section(PAPER_CHECK_INFO, { writing: 'AI_CHECK' })
@@ -52,6 +54,16 @@ export const JOB_GROUPS: { title: string; types: JobType[] }[] = [
         icon: FileSearch,
       },
       {
+        id: 'PROPOSAL_CONCEPT',
+        service: 'PROPOSAL',
+        name: 'Write a concept note',
+        short: 'Your research concept paper first: researched evidence, a plan you approve, then the concept paper. Continue into the full proposal when ready.',
+        youGet: ['A plan you edit and approve first', 'A concept paper written from confirmed sources', 'Continue into the full proposal on the same project'],
+        accepts: 'Your topic and study details (no upload needed)',
+        to: '/app/projects/new?goal=CONCEPT',
+        icon: Lightbulb,
+      },
+      {
         id: 'PROPOSAL_PROJECT',
         service: 'PROPOSAL',
         name: 'Write a research proposal',
@@ -60,6 +72,46 @@ export const JOB_GROUPS: { title: string; types: JobType[] }[] = [
         accepts: 'Your topic and study details (no upload needed)',
         to: '/app/projects/new',
         icon: FilePen,
+      },
+    ],
+  },
+  {
+    title: 'Coursework',
+    types: [
+      {
+        id: 'COURSEWORK',
+        service: 'COURSEWORK',
+        name: 'Write coursework',
+        short: 'Essays, reports, case studies, literature reviews, short research papers and reflective work, planned from your brief.',
+        youGet: ['Every part of the question found and planned', 'A draft from confirmed sources in your referencing style', 'Each rubric criterion checked (not a grade)'],
+        accepts: 'Your question, plus the brief and rubric if you have them',
+        to: '/app/works/new?kind=COURSEWORK',
+        icon: NotebookPen,
+      },
+    ],
+  },
+  {
+    title: 'Funding',
+    types: [
+      {
+        id: 'CONCEPT_NOTE',
+        service: 'CONCEPT_NOTE',
+        name: 'Write a concept note',
+        short: 'A funding or project concept note, checked against the call.',
+        youGet: ['What the call requires, read and quoted', 'A plan you approve first', 'Every limit and form box checked'],
+        accepts: 'Your idea, plus the call or template if you have one',
+        to: '/app/works/new?kind=CONCEPT_NOTE',
+        icon: Lightbulb,
+      },
+      {
+        id: 'FUNDING_PROPOSAL',
+        service: 'FUNDING_PROPOSAL',
+        name: 'Write a funding proposal',
+        short: 'A full proposal built on your Results Model, with the budget and tables checked by code.',
+        youGet: ['Eligibility and requirements read from the call', 'Logframe, workplan and M&E table from your Results Model', 'Every budget sum checked'],
+        accepts: 'The call and template, plus your project details',
+        to: '/app/works/new?kind=FUNDING_PROPOSAL',
+        icon: HandCoins,
       },
     ],
   },
@@ -92,7 +144,7 @@ export function ServiceChooser() {
     <>
       <PageHeader title="What would you like PaperAid to do?" description="Choose the job first. You upload your paper on the next page and see the price before anything starts." />
       <div className="space-y-8">
-        {JOB_GROUPS.map((group) => (
+        {JOB_GROUPS.filter((group) => group.types.some((t) => config.availability[t.service] !== 'soon') || group.title === PAPER_CHECK_INFO.name).map((group) => (
           <section key={group.title} aria-labelledby={`group-${group.title}`}>
             <h2 id={`group-${group.title}`} className="mb-3 text-sm font-semibold tracking-wide text-fg-subtle uppercase">
               {group.title}
@@ -121,6 +173,11 @@ export function ServiceChooser() {
                         </li>
                       ))}
                     </ul>
+                    {type.soon?.map((item) => (
+                      <p key={item} className="mt-2 flex items-center gap-2 text-xs text-fg-subtle">
+                        {item} <Badge>Coming soon</Badge>
+                      </p>
+                    ))}
                     <p className="mt-auto pt-4 text-xs text-fg-subtle">{type.accepts}</p>
                     {!reason && (
                       <span className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-brand-700">

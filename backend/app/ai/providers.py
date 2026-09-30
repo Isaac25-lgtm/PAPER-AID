@@ -1,5 +1,5 @@
-"""Provider adapters. The only module that imports the OpenAI and Anthropic SDKs; the rest of
-the system sees provider-neutral `ModelResult`s. Retries here are limited to one SDK retry —
+"""Provider adapters. The only module that imports the OpenAI and Anthropic SDKs or calls the
+Gemini API; the rest of the system sees provider-neutral `ModelResult`s. Retries here are limited to one SDK retry —
 the job queue owns retry policy, so retries never nest into storms."""
 
 import json
@@ -218,6 +218,75 @@ class OpenAIProvider:
         )
 
 
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+# Why Gemini stopped: these mean the answer was blocked, which ends the step like a refusal.
+GEMINI_BLOCKED = {"SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "IMAGE_SAFETY", "LANGUAGE"}
+
+
+class GeminiProvider:
+    """Gemini through the Gemini API (paid tier: prompts are not used to improve Google's products),
+    called over HTTPS with structured output. Thinking tokens are billed as output, so they are
+    counted as output. Web search stays on the OpenAI lead."""
+
+    name = "google"
+
+    def __init__(self, settings: Settings):
+        import httpx
+
+        if settings.gemini_api_key is None or not settings.gemini_api_key.get_secret_value().strip():
+            raise PermanentStageError("AI_NOT_CONFIGURED", AI_NOT_CONFIGURED, "the Gemini key is required for google:* roles")
+        self._httpx = httpx
+        self._key = settings.gemini_api_key.get_secret_value()
+        self._timeout = settings.provider_timeout_sec
+
+    def json(self, task: str, model: str, system: str, payload: dict[str, Any], schema: dict[str, Any], max_tokens: int) -> ModelResult:
+        httpx = self._httpx
+        started = time.monotonic()
+        body = {
+            "systemInstruction": {"parts": [{"text": system}]},
+            "contents": [{"role": "user", "parts": [{"text": render_user_message(payload)}]}],
+            "generationConfig": {"responseMimeType": "application/json", "responseJsonSchema": schema, "maxOutputTokens": max_tokens},
+        }
+        try:
+            response = httpx.post(GEMINI_URL.format(model=model), json=body, headers={"x-goog-api-key": self._key}, timeout=self._timeout)
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            raise RetryableStageError("PROVIDER_UNAVAILABLE", UNAVAILABLE, f"google {type(exc).__name__}") from exc
+        status = response.status_code
+        if status == 429 or status >= 500:
+            raise RetryableStageError("PROVIDER_UNAVAILABLE", UNAVAILABLE, f"google {status}")
+        if status in (401, 403):
+            # An expired key or an empty prepaid balance: the step fails and its credits come back.
+            raise PermanentStageError("PROVIDER_CONFIG", MISCONFIGURED, f"google {status}")
+        if status != 200:
+            raise PermanentStageError("PROVIDER_REJECTED", "We couldn't process this document.", f"google {status}")
+        data = response.json()
+        usage = data.get("usageMetadata") or {}
+        cached = int(usage.get("cachedContentTokenCount") or 0)
+        output = int(usage.get("candidatesTokenCount") or 0) + int(usage.get("thoughtsTokenCount") or 0)
+        candidates = data.get("candidates") or []
+        first = candidates[0] if candidates else {}
+        finish = first.get("finishReason", "")
+        blocked = bool((data.get("promptFeedback") or {}).get("blockReason")) or finish in GEMINI_BLOCKED
+        text = "".join(part.get("text", "") for part in (first.get("content") or {}).get("parts", []) if not part.get("thought"))
+        return ModelResult(
+            text=text,
+            stop="refusal" if blocked else "max_tokens" if finish == "MAX_TOKENS" else "end_turn",
+            usage=Usage(
+                input_tokens=max(0, int(usage.get("promptTokenCount") or 0) - cached),
+                output_tokens=output,
+                cached_tokens=cached,
+                latency_ms=int((time.monotonic() - started) * 1000),
+            ),
+            provider=self.name,
+            model=model,
+        )
+
+    def search_json(
+        self, task: str, model: str, system: str, payload: dict[str, Any], schema: dict[str, Any], max_tokens: int, max_searches: int
+    ) -> ModelResult:
+        raise PermanentStageError("SEARCH_NOT_SUPPORTED", MISCONFIGURED, "web search runs on the OpenAI lead only")
+
+
 def parse(text: str, task: str) -> dict[str, Any]:
     try:
         data = json.loads(text)
@@ -235,4 +304,6 @@ def provider_for(model_ref: str, settings: Settings) -> tuple[Provider, str]:
         return AnthropicProvider(settings), model
     if provider == "openai":
         return OpenAIProvider(settings), model
+    if provider == "google":
+        return GeminiProvider(settings), model
     raise PermanentStageError("PROVIDER_CONFIG", MISCONFIGURED, f"unknown provider in {model_ref!r}")

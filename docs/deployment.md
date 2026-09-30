@@ -187,6 +187,30 @@ Procedure:
 5. To roll forward again, move traffic back to the new revisions and deploy hosting again; nothing else
    needs undoing.
 
+### Releasing works (concept notes, coursework, funding proposals) and rolling back
+
+Two releases, in this order:
+
+1. **The tolerant release** (the rollback point): the new records are readable (the `works` collection,
+   work steps in `jobs`, the new service ids, `goal` on proposal projects); a work step fails at once with
+   its credits returned; works are deleted with their accounts and expire after 30 days; a concept-note
+   project never prices or starts Chapter One; the work services show as "soon". Checked on 2026-09-30
+   against records written by the full release (a finished plan step, a queued draft step holding
+   credits, a concept-note project): every record read, the queued step failed and its hold came back,
+   and account deletion removed the work, its steps and its files.
+2. **The full release**, on the same image settings plus:
+   - the Gemini key: `printf '%s' 'KEY' | gcloud secrets create GEMINI_API_KEY --replication-policy=user-managed --locations=europe-west1 --data-file=-`,
+     readable by both service accounts, and `--update-secrets GEMINI_API_KEY=GEMINI_API_KEY:latest` on both services;
+   - `WORKS_ENABLED` left empty until the owner sets each service's token prices in `FIXED_TOKENS`
+     (`WORK_PRICE_KEYS` in `app/pricing/quote.py`); a service without every price stays "coming soon";
+   - `RENDER_PAGES=false` until the owner approves the larger image. Turning it on needs an image built with
+     `--build-arg WITH_LIBREOFFICE=true`, which `gcloud builds submit --tag` cannot pass: use a
+     `cloudbuild.yaml` with a `docker build` step instead.
+
+Rollback from the full release: pause processing, wait for no job PROCESSING, move the worker then the
+API to the tolerant revisions, roll hosting back to the tolerant release, resume processing. Work steps
+still queued then fail with a refund; every record stays readable; nothing else needs undoing.
+
 ## Release log
 
 | Date | Commit | Image | API revision | Worker revision | Hosting release |

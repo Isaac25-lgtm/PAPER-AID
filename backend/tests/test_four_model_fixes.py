@@ -9,7 +9,7 @@ import pytest
 from docx import Document
 
 from app.ai import orchestration
-from app.ai.orchestration import PROMPTS, STEPS, current_engine, model_for_engine
+from app.ai.orchestration import PROMPTS, STEPS, current_engine, model_for_engine, work_engine
 from app.analysis.signals import MODEL_SCORE
 from app.core.config import Settings
 from app.core.errors import RetryableStageError
@@ -75,7 +75,10 @@ def test_older_engines_keep_removing_untraceable_text_after_review(client, monke
 def test_no_prompt_gives_a_model_a_role_it_does_not_have():
     engine = current_engine(Settings(_env_file=None))
     models_by_prompt: dict[str, set[str]] = {}
+    engine = work_engine(Settings(_env_file=None), "FUNDING_PROPOSAL")  # every role, the works roles included
     for task in STEPS:
+        if STEPS[task].role == "ADJUDICATOR" and not engine.roles.get("ADJUDICATOR"):
+            continue  # no adjudicator is configured by default
         models_by_prompt.setdefault(engine.prompts[task], set()).add(model_for_engine(engine, task))
     for prompt, models in models_by_prompt.items():
         opening = PROMPTS[prompt].split("\n\n")[0]

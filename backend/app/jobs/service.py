@@ -54,26 +54,27 @@ from app.jobs.models import (
 )
 from app.pricing import credits
 from app.pricing.billing import hold_for_job, refund_job, release_hold
-from app.pricing.quote import ai_cap_usd, bound_quote, estimate_charged, estimate_scan_usd, needs_estimate, with_margin
+from app.pricing.quote import ai_cap_usd, bound_quote, estimate_charged, estimate_scan_usd, needs_estimate, with_margin, work_prices_set
 from app.proposals.models import Project, moved_path
 from app.runtime import Runtime
 from app.works.models import Work
 
 logger = logging.getLogger("paperaid.jobs")
 
-BUILT = ("AI_CHECK", "REFINE", "FORMAT", "TEMPLATE_FORMAT", "SOURCE_CHECK", "REDRAFT", "LATEX", "PROPOSAL")
-NEEDS_AI = ("AI_CHECK", "REFINE", "TEMPLATE_FORMAT", "SOURCE_CHECK", "REDRAFT", "PROPOSAL")
+BUILT = ("AI_CHECK", "REFINE", "FORMAT", "TEMPLATE_FORMAT", "SOURCE_CHECK", "REDRAFT", "LATEX", "PROPOSAL", "CONCEPT_NOTE", "COURSEWORK", "FUNDING_PROPOSAL")
+NEEDS_AI = ("AI_CHECK", "REFINE", "TEMPLATE_FORMAT", "SOURCE_CHECK", "REDRAFT", "PROPOSAL", "CONCEPT_NOTE", "COURSEWORK", "FUNDING_PROPOSAL")
+WORKS = ("CONCEPT_NOTE", "COURSEWORK", "FUNDING_PROPOSAL")
 
 
 def availability(settings: Settings, user: "User | None" = None) -> dict[str, str]:
-    """"soon" = not built yet; "not_configured" = built, but the AI keys are not set;
-    "invite_only" = testing is limited to invited testers and this user isn't one."""
+    """"soon" = not built yet, or (a work service) not switched on or not priced yet; "not_configured"
+    = built, but the AI keys are not set; "invite_only" = testing is limited to invited testers and
+    this user isn't one."""
     result = {}
-    # The work services are not in this release: they are listed, never offered (a rollback target).
-    for service in ("AI_CHECK", "REFINE", "FORMAT", "TEMPLATE_FORMAT", "REDRAFT", "LATEX", "SOURCE_CHECK", "PROPOSAL", "CONCEPT_NOTE", "COURSEWORK", "FUNDING_PROPOSAL"):
-        if service not in BUILT:
-            result[service] = "soon"
-        elif service in NEEDS_AI and not settings.ai_configured:
+    for service in ("AI_CHECK", "REFINE", "FORMAT", "TEMPLATE_FORMAT", "REDRAFT", "LATEX", "SOURCE_CHECK", "PROPOSAL", *WORKS):
+        if service not in BUILT or (service in WORKS and (service not in settings.works_enabled or not work_prices_set(settings, service))):
+            result[service] = "soon"  # no invented prices: a work service without its token prices is not offered
+        elif service in NEEDS_AI and not settings.ai_configured or service in WORKS and not settings.roles_configured:
             result[service] = "not_configured"
         elif service in NEEDS_AI and not may_use_ai(settings, user):
             result[service] = "invite_only"
@@ -569,9 +570,10 @@ def _priced_input_intact(j: Job) -> bool:
 
 
 ProjectGate = Callable[[Job, Project | None], Project | None]
+WorkGate = Callable[[Job, Work | None], Work | None]
 
 
-def submit(rt: Runtime, user: User, job_id: str, quote_id: str, project_gate: ProjectGate | None = None) -> JobView:
+def submit(rt: Runtime, user: User, job_id: str, quote_id: str, project_gate: ProjectGate | None = None, work_gate: WorkGate | None = None) -> JobView:
     """Accept a quote. A proposal step is submitted through its project (app.proposals.service),
     whose `project_gate` runs in the same transaction as the hold: it refuses (None) or returns the
     project with the step claimed, so a project can never be deleted between its claim and the
@@ -579,8 +581,8 @@ def submit(rt: Runtime, user: User, job_id: str, quote_id: str, project_gate: Pr
     job = _owned(rt, user, job_id)
     if job.project_id and project_gate is None:
         raise AppError("Start this step from the proposal's page.", code="PROPOSAL_STEP")
-    if job.work_id:  # a work step priced by a later release: this release cannot run it
-        raise AppError("This service is not available right now.", code="SERVICE_UNAVAILABLE")
+    if job.work_id and work_gate is None:
+        raise AppError("Start this step from its page.", code="WORK_STEP")
     if job.status in state.SUBMITTED and job.quote and job.quote.id == quote_id:
         return job.view()  # double click or retried request: the same submission, nothing new
     if job.status != JobStatus.QUOTED or job.quote is None or job.quote.id != quote_id:
@@ -633,6 +635,16 @@ def submit(rt: Runtime, user: User, job_id: str, quote_id: str, project_gate: Pr
 
         triple = rt.store.update_job_wallet_and_project(job.id, job.project_id, accept_step)
         result = (triple[0], triple[1]) if triple else None
+    elif job.work_id:
+        assert work_gate is not None
+
+        def accept_work(j: Job, w: Wallet, k: Work | None) -> tuple[Job, Wallet, Work] | None:
+            claimed = work_gate(j, k)
+            accepted = accept(j, w) if claimed is not None else None
+            return (accepted[0], accepted[1], claimed) if accepted is not None and claimed is not None else None
+
+        triple_work = rt.store.update_job_wallet_and_work(job.id, job.work_id, accept_work)
+        result = (triple_work[0], triple_work[1]) if triple_work else None
     else:
         result = rt.store.update_job_and_wallet(job.id, accept)
     updated = result[0] if result else None
@@ -1114,8 +1126,8 @@ def cleanup_expired(rt: Runtime) -> int:
 
 
 def step_running(rt: Runtime, p: Project | Work) -> bool:
-    """A step of this project is queued or running. Its claim (`active_job`) is set in the same
-    transaction that holds the step's credits (app.jobs.service.submit)."""
+    """A step of this project (or work) is queued or running. Its claim (`active_job`) is set in the
+    same transaction that holds the step's credits (app.jobs.service.submit)."""
     return bool(p.active_job) and (step := rt.store.get(p.active_job or "")) is not None and step.status in ACTIVE
 
 
@@ -1214,14 +1226,14 @@ def cleanup_expired_projects(rt: Runtime) -> int:
 
 
 def _erase_work(rt: Runtime, work: Work, expired_before: datetime | None = None) -> bool:
-    """Delete a work (a later release's concept note, coursework or funding proposal): its record,
-    its files and every job run for it. Claimed first, like a proposal project."""
+    """Delete a work: its record, its files, and every job run for it (their frozen inputs and
+    saved AI answers hold the student's text). Claimed first, like a proposal project."""
 
     def mark(k: Work) -> Work | None:
         if k.deleting:
-            return k
+            return k  # an interrupted deletion: finish it
         if expired_before is not None and k.expires_at >= expired_before:
-            return None
+            return None  # renewed since it was listed
         if step_running(rt, k):
             return None
         k.deleting = True
@@ -1235,7 +1247,7 @@ def _erase_work(rt: Runtime, work: Work, expired_before: datetime | None = None)
         claimed = _mark_deleting(rt, job.id)
         if claimed is None:
             if rt.store.get(job.id) is not None:
-                return False
+                return False  # cannot be erased yet (a hold is still settling): resumed next time
             continue
         _erase(rt, claimed)
     rt.files.delete_prefix(work.storage_prefix())
@@ -1244,6 +1256,7 @@ def _erase_work(rt: Runtime, work: Work, expired_before: datetime | None = None)
 
 
 def cleanup_expired_works(rt: Runtime) -> int:
+    """Delete works 30 days after the student's last action, like proposal projects."""
     cutoff, erased = utcnow(), 0
     for work_id in rt.store.expired_work_ids(cutoff):
         work = rt.store.get_work(work_id)

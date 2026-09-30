@@ -52,7 +52,7 @@ def _step_usd(settings: Settings, task: str, payload_chars: float, words: float,
     provider, _, model = model_for_engine(engine, task).partition(":")
     batches = max(1, math.ceil(words / BATCH_WORDS))
     per_batch = len(PROMPTS[engine.prompts.get(task, step.prompt)]) + payload_chars / batches
-    return batches * costs.estimate_usd(provider, model, int(per_batch), step.max_tokens, settings.model_prices)
+    return batches * costs.estimate_usd(provider, model, int(per_batch), step.max_tokens, settings.model_prices, engine.price_table)
 
 
 # --- projections (USD of provider spend) ------------------------------------------------------
@@ -204,6 +204,62 @@ def proposal_usd(settings: Settings, step: str, words: int, engine: Engine | Non
     return usd
 
 
+SPEC_CHARS = 9000  # a resolved specification as the models see it
+WORK_STUDENT_CHARS = 6000  # the student's own description, answers and experience
+
+
+def work_usd(settings: Settings, step: str, kind: str, words: int, engine: Engine) -> float:
+    """A work step at its worst (owner decision 2026-09-30): every research need read in the student's
+    readings and the scholarly index and searched on the web, every finding checked; the plan drafted,
+    reviewed and redrafted (for funding also the Results Model); the draft written, then every audit
+    round (integrity, evaluation and repair), the whole-document review and its repair, and two
+    compression rounds. `words` is the target length (READ: the documents' words; REVISE: the
+    revised text)."""
+    e = engine
+    base = SPEC_CHARS + WORK_STUDENT_CHARS
+    if step == "READ":  # every part of every document, in calls of at most READ_CHARS (works.pipeline.read_parts)
+        from app.works.pipeline import READ_CHARS, READ_OVERLAP
+
+        chars = words * CHARS_PER_WORD
+        calls = max(1, math.ceil(chars / (READ_CHARS - READ_OVERLAP)))
+        return calls * _step_usd(settings, "w_read", chars / calls + READ_OVERLAP + 4000, 0, e)
+    usd = 0.0
+    if step in ("PLAN", "DRAFT"):
+        needs = 5 if step == "PLAN" else 8
+        provider, _, model = model_for_engine(e, "w_search").partition(":")
+        searches = settings.research_max_searches
+        per_need = 2 * _step_usd(settings, "w_extract", settings.proposal_works_per_need * 3200, 0, e)
+        per_need += costs.estimate_usd(provider, model, 1500 + costs.SEARCH_INPUT_TOKENS_WORST * 4 * searches, STEPS["w_search"].max_tokens, settings.model_prices, e.price_table)
+        per_need += costs.search_fee_usd(provider, searches)
+        found = needs * 3
+        usd += _step_usd(settings, "w_needs", base + LIBRARY_ITEMS * 200, 0, e) + needs * per_need + _step_usd(settings, "w_verify", found * 1600, found * 250, e)
+    evidence_chars = (8 * 3 + LIBRARY_ITEMS) * EVIDENCE_ITEM_CHARS
+    if step == "PLAN":
+        plan_chars = base + evidence_chars + 6000
+        usd += 2 * _step_usd(settings, "w_plan", plan_chars, 0, e) + _step_usd(settings, "w_plan_review", plan_chars + 8000, 0, e)
+        if kind == "FUNDING_PROPOSAL":
+            usd += 2 * _step_usd(settings, "w_results", plan_chars + 12000, 0, e) + _step_usd(settings, "w_results_review", plan_chars + 20000, 0, e)
+        return usd
+    batches = _batches_for(words)
+    section_input = batches * (base + BRIEF_CHARS) + evidence_chars * 2 + words * 2
+    review_input = batches * (base + 4000) + words * CHARS_PER_WORD * 2
+    rounds = settings.repair_attempts
+    if step == "DRAFT":
+        usd += _step_usd(settings, "w_draft", section_input, words, e)
+    else:  # REVISE: the requested changes first
+        usd += _step_usd(settings, "w_repair", section_input + words * CHARS_PER_WORD, words, e)
+    for _ in range(2):  # the audit, and the audit again after the whole-document review's repairs
+        usd += (rounds + 1) * (_step_usd(settings, "w_integrity", review_input, words * 2, e) + _step_usd(settings, "w_evaluate", review_input, words * 2, e))
+        usd += rounds * _step_usd(settings, "w_repair", section_input + words * CHARS_PER_WORD, words, e)
+        if e.roles.get("ADJUDICATOR"):
+            usd += (rounds + 1) * _step_usd(settings, "w_adjudicate", review_input, words, e)
+    usd += 2 * _step_usd(settings, "w_final", base + words * CHARS_PER_WORD * 1.2 + 6000, 0, e) + _step_usd(settings, "w_repair", section_input, words, e)
+    usd += 2 * _step_usd(settings, "w_compress", section_input + words * CHARS_PER_WORD, words, e)
+    # What compression or withholding changed is reviewed again, as it will be published (Codex audit 2026-09-30 #2).
+    usd += _step_usd(settings, "w_integrity", review_input, words * 2, e) + _step_usd(settings, "w_evaluate", review_input, words * 2, e)
+    return usd
+
+
 def revise_usd(settings: Settings, words: int, engine: Engine | None = None) -> float:
     """Sections revised from supervisor comments at their worst: the first fix, every review and
     further fix round, and the chapter's readiness check again. `words` is the revised text."""
@@ -292,13 +348,15 @@ def price(
     engine: Engine | None = None,
     part: float = 1.0,
     cap: int | None = None,
+    note: str = "",
 ) -> Priced:
     """Quote lines for a selection. Under the fixed policy each AI service has its price by page
     band; under the cost policy (refinement priced from its estimate's `passages`) each is its
     worst-case AI cost as a ceiling. Either way the job's spend cap is the worst-case projection,
     so quality is never cut to fit a price."""
     fixed_mode = settings.pricing_mode == "fixed"
-    e = engine or current_engine(settings)  # the engine the run will execute with (its routes and prompts)
+    e = engine or current_engine(settings)
+    label_note = f": {note}" if note else ""  # the engine the run will execute with (its routes and prompts)
     services: list[tuple[str, str, float, int | None]] = []  # (key, label, worst-case USD, banded words)
     if selection.writing == "AI_CHECK":
         services.append(("AI_CHECK", "Writing check", analysis_usd(settings, words, e), words))
@@ -332,6 +390,11 @@ def price(
         services.append((selection.proposal, label, proposal_usd(settings, selection.proposal, words, e), None))
     if selection.formatting == "TEMPLATE_FORMAT":
         services.append(("TEMPLATE_FORMAT", "University template formatting", template_usd(settings, guide_words, e), words))
+    if selection.work != "NONE":
+        banded = words if selection.work == "REVISE" else None
+        usd = work_usd(settings, selection.work, selection.work_kind, words, e)
+        ceiling = settings.work_budget_cap_usd.get(selection.work_kind)
+        services.append((selection.work_band, WORK_LABELS.get(selection.work_band, selection.work_band) + label_note, min(usd, ceiling) if ceiling else usd, banded))
 
     lines: list[QuoteLine] = []
     if fee_paid:
@@ -371,11 +434,12 @@ def bound_quote(
     scope_words: int | None = None,
     part: float = 1.0,
     cap: int | None = None,
+    note: str = "",
 ) -> BoundQuote:
     """A quote bound to the exact files, selection and engine it priced, with the rate and
     multiplier frozen. `fee_paid` is every estimate already charged on the job: it counts toward the
     quote, so accepting holds only the rest."""
-    priced = price(settings, selection, words, guide_words, passages, fee_paid, scope_words, engine=engine, part=part, cap=cap)
+    priced = price(settings, selection, words, guide_words, passages, fee_paid, scope_words, engine=engine, part=part, cap=cap, note=note)
     return BoundQuote(
         id=f"quote_{secrets.token_hex(6)}",
         lines=priced.lines,
@@ -394,6 +458,29 @@ def bound_quote(
         estimate_id=estimate_id,
         budget_usd=priced.budget_usd if settings.pricing_mode == "fixed" else 0.0,
     )
+
+
+WORK_LABELS = {
+    "WORK_READ": "Reading your documents", "WORK_REVISE": "Your requested changes",
+    "CN_PLAN": "Concept note plan", "CN_BRIEF": "Concept note, brief", "CN_STANDARD": "Concept note, standard", "CN_EXTENDED": "Concept note, extended",
+    "CW_PLAN": "Coursework plan", "CW_1500": "Coursework draft, up to 1,500 words", "CW_3000": "Coursework draft, up to 3,000 words",
+    "CW_5000": "Coursework draft, up to 5,000 words", "CW_8000": "Coursework draft, up to 8,000 words",
+    "FP_PLAN": "Funding proposal plan and Results Model", "FP_COMPACT": "Funding proposal, compact", "FP_STANDARD": "Funding proposal, standard",
+    "FP_COMPREHENSIVE": "Funding proposal, comprehensive",
+}
+# Every token price a work service needs (owner sets them from the benchmark; none are invented).
+WORK_PRICE_KEYS: dict[str, tuple[str, ...]] = {
+    "CONCEPT_NOTE": ("WORK_READ", "CN_PLAN", "CN_BRIEF", "CN_STANDARD", "CN_EXTENDED", "WORK_REVISE"),
+    "COURSEWORK": ("WORK_READ", "CW_PLAN", "CW_1500", "CW_3000", "CW_5000", "CW_8000", "WORK_REVISE"),
+    "FUNDING_PROPOSAL": ("WORK_READ", "FP_PLAN", "FP_COMPACT", "FP_STANDARD", "FP_COMPREHENSIVE", "WORK_REVISE"),
+}
+
+
+def work_prices_set(settings: Settings, service: str) -> bool:
+    """A work service can be offered only with every one of its prices (the cost policy needs none)."""
+    if settings.pricing_mode != "fixed":
+        return True
+    return all(settings.fixed_tokens.get(key, 0) > 0 for key in WORK_PRICE_KEYS.get(service, ("",)))
 
 
 def needs_estimate(selection: ServiceSelection, settings: Settings) -> bool:

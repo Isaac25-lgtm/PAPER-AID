@@ -83,7 +83,18 @@ def row(job: dict, default_rate: float) -> dict:
         "spendOfPrice": round(spend * ugx_per_usd / price, 3) if price else None,
         "spendOfCharge": round(spend * ugx_per_usd / charged, 3) if charged else None,
         "lostUgx": round(spend * ugx_per_usd) if status in ("FAILED", "CANCELLED") or (spend and not charged) else 0,
+        # spend by who made each call (lead, writer, or a works role such as WRITER or EVALUATOR_PREMIUM), and by step
+        "byRole": _sum(job, "role"),
+        "byTask": _sum(job, "task"),
     }
+
+
+def _sum(job: dict, key: str) -> dict:
+    out: dict[str, float] = {}
+    for call in job.get("modelCalls") or []:
+        name = call.get(key) or "-"
+        out[name] = round(out.get(name, 0.0) + float(call.get("costUsd") or 0), 6)
+    return out
 
 
 def summary(rows: list[dict]) -> dict:
@@ -102,6 +113,8 @@ def summary(rows: list[dict]) -> dict:
         "spendUsd": round(sum(r["spendUsd"] for r in rows), 2),
         "chargedUgx": sum(r["chargedUgx"] for r in rows),
         "lostUgx": sum(r["lostUgx"] for r in rows),  # AI spend on jobs that brought in nothing
+        "spendByRoleUsd": _merge(r["byRole"] for r in rows),
+        "spendByTaskUsd": _merge(r["byTask"] for r in rows),
         "byService": {
             name: {
                 "jobs": len(group),
@@ -113,6 +126,14 @@ def summary(rows: list[dict]) -> dict:
             for name, group in sorted(by_service.items())
         },
     }
+
+
+def _merge(parts) -> dict:
+    total: dict[str, float] = {}
+    for part in parts:
+        for name, usd in part.items():
+            total[name] = round(total.get(name, 0.0) + usd, 4)
+    return dict(sorted(total.items(), key=lambda kv: -kv[1]))
 
 
 def main() -> int:

@@ -4,6 +4,7 @@ Runs the real app on :8000 with both AI roles answered by tests.fake_models, dum
 own data folder (backend/.data_e2e), so browser-test jobs never mix with real ones and no provider
 is called. Usage: cd backend && .venv/Scripts/python -m tests.serve_e2e"""
 
+import json
 import os
 import shutil
 import tempfile
@@ -24,7 +25,10 @@ def main() -> None:
             "DATA_DIR": str(DATA),
             "OPENAI_API_KEY": "sk-e2e",
             "ANTHROPIC_API_KEY": "sk-e2e",
-            "MODEL_PRICES": '{"fake:gpt-6-sol":[0,0,0],"fake:gpt-6-luna":[0,0,0],"fake:claude-sonnet-5-5":[0,0,0],"fake:claude-opus-5-5":[0,0,0]}',
+            "GEMINI_API_KEY": "gm-e2e",
+            # Every work service on, with test prices, so the browser journeys can run them.
+            "WORKS_ENABLED": '["CONCEPT_NOTE","COURSEWORK","FUNDING_PROPOSAL"]',
+            "MODEL_PRICES": '{"fake:gpt-6-sol":[0,0,0],"fake:gpt-6-luna":[0,0,0],"fake:claude-sonnet-5-5":[0,0,0],"fake:claude-opus-5-5":[0,0,0],"fake:gemini-3.8-flash":[0,0,0]}',
             "ADMIN_EMAILS": '["demo@paperaid.app"]',
             "ENV": "local",
             "CREDITS_ENABLED": "true",  # the browser journey covers credits, whatever the local .env says
@@ -32,6 +36,13 @@ def main() -> None:
             "SUBMITS_PER_HOUR": "500",
         }
     )
+    from app.core.config import Settings, get_settings
+
+    # Test prices for the work services, in the browser-test backend only (the product has none until the owner sets them).
+    work_tokens = {"WORK_READ": 1, "CN_PLAN": 2, "CN_BRIEF": 3, "CN_STANDARD": 4, "CN_EXTENDED": 6, "CW_PLAN": 2, "CW_1500": 4, "CW_3000": 6, "CW_5000": 8, "CW_8000": 11,
+                   "FP_PLAN": 3, "FP_COMPACT": 8, "FP_STANDARD": 12, "FP_COMPREHENSIVE": 18, "WORK_REVISE": 2}
+    os.environ["FIXED_TOKENS"] = json.dumps({**Settings(_env_file=None).fixed_tokens, **work_tokens})
+    get_settings.cache_clear()
     from app.ai import costs, orchestration
     from app.main import create_app
     from tests.fake_models import FakeModels

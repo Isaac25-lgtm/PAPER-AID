@@ -1,6 +1,6 @@
 import * as Menu from '@radix-ui/react-dropdown-menu'
 import { clsx } from 'clsx'
-import { FileCheck2, GraduationCap, History, LayoutDashboard, LogOut, Menu as MenuIcon, Plus, Search, Settings, ShieldCheck, Wallet } from 'lucide-react'
+import { FileCheck2, GraduationCap, HandCoins, History, LayoutDashboard, LogOut, Menu as MenuIcon, NotebookPen, Plus, Search, Settings, ShieldCheck, Wallet } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router'
 import { useAuth } from '../../features/auth/auth-context'
@@ -22,7 +22,8 @@ export function AppLayout() {
 
   useEffect(() => setMenuOpen(false), [location.pathname, location.search])
 
-  // The three sections are one click away from anywhere (owner decision 2026-09-29).
+  // The sections are one click away from anywhere (owner decisions 2026-09-29 and 2026-09-30). A new
+  // section appears only once the server offers it.
   const service = new URLSearchParams(location.search).get('service') ?? (new URLSearchParams(location.search).get('review') ? 'PROPOSAL_REVIEW' : '')
   const onNew = (...ids: string[]) => location.pathname === '/app/new' && ids.includes(service)
   const offered = (id: ServiceId) => config.availability[id] !== 'soon'
@@ -33,6 +34,12 @@ export function AppLayout() {
       : []),
     ...(offered('PROPOSAL')
       ? [{ to: '/app/projects', label: 'Research Proposals', icon: GraduationCap, active: location.pathname.startsWith('/app/projects') || onNew('PROPOSAL_REVIEW') }]
+      : []),
+    ...(offered('COURSEWORK')
+      ? [{ to: '/app/works?section=COURSEWORK', label: 'Coursework', icon: NotebookPen, active: location.pathname.startsWith('/app/works') && (new URLSearchParams(location.search).get('section') ?? 'COURSEWORK') === 'COURSEWORK' && !location.search.includes('kind=CONCEPT') && !location.search.includes('kind=FUNDING') }]
+      : []),
+    ...(offered('CONCEPT_NOTE') || offered('FUNDING_PROPOSAL')
+      ? [{ to: '/app/works?section=FUNDING', label: 'Funding', icon: HandCoins, active: location.pathname.startsWith('/app/works') && (location.search.includes('section=FUNDING') || location.search.includes('kind=CONCEPT') || location.search.includes('kind=FUNDING')) }]
       : []),
     ...(offered('FORMAT')
       ? [{ to: '/app/new?service=ACADEMIC_FORMAT', label: 'Academic Formatting', icon: FileCheck2, active: onNew('ACADEMIC_FORMAT', 'FORMAT', 'TEMPLATE_FORMAT', 'LATEX') }]

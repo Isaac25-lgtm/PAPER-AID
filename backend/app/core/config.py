@@ -47,6 +47,29 @@ class Settings(BaseSettings):
     model_prices: dict[str, tuple[float, float, float]] = {}  # "provider:model" → USD per 1M (input, output, cached input)
     anthropic_api_key: SecretStr | None = None
     openai_api_key: SecretStr | None = None
+    gemini_api_key: SecretStr | None = None  # Secret Manager GEMINI_API_KEY (paid tier), for roles on google:*
+
+    # Works (concept notes, coursework, funding proposals; owner decisions 2026-09-30). Each role is a
+    # "provider:model" in configuration, so changing API in January is a settings change; a quote
+    # freezes the roles, the tier and the dated price table it was priced with.
+    role_models: dict[str, str] = {
+        "ANALYST": "openai:gpt-6-luna",  # reads documents, extracts requirements, plans research, classifies
+        "WRITER": "google:gemini-3.8-flash",  # plans, drafts and repairs
+        "INTEGRITY": "openai:gpt-6-luna",  # checks meaning is kept and nothing is invented; checks evidence
+        "EVALUATOR_STANDARD": "anthropic:claude-sonnet-5-5",
+        "EVALUATOR_PREMIUM": "anthropic:claude-opus-5-5",
+        "ADJUDICATOR": "",  # none configured: an unresolved disagreement becomes "Needs review"
+    }
+    # Which reviewers run behind each service's price. Students never choose or see a tier.
+    service_tiers: dict[str, str] = {"CONCEPT_NOTE": "STANDARD", "COURSEWORK": "STANDARD", "FUNDING_PROPOSAL": "PREMIUM"}
+    # The most one step of each service may spend on providers (USD); past it the step stops
+    # escalating and what is left is marked for review, never overspent (B5).
+    work_budget_cap_usd: dict[str, float] = {"CONCEPT_NOTE": 1.5, "COURSEWORK": 2.5, "FUNDING_PROPOSAL": 6.0}
+    # New services are switched on here, one by one, once their token prices are set (owner).
+    works_enabled: list[str] = []
+    # Rendered page counts with LibreOffice in the worker (Workstream H). Off: page limits are
+    # estimated from words and shown as "Needs review".
+    render_pages: bool = False
     provider_timeout_sec: float = 180
     writer_effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
 
@@ -140,6 +163,18 @@ class Settings(BaseSettings):
     @property
     def ai_configured(self) -> bool:
         return all(key is not None and key.get_secret_value().strip() for key in (self.openai_api_key, self.anthropic_api_key))
+
+    @property
+    def roles_configured(self) -> bool:
+        """Every provider a configured work role needs has its key."""
+        keys = {"openai": self.openai_api_key, "anthropic": self.anthropic_api_key, "google": self.gemini_api_key}
+        for ref in self.role_models.values():
+            if not ref:
+                continue
+            key = keys.get(ref.partition(":")[0])
+            if key is None or not key.get_secret_value().strip():
+                return False
+        return True
 
 
 @lru_cache

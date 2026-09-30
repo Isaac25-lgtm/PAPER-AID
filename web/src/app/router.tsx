@@ -14,6 +14,7 @@ import { isStaleBuildError, reloadForUpdate } from '../lib/stale-build'
 const lists = () => import('../features/jobs/list-pages')
 const admin = () => import('../features/admin/admin-pages')
 const proposals = () => import('../features/proposals/projects-page')
+const works = () => import('../features/works/works-page')
 
 function Root() {
   return (
@@ -88,6 +89,9 @@ export const router = createBrowserRouter([
               { path: '/app/projects', lazy: () => proposals().then((m) => ({ Component: m.ProjectsPage })) },
               { path: '/app/projects/new', lazy: () => proposals().then((m) => ({ Component: m.NewProjectPage })) },
               { path: '/app/projects/:projectId', lazy: () => import('../features/proposals/project-page').then((m) => ({ Component: m.ProjectPage })) },
+              { path: '/app/works', lazy: () => works().then((m) => ({ Component: m.WorksPage })) },
+              { path: '/app/works/new', lazy: () => works().then((m) => ({ Component: m.NewWorkPage })) },
+              { path: '/app/works/:workId', lazy: () => import('../features/works/work-page').then((m) => ({ Component: m.WorkPage })) },
               { path: '/app/credits', lazy: () => import('../features/credits/credits-page').then((m) => ({ Component: m.CreditsPage })) },
               { path: '/app/settings', lazy: () => import('../features/account/settings-page').then((m) => ({ Component: m.SettingsPage })) },
               {

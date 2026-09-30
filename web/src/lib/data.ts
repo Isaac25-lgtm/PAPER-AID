@@ -18,6 +18,7 @@ import type {
   WalletSummary,
 } from './types'
 import type { ChapterView, CitationStyle, Comparison, EvidenceItem, FeedbackStatus, Project, ProposalInputs, ProposalPlan, Rulebook, SampleSize, StepId, StepQuote, TitlePage } from './proposal-types'
+import type { Budget, ResultsModel, SourceRole, Work, WorkCitation, WorkDocumentView, WorkInputs, WorkKind, WorkPlan, WorkStep, WorkStepQuote } from './work-types'
 
 export interface JobQuery {
   cursor?: string | null
@@ -79,7 +80,9 @@ export interface DataSource {
     rulebook(): Promise<Rulebook>
     list(): Promise<Project[]>
     get(id: string): Promise<Project | null>
-    create(inputs: ProposalInputs, titlePage: TitlePage, citation: CitationStyle): Promise<Project>
+    create(inputs: ProposalInputs, titlePage: TitlePage, citation: CitationStyle, goal?: 'FULL' | 'CONCEPT'): Promise<Project>
+    /** A concept-note project becomes a full proposal (nothing starts by itself). */
+    continueToFull(id: string): Promise<Project>
     updateDetails(id: string, inputs: ProposalInputs, titlePage: TitlePage, citation: CitationStyle): Promise<Project>
     /** `baseVersion` is the plan version the edit started from; a stale edit is refused (409). */
     savePlan(id: string, plan: ProposalPlan, baseVersion: number): Promise<Project>
@@ -110,6 +113,34 @@ export interface DataSource {
     /** The institution's research guide, read into a profile by the PROFILE step. */
     uploadGuide(id: string, file: File): Promise<Project>
     useDefaultRulebook(id: string): Promise<Project>
+  }
+  /** Works: concept notes, coursework and funding proposals. Every edit names its base version. */
+  works: {
+    list(): Promise<Work[]>
+    get(id: string): Promise<Work | null>
+    create(kind: WorkKind, variant: string, mode: string, inputs: WorkInputs, citation: WorkCitation): Promise<Work>
+    updateDetails(id: string, inputs: WorkInputs, change: { mode?: string; variant?: string; citation?: WorkCitation }, baseVersion: number): Promise<Work>
+    answer(id: string, answers: Record<string, string>, baseVersion: number, skipRest?: boolean): Promise<Work>
+    confirm(id: string, baseVersion: number): Promise<Work>
+    setAiNote(id: string, on: boolean): Promise<Work>
+    uploadSource(id: string, role: SourceRole, file: File): Promise<Work>
+    pasteSource(id: string, role: SourceRole, name: string, text: string): Promise<Work>
+    removeSource(id: string, sourceId: string): Promise<Work>
+    savePlan(id: string, plan: WorkPlan, baseVersion: number): Promise<Work>
+    approvePlan(id: string, baseVersion: number): Promise<Work>
+    takeCandidate(id: string, accept: boolean): Promise<Work>
+    saveResults(id: string, results: ResultsModel, baseVersion: number): Promise<Work>
+    approveResults(id: string, baseVersion: number): Promise<Work>
+    saveBudget(id: string, budget: Budget, baseVersion: number): Promise<Work>
+    quoteStep(id: string, step: WorkStep, note: string): Promise<WorkStepQuote>
+    submitStep(id: string, jobId: string, quoteId: string): Promise<void>
+    requestChanges(id: string, instruction: string, sections: string[]): Promise<Work>
+    removeRequest(id: string, requestId: string): Promise<Work>
+    setVersion(id: string, version: number): Promise<Work>
+    document(id: string, version?: number): Promise<WorkDocumentView>
+    download(id: string, fileName: string, version?: number): Promise<void>
+    downloadPdf(id: string, fileName: string, version?: number): Promise<void>
+    remove(id: string): Promise<void>
   }
   admin: {
     summary(): Promise<AdminSummary>

@@ -155,7 +155,7 @@ def view(rt: Runtime, p: Project) -> ProjectView:
     return out
 
 
-def create(rt: Runtime, user: User, inputs: ProposalInputs, title_page: TitlePage, citation: CitationStyle) -> ProjectView:
+def create(rt: Runtime, user: User, inputs: ProposalInputs, title_page: TitlePage, citation: CitationStyle, goal: Literal["FULL", "CONCEPT"] = "FULL") -> ProjectView:
     if not user.verified:
         raise Forbidden("Verify your email address before starting a proposal.", code="EMAIL_NOT_VERIFIED")
     _require_ai(rt, user)
@@ -169,6 +169,7 @@ def create(rt: Runtime, user: User, inputs: ProposalInputs, title_page: TitlePag
         citation=citation,
         inputs=inputs,
         title_page=title_page,
+        goal=goal,
         chapters=[StoredChapterState(number=n) for n in (1, 2, 3)],
         created_at=now,
         updated_at=now,
@@ -257,6 +258,9 @@ def _start_chapter_one(rt: Runtime, user: User, project: Project) -> ProjectView
 
 
 def continue_to_full(rt: Runtime, user: User, project_id: str) -> ProjectView:
+    """A concept-note project becomes a full proposal, keeping its plan, evidence and concept paper.
+    Nothing starts by itself: the student prices Chapter One when ready."""
+
     def apply(p: Project) -> Project:
         p.goal = "FULL"
         return p
@@ -742,7 +746,7 @@ def submit_step(rt: Runtime, user: User, project_id: str, job_id: str, quote_id:
         q.active_job = j.id
         q.jobs = q.jobs if j.id in q.jobs else (q.jobs + [j.id])[-100:]
         if inp.step == "PLAN" and not q.chapter(1).versions and q.goal == "FULL":
-            q.auto_chapter_one = True  # agreed with the plan's price: starts when the plan is approved
+            q.auto_chapter_one = True  # agreed with the plan's price: starts when the plan is approved (never for a concept note)
         return _renew(rt, q)
 
     return submit(rt, user, job_id, quote_id, project_gate=gate)

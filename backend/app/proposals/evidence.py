@@ -12,9 +12,13 @@ confirmed the quoted passage itself. Code also refuses, before release:
 import hashlib
 import re
 from collections.abc import Iterable
+from typing import Literal
 
 from app.analysis import research
-from app.proposals.models import CitationStyle, EvidenceItem, EvidenceSource
+from app.proposals.models import EvidenceItem, EvidenceSource
+
+# Proposals use APA 6 or 7; coursework and funding works may also use Harvard (rulebook v1.0 CW-056).
+CitationStyle = Literal["APA6", "APA7", "HARVARD"]
 
 TOKEN = re.compile(r"⟦(E[0-9a-f]{6})(\|n)?⟧")
 CITATION = re.compile(r"⟦(?P<narrative>E[0-9a-f]{6})\|n⟧|(?:\s*⟦E[0-9a-f]{6}⟧)+")  # a narrative token, or a run of parenthetical ones
@@ -72,7 +76,7 @@ def author_label(source: EvidenceSource, style: CitationStyle = "APA7", first: b
     if not source.authors:
         return source.organisation or source.container or f"“{_short_title(source.title)}”"
     names = [_surname(a) for a in source.authors]
-    joiner = " and " if narrative else " & "
+    joiner = " and " if narrative or style == "HARVARD" else " & "
     if len(names) == 1:
         return names[0]
     if len(names) == 2:
@@ -98,7 +102,8 @@ class Citer:
         if narrative and len(sources) == 1:
             return f"{self._label(sources[0], True)} ({_year(sources[0])})"
         unique = {_key(s): s for s in sources}
-        parts = sorted((f"{self._label(s, False)}, {_year(s)}" for s in unique.values()), key=str.lower)
+        sep = " " if self.style == "HARVARD" else ", "  # Harvard: (Okello et al. 2022); APA: (Okello et al., 2022)
+        parts = sorted((f"{self._label(s, False)}{sep}{_year(s)}" for s in unique.values()), key=str.lower)
         return "(" + "; ".join(parts) + ")"
 
     def render(self, text: str) -> str:
@@ -126,8 +131,26 @@ def _authors_apa(authors: list[str], style: CitationStyle) -> str:
     return ", ".join(authors[: limit - 1]) + ", … " + authors[-1]
 
 
+def _harvard(source: EvidenceSource) -> str:
+    """Harvard (Cite Them Right): Surname, I. (Year) Title. Journal, volume(issue), pp. pages. Available at: link."""
+    names = source.authors
+    who = (", ".join(names[:-1]) + " and " + names[-1]) if len(names) > 1 else (names[0] if names else source.organisation or "")
+    title = source.title.strip().rstrip(".")
+    head = f"{who} ({_year(source)}) {title}." if who else f"{title} ({_year(source)})."
+    link = f"https://doi.org/{source.doi}" if source.doi else ("" if source.url.startswith("reading:") else source.url)
+    if source.kind == "ARTICLE":
+        volume = source.volume + (f"({source.issue})" if source.issue else "")
+        tail = ", ".join(p for p in (source.container, volume, f"pp. {source.pages}" if source.pages else "") if p)
+        head = f"{head} {tail}." if tail else head
+    elif source.container and source.container != who:
+        head = f"{head} {source.container}."
+    return f"{head} Available at: {link}." if link else head
+
+
 def reference(source: EvidenceSource, style: CitationStyle = "APA7") -> str:
     """One reference-list entry, built only from the source's recorded details."""
+    if style == "HARVARD":
+        return _harvard(source)
     who = _authors_apa(source.authors, style) if source.authors else (source.organisation or "")
     title = source.title.strip().rstrip(".")
     if who:
@@ -136,6 +159,8 @@ def reference(source: EvidenceSource, style: CitationStyle = "APA7") -> str:
         head = f"{title}. ({_year(source)})."
     if source.doi:
         link = f"doi:{source.doi}" if style == "APA6" else f"https://doi.org/{source.doi}"
+    elif source.url.startswith("reading:"):  # one of the student's own readings: no web address
+        link = ""
     else:
         link = f"Retrieved from {source.url}" if style == "APA6" else source.url
     if source.kind == "ARTICLE":

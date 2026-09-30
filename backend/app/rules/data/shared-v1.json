@@ -1,0 +1,910 @@
+{
+ "id": "shared-v1",
+ "kind": "SHARED",
+ "source": "PaperAid Final Implementation Rulebook v1.0 (28 September 2026), §10, with the amendments in docs/decisions.md (2026-09-30)",
+ "authority_order": [
+  "EXTERNAL_MANDATORY",
+  "USER_EXPLICIT",
+  "DOCUMENT_VARIANT",
+  "PAPERAID_BASELINE",
+  "QUALITY_GUIDANCE",
+  "MODEL_PREFERENCE"
+ ],
+ "source_precedence": {
+  "ADDENDUM": 4,
+  "BRIEF": 3,
+  "CALL": 3,
+  "TEMPLATE": 3,
+  "RUBRIC": 3,
+  "GUIDE": 2,
+  "READING": 1,
+  "OTHER": 1
+ },
+ "high_stakes": [
+  "deadline",
+  "eligibility",
+  "ceiling",
+  "cost_share",
+  "prohibited_cost",
+  "limit.words",
+  "limit.pages",
+  "limit.characters",
+  "field",
+  "ai_policy",
+  "indirect_rate"
+ ],
+ "never_adjustable": [
+  "limit.words",
+  "limit.pages",
+  "limit.characters",
+  "field",
+  "eligibility",
+  "deadline",
+  "ceiling",
+  "cost_share",
+  "prohibited_cost",
+  "section.required",
+  "citation_style",
+  "ai_policy"
+ ],
+ "rules": [
+  {
+   "id": "SH-001",
+   "scope": [
+    "concept_note",
+    "coursework",
+    "funding_proposal"
+   ],
+   "category": "requirements",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "External mandatory instructions override PaperAid defaults.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "requirements.precedence",
+    "params": {}
+   },
+   "stages": [
+    "INTAKE",
+    "PLAN"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Resolve precedence; external wins.",
+   "ui_message": "Your instructions take precedence over PaperAid's defaults",
+   "source": "Rulebook v1.0 §10"
+  },
+  {
+   "id": "SH-002",
+   "scope": [
+    "concept_note",
+    "coursework",
+    "funding_proposal"
+   ],
+   "category": "requirements",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "Every externally extracted requirement must retain the supporting quote and source location.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "requirements.provenance",
+    "params": {}
+   },
+   "stages": [
+    "INTAKE"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Re-extract with provenance.",
+   "ui_message": "Every requirement read from your documents keeps its exact quote and place",
+   "source": "Rulebook v1.0 §10"
+  },
+  {
+   "id": "SH-003",
+   "scope": [
+    "concept_note",
+    "coursework",
+    "funding_proposal"
+   ],
+   "category": "requirements",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "Low-confidence mandatory extracted rules must not become silently locked.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "requirements.unverified_not_locked",
+    "params": {}
+   },
+   "stages": [
+    "INTAKE"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Require confirmation.",
+   "ui_message": "Requirements PaperAid could not find word for word were confirmed with you",
+   "source": "Rulebook v1.0 §10"
+  },
+  {
+   "id": "SH-004",
+   "scope": [
+    "concept_note",
+    "coursework",
+    "funding_proposal"
+   ],
+   "category": "limits",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "Hard word, character, field, or page limits must be typed constraints rather than free-text notes.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "limits.typed",
+    "params": {}
+   },
+   "stages": [
+    "PLAN",
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Create typed constraint.",
+   "ui_message": "Word, character, field and page limits are applied as limits",
+   "source": "Rulebook v1.0 §10"
+  },
+  {
+   "id": "SH-005",
+   "scope": [
+    "concept_note",
+    "coursework",
+    "funding_proposal"
+   ],
+   "category": "limits",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {
+    "has_page_limit": true
+   },
+   "requirement": "Page-limit compliance must be checked on the rendered document using the required format.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "limits.rendered_pages",
+    "params": {}
+   },
+   "stages": [
+    "RENDER"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Render and count pages.",
+   "ui_message": "Page limits are checked on the formatted document",
+   "source": "Rulebook v1.0 §10"
+  },
+  {
+   "id": "SH-006",
+   "scope": [
+    "concept_note",
+    "coursework",
+    "funding_proposal"
+   ],
+   "category": "plan",
+   "class": "DEFAULT",
+   "severity": "INFO",
+   "applies_if": {},
+   "requirement": "When no external page limit exists, PaperAid plans primarily in words.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "plan.word_default",
+    "params": {}
+   },
+   "stages": [
+    "PLAN"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": true
+   },
+   "remediation": "Use document default.",
+   "ui_message": "Without a page limit, the plan is set in words",
+   "source": "Rulebook v1.0 §10"
+  },
+  {
+   "id": "SH-007",
+   "scope": [
+    "concept_note",
+    "coursework",
+    "funding_proposal"
+   ],
+   "category": "structure",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "Mandatory external sections cannot be removed by the user.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "structure.mandatory_kept",
+    "params": {}
+   },
+   "stages": [
+    "PLAN"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Restore section.",
+   "ui_message": "Sections your instructions require stay in the plan",
+   "source": "Rulebook v1.0 §10"
+  },
+  {
+   "id": "SH-008",
+   "scope": [
+    "concept_note",
+    "coursework",
+    "funding_proposal"
+   ],
+   "category": "plan",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {
+    "has_scoring": true
+   },
+   "requirement": "Published scoring criteria should influence planning depth and word allocation.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "plan.scoring_mapped",
+    "params": {}
+   },
+   "stages": [
+    "PLAN"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": true
+   },
+   "remediation": "Rebalance plan.",
+   "ui_message": "Published scoring criteria shape the plan's depth",
+   "source": "Rulebook v1.0 §10"
+  },
+  {
+   "id": "SH-009",
+   "scope": [
+    "concept_note",
+    "coursework",
+    "funding_proposal"
+   ],
+   "category": "evidence",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "PaperAid-added references marked NOT_VERIFIED cannot remain in final output.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "references.exists",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Verify, replace, or remove.",
+   "ui_message": "Every reference PaperAid added was found in a scholarly index or on its page",
+   "source": "Rulebook v1.0 §10"
+  },
+  {
+   "id": "SH-010",
+   "scope": [
+    "concept_note",
+    "coursework",
+    "funding_proposal"
+   ],
+   "category": "evidence",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "Claims marked CONTRADICTED cannot remain as unqualified factual claims.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "claims.not_contradicted",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Correct, qualify, or remove.",
+   "ui_message": "No claim contradicted by its source is stated as fact",
+   "source": "Rulebook v1.0 §10"
+  },
+  {
+   "id": "SH-011",
+   "scope": [
+    "concept_note",
+    "coursework",
+    "funding_proposal"
+   ],
+   "category": "evidence",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "Claims marked NOT_SUPPORTED cannot remain as supported factual assertions.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "claims.supported",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Find support, qualify, or remove.",
+   "ui_message": "Every cited claim is supported by the source it cites",
+   "source": "Rulebook v1.0 §10"
+  },
+  {
+   "id": "SH-012",
+   "scope": [
+    "concept_note",
+    "coursework",
+    "funding_proposal"
+   ],
+   "category": "evidence",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Stale evidence should be flagged when the task requires current evidence.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "references.current",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Research newer evidence or qualify date.",
+   "ui_message": "Evidence is recent enough, or its date is stated",
+   "source": "Rulebook v1.0 §10"
+  },
+  {
+   "id": "SH-013",
+   "scope": [
+    "concept_note",
+    "coursework",
+    "funding_proposal"
+   ],
+   "category": "evidence",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "In-text citations and reference-list entries must correspond where required by style.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "references.intext_mapping",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Repair mapping.",
+   "ui_message": "Every citation appears in the reference list, and every reference is cited",
+   "source": "Rulebook v1.0 §10"
+  },
+  {
+   "id": "SH-014",
+   "scope": [
+    "concept_note",
+    "coursework",
+    "funding_proposal"
+   ],
+   "category": "evidence",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "User-supplied numerical values must not be silently changed.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "numbers.user_figures",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Restore original; flag discrepancy.",
+   "ui_message": "Your own figures appear exactly as you gave them",
+   "source": "Rulebook v1.0 §10"
+  },
+  {
+   "id": "SH-015",
+   "scope": [
+    "concept_note",
+    "coursework",
+    "funding_proposal"
+   ],
+   "category": "requirements",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "All resolved constraints must be persisted in a versioned job specification.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "requirements.persisted",
+    "params": {}
+   },
+   "stages": [
+    "PLAN",
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Persist spec.",
+   "ui_message": "The requirements used are saved with this version",
+   "source": "Rulebook v1.0 §10"
+  },
+  {
+   "id": "SH-016",
+   "scope": [
+    "concept_note",
+    "coursework",
+    "funding_proposal"
+   ],
+   "category": "requirements",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "Unresolved conflicts between external mandatory instructions pause final locking of that requirement.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "requirements.conflict",
+    "params": {}
+   },
+   "stages": [
+    "PLAN"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Ask for resolution.",
+   "ui_message": "Conflicting instructions were resolved before writing",
+   "source": "Rulebook v1.0 §10"
+  },
+  {
+   "id": "SH-017",
+   "scope": [
+    "concept_note",
+    "coursework",
+    "funding_proposal"
+   ],
+   "category": "plan",
+   "class": "DEFAULT",
+   "severity": "INFO",
+   "applies_if": {},
+   "requirement": "Non-mandatory PaperAid defaults may be changed by the user within hard constraints.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "plan.user_preferences",
+    "params": {}
+   },
+   "stages": [
+    "PLAN"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": true
+   },
+   "remediation": "Apply valid preference.",
+   "ui_message": "Your changes to PaperAid's defaults were applied within the limits",
+   "source": "Rulebook v1.0 §10"
+  },
+  {
+   "id": "SH-018",
+   "scope": [
+    "concept_note",
+    "coursework",
+    "funding_proposal"
+   ],
+   "category": "limits",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "Final output must not exceed a hard external maximum after rendering.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "limits.hard_max",
+    "params": {}
+   },
+   "stages": [
+    "FINAL",
+    "RENDER"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Targeted compression.",
+   "ui_message": "The document is within every hard length limit",
+   "source": "Rulebook v1.0 §10"
+  },
+  {
+   "id": "SH-019",
+   "scope": [
+    "concept_note",
+    "coursework",
+    "funding_proposal"
+   ],
+   "category": "structure",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "Final output must include every externally required section or field.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "structure.required_sections",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Insert missing content.",
+   "ui_message": "Every required section or field is present",
+   "source": "Rulebook v1.0 §10"
+  },
+  {
+   "id": "SH-020",
+   "scope": [
+    "concept_note",
+    "coursework",
+    "funding_proposal"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Document logic must remain internally coherent across sections.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "DRAFT",
+    "FINAL"
+   ],
+   "sections": [
+    "DOCUMENT"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Targeted consistency repair.",
+   "ui_message": "The document's sections agree with each other",
+   "source": "Rulebook v1.0 §10"
+  },
+  {
+   "id": "SH-021",
+   "scope": [
+    "concept_note",
+    "coursework",
+    "funding_proposal"
+   ],
+   "category": "structure",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {
+    "has_template": true
+   },
+   "requirement": "An official document-specific template is authoritative for structure when clearly applicable.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "structure.template_match",
+    "params": {}
+   },
+   "stages": [
+    "INTAKE"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Map to template.",
+   "ui_message": "The official template's structure is followed",
+   "source": "Rulebook v1.0 §10"
+  },
+  {
+   "id": "SH-022",
+   "scope": [
+    "concept_note",
+    "coursework",
+    "funding_proposal"
+   ],
+   "category": "evidence",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "Required citation style must be stored and validated explicitly.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "references.style",
+    "params": {}
+   },
+   "stages": [
+    "INTAKE",
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Apply required style.",
+   "ui_message": "The required citation style is used throughout",
+   "source": "Rulebook v1.0 §10"
+  },
+  {
+   "id": "SH-023",
+   "scope": [
+    "concept_note",
+    "coursework",
+    "funding_proposal"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Source priority must depend on claim type rather than one static hierarchy.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "DOCUMENT"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Re-rank evidence.",
+   "ui_message": "Each kind of claim rests on the right kind of source",
+   "source": "Rulebook v1.0 §10"
+  },
+  {
+   "id": "SH-024",
+   "scope": [
+    "concept_note",
+    "coursework",
+    "funding_proposal"
+   ],
+   "category": "evidence",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "Reference metadata must not be fabricated to repair an unverifiable citation.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "references.metadata",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Flag or replace.",
+   "ui_message": "No reference detail was made up",
+   "source": "Rulebook v1.0 §10"
+  },
+  {
+   "id": "SH-025",
+   "scope": [
+    "concept_note",
+    "coursework",
+    "funding_proposal"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Secondary citations should be flagged when the original source is expected and reasonably obtainable.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "DOCUMENT"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Retrieve original where practical.",
+   "ui_message": "Secondary citations are flagged where the original should be cited",
+   "source": "Rulebook v1.0 §10"
+  },
+  {
+   "id": "SH-026",
+   "scope": [
+    "concept_note",
+    "coursework",
+    "funding_proposal"
+   ],
+   "category": "evidence",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "A precise numerical factual claim requires source text or structured data that supports the figure.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "numbers.supported",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Find stronger support or mark insufficient.",
+   "ui_message": "Every precise figure comes from its source or from you",
+   "source": "Rulebook v1.0 §10"
+  },
+  {
+   "id": "SH-027",
+   "scope": [
+    "concept_note",
+    "coursework",
+    "funding_proposal"
+   ],
+   "category": "evidence",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "Known retracted sources must be flagged before final release.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "references.retraction",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Replace or explicitly flag.",
+   "ui_message": "No retracted source is cited",
+   "source": "Rulebook v1.0 §10"
+  },
+  {
+   "id": "SH-028",
+   "scope": [
+    "concept_note",
+    "coursework",
+    "funding_proposal"
+   ],
+   "category": "plan",
+   "class": "DEFAULT",
+   "severity": "INFO",
+   "applies_if": {},
+   "requirement": "PaperAid word allocations are planning defaults, not universal laws.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "plan.user_preferences",
+    "params": {}
+   },
+   "stages": [
+    "PLAN"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": true
+   },
+   "remediation": "Allow adjustment within constraints.",
+   "ui_message": "PaperAid word allocations are planning defaults, not universal laws.",
+   "source": "Rulebook v1.0 §10"
+  },
+  {
+   "id": "SH-029",
+   "scope": [
+    "concept_note",
+    "coursework",
+    "funding_proposal"
+   ],
+   "category": "readiness",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "A failed blocking rule prevents READY status.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "readiness.blocking",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Repair or set NEEDS_REVIEW.",
+   "ui_message": "A failed blocking rule prevents READY status.",
+   "source": "Rulebook v1.0 §10"
+  },
+  {
+   "id": "SH-030",
+   "scope": [
+    "concept_note",
+    "coursework",
+    "funding_proposal"
+   ],
+   "category": "readiness",
+   "class": "QUALITY",
+   "severity": "INFO",
+   "applies_if": {},
+   "requirement": "Warnings remain visible in the final compliance report even when export is permitted.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "readiness.report",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Include compliance report.",
+   "ui_message": "Warnings remain visible in the final compliance report even when export is permitted.",
+   "source": "Rulebook v1.0 §10"
+  }
+ ]
+}

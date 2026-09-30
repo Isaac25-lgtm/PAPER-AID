@@ -1,0 +1,1695 @@
+{
+ "id": "concept-note-v1",
+ "kind": "CONCEPT_NOTE",
+ "source": "PaperAid Final Implementation Rulebook v1.0 (28 September 2026), §11 and Appendix C1",
+ "note": "The research concept note is PaperAid's academic concept paper (Research Proposals); CN-031 to CN-035 are applied there.",
+ "variants": {
+  "FUNDING_CONCEPT": {
+   "label": "Funding concept note",
+   "modes": {
+    "BRIEF": 900,
+    "STANDARD": 1800,
+    "EXTENDED": 2900
+   },
+   "sections": [
+    {
+     "key": "summary",
+     "heading": "Summary",
+     "words": 125,
+     "min": 100,
+     "max": 150,
+     "required": true,
+     "purpose": "The whole concept in miniature: problem, action, beneficiaries and expected result."
+    },
+    {
+     "key": "problem",
+     "heading": "Problem and Evidence of Need",
+     "words": 400,
+     "min": 300,
+     "max": 500,
+     "required": true,
+     "purpose": "Magnitude, population, geography and consequences, with evidence."
+    },
+    {
+     "key": "target",
+     "heading": "Target Group and Geography",
+     "words": 150,
+     "min": 100,
+     "max": 200,
+     "required": true,
+     "purpose": "Direct and indirect beneficiaries, and where."
+    },
+    {
+     "key": "relevance",
+     "heading": "Relevance and Fit to Funder Priorities",
+     "words": 275,
+     "min": 200,
+     "max": 350,
+     "required": true,
+     "purpose": "Why this call and this funder: the problem and approach tied to their priorities."
+    },
+    {
+     "key": "approach",
+     "heading": "Approach: Goal, Objectives, Activities and Expected Results",
+     "words": 475,
+     "min": 350,
+     "max": 550,
+     "required": true,
+     "purpose": "The core concept: goal, two to four objectives, main activities, outputs and outcomes."
+    },
+    {
+     "key": "capacity",
+     "heading": "Why This Applicant",
+     "words": 175,
+     "min": 120,
+     "max": 220,
+     "required": true,
+     "purpose": "Specific delivery capability: projects, years, results, scale and partners' roles."
+    },
+    {
+     "key": "timeline_budget",
+     "heading": "Timeline and Indicative Budget",
+     "words": 75,
+     "min": 50,
+     "max": 120,
+     "required": false,
+     "purpose": "A high-level timeline and the indicative budget envelope.",
+     "conditional": "budget_or_timeline"
+    },
+    {
+     "key": "sustainability_risk",
+     "heading": "Sustainability and Principal Risk",
+     "words": 125,
+     "min": 80,
+     "max": 180,
+     "required": true,
+     "purpose": "How benefits continue, and the main implementation risk with its mitigation."
+    }
+   ]
+  },
+  "PROJECT_CONCEPT": {
+   "label": "Project concept note",
+   "modes": {
+    "BRIEF": 900,
+    "STANDARD": 1500,
+    "EXTENDED": 2900
+   },
+   "sections": [
+    {
+     "key": "summary",
+     "heading": "Summary",
+     "words": 120,
+     "min": 90,
+     "max": 150,
+     "required": true,
+     "purpose": "The problem or opportunity, the proposed action, and the decision requested."
+    },
+    {
+     "key": "context",
+     "heading": "Context, Problem or Opportunity",
+     "words": 300,
+     "min": 220,
+     "max": 380,
+     "required": true,
+     "purpose": "What the situation is, who it affects, and why it matters now."
+    },
+    {
+     "key": "objectives",
+     "heading": "Goal and Objectives",
+     "words": 180,
+     "min": 130,
+     "max": 230,
+     "required": true,
+     "purpose": "The goal and two to four objectives."
+    },
+    {
+     "key": "approach",
+     "heading": "Proposed Approach and Activities",
+     "words": 400,
+     "min": 300,
+     "max": 480,
+     "required": true,
+     "purpose": "What will be done, in what sequence."
+    },
+    {
+     "key": "results",
+     "heading": "Intended Results",
+     "words": 180,
+     "min": 130,
+     "max": 230,
+     "required": true,
+     "purpose": "Outputs and the change they should bring."
+    },
+    {
+     "key": "stakeholders",
+     "heading": "Target Group and Stakeholders",
+     "words": 100,
+     "min": 70,
+     "max": 140,
+     "required": true,
+     "purpose": "Who benefits and who is involved."
+    },
+    {
+     "key": "feasibility",
+     "heading": "Feasibility, Risks and Resources",
+     "words": 120,
+     "min": 90,
+     "max": 160,
+     "required": true,
+     "purpose": "Resources needed, main risks and how they are handled."
+    },
+    {
+     "key": "decision",
+     "heading": "Decision Requested and Next Step",
+     "words": 100,
+     "min": 70,
+     "max": 130,
+     "required": true,
+     "purpose": "The decision or next step the reader is asked for."
+    }
+   ]
+  }
+ },
+ "questions": [
+  {
+   "id": "problem",
+   "label": "What problem or opportunity will the work address, for whom and where?",
+   "gate": "BLOCK",
+   "kind": "LONG",
+   "fallback": "",
+   "help": "Your own description is enough; PaperAid finds the evidence.",
+   "variants": [
+    "FUNDING_CONCEPT"
+   ]
+  },
+  {
+   "id": "intervention",
+   "label": "What do you propose to do about it?",
+   "gate": "BLOCK",
+   "kind": "LONG",
+   "fallback": "",
+   "help": "",
+   "variants": [
+    "FUNDING_CONCEPT"
+   ]
+  },
+  {
+   "id": "target_group",
+   "label": "Who is the target group?",
+   "gate": "ASK_ONCE",
+   "kind": "TEXT",
+   "fallback": "PaperAid describes the target group from your description and marks it for you to confirm.",
+   "help": "",
+   "variants": [
+    "FUNDING_CONCEPT"
+   ]
+  },
+  {
+   "id": "geography",
+   "label": "Where will the work take place?",
+   "gate": "ASK_ONCE",
+   "kind": "TEXT",
+   "fallback": "PaperAid uses the place in your description, or keeps the geography general.",
+   "help": "",
+   "variants": [
+    "FUNDING_CONCEPT"
+   ]
+  },
+  {
+   "id": "duration_months",
+   "label": "How many months will the work last?",
+   "gate": "ASK_ONCE",
+   "kind": "NUMBER",
+   "fallback": "PaperAid plans for 12 months and says so.",
+   "help": "",
+   "variants": [
+    "FUNDING_CONCEPT"
+   ]
+  },
+  {
+   "id": "currency",
+   "label": "Which currency is the budget in?",
+   "gate": "ASK_ONCE",
+   "kind": "CHOICE",
+   "fallback": "The call's currency, otherwise US dollars.",
+   "help": "",
+   "choices": [
+    "USD",
+    "EUR",
+    "GBP",
+    "UGX",
+    "KES",
+    "TZS"
+   ],
+   "variants": [
+    "FUNDING_CONCEPT"
+   ]
+  },
+  {
+   "id": "applicant",
+   "label": "Your organisation: what it is, and the specific projects, years, results or scale that show it can deliver this work",
+   "gate": "ASK_ONCE",
+   "kind": "LONG",
+   "fallback": "Without these facts the capacity section stays general and is marked for you to complete.",
+   "help": "",
+   "variants": [
+    "FUNDING_CONCEPT"
+   ]
+  },
+  {
+   "id": "partners",
+   "label": "Partners, if any, and what each will do",
+   "gate": "ASK_ONCE",
+   "kind": "LONG",
+   "fallback": "No partners.",
+   "help": "",
+   "variants": [
+    "FUNDING_CONCEPT"
+   ]
+  },
+  {
+   "id": "funder",
+   "label": "Which funder or call is this for?",
+   "gate": "ASK_ONCE",
+   "kind": "TEXT",
+   "fallback": "PaperAid writes for a general funder.",
+   "help": "",
+   "variants": [
+    "FUNDING_CONCEPT"
+   ]
+  },
+  {
+   "id": "vulnerable",
+   "label": "Will the work involve children or vulnerable adults?",
+   "gate": "ASK_ONCE",
+   "kind": "BOOL",
+   "fallback": "No.",
+   "help": "",
+   "variants": [
+    "FUNDING_CONCEPT"
+   ]
+  },
+  {
+   "id": "personal_data",
+   "label": "Will the work collect personal, health or identifiable data?",
+   "gate": "ASK_ONCE",
+   "kind": "BOOL",
+   "fallback": "No.",
+   "help": "",
+   "variants": [
+    "FUNDING_CONCEPT"
+   ]
+  },
+  {
+   "id": "budget_envelope",
+   "label": "What is the indicative budget envelope?",
+   "gate": "ASK_ONCE",
+   "kind": "NUMBER",
+   "fallback": "No figures are given; the budget part describes the main cost drivers only.",
+   "help": "",
+   "variants": [
+    "FUNDING_CONCEPT"
+   ]
+  },
+  {
+   "id": "problem",
+   "label": "What problem, opportunity or decision is this about?",
+   "gate": "BLOCK",
+   "kind": "LONG",
+   "fallback": "",
+   "help": "",
+   "variants": [
+    "PROJECT_CONCEPT"
+   ]
+  },
+  {
+   "id": "intervention",
+   "label": "What action do you propose?",
+   "gate": "BLOCK",
+   "kind": "LONG",
+   "fallback": "",
+   "help": "",
+   "variants": [
+    "PROJECT_CONCEPT"
+   ]
+  },
+  {
+   "id": "decision",
+   "label": "What decision or next step do you want from the reader?",
+   "gate": "ASK_ONCE",
+   "kind": "TEXT",
+   "fallback": "PaperAid asks for approval to develop the full proposal.",
+   "help": "",
+   "variants": [
+    "PROJECT_CONCEPT"
+   ]
+  },
+  {
+   "id": "stakeholders",
+   "label": "Who benefits, and who is involved?",
+   "gate": "ASK_ONCE",
+   "kind": "TEXT",
+   "fallback": "Described from your description and marked for you to confirm.",
+   "help": "",
+   "variants": [
+    "PROJECT_CONCEPT"
+   ]
+  },
+  {
+   "id": "duration_months",
+   "label": "How many months will the work last?",
+   "gate": "ASK_ONCE",
+   "kind": "NUMBER",
+   "fallback": "No duration is committed to.",
+   "help": "",
+   "variants": [
+    "PROJECT_CONCEPT"
+   ]
+  },
+  {
+   "id": "resources",
+   "label": "What resources will it need (people, money, time)?",
+   "gate": "ASK_ONCE",
+   "kind": "LONG",
+   "fallback": "Resources are described in general terms and marked for you.",
+   "help": "",
+   "variants": [
+    "PROJECT_CONCEPT"
+   ]
+  }
+ ],
+ "rules": [
+  {
+   "id": "CN-001",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "intake",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "Concept-note variant must resolve to research, project, funding, or external template.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "work.variant",
+    "params": {}
+   },
+   "stages": [
+    "PLAN"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Resolve variant.",
+   "ui_message": "The kind of concept note is settled",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-002",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "plan",
+   "class": "DEFAULT",
+   "severity": "INFO",
+   "applies_if": {},
+   "requirement": "If no external length exists, Standard targets 1,800 words for funding/research concepts and 1,500 for project concepts.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "plan.word_default",
+    "params": {}
+   },
+   "stages": [
+    "PLAN"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": true
+   },
+   "remediation": "Apply default target.",
+   "ui_message": "If no external length exists, Standard targets 1,800 words for funding/research concepts and 1,500 for project concepts.",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-003",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "limits",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "External page/word/character limits override PaperAid modes.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "limits.external_override",
+    "params": {}
+   },
+   "stages": [
+    "PLAN",
+    "RENDER"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Use external limit.",
+   "ui_message": "The call's own limits replace PaperAid's lengths",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-004",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "The concept note should remain concise and decision-oriented rather than become a compressed full proposal.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "PLAN"
+   ],
+   "sections": [
+    "PLAN",
+    "DOCUMENT"
+   ],
+   "adjustable": {
+    "allowed": true
+   },
+   "remediation": "Reduce unnecessary detail.",
+   "ui_message": "It stays a concise, decision-oriented concept note",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-005",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "intake",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {
+    "variant": [
+     "FUNDING_CONCEPT"
+    ]
+   },
+   "requirement": "A funding concept must identify a problem/opportunity and proposed intervention.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "gate.core_inputs",
+    "params": {}
+   },
+   "stages": [
+    "PLAN"
+   ],
+   "sections": [
+    "problem",
+    "approach"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Request missing core input.",
+   "ui_message": "It identifies the problem and the proposed intervention",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-006",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "The problem should identify who is affected, where, and why the issue matters.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "DRAFT",
+    "FINAL"
+   ],
+   "sections": [
+    "problem",
+    "context"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Strengthen framing.",
+   "ui_message": "The problem says who is affected, where, and why it matters",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-007",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "evidence",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Material factual claims in the problem section should be evidence-supported.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "claims.supported",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "problem",
+    "context"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add/verify evidence.",
+   "ui_message": "Material factual claims in the problem section should be evidence-supported.",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-008",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Objectives must respond directly to the stated problem.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "PLAN",
+    "FINAL"
+   ],
+   "sections": [
+    "PLAN",
+    "approach",
+    "objectives"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Realign objectives.",
+   "ui_message": "The objectives answer the problem",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-009",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "plan",
+   "class": "DEFAULT",
+   "severity": "INFO",
+   "applies_if": {},
+   "requirement": "Funding concepts normally use 2–4 specific objectives unless external rules specify otherwise.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "plan.objective_count",
+    "params": {}
+   },
+   "stages": [
+    "PLAN"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": true
+   },
+   "remediation": "Adjust count.",
+   "ui_message": "Two to four specific objectives",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-010",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Activities must plausibly contribute to objectives.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "approach"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Repair mapping.",
+   "ui_message": "The activities plausibly lead to the objectives",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-011",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Outputs must be plausible products/services of proposed activities.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "approach",
+    "results"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Repair output logic.",
+   "ui_message": "Outputs are things the activities produce",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-012",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Outcomes must describe plausible change rather than repeat activities.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "approach",
+    "results"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Rewrite outcomes.",
+   "ui_message": "Outcomes describe change, not activities",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-013",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Primary target group and geography should be identifiable when relevant.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "target",
+    "stakeholders"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add target/geography.",
+   "ui_message": "The target group and geography are clear",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-014",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "fit",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {
+    "has_call": true
+   },
+   "requirement": "If a funding call exists, the concept must address its mandatory priority areas.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "call.priorities_addressed",
+    "params": {}
+   },
+   "stages": [
+    "PLAN",
+    "FINAL"
+   ],
+   "sections": [
+    "relevance"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add alignment.",
+   "ui_message": "The call's priority areas are addressed",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-015",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {
+    "variant": [
+     "FUNDING_CONCEPT"
+    ]
+   },
+   "requirement": "A funding concept must explain why the applicant/consortium is credible for the work.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "capacity"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add capacity evidence.",
+   "ui_message": "It shows why this applicant can deliver the work",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-016",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {
+    "variant": [
+     "FUNDING_CONCEPT"
+    ]
+   },
+   "requirement": "Capacity claims should use specific projects, years, results, roles, or scale rather than adjectives alone.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "capacity"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Make capacity specific.",
+   "ui_message": "Capacity is shown with specific projects, years, results or scale",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-017",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "structure",
+   "class": "CONDITIONAL",
+   "severity": "WARNING",
+   "applies_if": {
+    "budget_required": true
+   },
+   "requirement": "Include an indicative budget when required or materially necessary to judge feasibility.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "structure.conditional_section",
+    "params": {}
+   },
+   "stages": [
+    "PLAN",
+    "FINAL"
+   ],
+   "sections": [
+    "timeline_budget"
+   ],
+   "adjustable": {
+    "allowed": true
+   },
+   "remediation": "Add budget.",
+   "ui_message": "An indicative budget is included",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-018",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "structure",
+   "class": "CONDITIONAL",
+   "severity": "WARNING",
+   "applies_if": {
+    "timeline_required": true
+   },
+   "requirement": "Include a high-level timeline when required or material.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "structure.conditional_section",
+    "params": {}
+   },
+   "stages": [
+    "PLAN",
+    "FINAL"
+   ],
+   "sections": [
+    "timeline_budget"
+   ],
+   "adjustable": {
+    "allowed": true
+   },
+   "remediation": "Add timeline.",
+   "ui_message": "A high-level timeline is included",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-019",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Indicative budget must be plausible relative to activities and duration.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "timeline_budget",
+    "feasibility"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Review scale.",
+   "ui_message": "The budget is plausible for the activities and duration",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-020",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Identify at least one principal implementation risk when risk is material.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "sustainability_risk",
+    "feasibility"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add risk.",
+   "ui_message": "The main implementation risk is named",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-021",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {
+    "variant": [
+     "FUNDING_CONCEPT"
+    ]
+   },
+   "requirement": "Address sustainability/continuation beyond initial support where relevant.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "sustainability_risk"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add sustainability.",
+   "ui_message": "Continuation beyond the funding is addressed",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-022",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "budget",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {
+    "has_ceiling": true
+   },
+   "requirement": "Funding concept may not exceed a stated funding ceiling.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "budget.ceiling",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Reduce budget.",
+   "ui_message": "The budget is within the funding ceiling",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-023",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "limits",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "Concept note may not exceed a hard external narrative limit after rendering.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "limits.hard_max",
+    "params": {}
+   },
+   "stages": [
+    "FINAL",
+    "RENDER"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Compress.",
+   "ui_message": "Concept note may not exceed a hard external narrative limit after rendering.",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-024",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "structure",
+   "class": "CONDITIONAL",
+   "severity": "BLOCKING",
+   "applies_if": {
+    "has_template": true
+   },
+   "requirement": "Mandatory external headings must appear in required order.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "structure.order",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Repair structure.",
+   "ui_message": "The required headings appear in the required order",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-025",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {
+    "variant": [
+     "FUNDING_CONCEPT"
+    ]
+   },
+   "requirement": "Funding-concept relevance must connect the problem and intervention to the funder priorities.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "relevance"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Strengthen fit.",
+   "ui_message": "The problem and intervention are tied to the funder's priorities",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-026",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "plan",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {
+    "has_scoring": true
+   },
+   "requirement": "High-weight scoring criteria should receive proportionate depth.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "plan.scoring_mapped",
+    "params": {}
+   },
+   "stages": [
+    "PLAN"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": true
+   },
+   "remediation": "Rebalance words.",
+   "ui_message": "High-weight scoring criteria should receive proportionate depth.",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-027",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "evidence",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "PaperAid-added references must pass bibliographic verification.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "references.exists",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Verify/replace.",
+   "ui_message": "PaperAid-added references must pass bibliographic verification.",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-028",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "evidence",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Evidence should be current enough for the claim unless older work is foundational/historical.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "references.current",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Update or justify.",
+   "ui_message": "Evidence should be current enough for the claim unless older work is foundational/historical.",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-029",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Summary must accurately reflect problem, action, beneficiaries, and expected result.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "summary"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Rewrite summary.",
+   "ui_message": "The summary reflects the problem, action, beneficiaries and result",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-030",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Summary must not introduce commitments absent from the body.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "summary",
+    "DOCUMENT"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Align summary/body.",
+   "ui_message": "The summary makes no commitment the body does not",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-031",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "quality",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {
+    "variant": [
+     "RESEARCH_CONCEPT"
+    ]
+   },
+   "requirement": "Research concepts must identify a research problem or gap.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "PLAN",
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Clarify gap.",
+   "ui_message": "Research concepts must identify a research problem or gap.",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-032",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {
+    "variant": [
+     "RESEARCH_CONCEPT"
+    ]
+   },
+   "requirement": "Research objectives/questions must align with proposed methods.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Repair alignment.",
+   "ui_message": "Research objectives/questions must align with proposed methods.",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-033",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {
+    "variant": [
+     "RESEARCH_CONCEPT"
+    ]
+   },
+   "requirement": "Research concept methods should cover design, setting/population, sampling/data source, data collection, and analysis at concept-note depth.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Complete methods.",
+   "ui_message": "Research concept methods should cover design, setting/population, sampling/data source, data collection, and analysis at concept-note depth.",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-034",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "quality",
+   "class": "CONDITIONAL",
+   "severity": "WARNING",
+   "applies_if": {
+    "variant": [
+     "RESEARCH_CONCEPT"
+    ]
+   },
+   "requirement": "Research concept should address ethics when human participants, personal data, vulnerable groups, or sensitive issues are involved.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add ethics.",
+   "ui_message": "Research concept should address ethics when human participants, personal data, vulnerable groups, or sensitive issues are involved.",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-035",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {
+    "variant": [
+     "RESEARCH_CONCEPT"
+    ]
+   },
+   "requirement": "Research concept should state intended contribution/significance.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add contribution.",
+   "ui_message": "Research concept should state intended contribution/significance.",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-036",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {
+    "variant": [
+     "PROJECT_CONCEPT"
+    ]
+   },
+   "requirement": "Internal project concepts should state the decision/next step requested.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "decision"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add decision request.",
+   "ui_message": "It ends with the decision or next step requested",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-037",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {
+    "variant": [
+     "PROJECT_CONCEPT"
+    ]
+   },
+   "requirement": "Project concepts should not present tentative assumptions as finalized commitments.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "DOCUMENT"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Qualify assumptions.",
+   "ui_message": "Tentative assumptions are not presented as commitments",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-038",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "limits",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {
+    "form_mode": true
+   },
+   "requirement": "Field-specific character limits trigger form mode.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "limits.fields_typed",
+    "params": {}
+   },
+   "stages": [
+    "INTAKE",
+    "PLAN"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Create field constraints.",
+   "ui_message": "Each form box has its own limit",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-039",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "limits",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {
+    "form_mode": true
+   },
+   "requirement": "Every form-mode field must comply with its own limit.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "limits.field_count",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Compress field.",
+   "ui_message": "Every form box is within its limit",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-040",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {
+    "form_mode": true
+   },
+   "requirement": "Avoid unnecessary duplication across short form fields.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "DOCUMENT"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Remove duplication.",
+   "ui_message": "The short boxes do not repeat each other",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-041",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Concept-note language should prioritize decision usefulness over exhaustive technical detail.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "DOCUMENT"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Simplify.",
+   "ui_message": "It is useful for a decision rather than exhaustive",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-042",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "eligibility",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {
+    "has_eligibility": true
+   },
+   "requirement": "Explicit failed applicant eligibility prevents submission-ready status.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "eligibility.thresholds",
+    "params": {}
+   },
+   "stages": [
+    "INTAKE",
+    "PLAN"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Mark ineligible / exploratory only.",
+   "ui_message": "You meet the call's eligibility criteria",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-043",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "quality",
+   "class": "CONDITIONAL",
+   "severity": "WARNING",
+   "applies_if": {
+    "has_partners": true
+   },
+   "requirement": "Explain partner roles when partners are material to delivery.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "capacity"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Clarify roles.",
+   "ui_message": "Partners' roles are clear",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-044",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "plan",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "No section should consume disproportionate space at the expense of highly weighted relevance/fit criteria.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "plan.balance",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Rebalance.",
+   "ui_message": "No section crowds out the most heavily weighted ones",
+   "source": "Rulebook v1.0 §11.7"
+  },
+  {
+   "id": "CN-045",
+   "scope": [
+    "concept_note"
+   ],
+   "category": "readiness",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "All blocking Concept Note rules must pass before READY status.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "readiness.blocking",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Repair blocking failures.",
+   "ui_message": "All blocking Concept Note rules must pass before READY status.",
+   "source": "Rulebook v1.0 §11.7"
+  }
+ ]
+}

@@ -881,6 +881,7 @@ def _readiness(
                 note=f"{count} confirmed sources cited; the annotated list is built from them.",
             )
         )
+        items += _concept_checks(inp, document)
     if n == 3:
         size = inp.plan.sample_size
         result = sampling.calculate(size)
@@ -892,6 +893,40 @@ def _readiness(
                     note=result.steps if has_source else "Add where your population figure comes from (for example district records) in the plan.",
                 )
             )
+    return items
+
+
+ETHICS = re.compile(r"\b(ethic|consent|approval|confidential|anonym)", re.I)
+
+
+def _concept_checks(inp: StepInput, document: ChapterDocument) -> list[ReadinessItem]:
+    """Two checks from the rulebook's research concept note (CN-032, CN-034), made by code on the
+    concept paper: each objective has its question and a method that answers it, and a study with
+    people says how it will be ethical."""
+    assert inp.plan is not None
+    plan = inp.plan
+    answered = {row.objective for row in plan.alignment if row.collection.strip() and row.analysis.strip()}
+    missing = [n for n in range(1, len(plan.specific_objectives) + 1) if n not in answered]
+    paired = len(plan.research_questions) == len(plan.specific_objectives)
+    items = [
+        ReadinessItem(
+            id="C4-METHODS", question="Your plan gives each objective its research question and a method that answers it", basis="CODE", chapter=4,
+            status="PASS" if paired and not missing else "NEEDS_REVIEW",
+            note="Every objective has a question, data collection and analysis in the plan." if paired and not missing
+            else ("Objectives without a method in the plan: " + ", ".join(str(n) for n in missing) + "." if missing else "The plan has a different number of questions and objectives."),
+        )
+    ]
+    with_people = plan.study_type not in ("SECONDARY", "NON_EMPIRICAL")
+    if with_people:
+        text = " ".join(p for s in document.sections for p in s.paragraphs)
+        mentioned = bool(ETHICS.search(text))
+        items.append(
+            ReadinessItem(
+                id="C4-ETHICS", question="The study says how it will protect participants (approval and consent)", basis="CODE", chapter=4,
+                status="PASS" if mentioned else "NEEDS_REVIEW",
+                note="Ethics is mentioned." if mentioned else "Add a sentence on ethical approval and informed consent to the methodology.",
+            )
+        )
     return items
 
 
@@ -931,14 +966,14 @@ def stage_exporting(ctx: "StageContext") -> None:
         nonlocal candidate
         if p.deleting:
             return None
+        if job_id in p.published:  # a retry after this job's transaction already committed: settle it, never refund it
+            return p
         if not structure_current(p, inp):
             raise PermanentStageError(  # replaced while this step ran: nothing is saved, nothing charged (Codex review #2)
                 "INPUTS_CHANGED", "Your institution's guide or proposal structure changed while this step was running, so nothing was saved and nothing was charged. Start it again.",
                 "guide or rulebook changed during the step",
             )
         nonlocal written_meanwhile, kept_choice
-        if job_id in p.published:  # a retry after this job's transaction already committed
-            return p
         p.published.append(job_id)
         if book is not None:
             p.profiles = list(dict.fromkeys([*p.profiles, book["id"]]))

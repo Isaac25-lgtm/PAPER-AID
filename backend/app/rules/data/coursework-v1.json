@@ -1,0 +1,3027 @@
+{
+ "id": "coursework-v1",
+ "kind": "COURSEWORK",
+ "source": "PaperAid Final Implementation Rulebook v1.0 (28 September 2026), §13 and Appendices C3, G, H; CW-047 amended by owner decision 2026-09-30",
+ "amendments": [
+  "CW-047: an explicit prohibition of generative AI no longer disables drafting; the draft carries the last-page note \"This document was drafted by an AI-assisted third party.\", which the student cannot remove from PaperAid's output (owner decision 2026-09-30)."
+ ],
+ "fallback_words": {
+  "FIRST_YEAR_UG": 1500,
+  "LATER_UG": 2000,
+  "POSTGRADUATE": 3000
+ },
+ "variant_words": {
+  "REFLECTIVE": {
+   "FIRST_YEAR_UG": 1000,
+   "LATER_UG": 1250,
+   "POSTGRADUATE": 1500
+  }
+ },
+ "directives": {
+  "define": {
+   "phrases": [
+    "define"
+   ],
+   "groups": [
+    "DESCRIPTIVE"
+   ],
+   "expectation": "Give precise meaning; distinguish from related concepts where useful."
+  },
+  "identify": {
+   "phrases": [
+    "identify",
+    "name",
+    "list"
+   ],
+   "groups": [
+    "DESCRIPTIVE"
+   ],
+   "expectation": "Select and name the relevant items."
+  },
+  "describe": {
+   "phrases": [
+    "describe"
+   ],
+   "groups": [
+    "DESCRIPTIVE"
+   ],
+   "expectation": "Present the relevant characteristics, stages or sequence."
+  },
+  "outline": {
+   "phrases": [
+    "outline"
+   ],
+   "groups": [
+    "DESCRIPTIVE"
+   ],
+   "expectation": "Give the main features concisely."
+  },
+  "summarise": {
+   "phrases": [
+    "summarise",
+    "summarize"
+   ],
+   "groups": [
+    "DESCRIPTIVE"
+   ],
+   "expectation": "Condense the key ideas without unnecessary detail."
+  },
+  "explain": {
+   "phrases": [
+    "explain"
+   ],
+   "groups": [
+    "ANALYTICAL"
+   ],
+   "expectation": "Show how or why: make the causal, mechanistic or logical connection."
+  },
+  "analyse": {
+   "phrases": [
+    "analyse",
+    "analyze"
+   ],
+   "groups": [
+    "ANALYTICAL"
+   ],
+   "expectation": "Break the subject into components and examine their relationships."
+  },
+  "critically_analyse": {
+   "phrases": [
+    "critically analyse",
+    "critically analyze"
+   ],
+   "groups": [
+    "ANALYTICAL",
+    "CRITICAL"
+   ],
+   "expectation": "Analyse and evaluate evidence, assumptions, strengths, weaknesses and limitations."
+  },
+  "evaluate": {
+   "phrases": [
+    "evaluate"
+   ],
+   "groups": [
+    "CRITICAL",
+    "EVALUATIVE"
+   ],
+   "expectation": "Judge using explicit or inferable criteria and evidence."
+  },
+  "critically_evaluate": {
+   "phrases": [
+    "critically evaluate"
+   ],
+   "groups": [
+    "CRITICAL",
+    "EVALUATIVE"
+   ],
+   "expectation": "Judge rigorously against criteria, weighing competing evidence and limitations."
+  },
+  "discuss": {
+   "phrases": [
+    "discuss"
+   ],
+   "groups": [
+    "ANALYTICAL"
+   ],
+   "expectation": "Develop a balanced, reasoned examination; take the precise expectation from the rubric or context."
+  },
+  "compare": {
+   "phrases": [
+    "compare"
+   ],
+   "groups": [
+    "COMPARE"
+   ],
+   "expectation": "Examine similarities and relevant differences."
+  },
+  "compare_and_contrast": {
+   "phrases": [
+    "compare and contrast"
+   ],
+   "groups": [
+    "COMPARE"
+   ],
+   "expectation": "Systematically examine similarities and differences."
+  },
+  "assess": {
+   "phrases": [
+    "assess"
+   ],
+   "groups": [
+    "CRITICAL",
+    "EVALUATIVE"
+   ],
+   "expectation": "Determine significance, value, extent or effectiveness from evidence."
+  },
+  "critically_assess": {
+   "phrases": [
+    "critically assess"
+   ],
+   "groups": [
+    "CRITICAL",
+    "EVALUATIVE"
+   ],
+   "expectation": "Determine value or effectiveness rigorously, weighing competing evidence."
+  },
+  "examine": {
+   "phrases": [
+    "examine"
+   ],
+   "groups": [
+    "ANALYTICAL"
+   ],
+   "expectation": "Investigate closely and explain significant features and relationships."
+  },
+  "explore": {
+   "phrases": [
+    "explore"
+   ],
+   "groups": [
+    "ANALYTICAL"
+   ],
+   "expectation": "Investigate several dimensions without forcing one conclusion."
+  },
+  "to_what_extent": {
+   "phrases": [
+    "to what extent",
+    "how far"
+   ],
+   "groups": [
+    "CRITICAL",
+    "EVALUATIVE",
+    "EXTENT"
+   ],
+   "expectation": "Evaluate degree and state a qualified acceptance or rejection."
+  },
+  "justify": {
+   "phrases": [
+    "justify"
+   ],
+   "groups": [
+    "CRITICAL",
+    "JUSTIFY"
+   ],
+   "expectation": "Give evidence-based reasons for a choice or position."
+  },
+  "critique": {
+   "phrases": [
+    "critique",
+    "criticise",
+    "criticize"
+   ],
+   "groups": [
+    "CRITICAL"
+   ],
+   "expectation": "Evaluate strengths, weaknesses, assumptions, evidence and implications."
+  },
+  "review": {
+   "phrases": [
+    "review"
+   ],
+   "groups": [
+    "ANALYTICAL"
+   ],
+   "expectation": "Summarise and evaluate a body of information in context."
+  },
+  "interpret": {
+   "phrases": [
+    "interpret"
+   ],
+   "groups": [
+    "ANALYTICAL"
+   ],
+   "expectation": "Explain the meaning and significance of evidence, data or findings."
+  },
+  "account_for": {
+   "phrases": [
+    "account for"
+   ],
+   "groups": [
+    "ANALYTICAL"
+   ],
+   "expectation": "Explain the reasons or causes."
+  },
+  "illustrate": {
+   "phrases": [
+    "illustrate"
+   ],
+   "groups": [
+    "DESCRIPTIVE"
+   ],
+   "expectation": "Explain using relevant examples and evidence."
+  },
+  "recommend": {
+   "phrases": [
+    "recommend",
+    "propose"
+   ],
+   "groups": [
+    "RECOMMEND"
+   ],
+   "expectation": "Present feasible action justified by analysis."
+  },
+  "apply": {
+   "phrases": [
+    "apply"
+   ],
+   "groups": [
+    "ANALYTICAL"
+   ],
+   "expectation": "Use a theory, model or method in the given case or context."
+  },
+  "design": {
+   "phrases": [
+    "design"
+   ],
+   "groups": [
+    "RECOMMEND"
+   ],
+   "expectation": "Construct a coherent solution, model or plan under the constraints."
+  },
+  "reflect": {
+   "phrases": [
+    "reflect",
+    "reflect on"
+   ],
+   "groups": [
+    "REFLECT"
+   ],
+   "expectation": "Analyse experience and learning rather than merely narrate it."
+  }
+ },
+ "variants": {
+  "ESSAY": {
+   "label": "Essay",
+   "sections": [
+    {
+     "key": "introduction",
+     "heading": "Introduction",
+     "share": 0.1,
+     "required": true,
+     "purpose": "Context, scope, your position where the task needs one, and the route through the answer."
+    },
+    {
+     "key": "theme*",
+     "heading": "Main body",
+     "share": 0.8,
+     "required": true,
+     "purpose": "The argument, in themes that answer every part of the question.",
+     "body": true
+    },
+    {
+     "key": "conclusion",
+     "heading": "Conclusion",
+     "share": 0.1,
+     "required": true,
+     "purpose": "The answer to the task, synthesising the argument."
+    }
+   ]
+  },
+  "ACADEMIC_REPORT": {
+   "label": "Academic report",
+   "sections": [
+    {
+     "key": "executive_summary",
+     "heading": "Executive Summary",
+     "share": 0.07,
+     "required": false,
+     "purpose": "Purpose, approach, principal findings and recommendations.",
+     "conditional": "executive_summary"
+    },
+    {
+     "key": "introduction",
+     "heading": "Introduction",
+     "share": 0.1,
+     "required": true,
+     "purpose": "Purpose and scope of the report."
+    },
+    {
+     "key": "background",
+     "heading": "Background and Context",
+     "share": 0.12,
+     "required": true,
+     "purpose": "What the reader needs to know first."
+    },
+    {
+     "key": "method",
+     "heading": "Method and Approach",
+     "share": 0.1,
+     "required": false,
+     "purpose": "How the information was gathered and analysed.",
+     "conditional": "empirical"
+    },
+    {
+     "key": "findings",
+     "heading": "Findings and Analysis",
+     "share": 0.32,
+     "required": true,
+     "purpose": "What was found, analysed against evidence."
+    },
+    {
+     "key": "discussion",
+     "heading": "Discussion",
+     "share": 0.13,
+     "required": true,
+     "purpose": "What the findings mean."
+    },
+    {
+     "key": "recommendations",
+     "heading": "Recommendations",
+     "share": 0.09,
+     "required": false,
+     "purpose": "Actions that follow from the findings.",
+     "conditional": "recommendations"
+    },
+    {
+     "key": "conclusion",
+     "heading": "Conclusion",
+     "share": 0.07,
+     "required": true,
+     "purpose": "The report's answer to its purpose."
+    }
+   ]
+  },
+  "CASE_STUDY_ANALYTICAL": {
+   "label": "Case study (analytical)",
+   "sections": [
+    {
+     "key": "introduction",
+     "heading": "Introduction",
+     "share": 0.08,
+     "required": true,
+     "purpose": "The case and the question."
+    },
+    {
+     "key": "context",
+     "heading": "Case Context",
+     "share": 0.12,
+     "required": true,
+     "purpose": "The facts of the case."
+    },
+    {
+     "key": "framework",
+     "heading": "Analytical Framework",
+     "share": 0.12,
+     "required": true,
+     "purpose": "The model or framework used, and why."
+    },
+    {
+     "key": "analysis",
+     "heading": "Analysis",
+     "share": 0.35,
+     "required": true,
+     "purpose": "The case analysed through the framework."
+    },
+    {
+     "key": "interpretation",
+     "heading": "Interpretation",
+     "share": 0.15,
+     "required": true,
+     "purpose": "What the analysis shows."
+    },
+    {
+     "key": "lessons",
+     "heading": "Lessons and Implications",
+     "share": 0.1,
+     "required": true,
+     "purpose": "What follows for practice or theory."
+    },
+    {
+     "key": "conclusion",
+     "heading": "Conclusion",
+     "share": 0.08,
+     "required": true,
+     "purpose": "The answer to the question."
+    }
+   ]
+  },
+  "CASE_STUDY_PROBLEM": {
+   "label": "Case study (problem-oriented)",
+   "sections": [
+    {
+     "key": "introduction",
+     "heading": "Introduction",
+     "share": 0.07,
+     "required": true,
+     "purpose": "The case and the task."
+    },
+    {
+     "key": "context",
+     "heading": "Case Context",
+     "share": 0.1,
+     "required": true,
+     "purpose": "The facts of the case."
+    },
+    {
+     "key": "problem",
+     "heading": "Problem Definition",
+     "share": 0.1,
+     "required": true,
+     "purpose": "The problem, stated precisely."
+    },
+    {
+     "key": "diagnosis",
+     "heading": "Analysis and Diagnosis",
+     "share": 0.2,
+     "required": true,
+     "purpose": "Causes, diagnosed from the evidence."
+    },
+    {
+     "key": "options",
+     "heading": "Options and Alternatives",
+     "share": 0.15,
+     "required": true,
+     "purpose": "Feasible alternatives."
+    },
+    {
+     "key": "evaluation",
+     "heading": "Evaluation of Options",
+     "share": 0.15,
+     "required": true,
+     "purpose": "Each option weighed against criteria."
+    },
+    {
+     "key": "recommendation",
+     "heading": "Recommendation",
+     "share": 0.1,
+     "required": true,
+     "purpose": "The recommended option, justified."
+    },
+    {
+     "key": "implementation",
+     "heading": "Implementation Considerations",
+     "share": 0.08,
+     "required": true,
+     "purpose": "How it would be done."
+    },
+    {
+     "key": "conclusion",
+     "heading": "Conclusion",
+     "share": 0.05,
+     "required": true,
+     "purpose": "The answer to the task."
+    }
+   ]
+  },
+  "LITERATURE_REVIEW": {
+   "label": "Literature review",
+   "sections": [
+    {
+     "key": "introduction",
+     "heading": "Introduction",
+     "share": 0.1,
+     "required": true,
+     "purpose": "The topic and why it matters."
+    },
+    {
+     "key": "scope",
+     "heading": "Scope and Review Question",
+     "share": 0.05,
+     "required": true,
+     "purpose": "What the review covers and asks."
+    },
+    {
+     "key": "search",
+     "heading": "Search and Selection Approach",
+     "share": 0.05,
+     "required": false,
+     "purpose": "How the literature was found and chosen.",
+     "conditional": "postgraduate"
+    },
+    {
+     "key": "theme*",
+     "heading": "Thematic Synthesis",
+     "share": 0.6,
+     "required": true,
+     "purpose": "Themes synthesising agreement, contradiction, methods and limitations.",
+     "body": true
+    },
+    {
+     "key": "gaps",
+     "heading": "Research Gaps",
+     "share": 0.1,
+     "required": true,
+     "purpose": "Gaps that arise from the reviewed evidence."
+    },
+    {
+     "key": "conclusion",
+     "heading": "Conclusion",
+     "share": 0.1,
+     "required": true,
+     "purpose": "What the literature shows, overall."
+    }
+   ]
+  },
+  "RESEARCH_PAPER_EMPIRICAL": {
+   "label": "Short research paper (empirical)",
+   "sections": [
+    {
+     "key": "introduction",
+     "heading": "Introduction",
+     "share": 0.12,
+     "required": true,
+     "purpose": "The question and why it matters."
+    },
+    {
+     "key": "literature",
+     "heading": "Literature and Context",
+     "share": 0.18,
+     "required": true,
+     "purpose": "What is known."
+    },
+    {
+     "key": "methods",
+     "heading": "Methods",
+     "share": 0.15,
+     "required": true,
+     "purpose": "Design, data and analysis."
+    },
+    {
+     "key": "results",
+     "heading": "Results",
+     "share": 0.25,
+     "required": true,
+     "purpose": "What the data show (supplied or permitted data only)."
+    },
+    {
+     "key": "discussion",
+     "heading": "Discussion",
+     "share": 0.2,
+     "required": true,
+     "purpose": "What the results mean, with limitations."
+    },
+    {
+     "key": "conclusion",
+     "heading": "Conclusion",
+     "share": 0.1,
+     "required": true,
+     "purpose": "The answer to the question."
+    }
+   ]
+  },
+  "RESEARCH_PAPER_NON_EMPIRICAL": {
+   "label": "Short research paper (analytical)",
+   "sections": [
+    {
+     "key": "introduction",
+     "heading": "Introduction",
+     "share": 0.12,
+     "required": true,
+     "purpose": "The question and why it matters."
+    },
+    {
+     "key": "literature",
+     "heading": "Literature and Context",
+     "share": 0.18,
+     "required": true,
+     "purpose": "What is known."
+    },
+    {
+     "key": "framework",
+     "heading": "Analytical Approach",
+     "share": 0.1,
+     "required": true,
+     "purpose": "The framework or approach used."
+    },
+    {
+     "key": "analysis",
+     "heading": "Analysis",
+     "share": 0.35,
+     "required": true,
+     "purpose": "The main analysis."
+    },
+    {
+     "key": "discussion",
+     "heading": "Discussion",
+     "share": 0.15,
+     "required": true,
+     "purpose": "What the analysis means."
+    },
+    {
+     "key": "conclusion",
+     "heading": "Conclusion",
+     "share": 0.1,
+     "required": true,
+     "purpose": "The answer to the question."
+    }
+   ]
+  },
+  "REFLECTIVE": {
+   "label": "Reflective assignment",
+   "sections": [
+    {
+     "key": "introduction",
+     "heading": "Introduction",
+     "share": 0.1,
+     "required": true,
+     "purpose": "What is reflected on, and why."
+    },
+    {
+     "key": "context",
+     "heading": "Context and Experience",
+     "share": 0.15,
+     "required": true,
+     "purpose": "The student's own experience, as they gave it."
+    },
+    {
+     "key": "reflection",
+     "heading": "Critical Reflection",
+     "share": 0.4,
+     "required": true,
+     "purpose": "Analysis of the experience: what happened, why, and what it means."
+    },
+    {
+     "key": "theory",
+     "heading": "Theory and Evidence",
+     "share": 0.15,
+     "required": false,
+     "purpose": "Links to theory or evidence, where the task asks for them.",
+     "conditional": "theory"
+    },
+    {
+     "key": "learning",
+     "heading": "Learning and Implications",
+     "share": 0.1,
+     "required": true,
+     "purpose": "What was learned."
+    },
+    {
+     "key": "action_plan",
+     "heading": "Action Plan",
+     "share": 0.05,
+     "required": false,
+     "purpose": "What will be done differently.",
+     "conditional": "action_plan"
+    },
+    {
+     "key": "conclusion",
+     "heading": "Conclusion",
+     "share": 0.05,
+     "required": true,
+     "purpose": "The reflection summed up."
+    }
+   ]
+  }
+ },
+ "questions": [
+  {
+   "id": "task",
+   "label": "Paste your assignment question (every part of it)",
+   "gate": "BLOCK",
+   "kind": "LONG",
+   "fallback": "",
+   "help": "Or upload the brief; PaperAid reads the question from it."
+  },
+  {
+   "id": "word_limit",
+   "label": "What word limit did your lecturer give you?",
+   "gate": "ASK_ONCE",
+   "kind": "NUMBER",
+   "fallback": "PaperAid uses the usual length for your level and says so.",
+   "help": ""
+  },
+  {
+   "id": "level",
+   "label": "What level is this work?",
+   "gate": "ASK_ONCE",
+   "kind": "CHOICE",
+   "fallback": "Later undergraduate.",
+   "help": "",
+   "choices": [
+    "FIRST_YEAR_UG",
+    "LATER_UG",
+    "POSTGRADUATE"
+   ]
+  },
+  {
+   "id": "citation_style",
+   "label": "Which referencing style should be used?",
+   "gate": "ASK_ONCE",
+   "kind": "CHOICE",
+   "fallback": "APA 7th edition.",
+   "help": "",
+   "choices": [
+    "APA7",
+    "APA6",
+    "HARVARD"
+   ]
+  },
+  {
+   "id": "ai_policy",
+   "label": "Does your assignment say anything about using AI?",
+   "gate": "ASK_ONCE",
+   "kind": "CHOICE",
+   "fallback": "Not mentioned: PaperAid adds its note on the last page unless you untick it.",
+   "help": "",
+   "choices": [
+    "NOT_MENTIONED",
+    "BANNED",
+    "ALLOWED_WITH_DISCLOSURE",
+    "ALLOWED"
+   ]
+  },
+  {
+   "id": "experience",
+   "label": "Describe the experience you are reflecting on, in your own words",
+   "gate": "BLOCK",
+   "kind": "LONG",
+   "fallback": "",
+   "help": "PaperAid never invents your experience; it works only from what you write here.",
+   "variants": [
+    "REFLECTIVE"
+   ]
+  },
+  {
+   "id": "empirical",
+   "label": "Does the report present data you collected or were given?",
+   "gate": "ASK_ONCE",
+   "kind": "BOOL",
+   "fallback": "No: a report without a method section.",
+   "help": "",
+   "variants": [
+    "ACADEMIC_REPORT"
+   ]
+  },
+  {
+   "id": "data",
+   "label": "Paste or describe the data your paper should report",
+   "gate": "BLOCK",
+   "kind": "LONG",
+   "fallback": "",
+   "help": "PaperAid reports only data you supply or are permitted to use; it never invents results.",
+   "variants": [
+    "RESEARCH_PAPER_EMPIRICAL"
+   ]
+  }
+ ],
+ "rules": [
+  {
+   "id": "CW-001",
+   "scope": [
+    "coursework"
+   ],
+   "category": "intake",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "Assignment question/brief must be available before full drafting.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "gate.task_present",
+    "params": {}
+   },
+   "stages": [
+    "INTAKE"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Request task.",
+   "ui_message": "The assignment question is available",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-002",
+   "scope": [
+    "coursework"
+   ],
+   "category": "coursework",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "Directive words, subject matter, limiting words, and subquestions must be parsed before drafting.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "coursework.parsed",
+    "params": {}
+   },
+   "stages": [
+    "PLAN"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Parse task.",
+   "ui_message": "The command words, subject, limits and parts of the question were read",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-003",
+   "scope": [
+    "coursework"
+   ],
+   "category": "coursework",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "Every explicit subquestion is represented in the plan and answered in final work.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "coursework.subquestion_coverage",
+    "params": {}
+   },
+   "stages": [
+    "PLAN",
+    "FINAL"
+   ],
+   "sections": [
+    "*"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add coverage.",
+   "ui_message": "Every part of the question is planned and answered",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-004",
+   "scope": [
+    "coursework"
+   ],
+   "category": "intake",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "Coursework type must be resolved or confirmed.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "work.variant",
+    "params": {}
+   },
+   "stages": [
+    "PLAN"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Resolve type.",
+   "ui_message": "The type of assignment is settled",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-005",
+   "scope": [
+    "coursework"
+   ],
+   "category": "limits",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "External word/page/character limits override level defaults.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "limits.external_override",
+    "params": {}
+   },
+   "stages": [
+    "PLAN",
+    "RENDER"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Use external limit.",
+   "ui_message": "Your brief's limits replace PaperAid's defaults",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-006",
+   "scope": [
+    "coursework"
+   ],
+   "category": "plan",
+   "class": "DEFAULT",
+   "severity": "INFO",
+   "applies_if": {},
+   "requirement": "If no limit exists after one clarification, use level-based fallback target.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "plan.word_default",
+    "params": {}
+   },
+   "stages": [
+    "PLAN"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": true
+   },
+   "remediation": "Apply fallback.",
+   "ui_message": "If no limit exists after one clarification, use level-based fallback target.",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-007",
+   "scope": [
+    "coursework"
+   ],
+   "category": "coursework",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "Do not assume ±10% tolerance unless explicitly permitted.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "coursework.word_tolerance",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Use configured tolerance only.",
+   "ui_message": "The length is within the limit (no tolerance assumed)",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-008",
+   "scope": [
+    "coursework"
+   ],
+   "category": "quality",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "Response must fulfil directive meaning appropriate to context.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "PLAN",
+    "FINAL"
+   ],
+   "sections": [
+    "DOCUMENT"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Repair task fulfillment.",
+   "ui_message": "The answer does what the question's command word asks",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-009",
+   "scope": [
+    "coursework"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {
+    "directive_any": [
+     "DESCRIPTIVE"
+    ]
+   },
+   "requirement": "A descriptive task is not penalized for appropriately descriptive writing.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "DOCUMENT"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Adjust criticality expectation.",
+   "ui_message": "Description is used where the task asks for it",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-010",
+   "scope": [
+    "coursework"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {
+    "directive_any": [
+     "ANALYTICAL"
+    ]
+   },
+   "requirement": "An analytical task examines components/relationships rather than only summarizing.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "DOCUMENT"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add analysis.",
+   "ui_message": "It analyses components and relationships, not only summarises",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-011",
+   "scope": [
+    "coursework"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {
+    "directive_any": [
+     "CRITICAL"
+    ]
+   },
+   "requirement": "A critical task evaluates evidence, assumptions, strengths, weaknesses, limitations, or competing evidence where appropriate.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "DOCUMENT"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add critical evaluation.",
+   "ui_message": "It evaluates evidence, assumptions, strengths and limitations",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-012",
+   "scope": [
+    "coursework"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {
+    "directive_any": [
+     "EVALUATIVE"
+    ]
+   },
+   "requirement": "An evaluative task reaches a reasoned judgment using criteria/evidence.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "DOCUMENT"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add judgment.",
+   "ui_message": "It reaches a reasoned judgement",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-013",
+   "scope": [
+    "coursework"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {
+    "directive_any": [
+     "COMPARE"
+    ]
+   },
+   "requirement": "A compare task examines similarities and relevant differences.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "DOCUMENT"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add balance.",
+   "ui_message": "It covers similarities and relevant differences",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-014",
+   "scope": [
+    "coursework"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {
+    "directive_any": [
+     "EXTENT"
+    ]
+   },
+   "requirement": "A to-what-extent/how-far task states the degree of acceptance/rejection.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "DOCUMENT"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add qualified judgment.",
+   "ui_message": "It states how far it accepts the proposition",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-015",
+   "scope": [
+    "coursework"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {
+    "directive_any": [
+     "JUSTIFY"
+    ]
+   },
+   "requirement": "A justify task gives evidence-based reasons.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "DOCUMENT"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add justification.",
+   "ui_message": "It gives evidence-based reasons",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-016",
+   "scope": [
+    "coursework"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Recommendations are grounded in preceding analysis.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "recommendations",
+    "recommendation"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Align recommendations.",
+   "ui_message": "Recommendations follow from the analysis",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-017",
+   "scope": [
+    "coursework"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {
+    "variant": [
+     "REFLECTIVE"
+    ]
+   },
+   "requirement": "Reflective tasks analyse learning/experience rather than merely narrate.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "reflection"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Deepen reflection.",
+   "ui_message": "It analyses the experience, not only narrates it",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-018",
+   "scope": [
+    "coursework"
+   ],
+   "category": "coursework",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {
+    "has_rubric": true
+   },
+   "requirement": "If a rubric is supplied, criteria and weights are extracted into the resolved specification.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "coursework.rubric_parsed",
+    "params": {}
+   },
+   "stages": [
+    "INTAKE",
+    "PLAN"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Parse rubric.",
+   "ui_message": "The rubric's criteria and weights were read",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-019",
+   "scope": [
+    "coursework"
+   ],
+   "category": "plan",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {
+    "has_rubric": true
+   },
+   "requirement": "Rubric weights influence depth without direct 1:1 word conversion.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "plan.scoring_mapped",
+    "params": {}
+   },
+   "stages": [
+    "PLAN"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": true
+   },
+   "remediation": "Rebalance plan.",
+   "ui_message": "The rubric's weights shape the plan's depth",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-020",
+   "scope": [
+    "coursework"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {
+    "has_rubric": true
+   },
+   "requirement": "Final work is assessed against each extracted rubric criterion.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "DOCUMENT"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Run rubric audit.",
+   "ui_message": "Each rubric criterion is met (PaperAid's assessment, not a grade)",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-021",
+   "scope": [
+    "coursework"
+   ],
+   "category": "quality",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {
+    "learning_outcomes": true
+   },
+   "requirement": "Explicit learning outcomes named in brief/rubric are evidenced somewhere in submission.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "DOCUMENT"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add coverage.",
+   "ui_message": "The named learning outcomes are evidenced",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-022",
+   "scope": [
+    "coursework"
+   ],
+   "category": "plan",
+   "class": "DEFAULT",
+   "severity": "INFO",
+   "applies_if": {
+    "variant": [
+     "ESSAY"
+    ]
+   },
+   "requirement": "Essay planning may use approximately 10/80/10 when no better instruction exists.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "plan.word_default",
+    "params": {}
+   },
+   "stages": [
+    "PLAN"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": true
+   },
+   "remediation": "Apply heuristic.",
+   "ui_message": "Essay planning may use approximately 10/80/10 when no better instruction exists.",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-023",
+   "scope": [
+    "coursework"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Essay introduction establishes context, scope, position where appropriate, and route through response.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "introduction"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Strengthen introduction.",
+   "ui_message": "The introduction sets context, scope, position and route",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-024",
+   "scope": [
+    "coursework"
+   ],
+   "category": "coursework",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Introduction should not consume disproportionate space without task justification.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "coursework.intro_share",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "introduction"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Compress introduction.",
+   "ui_message": "The introduction is in proportion",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-025",
+   "scope": [
+    "coursework"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Body paragraphs have clear controlling ideas and contribute to the assignment argument.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "theme*",
+    "analysis",
+    "findings",
+    "reflection"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Repair focus.",
+   "ui_message": "Each body paragraph has a clear controlling idea",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-026",
+   "scope": [
+    "coursework"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Source-listing paragraphs with little synthesis are flagged in analytical coursework.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "theme*",
+    "literature"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add synthesis.",
+   "ui_message": "Sources are synthesised, not listed",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-027",
+   "scope": [
+    "coursework"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Evidence is interpreted and linked to the assignment question.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "theme*",
+    "analysis",
+    "findings",
+    "results",
+    "discussion"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add analysis/link.",
+   "ui_message": "Evidence is interpreted and linked to the question",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-028",
+   "scope": [
+    "coursework"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Conclusion answers the task and synthesizes the argument.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "conclusion"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Rewrite conclusion.",
+   "ui_message": "The conclusion answers the task",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-029",
+   "scope": [
+    "coursework"
+   ],
+   "category": "coursework",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Conclusion does not introduce a major new line of evidence absent from the body.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "coursework.conclusion_new_evidence",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "conclusion"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Move/remove evidence.",
+   "ui_message": "The conclusion brings no new evidence",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-030",
+   "scope": [
+    "coursework"
+   ],
+   "category": "structure",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {
+    "variant": [
+     "ACADEMIC_REPORT"
+    ],
+    "has_template": true
+   },
+   "requirement": "Academic reports follow externally required headings when supplied.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "structure.required_sections",
+    "params": {}
+   },
+   "stages": [
+    "PLAN",
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Map report structure.",
+   "ui_message": "The report's required headings are used",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-031",
+   "scope": [
+    "coursework"
+   ],
+   "category": "structure",
+   "class": "CONDITIONAL",
+   "severity": "WARNING",
+   "applies_if": {
+    "variant": [
+     "ACADEMIC_REPORT"
+    ],
+    "empirical": true
+   },
+   "requirement": "Empirical reports normally include a method/approach section.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "structure.conditional_section",
+    "params": {}
+   },
+   "stages": [
+    "PLAN",
+    "FINAL"
+   ],
+   "sections": [
+    "method"
+   ],
+   "adjustable": {
+    "allowed": true
+   },
+   "remediation": "Add method.",
+   "ui_message": "An empirical report has a method section",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-032",
+   "scope": [
+    "coursework"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {
+    "variant": [
+     "ACADEMIC_REPORT"
+    ]
+   },
+   "requirement": "Report findings/analysis are distinguished from unsupported opinion.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "findings"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Strengthen evidence.",
+   "ui_message": "Findings are distinguished from opinion",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-033",
+   "scope": [
+    "coursework"
+   ],
+   "category": "quality",
+   "class": "CONDITIONAL",
+   "severity": "WARNING",
+   "applies_if": {
+    "variant": [
+     "ACADEMIC_REPORT"
+    ]
+   },
+   "requirement": "Report recommendations arise from findings/analysis.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "recommendations"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Align recommendations.",
+   "ui_message": "Recommendations arise from the findings",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-034",
+   "scope": [
+    "coursework"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {
+    "variant": [
+     "LITERATURE_REVIEW"
+    ]
+   },
+   "requirement": "Literature reviews synthesize thematically/methodologically/conceptually rather than list studies.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "PLAN",
+    "FINAL"
+   ],
+   "sections": [
+    "PLAN",
+    "theme*"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Restructure synthesis.",
+   "ui_message": "The review is organised by themes, not study by study",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-035",
+   "scope": [
+    "coursework"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {
+    "variant": [
+     "LITERATURE_REVIEW"
+    ]
+   },
+   "requirement": "Literature reviews compare agreement, contradiction, methodological variation, and limitations within themes where relevant.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "theme*"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Deepen synthesis.",
+   "ui_message": "Agreement, contradiction and method differences are compared within themes",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-036",
+   "scope": [
+    "coursework"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {
+    "variant": [
+     "LITERATURE_REVIEW"
+    ]
+   },
+   "requirement": "Literature reviews identify evidence gaps only where supported.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "gaps"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add/repair gap.",
+   "ui_message": "Gaps rest on the evidence reviewed",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-037",
+   "scope": [
+    "coursework"
+   ],
+   "category": "structure",
+   "class": "CONDITIONAL",
+   "severity": "WARNING",
+   "applies_if": {
+    "variant": [
+     "LITERATURE_REVIEW"
+    ],
+    "level": [
+     "POSTGRADUATE"
+    ]
+   },
+   "requirement": "Postgraduate literature reviews include a brief search/selection approach when review methodology is expected.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "structure.conditional_section",
+    "params": {}
+   },
+   "stages": [
+    "PLAN",
+    "FINAL"
+   ],
+   "sections": [
+    "search"
+   ],
+   "adjustable": {
+    "allowed": true
+   },
+   "remediation": "Add search approach.",
+   "ui_message": "The search and selection approach is described",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-038",
+   "scope": [
+    "coursework"
+   ],
+   "category": "intake",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {
+    "variant": [
+     "CASE_STUDY_ANALYTICAL",
+     "CASE_STUDY_PROBLEM"
+    ]
+   },
+   "requirement": "Case study mode resolves to analytical, problem-oriented, or external format.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "work.variant",
+    "params": {}
+   },
+   "stages": [
+    "PLAN"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Resolve case mode.",
+   "ui_message": "Case study mode resolves to analytical, problem-oriented, or external format.",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-039",
+   "scope": [
+    "coursework"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {
+    "variant": [
+     "CASE_STUDY_ANALYTICAL"
+    ]
+   },
+   "requirement": "Analytical case studies use an explicit analytical framework/model where appropriate.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "framework"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add framework.",
+   "ui_message": "An analytical framework is used",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-040",
+   "scope": [
+    "coursework"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {
+    "variant": [
+     "CASE_STUDY_PROBLEM"
+    ]
+   },
+   "requirement": "Problem-oriented case studies diagnose before recommending.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "DOCUMENT"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add diagnosis.",
+   "ui_message": "The problem is diagnosed before recommending",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-041",
+   "scope": [
+    "coursework"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {
+    "variant": [
+     "CASE_STUDY_PROBLEM"
+    ]
+   },
+   "requirement": "Problem-oriented case studies compare feasible alternatives when warranted.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "options"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add options analysis.",
+   "ui_message": "Feasible alternatives are compared",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-042",
+   "scope": [
+    "coursework"
+   ],
+   "category": "structure",
+   "class": "CONDITIONAL",
+   "severity": "WARNING",
+   "applies_if": {
+    "variant": [
+     "RESEARCH_PAPER_EMPIRICAL"
+    ]
+   },
+   "requirement": "Empirical short research papers include a method section.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "structure.conditional_section",
+    "params": {}
+   },
+   "stages": [
+    "PLAN",
+    "FINAL"
+   ],
+   "sections": [
+    "methods"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add methods.",
+   "ui_message": "The empirical paper has a methods section",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-043",
+   "scope": [
+    "coursework"
+   ],
+   "category": "coursework",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {
+    "variant": [
+     "RESEARCH_PAPER_NON_EMPIRICAL"
+    ]
+   },
+   "requirement": "Non-empirical short research papers use an appropriate analytical approach instead of an artificial method section.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "coursework.no_artificial_methods",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Replace/remove methods.",
+   "ui_message": "No artificial methods section in a non-empirical paper",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-044",
+   "scope": [
+    "coursework"
+   ],
+   "category": "intake",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {
+    "variant": [
+     "REFLECTIVE"
+    ]
+   },
+   "requirement": "Reflective assignments requiring personal experience may not invent user experience.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "gate.experience_present",
+    "params": {}
+   },
+   "stages": [
+    "INTAKE",
+    "PLAN"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Request context.",
+   "ui_message": "Your own experience is used, never invented",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-045",
+   "scope": [
+    "coursework"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {
+    "variant": [
+     "REFLECTIVE"
+    ]
+   },
+   "requirement": "Reflective writing connects experience to learning, theory/evidence, or future action as required.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "reflection",
+    "learning"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Deepen reflection.",
+   "ui_message": "The reflection connects experience to learning",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-046",
+   "scope": [
+    "coursework"
+   ],
+   "category": "coursework",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "Explicit institution/assignment AI-use policy is extracted and applied.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "coursework.ai_policy",
+    "params": {}
+   },
+   "stages": [
+    "INTAKE",
+    "PLAN"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Apply policy.",
+   "ui_message": "Your assignment's rule on AI use is applied",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-047",
+   "scope": [
+    "coursework"
+   ],
+   "category": "coursework",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {
+    "ai_policy": [
+     "BANNED"
+    ]
+   },
+   "requirement": "Explicit generative-AI prohibition disables full-drafting mode.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "coursework.ai_note",
+    "params": {}
+   },
+   "stages": [
+    "PLAN"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Switch to support mode.",
+   "ui_message": "The last page states the document was drafted by an AI-assisted third party",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-048",
+   "scope": [
+    "coursework"
+   ],
+   "category": "coursework",
+   "class": "CONDITIONAL",
+   "severity": "INFO",
+   "applies_if": {
+    "ai_policy": [
+     "ALLOWED_WITH_DISCLOSURE"
+    ]
+   },
+   "requirement": "If AI is permitted with disclosure, PaperAid may generate a disclosure statement when requested.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "coursework.ai_policy",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": true
+   },
+   "remediation": "Generate disclosure.",
+   "ui_message": "A disclosure statement is included",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-049",
+   "scope": [
+    "coursework"
+   ],
+   "category": "coursework",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {
+    "source_policy": [
+     "CLOSED"
+    ]
+   },
+   "requirement": "If brief restricts sources to supplied readings, PaperAid must not add external literature unless permitted.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "coursework.source_restriction",
+    "params": {}
+   },
+   "stages": [
+    "PLAN"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Use closed source set.",
+   "ui_message": "Only the set readings are used",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-050",
+   "scope": [
+    "coursework"
+   ],
+   "category": "coursework",
+   "class": "CONDITIONAL",
+   "severity": "WARNING",
+   "applies_if": {
+    "source_policy": [
+     "INDEPENDENT"
+    ]
+   },
+   "requirement": "Independent research is performed when the task expects it and source restrictions allow it.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "coursework.research_done",
+    "params": {}
+   },
+   "stages": [
+    "PLAN",
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": true
+   },
+   "remediation": "Run research.",
+   "ui_message": "Independent research was carried out",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-051",
+   "scope": [
+    "coursework"
+   ],
+   "category": "coursework",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {
+    "has_required_readings": true
+   },
+   "requirement": "Required course readings are incorporated where the brief/rubric expects them.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "coursework.required_readings",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add required readings.",
+   "ui_message": "The required readings are used",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-052",
+   "scope": [
+    "coursework"
+   ],
+   "category": "evidence",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "PaperAid-added references are bibliographically verified.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "references.exists",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Verify/replace.",
+   "ui_message": "PaperAid-added references are bibliographically verified.",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-053",
+   "scope": [
+    "coursework"
+   ],
+   "category": "evidence",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "A cited source supports the claim for which it is used.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "claims.supported",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Replace/qualify citation.",
+   "ui_message": "Each cited source supports its claim",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-054",
+   "scope": [
+    "coursework"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Source sufficiency is judged by coverage/quality, not fixed references per 1,000 words.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "DOCUMENT"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Improve evidence coverage.",
+   "ui_message": "The evidence covers the question well",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-055",
+   "scope": [
+    "coursework"
+   ],
+   "category": "coursework",
+   "class": "CONDITIONAL",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "When no source count is specified, any suggested count is clearly non-binding guidance.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "coursework.source_count_label",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": true
+   },
+   "remediation": "Label guidance.",
+   "ui_message": "When no source count is specified, any suggested count is clearly non-binding guidance.",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-056",
+   "scope": [
+    "coursework"
+   ],
+   "category": "evidence",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "Required citation style is followed consistently.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "references.style",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Repair citations.",
+   "ui_message": "Your referencing style is followed",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-057",
+   "scope": [
+    "coursework"
+   ],
+   "category": "evidence",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "Required in-text citations correspond to reference entries.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "references.intext_mapping",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Repair mapping.",
+   "ui_message": "Required in-text citations correspond to reference entries.",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-058",
+   "scope": [
+    "coursework"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Body remains focused on the task instead of drifting into generally relevant but unasked material.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "DOCUMENT"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Remove drift.",
+   "ui_message": "It stays on the question",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-059",
+   "scope": [
+    "coursework"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Major claims are proportionate to evidence and avoid unsupported certainty.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "DOCUMENT"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Qualify claims.",
+   "ui_message": "Claims are in proportion to the evidence",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-060",
+   "scope": [
+    "coursework"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {
+    "directive_any": [
+     "CRITICAL"
+    ]
+   },
+   "requirement": "Counter-evidence or alternative perspectives are considered when required by critical/evaluative directives.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "DOCUMENT"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add counter-position.",
+   "ui_message": "Counter-evidence and other views are considered",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-061",
+   "scope": [
+    "coursework"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {
+    "directive_any": [
+     "CRITICAL"
+    ]
+   },
+   "requirement": "Critical/evaluative coursework acknowledges material limitations where relevant.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "DOCUMENT"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add limitations.",
+   "ui_message": "Material limitations are acknowledged",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-062",
+   "scope": [
+    "coursework"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Transitions support logical progression without repetitive formulaic phrasing.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "DOCUMENT"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Improve flow.",
+   "ui_message": "Transitions carry the argument without formulaic phrasing",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-063",
+   "scope": [
+    "coursework"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {
+    "directive_any": [
+     "CRITICAL"
+    ]
+   },
+   "requirement": "Most substantive paragraphs in a critically evaluative essay should be analytical/evaluative rather than purely descriptive.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "DOCUMENT"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Target weak paragraphs.",
+   "ui_message": "Most body paragraphs analyse or evaluate",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-064",
+   "scope": [
+    "coursework"
+   ],
+   "category": "readiness",
+   "class": "QUALITY",
+   "severity": "INFO",
+   "applies_if": {},
+   "requirement": "Paragraph criticality labels are internal quality signals, not official grades.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "readiness.internal_labels",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Do not expose as grade.",
+   "ui_message": "Paragraph criticality labels are internal quality signals, not official grades.",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-065",
+   "scope": [
+    "coursework"
+   ],
+   "category": "structure",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "All required sections/components specified by the brief are present.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "structure.required_sections",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add missing component.",
+   "ui_message": "Every component your brief requires is present",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-066",
+   "scope": [
+    "coursework"
+   ],
+   "category": "limits",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "Final coursework complies with hard length and formatting requirements after rendering.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "limits.hard_max",
+    "params": {}
+   },
+   "stages": [
+    "FINAL",
+    "RENDER"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Compress/reformat.",
+   "ui_message": "Final coursework complies with hard length and formatting requirements after rendering.",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-067",
+   "scope": [
+    "coursework"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Title/headings accurately reflect content and required structure.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "DOCUMENT"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Repair headings.",
+   "ui_message": "The title and headings reflect the content",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-068",
+   "scope": [
+    "coursework"
+   ],
+   "category": "quality",
+   "class": "CONDITIONAL",
+   "severity": "WARNING",
+   "applies_if": {
+    "variant": [
+     "ACADEMIC_REPORT"
+    ]
+   },
+   "requirement": "Report executive summary summarizes purpose, approach, principal analysis/findings, and recommendations without duplicating introduction.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "executive_summary"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Rewrite summary.",
+   "ui_message": "The executive summary covers purpose, approach, findings and recommendations",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-069",
+   "scope": [
+    "coursework"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {
+    "variant": [
+     "RESEARCH_PAPER_EMPIRICAL",
+     "RESEARCH_PAPER_NON_EMPIRICAL"
+    ]
+   },
+   "requirement": "Short research papers distinguish evidence/findings from interpretation where applicable.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "results",
+    "discussion",
+    "analysis"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Clarify results/discussion.",
+   "ui_message": "Evidence is distinguished from interpretation",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-070",
+   "scope": [
+    "coursework"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {
+    "variant": [
+     "LITERATURE_REVIEW"
+    ]
+   },
+   "requirement": "Literature-review gaps arise from reviewed evidence rather than being invented.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "gaps"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Repair gap claim.",
+   "ui_message": "Gaps arise from the reviewed evidence",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-071",
+   "scope": [
+    "coursework"
+   ],
+   "category": "evidence",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "Student-supplied quotations, figures, and required readings are not silently altered.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "numbers.user_figures",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Restore/flag.",
+   "ui_message": "Your quotations, figures and readings are unchanged",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-072",
+   "scope": [
+    "coursework"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {
+    "directive_any": [
+     "EVALUATIVE",
+     "EXTENT",
+     "CRITICAL"
+    ]
+   },
+   "requirement": "Final answer makes its central position/judgment explicit when the directive requires one.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "introduction",
+    "conclusion"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Strengthen thesis/judgment.",
+   "ui_message": "The central position is explicit",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-073",
+   "scope": [
+    "coursework"
+   ],
+   "category": "integrity",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "PaperAid-generated coursework never runs a detector-evasion or make-undetectable stage.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "pipeline.no_evasion",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Use Academic Quality & Integrity Review.",
+   "ui_message": "PaperAid-generated coursework never runs a detector-evasion or make-undetectable stage.",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-074",
+   "scope": [
+    "coursework"
+   ],
+   "category": "readiness",
+   "class": "QUALITY",
+   "severity": "INFO",
+   "applies_if": {},
+   "requirement": "PaperAid rubric/readiness feedback is not presented as an official lecturer grade prediction.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "readiness.internal_labels",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Label as PaperAid assessment.",
+   "ui_message": "PaperAid rubric/readiness feedback is not presented as an official lecturer grade prediction.",
+   "source": "Rulebook v1.0 §13.16"
+  },
+  {
+   "id": "CW-075",
+   "scope": [
+    "coursework"
+   ],
+   "category": "readiness",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "All blocking coursework rules pass before READY status.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "readiness.blocking",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Repair blocking failures.",
+   "ui_message": "All blocking coursework rules pass before READY status.",
+   "source": "Rulebook v1.0 §13.16"
+  }
+ ]
+}

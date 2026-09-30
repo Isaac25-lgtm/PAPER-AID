@@ -237,6 +237,11 @@ export function JobOptions({ job, mode, initial }: { job: Job; mode: Mode; initi
       <div>
         <p className="text-base font-semibold">{text.title}</p>
         <p className="mt-1 text-sm text-fg-muted">{text.body}</p>
+        {mode === 'check' && (
+          <p className="mt-2 flex items-center gap-2 text-xs text-fg-subtle">
+            AI detection <Badge>Coming soon</Badge>
+          </p>
+        )}
       </div>
 
       {mode === 'prepared' && (

@@ -160,6 +160,8 @@ export interface Project {
   planProblems: string[]
   candidatePlan: ProposalPlan | null
   autoChapterOne: boolean
+  /** CONCEPT: the concept paper first (Research Proposals → Concept note); FULL: the whole proposal. */
+  goal: 'FULL' | 'CONCEPT'
   feedback: FeedbackComment[]
   /** The current chapters' sections, where comments can be placed. */
   written: WrittenSection[]
@@ -192,6 +194,8 @@ export interface ReadinessItem {
   note: string
   where: string
   chapter: number
+  /** Works: how much a failure matters; a blocking one keeps the work "Not ready". */
+  severity?: 'BLOCKING' | 'WARNING' | 'INFO'
 }
 
 export interface ChapterView {

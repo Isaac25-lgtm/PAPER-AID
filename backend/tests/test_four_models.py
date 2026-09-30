@@ -7,7 +7,7 @@ import pytest
 from docx import Document
 
 from app.ai import costs, orchestration
-from app.ai.orchestration import DRAFTING_TASKS, ROUTINE_TASKS, STEPS, AIRunner, Revision, current_engine
+from app.ai.orchestration import DRAFTING_TASKS, ROUTINE_TASKS, STEPS, WORK_ROLES, AIRunner, Revision, current_engine
 from app.ai.styles import writing_brief
 from app.core.config import Settings
 from app.proposals.ai import ProposalRunner
@@ -43,7 +43,8 @@ def test_every_new_task_has_the_requested_model():
         assert runner.model_for(task) == "anthropic:claude-sonnet-5-5"
     assert runner.model_for("analyse_after") == "openai:gpt-6-luna"
     assert runner.model_for("analyse_after_peer") == "anthropic:claude-sonnet-5-5"
-    for task in set(STEPS) - ROUTINE_TASKS - DRAFTING_TASKS - {"analyse", "analyse_peer", "analyse_after", "analyse_after_peer"}:
+    works = {t for t, s in STEPS.items() if s.role in WORK_ROLES}  # the works algorithm has its own roles (test_works_flows)
+    for task in set(STEPS) - ROUTINE_TASKS - DRAFTING_TASKS - works - {"analyse", "analyse_peer", "analyse_after", "analyse_after_peer"}:
         assert runner.model_for(task) == ("openai:gpt-6-sol" if STEPS[task].role == "lead" else "anthropic:claude-opus-5-5")
 
 

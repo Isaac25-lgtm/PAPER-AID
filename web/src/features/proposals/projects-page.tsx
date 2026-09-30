@@ -1,6 +1,6 @@
 import { FileSearch, GraduationCap, Plus } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { Link, useNavigate } from 'react-router'
+import { Link, useNavigate, useSearchParams } from 'react-router'
 import { Button, ButtonLink } from '../../components/ui/button'
 import { Input, Select, TextArea } from '../../components/ui/field'
 import { Alert, Card, EmptyState, PageHeader, Skeleton } from '../../components/ui/primitives'
@@ -39,9 +39,14 @@ export function ProjectsPage() {
         description="Plan, research and write your research proposal chapter by chapter, or check one you have already written."
         actions={
           !blocked && (
-            <ButtonLink to="/app/projects/new">
-              <Plus className="size-4" aria-hidden /> New proposal
-            </ButtonLink>
+            <div className="flex flex-wrap gap-2">
+              <ButtonLink to="/app/projects/new?goal=CONCEPT" variant="secondary">
+                <Plus className="size-4" aria-hidden /> New concept note
+              </ButtonLink>
+              <ButtonLink to="/app/projects/new">
+                <Plus className="size-4" aria-hidden /> New proposal
+              </ButtonLink>
+            </div>
           )
         }
       />
@@ -94,6 +99,7 @@ export function ProjectsPage() {
                 <div className="flex flex-wrap items-center gap-2">
                   <p className="font-semibold text-fg">{p.plan?.title ?? p.inputs.topic}</p>
                   <PlanStatusBadge status={p.planStatus} />
+                  {p.goal === 'CONCEPT' && <span className="text-xs font-medium text-fg-subtle">Concept note</span>}
                 </div>
                 <p className="mt-1 text-sm text-fg-muted">
                   {LEVELS[p.inputs.level]} · {p.chapters.filter((c) => c.number <= 3 && c.current).length} of 3 chapters written · {p.evidenceCount} confirmed sources
@@ -245,7 +251,9 @@ export function DetailsForm({
 }
 
 export function NewProjectPage() {
-  useTitle('New proposal')
+  const [params] = useSearchParams()
+  const concept = params.get('goal') === 'CONCEPT'
+  useTitle(concept ? 'New concept note' : 'New proposal')
   const data = useData()
   const navigate = useNavigate()
   const [rulebook, setRulebook] = useState<Rulebook | null>(null)
@@ -255,11 +263,13 @@ export function NewProjectPage() {
   return (
     <>
       <PageHeader
-        title="New research proposal"
+        title={concept ? 'New research concept note' : 'New research proposal'}
         description={
-          <>
-            Tell PaperAid about your study. It researches the evidence and drafts a plan for you to edit and approve before any chapter is written.
-          </>
+          concept ? (
+            <>Tell PaperAid about your study. It researches the evidence and drafts a plan for you to approve, then writes your concept paper. You can continue into the full proposal later.</>
+          ) : (
+            <>Tell PaperAid about your study. It researches the evidence and drafts a plan for you to edit and approve before any chapter is written.</>
+          )
         }
       />
       <div className="max-w-3xl">
@@ -268,9 +278,9 @@ export function NewProjectPage() {
           titlePage={EMPTY_TITLE}
           citation={rulebook?.defaultCitation ?? 'APA6'}
           rulebook={rulebook}
-          submitLabel="Create proposal"
+          submitLabel={concept ? 'Create concept note' : 'Create proposal'}
           onSubmit={async (inputs, titlePage, citation) => {
-            const project = await data.projects.create(inputs, titlePage, citation)
+            const project = await data.projects.create(inputs, titlePage, citation, concept ? 'CONCEPT' : 'FULL')
             navigate(`/app/projects/${project.id}`)
           }}
         />

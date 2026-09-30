@@ -28,6 +28,8 @@ export interface SectionInfo {
   youGet: string[]
   untouched: string[]
   to: string
+  /** Shown as "coming soon", never as something the student can choose (owner decision 2026-09-30). */
+  soon?: string[]
 }
 
 export const SECTIONS: SectionInfo[] = [
@@ -45,6 +47,7 @@ export const SECTIONS: SectionInfo[] = [
     ],
     untouched: ['Citations, quotations, numbers and URLs', 'Your argument and findings', 'Anything you choose to keep in your own words'],
     to: '/app/new?service=PAPER_CHECK',
+    soon: ['AI detection'],
   },
   {
     id: 'PROPOSALS',

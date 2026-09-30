@@ -24,6 +24,7 @@ class Details(Camel):
     inputs: ProposalInputs
     title_page: TitlePage = TitlePage()
     citation: CitationStyle = "APA6"
+    goal: Literal["FULL", "CONCEPT"] = "FULL"  # creation only: a concept note first, or the full proposal
 
 
 class PlanEdit(Camel):
@@ -79,7 +80,7 @@ def list_projects(user: User = Depends(current_user), rt: Runtime = Depends(get_
 
 @router.post("", response_model=ProjectView)
 def create(body: Details, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> ProjectView:
-    return projects.create(rt, user, body.inputs, body.title_page, body.citation)
+    return projects.create(rt, user, body.inputs, body.title_page, body.citation, body.goal)
 
 
 @router.get("/{project_id}", response_model=ProjectView)

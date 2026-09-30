@@ -2,6 +2,7 @@
 // supplies (a Firebase ID token in production, a local developer identity when running locally).
 import { DataError, type DataSource, type JobQuery } from './data'
 import type { ChapterView, Comparison, EvidenceItem, Project, Rulebook, StepQuote } from './proposal-types'
+import type { Work, WorkDocumentView, WorkStepQuote } from './work-types'
 import type { AdminJob, AdminSummary, FileMeta, ImageMeta, Job, JobDocument, LedgerEntry, Page, PublicConfig, QuoteResponse, Wallet, WalletSummary } from './types'
 
 interface Options {
@@ -206,7 +207,8 @@ export function createApiSource({ config, getAuthHeaders }: Options): DataSource
           if (err instanceof DataError && err.status === 404) return null
           throw err
         }),
-      create: (inputs, titlePage, citation) => request<Project>('/api/projects', { method: 'POST', body: JSON.stringify({ inputs, titlePage, citation }) }),
+      create: (inputs, titlePage, citation, goal = 'FULL') => request<Project>('/api/projects', { method: 'POST', body: JSON.stringify({ inputs, titlePage, citation, goal }) }),
+      continueToFull: (id) => request<Project>(`/api/projects/${id}/continue`, { method: 'POST' }),
       updateDetails: (id, inputs, titlePage, citation) =>
         request<Project>(`/api/projects/${id}/details`, { method: 'POST', body: JSON.stringify({ inputs, titlePage, citation }) }),
       savePlan: (id, plan, baseVersion) => request<Project>(`/api/projects/${id}/plan`, { method: 'POST', body: JSON.stringify({ plan, baseVersion }) }),
@@ -244,6 +246,47 @@ export function createApiSource({ config, getAuthHeaders }: Options): DataSource
         return request<Project>(`/api/projects/${id}/guide`, { method: 'POST', body: form })
       },
       useDefaultRulebook: (id) => request<Project>(`/api/projects/${id}/rulebook/default`, { method: 'POST' }),
+    },
+
+    works: {
+      list: () => request<Work[]>('/api/works'),
+      get: (id) =>
+        request<Work>(`/api/works/${encodeURIComponent(id)}`).catch((err: unknown) => {
+          if (err instanceof DataError && err.status === 404) return null
+          throw err
+        }),
+      create: (kind, variant, mode, inputs, citation) => request<Work>('/api/works', { method: 'POST', body: JSON.stringify({ kind, variant, mode, inputs, citation }) }),
+      updateDetails: (id, inputs, change, baseVersion) =>
+        request<Work>(`/api/works/${id}/details`, { method: 'POST', body: JSON.stringify({ inputs, ...change, baseVersion }) }),
+      answer: (id, answers, baseVersion, skipRest = false) =>
+        request<Work>(`/api/works/${id}/answers`, { method: 'POST', body: JSON.stringify({ answers, baseVersion, skipRest }) }),
+      confirm: (id, baseVersion) => request<Work>(`/api/works/${id}/spec/confirm`, { method: 'POST', body: JSON.stringify({ baseVersion }) }),
+      setAiNote: (id, on) => request<Work>(`/api/works/${id}/ai-note`, { method: 'POST', body: JSON.stringify({ on }) }),
+      uploadSource(id, role, file) {
+        const form = new FormData()
+        form.append('role', role)
+        form.append('file', file)
+        return request<Work>(`/api/works/${id}/sources`, { method: 'POST', body: form })
+      },
+      pasteSource: (id, role, name, text) => request<Work>(`/api/works/${id}/sources/text`, { method: 'POST', body: JSON.stringify({ role, name, text }) }),
+      removeSource: (id, sourceId) => request<Work>(`/api/works/${id}/sources/${sourceId}`, { method: 'DELETE' }),
+      savePlan: (id, plan, baseVersion) => request<Work>(`/api/works/${id}/plan`, { method: 'POST', body: JSON.stringify({ plan, baseVersion }) }),
+      approvePlan: (id, baseVersion) => request<Work>(`/api/works/${id}/plan/approve`, { method: 'POST', body: JSON.stringify({ baseVersion }) }),
+      takeCandidate: (id, accept) => request<Work>(`/api/works/${id}/plan/candidate`, { method: 'POST', body: JSON.stringify({ accept }) }),
+      saveResults: (id, results, baseVersion) => request<Work>(`/api/works/${id}/results`, { method: 'POST', body: JSON.stringify({ results, baseVersion }) }),
+      approveResults: (id, baseVersion) => request<Work>(`/api/works/${id}/results/approve`, { method: 'POST', body: JSON.stringify({ baseVersion }) }),
+      saveBudget: (id, budget, baseVersion) => request<Work>(`/api/works/${id}/budget`, { method: 'POST', body: JSON.stringify({ budget, baseVersion }) }),
+      quoteStep: (id, step, note) => request<WorkStepQuote>(`/api/works/${id}/steps`, { method: 'POST', body: JSON.stringify({ step, note }) }),
+      submitStep: async (id, jobId, quoteId) => {
+        await request<Job>(`/api/works/${id}/steps/${jobId}/submit`, { method: 'POST', body: JSON.stringify({ quoteId }) })
+      },
+      requestChanges: (id, instruction, sections) => request<Work>(`/api/works/${id}/requests`, { method: 'POST', body: JSON.stringify({ instruction, sections }) }),
+      removeRequest: (id, requestId) => request<Work>(`/api/works/${id}/requests/${requestId}`, { method: 'DELETE' }),
+      setVersion: (id, version) => request<Work>(`/api/works/${id}/version`, { method: 'POST', body: JSON.stringify({ version }) }),
+      document: (id, version) => request<WorkDocumentView>(`/api/works/${id}/document${query({ version })}`),
+      download: (id, fileName, version) => saveFile(`/api/works/${id}/export${query({ version })}`, fileName),
+      downloadPdf: (id, fileName, version) => saveFile(`/api/works/${id}/export.pdf${query({ version })}`, fileName),
+      remove: (id) => request<void>(`/api/works/${id}`, { method: 'DELETE' }),
     },
 
     admin: {

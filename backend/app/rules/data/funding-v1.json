@@ -1,0 +1,2874 @@
+{
+ "id": "funding-v1",
+ "kind": "FUNDING_PROPOSAL",
+ "source": "PaperAid Final Implementation Rulebook v1.0 (28 September 2026), §12 and Appendices A2, C2, E, F",
+ "variants": {
+  "NGO_PROJECT": {
+   "label": "NGO / development project proposal",
+   "modes": {
+    "COMPACT": 2500,
+    "STANDARD": 5500,
+    "COMPREHENSIVE": 10000
+   },
+   "mode_sections": {
+    "COMPACT": [
+     {
+      "key": "executive_summary",
+      "heading": "Executive Summary",
+      "words": 150,
+      "min": 120,
+      "max": 180,
+      "required": true,
+      "purpose": "The problem, intervention, results, duration, geography, applicant and request, all matching the body."
+     },
+     {
+      "key": "problem",
+      "heading": "Problem and Need",
+      "words": 350,
+      "min": 280,
+      "max": 420,
+      "required": true,
+      "purpose": "Evidence of the problem, its root causes and consequences, for the affected population and place."
+     },
+     {
+      "key": "target_population",
+      "heading": "Target Population",
+      "words": 100,
+      "min": 80,
+      "max": 120,
+      "required": true,
+      "purpose": "Who the project serves and involves, where, and why them."
+     },
+     {
+      "key": "goal_objectives",
+      "heading": "Goal and Objectives",
+      "words": 100,
+      "min": 80,
+      "max": 120,
+      "required": true,
+      "purpose": "The goal (higher-level change) and specific objectives answering the problem, from the Results Model."
+     },
+     {
+      "key": "technical_approach",
+      "heading": "Technical Approach",
+      "words": 550,
+      "min": 440,
+      "max": 660,
+      "required": true,
+      "purpose": "The core design and why it is expected to work, with evidence of effectiveness."
+     },
+     {
+      "key": "implementation",
+      "heading": "Implementation",
+      "words": 250,
+      "min": 200,
+      "max": 300,
+      "required": true,
+      "purpose": "How and when the activities are delivered, by whom (the workplan table follows from the Results Model)."
+     },
+     {
+      "key": "expected_results",
+      "heading": "Expected Results",
+      "words": 150,
+      "min": 120,
+      "max": 180,
+      "required": true,
+      "purpose": "The outputs and outcomes, with their indicators and targets from the Results Model."
+     },
+     {
+      "key": "mel",
+      "heading": "Monitoring, Evaluation and Learning",
+      "words": 250,
+      "min": 200,
+      "max": 300,
+      "required": true,
+      "purpose": "How results are measured and used: indicators, baselines, data sources, frequency, responsibility, quality assurance, learning and evaluation."
+     },
+     {
+      "key": "risks",
+      "heading": "Risks and Mitigation",
+      "words": 100,
+      "min": 80,
+      "max": 120,
+      "required": true,
+      "purpose": "The material risks, each with a concrete mitigation and an owner."
+     },
+     {
+      "key": "sustainability",
+      "heading": "Sustainability",
+      "words": 150,
+      "min": 120,
+      "max": 180,
+      "required": true,
+      "purpose": "How benefits and ownership continue after funding, and scale where it is an aim."
+     },
+     {
+      "key": "capacity",
+      "heading": "Organisational Capacity and Management",
+      "words": 150,
+      "min": 120,
+      "max": 180,
+      "required": true,
+      "purpose": "Specific capability: past projects, dates, donors, scale, results, systems and staff, and the management structure."
+     },
+     {
+      "key": "budget_narrative",
+      "heading": "Budget Narrative",
+      "words": 200,
+      "min": 160,
+      "max": 240,
+      "required": true,
+      "purpose": "What the budget buys and why it is good value, using the budget's own totals."
+     }
+    ],
+    "STANDARD": [
+     {
+      "key": "executive_summary",
+      "heading": "Executive Summary",
+      "words": 300,
+      "min": 240,
+      "max": 360,
+      "required": true,
+      "purpose": "The problem, intervention, results, duration, geography, applicant and request, all matching the body."
+     },
+     {
+      "key": "problem",
+      "heading": "Problem and Situation Analysis",
+      "words": 650,
+      "min": 520,
+      "max": 780,
+      "required": true,
+      "purpose": "Evidence of the problem, its root causes and consequences, for the affected population and place."
+     },
+     {
+      "key": "target_population",
+      "heading": "Target Population and Stakeholders",
+      "words": 250,
+      "min": 200,
+      "max": 300,
+      "required": true,
+      "purpose": "Who the project serves and involves, where, and why them."
+     },
+     {
+      "key": "goal_objectives",
+      "heading": "Goal and Specific Objectives",
+      "words": 200,
+      "min": 160,
+      "max": 240,
+      "required": true,
+      "purpose": "The goal (higher-level change) and specific objectives answering the problem, from the Results Model."
+     },
+     {
+      "key": "intervention_logic",
+      "heading": "Intervention Logic",
+      "words": 350,
+      "min": 280,
+      "max": 420,
+      "required": true,
+      "purpose": "Why the activities lead to the outputs and outcomes: the intervention logic, and a Theory of Change where required."
+     },
+     {
+      "key": "technical_approach",
+      "heading": "Technical Approach and Strategy",
+      "words": 950,
+      "min": 760,
+      "max": 1140,
+      "required": true,
+      "purpose": "The core design and why it is expected to work, with evidence of effectiveness."
+     },
+     {
+      "key": "implementation",
+      "heading": "Activities and Implementation",
+      "words": 500,
+      "min": 400,
+      "max": 600,
+      "required": true,
+      "purpose": "How and when the activities are delivered, by whom (the workplan table follows from the Results Model)."
+     },
+     {
+      "key": "expected_results",
+      "heading": "Expected Results",
+      "words": 300,
+      "min": 240,
+      "max": 360,
+      "required": true,
+      "purpose": "The outputs and outcomes, with their indicators and targets from the Results Model."
+     },
+     {
+      "key": "mel",
+      "heading": "Monitoring, Evaluation and Learning",
+      "words": 550,
+      "min": 440,
+      "max": 660,
+      "required": true,
+      "purpose": "How results are measured and used: indicators, baselines, data sources, frequency, responsibility, quality assurance, learning and evaluation."
+     },
+     {
+      "key": "risks",
+      "heading": "Risks and Mitigation",
+      "words": 200,
+      "min": 160,
+      "max": 240,
+      "required": true,
+      "purpose": "The material risks, each with a concrete mitigation and an owner."
+     },
+     {
+      "key": "sustainability",
+      "heading": "Sustainability, Exit and Scale",
+      "words": 300,
+      "min": 240,
+      "max": 360,
+      "required": true,
+      "purpose": "How benefits and ownership continue after funding, and scale where it is an aim."
+     },
+     {
+      "key": "capacity",
+      "heading": "Organisational Capacity and Management",
+      "words": 400,
+      "min": 320,
+      "max": 480,
+      "required": true,
+      "purpose": "Specific capability: past projects, dates, donors, scale, results, systems and staff, and the management structure."
+     },
+     {
+      "key": "budget_narrative",
+      "heading": "Budget Narrative and Value for Money",
+      "words": 550,
+      "min": 440,
+      "max": 660,
+      "required": true,
+      "purpose": "What the budget buys and why it is good value, using the budget's own totals."
+     }
+    ],
+    "COMPREHENSIVE": [
+     {
+      "key": "executive_summary",
+      "heading": "Executive Summary",
+      "words": 450,
+      "min": 360,
+      "max": 540,
+      "required": true,
+      "purpose": "The problem, intervention, results, duration, geography, applicant and request, all matching the body."
+     },
+     {
+      "key": "problem",
+      "heading": "Problem and Situation Analysis",
+      "words": 1200,
+      "min": 960,
+      "max": 1440,
+      "required": true,
+      "purpose": "Evidence of the problem, its root causes and consequences, for the affected population and place."
+     },
+     {
+      "key": "target_population",
+      "heading": "Target Population and Stakeholders",
+      "words": 450,
+      "min": 360,
+      "max": 540,
+      "required": true,
+      "purpose": "Who the project serves and involves, where, and why them."
+     },
+     {
+      "key": "goal_objectives",
+      "heading": "Goal and Objectives",
+      "words": 300,
+      "min": 240,
+      "max": 360,
+      "required": true,
+      "purpose": "The goal (higher-level change) and specific objectives answering the problem, from the Results Model."
+     },
+     {
+      "key": "intervention_logic",
+      "heading": "Intervention Logic and Theory of Change",
+      "words": 700,
+      "min": 560,
+      "max": 840,
+      "required": true,
+      "purpose": "Why the activities lead to the outputs and outcomes: the intervention logic, and a Theory of Change where required."
+     },
+     {
+      "key": "technical_approach",
+      "heading": "Technical Approach",
+      "words": 1700,
+      "min": 1360,
+      "max": 2040,
+      "required": true,
+      "purpose": "The core design and why it is expected to work, with evidence of effectiveness."
+     },
+     {
+      "key": "implementation",
+      "heading": "Implementation and Workstreams",
+      "words": 900,
+      "min": 720,
+      "max": 1080,
+      "required": true,
+      "purpose": "How and when the activities are delivered, by whom (the workplan table follows from the Results Model)."
+     },
+     {
+      "key": "expected_results",
+      "heading": "Expected Results",
+      "words": 500,
+      "min": 400,
+      "max": 600,
+      "required": true,
+      "purpose": "The outputs and outcomes, with their indicators and targets from the Results Model."
+     },
+     {
+      "key": "mel",
+      "heading": "Monitoring, Evaluation and Learning",
+      "words": 1000,
+      "min": 800,
+      "max": 1200,
+      "required": true,
+      "purpose": "How results are measured and used: indicators, baselines, data sources, frequency, responsibility, quality assurance, learning and evaluation."
+     },
+     {
+      "key": "risks",
+      "heading": "Risks and Assumptions",
+      "words": 400,
+      "min": 320,
+      "max": 480,
+      "required": true,
+      "purpose": "The material risks, each with a concrete mitigation and an owner."
+     },
+     {
+      "key": "sustainability",
+      "heading": "Sustainability, Scale and Exit",
+      "words": 600,
+      "min": 480,
+      "max": 720,
+      "required": true,
+      "purpose": "How benefits and ownership continue after funding, and scale where it is an aim."
+     },
+     {
+      "key": "capacity",
+      "heading": "Organisational Capacity and Management",
+      "words": 700,
+      "min": 560,
+      "max": 840,
+      "required": true,
+      "purpose": "Specific capability: past projects, dates, donors, scale, results, systems and staff, and the management structure."
+     },
+     {
+      "key": "partnerships",
+      "heading": "Partnerships and Consortium",
+      "words": 400,
+      "min": 320,
+      "max": 480,
+      "required": true,
+      "purpose": "Each partner's role and the division of responsibility."
+     },
+     {
+      "key": "budget_narrative",
+      "heading": "Budget Narrative and Value for Money",
+      "words": 700,
+      "min": 560,
+      "max": 840,
+      "required": true,
+      "purpose": "What the budget buys and why it is good value, using the budget's own totals."
+     }
+    ]
+   }
+  },
+  "RESEARCH_GRANT": {
+   "label": "Research grant proposal",
+   "modes": {
+    "COMPACT": 4000,
+    "STANDARD": 5000,
+    "COMPREHENSIVE": 6000
+   },
+   "sections": [
+    {
+     "key": "summary",
+     "heading": "Project Summary",
+     "words": 250,
+     "min": 200,
+     "max": 300,
+     "required": true,
+     "purpose": "The whole project in brief: aims, approach, significance."
+    },
+    {
+     "key": "aims",
+     "heading": "Specific Aims and Research Objectives",
+     "words": 400,
+     "min": 320,
+     "max": 480,
+     "required": true,
+     "purpose": "The specific aims and objectives."
+    },
+    {
+     "key": "significance",
+     "heading": "Significance and Problem",
+     "words": 600,
+     "min": 480,
+     "max": 720,
+     "required": true,
+     "purpose": "Why the problem matters and what is not yet known."
+    },
+    {
+     "key": "innovation",
+     "heading": "Innovation and Contribution",
+     "words": 400,
+     "min": 320,
+     "max": 480,
+     "required": true,
+     "purpose": "What is new, and the contribution."
+    },
+    {
+     "key": "strategy",
+     "heading": "Research Strategy and Approach",
+     "words": 800,
+     "min": 640,
+     "max": 960,
+     "required": true,
+     "purpose": "The overall research strategy."
+    },
+    {
+     "key": "methods",
+     "heading": "Methods",
+     "words": 900,
+     "min": 720,
+     "max": 1080,
+     "required": true,
+     "purpose": "Design, setting, population, sampling, data and instruments."
+    },
+    {
+     "key": "analysis",
+     "heading": "Analysis",
+     "words": 500,
+     "min": 400,
+     "max": 600,
+     "required": true,
+     "purpose": "How the data will be analysed for each aim."
+    },
+    {
+     "key": "feasibility",
+     "heading": "Feasibility",
+     "words": 300,
+     "min": 240,
+     "max": 360,
+     "required": true,
+     "purpose": "Why the plan can be delivered."
+    },
+    {
+     "key": "team",
+     "heading": "Team and Environment",
+     "words": 300,
+     "min": 240,
+     "max": 360,
+     "required": true,
+     "purpose": "The team's expertise and the research environment."
+    },
+    {
+     "key": "ethics_data",
+     "heading": "Ethics and Data Management",
+     "words": 250,
+     "min": 200,
+     "max": 300,
+     "required": true,
+     "purpose": "Ethics approvals and data management, where relevant."
+    },
+    {
+     "key": "timeline",
+     "heading": "Timeline and Milestones",
+     "words": 150,
+     "min": 120,
+     "max": 180,
+     "required": true,
+     "purpose": "Milestones over the project period."
+    },
+    {
+     "key": "budget_narrative",
+     "heading": "Budget Justification",
+     "words": 150,
+     "min": 120,
+     "max": 180,
+     "required": true,
+     "purpose": "Why each cost is needed."
+    }
+   ]
+  }
+ },
+ "complexity_signals": [
+  "required_section_count",
+  "partner_count",
+  "site_count",
+  "duration_months",
+  "results_chain_depth",
+  "indicator_count",
+  "budget_line_count",
+  "required_annex_count",
+  "scoring_criteria_count",
+  "mel_requirements"
+ ],
+ "questions": [
+  {
+   "id": "problem",
+   "label": "What problem or opportunity will the work address, for whom and where?",
+   "gate": "BLOCK",
+   "kind": "LONG",
+   "fallback": "",
+   "help": "Your own description is enough; PaperAid finds the evidence."
+  },
+  {
+   "id": "intervention",
+   "label": "What do you propose to do about it?",
+   "gate": "BLOCK",
+   "kind": "LONG",
+   "fallback": "",
+   "help": ""
+  },
+  {
+   "id": "target_group",
+   "label": "Who is the target group?",
+   "gate": "ASK_ONCE",
+   "kind": "TEXT",
+   "fallback": "PaperAid describes the target group from your description and marks it for you to confirm.",
+   "help": ""
+  },
+  {
+   "id": "geography",
+   "label": "Where will the work take place?",
+   "gate": "ASK_ONCE",
+   "kind": "TEXT",
+   "fallback": "PaperAid uses the place in your description, or keeps the geography general.",
+   "help": ""
+  },
+  {
+   "id": "duration_months",
+   "label": "How many months will the work last?",
+   "gate": "ASK_ONCE",
+   "kind": "NUMBER",
+   "fallback": "PaperAid plans for 12 months and says so.",
+   "help": ""
+  },
+  {
+   "id": "currency",
+   "label": "Which currency is the budget in?",
+   "gate": "ASK_ONCE",
+   "kind": "CHOICE",
+   "fallback": "The call's currency, otherwise US dollars.",
+   "help": "",
+   "choices": [
+    "USD",
+    "EUR",
+    "GBP",
+    "UGX",
+    "KES",
+    "TZS"
+   ]
+  },
+  {
+   "id": "applicant",
+   "label": "Your organisation: what it is, and the specific projects, years, results or scale that show it can deliver this work",
+   "gate": "ASK_ONCE",
+   "kind": "LONG",
+   "fallback": "Without these facts the capacity section stays general and is marked for you to complete.",
+   "help": ""
+  },
+  {
+   "id": "partners",
+   "label": "Partners, if any, and what each will do",
+   "gate": "ASK_ONCE",
+   "kind": "LONG",
+   "fallback": "No partners.",
+   "help": ""
+  },
+  {
+   "id": "funder",
+   "label": "Which funder or call is this for?",
+   "gate": "ASK_ONCE",
+   "kind": "TEXT",
+   "fallback": "PaperAid writes for a general funder.",
+   "help": ""
+  },
+  {
+   "id": "vulnerable",
+   "label": "Will the work involve children or vulnerable adults?",
+   "gate": "ASK_ONCE",
+   "kind": "BOOL",
+   "fallback": "No.",
+   "help": ""
+  },
+  {
+   "id": "personal_data",
+   "label": "Will the work collect personal, health or identifiable data?",
+   "gate": "ASK_ONCE",
+   "kind": "BOOL",
+   "fallback": "No.",
+   "help": ""
+  },
+  {
+   "id": "amount_requested",
+   "label": "How much will you request?",
+   "gate": "ASK_ONCE",
+   "kind": "NUMBER",
+   "fallback": "PaperAid uses your budget's total.",
+   "help": ""
+  },
+  {
+   "id": "legal_entity",
+   "label": "Your organisation's legal name and registration (for eligibility)",
+   "gate": "ASK_ONCE",
+   "kind": "TEXT",
+   "fallback": "Not stated; eligibility that depends on it stays for you to confirm.",
+   "help": ""
+  }
+ ],
+ "rules": [
+  {
+   "id": "FP-001",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "requirements",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {
+    "has_call": true
+   },
+   "requirement": "If a funding call/template is supplied, extract and resolve mandatory requirements before drafting.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "requirements.extracted",
+    "params": {}
+   },
+   "stages": [
+    "INTAKE"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Run compliance extraction.",
+   "ui_message": "The call's requirements were read before drafting",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-002",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "eligibility",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {
+    "has_eligibility": true
+   },
+   "requirement": "Explicit eligibility criteria must be evaluated before submission-ready drafting.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "eligibility.evaluated",
+    "params": {}
+   },
+   "stages": [
+    "INTAKE"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Evaluate eligibility.",
+   "ui_message": "Eligibility was checked before drafting",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-003",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "eligibility",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {
+    "has_eligibility": true
+   },
+   "requirement": "Failed mandatory eligibility prevents READY status.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "eligibility.thresholds",
+    "params": {}
+   },
+   "stages": [
+    "PLAN"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Mark ineligible.",
+   "ui_message": "You meet the call's eligibility criteria",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-004",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "plan",
+   "class": "DEFAULT",
+   "severity": "INFO",
+   "applies_if": {},
+   "requirement": "When no external length exists, Standard mode targets 5,500 narrative words.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "plan.word_default",
+    "params": {}
+   },
+   "stages": [
+    "PLAN"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": true
+   },
+   "remediation": "Apply Standard target.",
+   "ui_message": "When no external length exists, Standard mode targets 5,500 narrative words.",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-005",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "plan",
+   "class": "DEFAULT",
+   "severity": "INFO",
+   "applies_if": {},
+   "requirement": "Recommend Compact/Standard/Comprehensive primarily from complexity, not funding amount.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "plan.complexity",
+    "params": {}
+   },
+   "stages": [
+    "PLAN"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": true
+   },
+   "remediation": "Run complexity classifier.",
+   "ui_message": "The proposal size fits the project's complexity",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-006",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "limits",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "External word/page/character limits override PaperAid funding modes.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "limits.external_override",
+    "params": {}
+   },
+   "stages": [
+    "PLAN",
+    "RENDER"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Use donor limit.",
+   "ui_message": "The call's own limits replace PaperAid's lengths",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-007",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "limits",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {
+    "form_mode": true
+   },
+   "requirement": "Field-limited applications must be represented as per-field constraints.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "limits.fields_typed",
+    "params": {}
+   },
+   "stages": [
+    "INTAKE",
+    "PLAN"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Create form mode.",
+   "ui_message": "Each form box has its own limit",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-008",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "limits",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {
+    "form_mode": true
+   },
+   "requirement": "Each form field must comply with its own hard limit.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "limits.field_count",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Compress field.",
+   "ui_message": "Every form box is within its limit",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-009",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "plan",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {
+    "has_scoring": true
+   },
+   "requirement": "Published scoring criteria should influence section depth and emphasis.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "plan.scoring_mapped",
+    "params": {}
+   },
+   "stages": [
+    "PLAN"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": true
+   },
+   "remediation": "Rebalance plan.",
+   "ui_message": "The scoring criteria shape the plan's depth",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-010",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Proposal must articulate a clear problem/need/opportunity grounded in evidence.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "PLAN",
+    "FINAL"
+   ],
+   "sections": [
+    "problem"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Strengthen problem.",
+   "ui_message": "The problem is clear and grounded in evidence",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-011",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Problem analysis should identify material root causes, not only symptoms.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "problem"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add root-cause analysis.",
+   "ui_message": "Root causes are analysed, not only symptoms",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-012",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Problem analysis should identify affected population and geography.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "problem",
+    "target_population"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add context.",
+   "ui_message": "The affected population and geography are identified",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-013",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "evidence",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Material quantitative claims should be supported by appropriate evidence.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "numbers.supported",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Verify evidence.",
+   "ui_message": "Quantitative claims are supported by evidence",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-014",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "results",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "Every non-trivial funding proposal must have a Results Model.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "results.exists",
+    "params": {}
+   },
+   "stages": [
+    "PLAN"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Build Results Model.",
+   "ui_message": "The proposal has a complete Results Model",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-015",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Goal must describe higher-level intended change, not activities.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "PLAN",
+    "FINAL"
+   ],
+   "sections": [
+    "RESULTS",
+    "goal_objectives"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Rewrite goal.",
+   "ui_message": "The goal is a higher-level change, not an activity",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-016",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Objectives must respond directly to the problem/project logic.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "PLAN",
+    "FINAL"
+   ],
+   "sections": [
+    "goal_objectives"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Realign objectives.",
+   "ui_message": "The objectives answer the problem",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-017",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Objectives should be sufficiently specific and assessable for the donor context.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "goal_objectives"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Improve objectives.",
+   "ui_message": "The objectives are specific and assessable",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-018",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "results",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "Every activity in the Results Model maps to an output.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "results.activity_output_link",
+    "params": {}
+   },
+   "stages": [
+    "PLAN",
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Map activity.",
+   "ui_message": "Every activity leads to an output",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-019",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "results",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "Every output maps to at least one outcome.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "results.output_outcome_link",
+    "params": {}
+   },
+   "stages": [
+    "PLAN",
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Map output.",
+   "ui_message": "Every output leads to an outcome",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-020",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Outputs describe products/services/deliverables rather than activities disguised as results.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "RESULTS"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Repair output wording.",
+   "ui_message": "Outputs are deliverables, not activities",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-021",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Outcomes describe plausible change rather than completed activities.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "RESULTS"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Repair outcome wording.",
+   "ui_message": "Outcomes describe change, not completed activities",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-022",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "results",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {
+    "mode": [
+     "STANDARD",
+     "COMPREHENSIVE"
+    ]
+   },
+   "requirement": "Every outcome has at least one indicator in Standard/Comprehensive proposals.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "results.outcome_indicator_link",
+    "params": {}
+   },
+   "stages": [
+    "PLAN",
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Create indicator.",
+   "ui_message": "Every outcome has an indicator",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-023",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "results",
+   "class": "CONDITIONAL",
+   "severity": "WARNING",
+   "applies_if": {
+    "output_indicators_required": true
+   },
+   "requirement": "Outputs have indicators when required by donor/results framework.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "results.output_indicator_link",
+    "params": {}
+   },
+   "stages": [
+    "PLAN",
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add output indicator.",
+   "ui_message": "Every output has an indicator",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-024",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "results",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "Each indicator measures the result level under which it sits.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "results.indicator_level",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "RESULTS"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Repair indicator level.",
+   "ui_message": "Each indicator measures its own result level",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-025",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "results",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "Each active indicator has a defined unit.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "results.indicator_fields",
+    "params": {}
+   },
+   "stages": [
+    "PLAN",
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add unit.",
+   "ui_message": "Each indicator has a unit",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-026",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "results",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "Each outcome indicator has a baseline or stated baseline-establishment plan/date.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "results.indicator_fields",
+    "params": {}
+   },
+   "stages": [
+    "PLAN",
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add baseline plan.",
+   "ui_message": "Each outcome indicator has a baseline or a plan to set one",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-027",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "results",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "Each outcome indicator has a target unless donor rules explicitly allow otherwise.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "results.indicator_fields",
+    "params": {}
+   },
+   "stages": [
+    "PLAN",
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add target.",
+   "ui_message": "Each outcome indicator has a target",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-028",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Indicator targets should be plausible relative to baseline, duration, resources, and scale.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "RESULTS"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Review target.",
+   "ui_message": "Targets are plausible for the baseline, time and resources",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-029",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "results",
+   "class": "CONDITIONAL",
+   "severity": "WARNING",
+   "applies_if": {
+    "disaggregation_required": true
+   },
+   "requirement": "Indicators include meaningful disaggregation when required/relevant.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "results.disaggregation",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add disaggregation.",
+   "ui_message": "Indicators are disaggregated where required",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-030",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "results",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "Each indicator identifies a means of verification/data source.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "results.indicator_fields",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add source.",
+   "ui_message": "Each indicator has a means of verification",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-031",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "results",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "Each indicator identifies measurement frequency where applicable.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "results.indicator_fields",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add frequency.",
+   "ui_message": "Each indicator has a measurement frequency",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-032",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "results",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "Each indicator identifies a responsible role/unit.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "results.indicator_fields",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Assign responsibility.",
+   "ui_message": "Each indicator has a responsible role",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-033",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Technical approach explains why the intervention is expected to address the problem.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "technical_approach",
+    "intervention_logic"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Strengthen causal rationale.",
+   "ui_message": "The approach explains why it will address the problem",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-034",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Technical approach uses effectiveness/rationale evidence where appropriate.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "technical_approach"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add evidence.",
+   "ui_message": "The approach uses evidence of what works",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-035",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Distinguish what is novel/adapted from standard practice when relevant.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "technical_approach"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Clarify approach.",
+   "ui_message": "What is new or adapted is distinguished from standard practice",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-036",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "results",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "Every major activity appears in the implementation timeline.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "timeline.activity_coverage",
+    "params": {}
+   },
+   "stages": [
+    "PLAN",
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add timeline item.",
+   "ui_message": "Every major activity is in the timeline",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-037",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "budget",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {
+    "has_budget": true
+   },
+   "requirement": "Every costed activity maps to at least one budget line.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "budget.activity_mapping",
+    "params": {}
+   },
+   "stages": [
+    "PLAN",
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Map budget line.",
+   "ui_message": "Every costed activity has a budget line",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-038",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "budget",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {
+    "has_budget": true
+   },
+   "requirement": "Every budget line maps to an activity or declared support/administrative category.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "budget.line_purpose",
+    "params": {}
+   },
+   "stages": [
+    "PLAN",
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Map budget purpose.",
+   "ui_message": "Every budget line belongs to an activity or a declared support cost",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-039",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "budget",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {
+    "has_budget": true
+   },
+   "requirement": "Budget unit cost × quantity equals line subtotal.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "budget.line_math",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Correct arithmetic.",
+   "ui_message": "Every budget line's total is its quantity times its unit cost",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-040",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "budget",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {
+    "has_budget": true
+   },
+   "requirement": "Budget category totals reconcile to the grand total.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "budget.subtotals",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Correct totals.",
+   "ui_message": "Category totals add up to the grand total",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-041",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "budget",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {
+    "has_ceiling": true
+   },
+   "requirement": "Requested amount does not exceed funding ceiling.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "budget.ceiling",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Reduce request.",
+   "ui_message": "The amount requested is within the funding ceiling",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-042",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "budget",
+   "class": "CONDITIONAL",
+   "severity": "BLOCKING",
+   "applies_if": {
+    "cost_share_required": true
+   },
+   "requirement": "Required cost share/co-financing meets required percentage and calculation base.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "budget.cost_share",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Correct cost share.",
+   "ui_message": "The required cost share is met",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-043",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "budget",
+   "class": "CONDITIONAL",
+   "severity": "BLOCKING",
+   "applies_if": {
+    "indirect_rule": true
+   },
+   "requirement": "Indirect costs use the rate and base allowed by the governing call/policy.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "budget.indirect_cost",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Correct indirect costs.",
+   "ui_message": "Indirect costs follow the allowed rate and base",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-044",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "budget",
+   "class": "CONDITIONAL",
+   "severity": "BLOCKING",
+   "applies_if": {
+    "prohibited_listed": true
+   },
+   "requirement": "Prohibited costs identified by the call do not appear in the budget.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "budget.prohibited_costs",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Remove prohibited cost.",
+   "ui_message": "No cost the call prohibits is in the budget",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-045",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "budget",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {
+    "has_budget": true
+   },
+   "requirement": "Multi-year and category subtotals reconcile to the same grand total.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "budget.years",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Repair totals.",
+   "ui_message": "Year and category totals give the same grand total",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-046",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "budget",
+   "class": "CONDITIONAL",
+   "severity": "WARNING",
+   "applies_if": {
+    "has_budget": true
+   },
+   "requirement": "Currency conversion stores exchange rate and date when conversion affects values.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "budget.currency",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add exchange metadata.",
+   "ui_message": "Currency conversions state their rate and date",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-047",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "budget",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {
+    "has_budget": true
+   },
+   "requirement": "Staff effort/LOE is consistent across narrative, timeline, and budget.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "staff.effort_consistency",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Reconcile effort.",
+   "ui_message": "Staff time agrees across the narrative, workplan and budget",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-048",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "evidence",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "Beneficiary counts, duration, totals, and major numeric commitments are consistent across sections/annexes.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "numbers.consistency",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Repair numeric inconsistency.",
+   "ui_message": "Figures agree across the narrative, tables and budget",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-049",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "MEL narrative explains how performance/outcomes will be measured and used.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "mel"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Strengthen MEL.",
+   "ui_message": "The MEL plan says how results will be measured and used",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-050",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "quality",
+   "class": "CONDITIONAL",
+   "severity": "WARNING",
+   "applies_if": {
+    "mode": [
+     "STANDARD",
+     "COMPREHENSIVE"
+    ]
+   },
+   "requirement": "Substantial MEL plans identify data-quality assurance mechanisms.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "mel"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add DQA.",
+   "ui_message": "Data quality assurance is described",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-051",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "MEL includes learning/adaptation when implementation learning is relevant.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "mel"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add learning loop.",
+   "ui_message": "Learning and adaptation are built in",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-052",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "quality",
+   "class": "CONDITIONAL",
+   "severity": "WARNING",
+   "applies_if": {
+    "evaluation_required": true
+   },
+   "requirement": "Evaluation timing/independence is described when evaluation is required/material.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "mel"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add evaluation approach.",
+   "ui_message": "Evaluation timing and independence are described",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-053",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "overlays",
+   "class": "CONDITIONAL",
+   "severity": "WARNING",
+   "applies_if": {
+    "personal_data": true
+   },
+   "requirement": "Projects collecting personal/sensitive data include appropriate data-protection arrangements.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "overlay.data_protection",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add data protection.",
+   "ui_message": "Personal data is protected",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-054",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "budget",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {
+    "has_budget": true
+   },
+   "requirement": "Substantial MEL framework with no identifiable resources is flagged.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "budget.mel_resources",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add/justify MEL resources.",
+   "ui_message": "The MEL work has resources in the budget",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-055",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Risk sections pair material risks with concrete mitigation.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "risks"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add mitigation.",
+   "ui_message": "Each material risk has a concrete mitigation",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-056",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "results",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Risk mitigation is feasible and owned by a role where practical.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "results.risk_owner",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "risks"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Strengthen ownership.",
+   "ui_message": "Each mitigation has an owner",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-057",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Sustainability explains continued benefit/ownership rather than merely asserting sustainability.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "sustainability"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Strengthen sustainability.",
+   "ui_message": "Sustainability explains how benefits continue",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-058",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "quality",
+   "class": "CONDITIONAL",
+   "severity": "WARNING",
+   "applies_if": {
+    "scale_objective": true
+   },
+   "requirement": "Scale/replication is addressed when it is a donor objective or explicit project ambition.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "sustainability"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add scale strategy.",
+   "ui_message": "Scale or replication is addressed",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-059",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Capacity claims use specific projects, dates, donors, scale, results, systems, audits, or staff evidence.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "capacity"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Make capacity specific.",
+   "ui_message": "Capacity is shown with specific projects, dates, donors or results",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-060",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Management structure identifies decision-making and delivery responsibility appropriate to complexity.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "capacity"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Clarify management.",
+   "ui_message": "Management and delivery responsibilities are clear",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-061",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "quality",
+   "class": "CONDITIONAL",
+   "severity": "WARNING",
+   "applies_if": {
+    "has_partners": true
+   },
+   "requirement": "Partner roles and responsibility division are clear for consortium/co-applicant proposals.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "partnerships",
+    "capacity"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Clarify partner roles.",
+   "ui_message": "Partners' roles are clear",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-062",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "fit",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {
+    "has_call": true
+   },
+   "requirement": "Proposal explicitly addresses mandatory donor priorities and scoring criteria.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "call.priorities_addressed",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "DOCUMENT"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add missing alignment.",
+   "ui_message": "The donor's priorities and scoring criteria are addressed",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-063",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "structure",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {
+    "has_template": true
+   },
+   "requirement": "Mandatory donor headings/fields are present in required order.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "structure.order",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Repair structure.",
+   "ui_message": "The donor's headings appear in the required order",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-064",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "limits",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "All hard donor limits pass after rendering/form validation.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "limits.hard_max",
+    "params": {}
+   },
+   "stages": [
+    "FINAL",
+    "RENDER"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Compress/restructure.",
+   "ui_message": "Every hard limit is met",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-065",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "overlays",
+   "class": "CONDITIONAL",
+   "severity": "WARNING",
+   "applies_if": {
+    "vulnerable": true
+   },
+   "requirement": "Safeguarding is addressed when beneficiary profile or donor policy triggers it.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "overlay.safeguarding",
+    "params": {}
+   },
+   "stages": [
+    "PLAN",
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add safeguarding.",
+   "ui_message": "Safeguarding is addressed",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-066",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "overlays",
+   "class": "CONDITIONAL",
+   "severity": "WARNING",
+   "applies_if": {
+    "personal_data": true
+   },
+   "requirement": "Data protection is addressed when personal/health/identifiable data is processed.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "overlay.data_protection",
+    "params": {}
+   },
+   "stages": [
+    "PLAN",
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Add protection plan.",
+   "ui_message": "Data protection is addressed",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-067",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "overlays",
+   "class": "CONDITIONAL",
+   "severity": "WARNING",
+   "applies_if": {
+    "has_overlays": true
+   },
+   "requirement": "Other cross-cutting overlays activate only when call/sector/profile requires or materially warrants them.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "overlay.required",
+    "params": {}
+   },
+   "stages": [
+    "PLAN",
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Apply relevant overlay.",
+   "ui_message": "The cross-cutting themes the call asks for are addressed",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-068",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "requirements",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {
+    "has_call": true
+   },
+   "requirement": "Donor-policy-specific language comes from current governing documents, not model memory.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "requirements.governing_source",
+    "params": {}
+   },
+   "stages": [
+    "INTAKE",
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Retrieve current requirement.",
+   "ui_message": "Donor requirements come from the documents you supplied",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-069",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Executive summary accurately reflects problem, intervention, results, duration, geography, applicant, and request.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "executive_summary",
+    "summary"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Rewrite summary.",
+   "ui_message": "The executive summary reflects the whole proposal",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-070",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Executive summary introduces no major commitment absent from body/Results Model.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "executive_summary",
+    "summary",
+    "DOCUMENT"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Align summary/body.",
+   "ui_message": "The summary makes no commitment the body does not",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-071",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "structure",
+   "class": "CONDITIONAL",
+   "severity": "WARNING",
+   "applies_if": {
+    "toc_required": true
+   },
+   "requirement": "Formal ToC section/diagram is required only when call or complexity warrants; internal intervention logic is always required.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "structure.conditional_section",
+    "params": {}
+   },
+   "stages": [
+    "PLAN",
+    "FINAL"
+   ],
+   "sections": [
+    "intervention_logic"
+   ],
+   "adjustable": {
+    "allowed": true
+   },
+   "remediation": "Generate formal ToC if triggered.",
+   "ui_message": "A Theory of Change is included",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-072",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "results",
+   "class": "DEFAULT",
+   "severity": "INFO",
+   "applies_if": {
+    "variant": [
+     "NGO_PROJECT"
+    ]
+   },
+   "requirement": "Standard/Comprehensive NGO proposals normally render a logframe/results table unless donor format makes it unnecessary.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "tables.logframe",
+    "params": {}
+   },
+   "stages": [
+    "PLAN",
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": true
+   },
+   "remediation": "Generate logframe.",
+   "ui_message": "A logframe is included",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-073",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "results",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {
+    "variant": [
+     "NGO_PROJECT"
+    ]
+   },
+   "requirement": "Logframe/results table is rendered from Results Model and cannot diverge from it.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "tables.logframe",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Regenerate from model.",
+   "ui_message": "The logframe matches the Results Model",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-074",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "results",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "Workplan is rendered from activity/timeline state and cannot contradict narrative dates.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "tables.workplan",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Regenerate workplan.",
+   "ui_message": "The workplan matches the activities and their dates",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-075",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "results",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "M&E indicator table is rendered from Results Model and has no orphan indicators.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "tables.mel",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Repair model.",
+   "ui_message": "The M&E table matches the Results Model",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-076",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "evidence",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "PaperAid-added references are verified before finalization.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "references.exists",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Verify/replace.",
+   "ui_message": "PaperAid-added references are verified before finalization.",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-077",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {},
+   "requirement": "Effectiveness claims prefer appropriate evidence synthesis where stronger evidence exists.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "DOCUMENT"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Improve source quality.",
+   "ui_message": "Effectiveness claims rest on the strongest available evidence",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-078",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "intake",
+   "class": "CONDITIONAL",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "Identified research-grant schemes switch to scheme-specific structure.",
+   "check": {
+    "type": "HYBRID",
+    "validator": "work.variant",
+    "params": {}
+   },
+   "stages": [
+    "INTAKE",
+    "PLAN"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Apply research-grant profile.",
+   "ui_message": "Identified research-grant schemes switch to scheme-specific structure.",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-079",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "quality",
+   "class": "QUALITY",
+   "severity": "WARNING",
+   "applies_if": {
+    "variant": [
+     "RESEARCH_GRANT"
+    ]
+   },
+   "requirement": "Research-grant significance, contribution/innovation, approach, and methods remain logically aligned.",
+   "check": {
+    "type": "SEMANTIC",
+    "validator": "semantic",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [
+    "DOCUMENT"
+   ],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Repair strategy.",
+   "ui_message": "Significance, contribution, approach and methods agree",
+   "source": "Rulebook v1.0 §12.14"
+  },
+  {
+   "id": "FP-080",
+   "scope": [
+    "funding_proposal"
+   ],
+   "category": "readiness",
+   "class": "REQUIRED",
+   "severity": "BLOCKING",
+   "applies_if": {},
+   "requirement": "All blocking funding-proposal rules pass before READY status.",
+   "check": {
+    "type": "DETERMINISTIC",
+    "validator": "readiness.blocking",
+    "params": {}
+   },
+   "stages": [
+    "FINAL"
+   ],
+   "sections": [],
+   "adjustable": {
+    "allowed": false
+   },
+   "remediation": "Repair blocking failures.",
+   "ui_message": "All blocking funding-proposal rules pass before READY status.",
+   "source": "Rulebook v1.0 §12.14"
+  }
+ ]
+}

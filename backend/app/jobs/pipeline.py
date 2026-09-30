@@ -63,6 +63,7 @@ from app.proposals import pipeline as proposal_pipeline
 from app.proposals import review as proposal_review
 from app.reports.builder import change_report, source_report, writing_report
 from app.runtime import Runtime
+from app.works import pipeline as work_pipeline
 
 logger = logging.getLogger("paperaid.worker")
 LEASE = timedelta(minutes=25)
@@ -1243,10 +1244,9 @@ STAGES = {
 # --- the step runner -----------------------------------------------------------------------
 
 
-def _work_unavailable(ctx: StageContext) -> None:
-    raise PermanentStageError(
-        "SERVICE_UNAVAILABLE", "This step cannot run on this version of PaperAid, so nothing was charged. Please start it again later.", "work step without the works pipeline"
-    )
+def work_stage(stage: Stage):
+    """A work step's stage (concept notes, coursework, funding proposals): never another service's."""
+    return work_pipeline.STAGES[stage]
 
 
 def run_step(rt: Runtime, job_id: str) -> None:
@@ -1291,7 +1291,7 @@ def _run_step(rt: Runtime, job_id: str) -> None:
     started = utcnow()
     ctx = StageContext(rt, job)
     if job.selection.work != "NONE":
-        run = _work_unavailable
+        run = work_stage(stage)
     elif job.selection.proposal == "REVIEW":
         run = proposal_review.STAGES.get(stage) or STAGES[stage]
     elif job.selection.proposal != "NONE":
@@ -1311,7 +1311,9 @@ def _run_step(rt: Runtime, job_id: str) -> None:
         _handle_failure(rt, job_id, stage, "INTERNAL", GENERIC_FAILURE, f"{type(exc).__name__}: {exc}", True)
         return
 
-    def complete(j: Job, w: Wallet) -> tuple[Job, Wallet]:
+    def complete(j: Job, w: Wallet) -> tuple[Job, Wallet] | None:
+        if j.status != JobStatus.PROCESSING:
+            return None  # the stage finished the job itself (a work step publishes and settles in one transaction), or it was stopped
         if stage not in j.completed_stages:
             j.completed_stages.append(stage)
         j.attempts = 0
@@ -1323,7 +1325,8 @@ def _run_step(rt: Runtime, job_id: str) -> None:
         return j, w
 
     result = rt.store.update_job_and_wallet(job_id, complete)
-    assert result is not None
+    if result is None:
+        return
     job = result[0]
     log(logger, logging.INFO, "stage complete", stage=stage.value, durationMs=int((utcnow() - started).total_seconds() * 1000))
     if job.status == JobStatus.PROCESSING:
@@ -1361,8 +1364,10 @@ def _handle_failure(rt: Runtime, job_id: str, stage: Stage, code: str, message: 
     settings = rt.settings
     retry_again = False
 
-    def fail(j: Job, w: Wallet) -> tuple[Job, Wallet]:
+    def fail(j: Job, w: Wallet) -> tuple[Job, Wallet] | None:
         nonlocal retry_again
+        if j.status != JobStatus.PROCESSING:
+            return None  # already finished (an error after the stage completed and settled it) or stopped: never refunded twice or after delivery
         j.lease_until = None
         if retryable and j.attempts + 1 < settings.stage_max_attempts:
             j.attempts += 1

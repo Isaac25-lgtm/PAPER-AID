@@ -10,7 +10,7 @@ from typing import Any
 
 from app.ai.providers import ModelResult, Usage
 from app.formatting.guideline import read_guide
-from tests import fake_writer
+from tests import fake_works, fake_writer
 
 SOURCE_URL = "https://stats.example.org/report-2022"
 SOURCE_PAGE = "<html><body><h1>Annual report</h1><p>The report gives the figure for 2022. It covers every district.</p></body></html>"
@@ -121,6 +121,9 @@ class FakeModels:
     def default(task: str, payload: dict[str, Any]) -> dict[str, Any]:
         task = {"analyse_peer": "analyse", "analyse_after": "analyse", "analyse_after_peer": "analyse", "guide": "critique", "review_peer": "review", "spec_guide": "spec_critique",
                 "spec_review_peer": "spec_review", "p_guide": "p_critique", "p_review_peer": "p_review", "p_profile_guide": "p_profile_critique"}.get(task, task)
+        task = {"w_extract": "p_extract", "w_search": "p_search", "w_verify": "verify"}.get(task, task)
+        if task.startswith("w_"):
+            return fake_works.answer(task, payload)
         if task in ("p_plan_review", "p_plan_review_peer", "p_profile_review", "p_profile_review_peer"):
             return {"approved": True, "issues": []}
         if task == "analyse":  # confirms the signals and explicitly reviews every passage

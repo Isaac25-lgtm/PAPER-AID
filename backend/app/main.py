@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.projects import router as project_routes
 from app.api.routes import api, tasks
+from app.api.works import router as work_routes
 from app.core.config import get_settings
 from app.core.errors import AppError
 from app.core.logging import log, request_id, setup_logging
@@ -53,6 +54,7 @@ def create_app() -> FastAPI:
     if role in ("api", "all"):
         app.include_router(api)
         app.include_router(project_routes)
+        app.include_router(work_routes)
     if role in ("worker", "all"):
         app.include_router(tasks)
 

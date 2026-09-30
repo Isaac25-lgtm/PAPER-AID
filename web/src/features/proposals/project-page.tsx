@@ -24,7 +24,9 @@ const CONCEPT = 4
 function Progress({ project }: { project: Project }) {
   const steps = [
     { label: 'Plan', done: project.planStatus === 'APPROVED', started: project.planStatus !== 'NONE' },
-    ...project.chapters.filter((c) => c.number !== CONCEPT).map((c) => ({ label: `Chapter ${c.number}`, done: c.approved, started: c.current > 0 })),
+    ...(project.goal === 'CONCEPT'
+      ? project.chapters.filter((c) => c.number === CONCEPT).map((c) => ({ label: 'Concept paper', done: c.approved, started: c.current > 0 }))
+      : project.chapters.filter((c) => c.number !== CONCEPT).map((c) => ({ label: `Chapter ${c.number}`, done: c.approved, started: c.current > 0 }))),
   ]
   return (
     <ol className="mb-6 grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -690,6 +692,7 @@ export function ProjectPage() {
     )
   if (project === null) return <Alert tone="warning">This proposal no longer exists.</Alert>
   const hasChapter = project.chapters.some((c) => c.number !== CONCEPT && c.current)
+  const conceptOnly = project.goal === 'CONCEPT'
 
   return (
     <>
@@ -703,6 +706,11 @@ export function ProjectPage() {
         }
         actions={
           <div className="flex flex-wrap gap-2">
+            {conceptOnly && (
+              <Button variant="secondary" disabled={!!running} onClick={async () => setProject(await data.projects.continueToFull(project.id))}>
+                Continue to the full proposal
+              </Button>
+            )}
             <Button variant="secondary" disabled={!hasChapter} onClick={() => download(false)}>
               <Download className="size-4" aria-hidden /> Draft (Word)
             </Button>
@@ -740,7 +748,7 @@ export function ProjectPage() {
         <TabsList className="mb-5">
           <TabsTrigger value="plan">Plan</TabsTrigger>
           <TabsTrigger value="concept">Concept paper</TabsTrigger>
-          {project.chapters.filter((c) => c.number !== CONCEPT).map((c) => (
+          {project.chapters.filter((c) => c.number !== CONCEPT && !conceptOnly).map((c) => (
             <TabsTrigger key={c.number} value={`c${c.number}`}>
               Chapter {c.number}
               {c.needsReview.length > 0 && <TriangleAlert className="ml-1 size-3.5 text-amber-600" aria-label="needs review" />}
@@ -780,11 +788,13 @@ export function ProjectPage() {
           <StepRunner
             projectId={project.id}
             step="PLAN"
-            label={project.plan ? 'Draft a new plan' : 'Draft my plan, then Chapter One'}
+            label={project.plan ? 'Draft a new plan' : conceptOnly ? 'Draft my plan' : 'Draft my plan, then Chapter One'}
             description={
               project.plan
                 ? 'PaperAid researches your topic again and drafts a fresh plan. You edit and approve it before any chapter is written.'
-                : 'PaperAid researches your topic and drafts a plan for your study: problem, objectives, questions, design and methods. You edit and approve it, and Chapter One starts as soon as you do.'
+                : conceptOnly
+                  ? 'PaperAid researches your topic and drafts a plan for your study. You edit and approve it, then PaperAid writes your concept paper when you ask. Nothing else starts by itself.'
+                  : 'PaperAid researches your topic and drafts a plan for your study: problem, objectives, questions, design and methods. You edit and approve it, and Chapter One starts as soon as you do.'
             }
             disabledReason={running ? 'A step is running for this proposal. Wait for it to finish.' : undefined}
             onStarted={setRunning}
