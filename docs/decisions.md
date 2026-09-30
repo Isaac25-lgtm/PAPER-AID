@@ -300,3 +300,10 @@ Codex's review of the plan, adopted: nothing the student must settle is left to 
 9. **Frozen content is enforced:** before any paid call or rule, a work step checks the running prompts, rule files, validator set and render profile against its quote's hashes; a changed release fails it without charge.
 10. **A quote verifies its value:** a requirement is verified only when its number (figures, "50k", words, years for a duration), a limit's unit, a referencing style or a currency appears in its own quote; otherwise the student confirms it.
 11. **The preview shows each section's table**, as the Word file does.
+
+### 2026-09-30 — Works on for invited testers (owner: "I need coursework live")
+
+- Coursework, funding and project concept notes and funding proposals are on (`WORKS_ENABLED`) for the invited testers only (the work services now follow `TESTER_EMAILS` like every AI service). Credits stay off while testing, so nothing is charged. Only AI detection stays "coming soon".
+- Testing prices (worst-case projection × 2): read 1; plan 3 (coursework, concept note) or 7 (funding); coursework 20 / 35 / 60 / 90 for up to 1,500 / 3,000 / 5,000 / 8,000 words; concept note 20 / 34 / 44; funding proposal 57 / 122 / 247; changes 17. To be set from real spend before students pay.
+- Real-model pilot (Gemini writer, Luna, Sonnet or Opus reviewers), actual spend: coursework plan $0.10, 1,500-word draft $0.32 (7.6 min), changes $0.04; concept note read $0.001, plan $0.15, standard draft $0.47 (10 min); funding plan $0.35, compact draft $1.66 (18 min). Actual spend is about a fifth of the worst-case projection or less.
+- Before public launch: credits on, a way to buy tokens (interim: mobile money confirmed by an admin; later a payment gateway), then the tester list removed.
