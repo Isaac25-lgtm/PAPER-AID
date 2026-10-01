@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useParams } from 'react-router'
+import { Navigate, useParams } from 'react-router'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/field'
 import { Alert, Skeleton } from '../../components/ui/primitives'
@@ -12,6 +12,8 @@ import { StartProgress, StoppedCard, type Phase } from '../start/progress'
 import { ChangeBox, ChecksList, DocTable, ErrorNote, PanelSection, Paper, Para, Versions, WorkspaceHeader, type CheckLine, type WorkspaceStatus } from '../workspace/parts'
 import { KIND_LABELS, VARIANT_LABELS } from './shared'
 import { LegacyWorkPage } from './work-page'
+
+const START: Record<Work['kind'], string> = { COURSEWORK: '/app/start/coursework', CONCEPT_NOTE: '/app/start/concept-note', FUNDING_PROPOSAL: '/app/start/funding' }
 
 const ESTIMATES: Record<Work['kind'], string> = {
   COURSEWORK: 'This usually takes 8 to 15 minutes.',
@@ -50,6 +52,10 @@ export function WorkPage() {
     )
   if (work === undefined) return <Skeleton className="h-96 rounded-2xl" />
   if (work === null) return <Alert tone="warning">We couldn't find this work.</Alert>
+  // Set up but never started, and no plan yet: it continues on the Start page with its details kept (a
+  // tester's coursework refused at Start must not reopen on the earlier plan pages). Older work with a
+  // plan keeps its earlier page until written.
+  if (!work.auto && !work.documents.length && !work.plan) return <Navigate to={`${START[work.kind]}?work=${work.id}`} replace />
   if (!work.auto && !work.documents.length) return <LegacyWorkPage />
 
   const retry = async () => {
