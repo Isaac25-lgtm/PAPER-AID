@@ -360,3 +360,33 @@ def test_a_web_found_article_is_cited_by_its_authors_from_its_registered_record(
     assert proposal_pipeline._registered_by_title("Effect of a Community Health Worker Intervention on Facility Delivery in Uganda", "2016")["authors"].startswith("Nsibambi")
     assert proposal_pipeline._registered_by_title("Effect of a community health worker intervention on facility delivery in Uganda", "2019") is None  # another year
     assert proposal_pipeline._registered_by_title("A different article about maternal health in Uganda", "2016") is None
+
+
+def test_a_final_review_repair_gets_the_sections_evidence_and_brief(works_client):
+    """An objection that a part of the question is unanswered or unsupported can only be repaired
+    with support: the writer gets the section's evidence, brief and rules, as when it drafted it
+    (live coursework failed twice when repairs had no evidence, 2026-10-01)."""
+    client = works_client
+    calls = []
+
+    def final(payload):
+        first = not calls
+        return {"rules": [{"rule": r["rule"], "status": "PASS", "note": "Met.", "where": ""} for r in payload["rules"]],
+                "coverage": [{"id": c["id"], "answered": not first, "where": ""} for c in payload["coverage"]],
+                "priorities": [{"priority": p, "addressed": True, "where": ""} for p in payload["priorities"]]}
+
+    def repair(payload):
+        calls.append(payload["sections"])
+        answer = fake_works.repair(payload)
+        for s in answer["sections"]:
+            s["paragraphs"] = [*s["paragraphs"], "This part is now addressed."]
+        return answer
+
+    client.models.overrides["w_final"] = final
+    client.models.overrides["w_repair"] = repair
+    work = _approved(client, _coursework(client))
+    _, job = _run(client, work["id"], "DRAFT")
+    assert job["status"] == "COMPLETED" and calls
+    for section in calls[-1]:
+        assert section["evidence"] and {"id", "statement"} <= set(section["evidence"][0])
+        assert section["brief"] and "rules" in section and any("Answer this part" in i for i in section["issues"])

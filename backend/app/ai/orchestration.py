@@ -166,7 +166,7 @@ STEPS: dict[str, Step] = {
     "w_draft": Step("WRITER", Stage.DRAFTING, "w-draft-v1", 16000),
     "w_integrity": Step("INTEGRITY", Stage.AUDITING, "w-integrity-v1", 6000),
     "w_evaluate": Step("EVALUATOR", Stage.AUDITING, "w-evaluate-v1", 8000),
-    "w_repair": Step("WRITER", Stage.AUDITING, "w-repair-v1", 16000),
+    "w_repair": Step("WRITER", Stage.AUDITING, "w-repair-v2", 16000),  # v2: repairs with the section's evidence, as drafting has
     "w_adjudicate": Step("ADJUDICATOR", Stage.AUDITING, "w-adjudicate-v1", 4000),
     "w_final": Step("EVALUATOR", Stage.AUDITING, "w-final-v2", 8000),  # v2: the exact deliverable, every verdict required (Sol with one final reviewer)
     "w_compress": Step("WRITER", Stage.AUDITING, "w-compress-v1", 12000),

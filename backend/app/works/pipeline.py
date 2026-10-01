@@ -613,6 +613,19 @@ def _review_items(inp: WorkStepInput, sections: dict[str, PlanSection], current:
     ]
 
 
+def _repair_items(inp: WorkStepInput, current: dict[str, SectionText], library_items: dict[str, EvidenceItem], fix: dict[str, list[str]],
+                  problems: dict[str, list[str]] | None = None) -> list[dict[str, Any]]:
+    """What the writer needs to repair each section: its brief, rules, parts of the question, the
+    evidence assigned to it (the same as when it was drafted, so an objection that the text is
+    unsupported can be answered with support) and the issues to resolve."""
+    assert inp.plan is not None
+    sections = {s.key: s for s in inp.plan.sections}
+    usable = [i for i in library_items.values() if i.usable]
+    keys = [k for k in fix if k in current and k in sections]
+    return [{**i, "issues": fix[i["key"]], "evidence": _for_model(_relevant(sections[i["key"]], usable), passages=True)}
+            for i in _review_items(inp, sections, current, problems or {}, keys)]
+
+
 def _issues_from(evaluation: Evaluation | None, integrity: Any) -> list[str]:
     issues: list[str] = []
     if evaluation is not None and evaluation.verdict != "PASS":
@@ -670,8 +683,7 @@ def _audit(ctx: "StageContext", runner: WorkRunner, inp: WorkStepInput, current:
                         unresolved[key].append(decision.instruction)
         if not unresolved or runner.budget_reached or round_ == rounds:
             break
-        fixes = [{**i, "issues": unresolved[i["key"]]} for i in _review_items(inp, sections, current, problems, list(unresolved))]
-        for key, fixed in runner.repair(fixes, common).items():
+        for key, fixed in runner.repair(_repair_items(inp, current, library_items, unresolved, problems), common).items():
             current[key] = fixed
         pending = list(unresolved)
     return {"unresolved": unresolved, "evaluations": evaluations, "integrity": integrity, "library": library_items, "tokens": tokens, "allowed": allowed}
@@ -939,8 +951,7 @@ def stage_auditing(ctx: "StageContext") -> None:
         current = {s.key: SectionText(key=s.key, paragraphs=s.paragraphs, table=Table(caption=s.table_caption, rows=s.table or [])) for s in base.sections}
         original = dict(current)
         targets = [k for k in inp.revise if k in current]
-        requests = [{"key": k, "heading": headings.get(k, k), "text": current[k].paragraphs, "table": current[k].table.model_dump(),
-                     "issues": [f"The student asks: {r}" for r in inp.revise[k]], "_words": " ".join(current[k].paragraphs)} for k in targets]
+        requests = _repair_items(inp, current, _library(ctx, inp), {k: [f"The student asks: {r}" for r in inp.revise[k]] for k in targets})
         for key, revised in runner.repair(requests, _common(inp)).items():
             if key in targets:
                 current[key] = revised
@@ -1030,6 +1041,7 @@ def stage_auditing(ctx: "StageContext") -> None:
         # deliverable reviewed again, at most twice. A review that cannot complete is never approval.
         final: Final | None = None
         doc_rules = _document_rules(spec)
+        rounds_seen: list[dict[str, Any]] = []
         for round_ in range(REVIEW_REPAIRS + 1):
             settle_wording()
             final = _final_review(runner, inp, _document(inp, current, set()), library_items, tokens, doc_rules)
@@ -1040,12 +1052,13 @@ def stage_auditing(ctx: "StageContext") -> None:
                     "final review incomplete" + (" (spend cap)" if runner.budget_reached else ""),
                 )
             fix = repair_for(final, doc_rules)
+            rounds_seen.append({"round": round_, "final": final.model_dump(), "fix": fix, "text": {k: v.paragraphs for k, v in current.items()}})
+            ctx.put_json("final_review.json", rounds_seen)  # what the final reviewer objected to each round (admin diagnosis; never logged)
             if not fix or round_ == REVIEW_REPAIRS or runner.budget_reached:
                 break
             fix_notes.append(f"round {round_ + 1}: " + ", ".join(fix))
             repaired = runner.repair(
-                [{"key": k, "heading": headings.get(k, k), "text": current[k].paragraphs, "table": current[k].table.model_dump(),
-                  "issues": v, "_words": " ".join(current[k].paragraphs)} for k, v in fix.items() if k in current], _common(inp))
+                _repair_items(inp, current, library_items, fix), _common(inp))
             current.update({k: v for k, v in repaired.items() if k in fix})
             review(list(fix))
     else:
@@ -1056,8 +1069,7 @@ def stage_auditing(ctx: "StageContext") -> None:
             fix = repair_for(final, doc_rules)
             if fix:
                 repaired = runner.repair(
-                    [{"key": k, "heading": headings.get(k, k), "text": current[k].paragraphs, "table": current[k].table.model_dump(),
-                      "issues": v, "_words": " ".join(current[k].paragraphs)} for k, v in fix.items() if k in current], _common(inp))
+                    _repair_items(inp, current, library_items, fix), _common(inp))
                 current.update({k: v for k, v in repaired.items() if k in fix})
                 review(list(fix))
         settle_wording()
