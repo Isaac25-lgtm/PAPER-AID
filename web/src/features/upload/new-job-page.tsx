@@ -702,7 +702,7 @@ function NewJobForm({ type }: { type: JobType | null }) {
             <div className="p-5">
               {charging && meta && wallet && (
                 <p className="mb-4 flex items-center justify-between rounded-lg bg-surface-subtle px-3 py-2 text-xs text-fg-muted">
-                  <span>Your tokens{wallet.testCredits && ' (test)'}</span>
+                  <span>Your credits{wallet.testCredits && ' (test)'}</span>
                   <Link to="/app/credits" className="font-semibold text-fg hover:underline">
                     {formatTokens(wallet.available)}
                   </Link>
@@ -724,7 +724,7 @@ function NewJobForm({ type }: { type: JobType | null }) {
                   action={
                     pricing.needsCredits ? (
                       <ButtonLink to="/app/credits" size="sm" variant="secondary">
-                        Your tokens
+                        Your credits
                       </ButtonLink>
                     ) : undefined
                   }
@@ -770,7 +770,7 @@ function NewJobForm({ type }: { type: JobType | null }) {
                   {charging ? (
                     <>
                       <p className="mt-1 flex justify-between text-sm font-semibold">
-                        <span>Held from your tokens now</span> <span>{formatTokens(hold)}</span>
+                        <span>Held from your credits now</span> <span>{formatTokens(hold)}</span>
                       </p>
                       <p className="mt-2 text-xs leading-relaxed text-fg-subtle">
                         {fixedPrice
@@ -787,7 +787,7 @@ function NewJobForm({ type }: { type: JobType | null }) {
                       className="mt-3"
                       action={
                         <ButtonLink to="/app/credits" size="sm" variant="secondary">
-                          Your tokens
+                          Your credits
                         </ButtonLink>
                       }
                     >
@@ -844,7 +844,7 @@ function NewJobForm({ type }: { type: JobType | null }) {
                     <p className="mt-2 text-xs text-amber-800">
                       Your balance is {formatTokens(wallet.available)}.{' '}
                       <Link to="/app/credits" className="font-semibold underline">
-                        See your tokens
+                        See your credits
                       </Link>
                     </p>
                   )}

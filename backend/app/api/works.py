@@ -177,6 +177,31 @@ def request_changes(work_id: str, body: ChangeRequest, user: User = Depends(curr
     return works.request_changes(rt, user, work_id, body.instruction, body.sections)
 
 
+@router.post("/{work_id}/requests/with-document", response_model=WorkView)
+def request_changes_with_document(work_id: str, instruction: str = Form(..., min_length=3, max_length=2000), sections: str = Form(default=""),
+                                  file: UploadFile = File(...), user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> WorkView:
+    """Ask for changes with a document added for context (Word or PDF): its text goes to the writer with the request."""
+    data = file.file.read(rt.settings.max_upload_bytes + 1)
+    return works.request_changes_with_document(rt, user, work_id, instruction, [s for s in sections.split(",") if s], file.filename or "document", data)
+
+
+# One Start (owner decision 2026-10-01): read the student's documents, then plan and draft by itself.
+@router.post("/{work_id}/read", response_model=WorkView)
+def read(work_id: str, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> WorkView:
+    return works.auto_read(rt, user, work_id)
+
+
+@router.post("/{work_id}/start", response_model=WorkView)
+def start(work_id: str, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> WorkView:
+    return works.start(rt, user, work_id)
+
+
+@router.post("/{work_id}/figures", response_model=WorkView)
+def apply_figures(work_id: str, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> WorkView:
+    """The student's saved figures go into the current document as a new version (code only, no charge)."""
+    return works.apply_figures(rt, user, work_id)
+
+
 @router.delete("/{work_id}/requests/{request_id}", response_model=WorkView)
 def remove_request(work_id: str, request_id: str, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> WorkView:
     return works.remove_request(rt, user, work_id, request_id)

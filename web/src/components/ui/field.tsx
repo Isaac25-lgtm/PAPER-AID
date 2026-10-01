@@ -4,6 +4,15 @@ import { useId, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttribu
 const control =
   'w-full rounded-lg border border-line-strong bg-white px-3 text-sm text-fg shadow-sm transition-colors placeholder:text-fg-subtle hover:border-brand-300 focus:border-brand-500 focus:outline-none focus:ring-3 focus:ring-brand-100 disabled:bg-surface-muted aria-invalid:border-red-400 aria-invalid:focus:ring-red-100'
 
+/** A required field says so in words as well as with the asterisk (not by colour alone). */
+function RequiredMark() {
+  return (
+    <span className="ml-1 text-xs font-semibold text-red-700">
+      <span aria-hidden>*</span> Required
+    </span>
+  )
+}
+
 interface FieldProps {
   label: string
   hint?: ReactNode
@@ -17,6 +26,7 @@ export function Input({ label, hint, error, className, ...props }: FieldProps & 
     <div className={className}>
       <label htmlFor={id} className="mb-1.5 block text-sm font-medium text-fg">
         {label}
+        {props.required && <RequiredMark />}
       </label>
       <input id={id} aria-invalid={error ? true : undefined} aria-describedby={describedBy} className={clsx(control, 'h-11')} {...props} />
       {hint && !error && (
@@ -40,6 +50,7 @@ export function TextArea({ label, hint, error, className, rows = 3, ...props }: 
     <div className={className}>
       <label htmlFor={id} className="mb-1.5 block text-sm font-medium text-fg">
         {label}
+        {props.required && <RequiredMark />}
       </label>
       <textarea id={id} rows={rows} aria-invalid={error ? true : undefined} aria-describedby={describedBy} className={clsx(control, 'py-2 leading-relaxed')} {...props} />
       {hint && !error && (
@@ -62,6 +73,7 @@ export function Select({ label, hint, className, children, ...props }: FieldProp
     <div className={className}>
       <label htmlFor={id} className="mb-1.5 block text-sm font-medium text-fg">
         {label}
+        {props.required && <RequiredMark />}
       </label>
       <select id={id} className={clsx(control, 'h-10 pr-8')} aria-describedby={hint ? `${id}-hint` : undefined} {...props}>
         {children}
@@ -82,6 +94,7 @@ export function Checkbox({ label, className, ...props }: { label: ReactNode } & 
       <input id={id} type="checkbox" className="mt-0.5 size-4 shrink-0 rounded border-line-strong accent-brand-700" {...props} />
       <label htmlFor={id} className="text-sm leading-snug text-fg-muted">
         {label}
+        {props.required && <RequiredMark />}
       </label>
     </div>
   )

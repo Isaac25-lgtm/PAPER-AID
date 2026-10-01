@@ -118,7 +118,7 @@ function JobBody({ job }: { job: Job }) {
       >
         <p>{job.failure?.userMessage}</p>
         <p className="mt-2">
-          Nothing was charged: your tokens, including any estimate, went back to your balance.{' '}
+          Nothing was charged: your credits, including any estimate, went back to your balance.{' '}
           {job.failure?.retryable && 'We may restart it for you — it will appear here if we do.'}
         </p>
       </Alert>
@@ -129,7 +129,7 @@ function JobBody({ job }: { job: Job }) {
         <CircleSlash className="size-6 shrink-0 text-fg-subtle" aria-hidden />
         <div>
           <p className="font-semibold">This job was cancelled before it started.</p>
-          <p className="text-sm text-fg-muted">Nothing was processed, and any tokens held for it went back to your balance.</p>
+          <p className="text-sm text-fg-muted">Nothing was processed, and any credits held for it went back to your balance.</p>
         </div>
       </Card>
     )

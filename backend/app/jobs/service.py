@@ -113,6 +113,7 @@ def public_config(rt: Runtime, user: "User | None" = None) -> dict:
         "paymentsEnabled": rt.settings.payments_enabled,
         "availability": availability(rt.settings, user),
         "creditsEnabled": rt.settings.credits_enabled,
+        "minCredits": rt.settings.min_credits,
         "aiScore": rt.settings.show_ai_score,  # the AI-likeness percentage and band are shown only when on
         "minTopUpUgx": rt.settings.min_top_up_ugx,
         "ugxPerUsd": rt.settings.ugx_per_usd,

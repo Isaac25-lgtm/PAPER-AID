@@ -34,7 +34,8 @@ function useAction(onDone: (work: Work) => void) {
   return { busy, error, run }
 }
 
-export function WorkPage() {
+/** The page for works set up before one Start (owner decision 2026-10-01), until they are written. */
+export function LegacyWorkPage() {
   const { workId = '' } = useParams()
   const data = useData()
   const [work, setWork] = useState<Work | null | undefined>(undefined)

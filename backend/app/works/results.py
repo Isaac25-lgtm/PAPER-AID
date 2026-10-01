@@ -5,6 +5,16 @@ disagree with it or with each other (FP-073 to FP-075)."""
 from app.works.budget import Check
 from app.works.models import Indicator, ResolvedSpec, ResultsModel
 
+# Each indicator rule checks its own field (validators-v3): the applicant settles baselines and targets,
+# PaperAid the rest, so each is reported, and owned, separately.
+FIELD_RULES = (
+    ("FP-025", "unit", "Every indicator has a unit."),
+    ("FP-026", "baseline or a plan to set one", "Every outcome indicator has a baseline or a plan to set one."),
+    ("FP-027", "target", "Every outcome indicator has a target."),
+    ("FP-030", "means of verification", "Every indicator has a source of data."),
+    ("FP-031", "frequency", "Every indicator has a measurement frequency."),
+    ("FP-032", "responsible role", "Every indicator has a responsible role."),
+)
 WRITTEN_FIELDS = ("unit", "means of verification", "frequency", "responsible role")  # what the Results Model's writer supplies; baselines and targets are the applicant's
 
 
@@ -48,9 +58,9 @@ def checks(model: ResultsModel | None, spec: ResolvedSpec) -> list[Check]:
     level_of = {model.goal.id: "goal", **{o: "outcome" for o in outcomes}, **{o: "output" for o in outputs}}
     wrong = [i.id for i in model.indicators if i.result_id not in results or level_of.get(i.result_id) != i.level]
     out.append(("FP-024", "FAIL" if wrong else "PASS", f"Indicators measuring no result, or the wrong level: {', '.join(wrong)}." if wrong else "Each indicator measures a result at its own level."))
-    gaps = [f"{i.id}: {', '.join(g)}" for i in model.indicators if (g := _missing(i))]
-    for rid in ("FP-025", "FP-026", "FP-027", "FP-030", "FP-031", "FP-032"):
-        out.append((rid, "FAIL" if gaps else "PASS", ("Missing: " + "; ".join(gaps)) if gaps else "Every indicator has its unit, baseline, target, source, frequency and owner."))
+    for rid, field, done in FIELD_RULES:
+        missing = [i.id for i in model.indicators if field in _missing(i)]
+        out.append((rid, "FAIL" if missing else "PASS", f"Missing the {field}: {', '.join(missing)}." if missing else done))
     if spec.flags.get("disaggregation_required"):
         bare = [i.id for i in model.indicators if i.level != "goal" and not i.disaggregation]
         out.append(("FP-029", "FAIL" if bare else "PASS", f"Not disaggregated: {', '.join(bare)}." if bare else "Indicators are disaggregated."))
@@ -66,6 +76,9 @@ def checks(model: ResultsModel | None, spec: ResolvedSpec) -> list[Check]:
     return out
 
 
+TO_ADD = "[to be added]"  # a figure only the applicant gives, not entered yet
+
+
 def logframe(model: ResultsModel) -> list[list[str]]:
     """Level | Result | Indicators | Baseline | Target | Means of verification | Assumptions."""
     rows = [["Level", "Result", "Indicators", "Baseline", "Target", "Means of verification", "Assumptions"]]
@@ -74,8 +87,8 @@ def logframe(model: ResultsModel) -> list[list[str]]:
         found = [i for i in model.indicators if i.result_id == result_id]
         return (
             "; ".join(f"{i.id}: {i.definition}" for i in found),
-            "; ".join(_value(i.baseline, i.unit) or i.baseline_plan for i in found),
-            "; ".join(_value(i.target, i.unit) for i in found),
+            "; ".join(_value(i.baseline, i.unit) or i.baseline_plan or TO_ADD for i in found),
+            "; ".join(_value(i.target, i.unit) or TO_ADD for i in found),
             "; ".join(i.means_of_verification for i in found),
         )
 
@@ -104,7 +117,7 @@ def workplan(model: ResultsModel, months: int | None) -> list[list[str]]:
 def mel_table(model: ResultsModel) -> list[list[str]]:
     rows = [["Indicator", "Result", "Unit", "Baseline", "Target", "Data source", "Frequency", "Responsible", "Disaggregation"]]
     for i in model.indicators:
-        rows.append([f"{i.id}: {i.definition}", i.result_id, i.unit, _value(i.baseline, i.unit) or i.baseline_plan, _value(i.target, i.unit),
+        rows.append([f"{i.id}: {i.definition}", i.result_id, i.unit, _value(i.baseline, i.unit) or i.baseline_plan or TO_ADD, _value(i.target, i.unit) or TO_ADD,
                      i.means_of_verification, i.frequency, i.responsible_role, ", ".join(i.disaggregation)])
     return rows
 

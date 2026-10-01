@@ -73,7 +73,7 @@ try {
   await page.waitForURL(/\/app/)
   await page.goto(`${base}/admin/credits`) // payments aren't live: an admin adds test credits
   await page.getByLabel('Student email').fill('demo@paperaid.app')
-  await page.getByLabel('Amount (tokens)').fill('1000')
+  await page.getByLabel('Amount (credits)').fill('1000')
   await page.getByRole('button', { name: 'Add credits' }).click()
   await page.getByText(/Their balance is now/).first().waitFor()
   await page.goto(`${base}/app/new`)
@@ -83,8 +83,7 @@ try {
   step('the new sections are offered, and AI detection shows as coming soon')
 
   // --- coursework: an essay whose brief bans AI -----------------------------------------------
-  await page.getByRole('link', { name: 'Coursework', exact: true }).first().click()
-  await page.getByRole('link', { name: /New coursework/ }).first().click()
+  await page.goto(`${base}/app/works/new?kind=COURSEWORK`) // the earlier works pages, kept for works set up before one Start
   await page.getByLabel('Title or topic').fill('Community health workers and maternal health')
   await page.getByLabel('The assignment question, word for word').fill(
     'Critically evaluate the effectiveness of community health workers in improving maternal health outcomes in rural Uganda since 2015.',

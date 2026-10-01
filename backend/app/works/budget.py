@@ -27,6 +27,11 @@ class Totals:
     by_year: dict[int, float]
 
 
+def complete(budget: Budget) -> bool:
+    """Every line has its quantity and unit cost (the applicant's figures)."""
+    return all(li.quantity and li.unit_cost for li in budget.lines)
+
+
 def totals(budget: Budget) -> Totals:
     by_category: dict[str, float] = {}
     by_year: dict[int, float] = {}

@@ -32,7 +32,7 @@ from app.latex.convert import convert as to_latex
 from app.latex.package import compile_pdf
 from app.latex.package import project as latex_project
 from app.pricing.quote import bound_quote, fixed_price, proposal_usd, with_margin
-from app.proposals import decisions, evidence, feedback, rulebook, sampling
+from app.proposals import decisions, evidence, feedback, framework, rulebook, sampling
 from app.proposals import export as proposal_export
 from app.proposals.models import (
     Acknowledgment,
@@ -154,6 +154,14 @@ def view(rt: Runtime, p: Project) -> ProjectView:
             missing = [f"{s.number} {s.heading} (not written yet)" for s in expected if s.key not in written]
             chapter.needs_review = decisions.stale(doc, p.plan) + missing
     out.active_job = p.active_job if step_running(rt, p) else None
+    out.framework = framework.describe(p.plan.variables) if p.plan else ""
+    first = CONCEPT if p.goal == "CONCEPT" else 1
+    if p.auto and not p.chapter(first).versions and out.active_job is None and not p.auto_failure and p.jobs:
+        last = rt.store.get(p.jobs[-1])
+        if last is not None and last.status == JobStatus.FAILED and last.failure is not None:
+            out.auto_failure = last.failure.user_message
+        elif last is not None and last.status == JobStatus.CANCELLED:
+            out.auto_failure = "Stopped at your request. Nothing was delivered and you were not charged."
     return out
 
 
@@ -526,7 +534,7 @@ def chapter_one_estimate(settings, level: str) -> QuoteLine:
     return QuoteLine(label="Chapter 1, started when you approve the plan (up to)", amount=with_margin(proposal_usd(settings, "CHAPTER_1", words), settings), service="CHAPTER_1")
 
 
-def quote_step(rt: Runtime, user: User, project_id: str, step: Step, note: str, comments: list[str] | None = None) -> StepQuote:
+def quote_step(rt: Runtime, user: User, project_id: str, step: Step, note: str, comments: list[str] | None = None, bundled: bool = False) -> StepQuote:
     """Freeze the project's input for a step, price it and return the quote. Nothing is held until
     the student submits."""
     _require_ai(rt, user)
@@ -574,7 +582,7 @@ def quote_step(rt: Runtime, user: User, project_id: str, step: Step, note: str, 
             if included and comment.status == "OPEN" and comment.chapter == chapter:
                 for key in comment.sections:
                     if key in written and len(revise.setdefault(key, [])) < 8:
-                        revise[key].append(comment.text)
+                        revise[key].append(comment.text + (f" (The student added their document \"{comment.context_name}\" for context: {comment.context})" if comment.context else ""))
                         comment_ids.append(comment.id)
         revise = {k: v for k, v in revise.items() if v}
         if not revise:
@@ -623,7 +631,8 @@ def quote_step(rt: Runtime, user: User, project_id: str, step: Step, note: str, 
             finish = sum(s.words for s in planned if s.key in only)
             part, words = (finish / words if words else 1.0), finish
     # a finish is its chapter's step with the finish flag: a record the released code can still read
-    selection = ServiceSelection(proposal="CONCEPT" if chapter == CONCEPT else f"CHAPTER_{chapter}", finish=True) if completing else ServiceSelection(proposal=step)
+    selection = (ServiceSelection(proposal="CONCEPT" if chapter == CONCEPT else f"CHAPTER_{chapter}", finish=True) if completing
+                 else ServiceSelection(proposal=step, bundled=bundled and step in ("PLAN", "CHAPTER_1", "CONCEPT")))
     job = Job(
         id=f"job_{secrets.token_hex(6)}",
         status=JobStatus.DRAFT,
@@ -851,7 +860,7 @@ def update_feedback(
     return view(rt, _change(rt, user, project_id, apply))
 
 
-def request_changes(rt: Runtime, user: User, project_id: str, number: int, instruction: str, sections: list[str]) -> ProjectView:
+def request_changes(rt: Runtime, user: User, project_id: str, number: int, instruction: str, sections: list[str], context_name: str = "", context: str = "") -> ProjectView:
     """The student's own request for changes to a chapter or the concept paper, on the sections they
     chose (or all of them). It is revised like a supervisor comment; the price comes next."""
     if number not in (1, 2, 3, CONCEPT):
@@ -870,7 +879,8 @@ def request_changes(rt: Runtime, user: User, project_id: str, number: int, instr
         if len(q.feedback) >= feedback.MAX_COMMENTS:
             raise AppError(f"A proposal keeps up to {feedback.MAX_COMMENTS} comments. Remove ones already dealt with first.", code="TOO_MANY_COMMENTS")
         round_ = max((c.round for c in q.feedback), default=0) + 1
-        q.feedback.append(FeedbackComment(id=f"fb_{secrets.token_hex(4)}", round=round_, text=text, anchor="Your request", chapter=number, sections=chosen, by="STUDENT"))
+        q.feedback.append(FeedbackComment(id=f"fb_{secrets.token_hex(4)}", round=round_, text=text, anchor="Your request", chapter=number, sections=chosen, by="STUDENT",
+                                          context_name=context_name[:120], context=context[:6000]))
         return q
 
     return view(rt, _change(rt, user, project_id, apply))
@@ -1016,3 +1026,98 @@ def sample_size_preview(sample: SampleSize) -> dict[str, object]:
     """What PaperAid will calculate from the student's figures, shown while they edit the plan."""
     result = sampling.calculate(sample)
     return {"size": result.size, "steps": result.steps, "missing": result.missing}
+
+
+# --- one Start (owner decision 2026-10-01) ------------------------------------------------------------------
+# The student gives their topic and study details and presses Start: PaperAid plans, and once its own
+# final review approves the plan, writes Chapter One (or the concept paper) by itself. The plan is never
+# approved in the student's name otherwise (Codex 2026-10-01). One charge: the plan is part of the first
+# document's price.
+
+NOT_FINISHED = "We couldn't finish this one: PaperAid could not make a plan it was satisfied with. You were not charged. Please try again."
+SAMPLING_CONSENT = "Standard sample-size settings (95% confidence, 5% margin, 50% proportion) where the student gave none, as stated when they started."
+
+
+def start(rt: Runtime, user: User, project_id: str) -> ProjectView:
+    """Start, or continue after a stop: plan (bundled) if there is no approved plan, otherwise write the
+    first document."""
+    from app.works.service import check_credits  # the same credit and minimum check for every service
+
+    p = _owned(rt, user, project_id)
+    _require_ai(rt, user)
+    if step_running(rt, p):
+        raise Conflict("PaperAid is already working on this.", code="STEP_RUNNING")
+    first: Step = "CONCEPT" if p.goal == "CONCEPT" else "CHAPTER_1"
+    price = 0
+    if rt.settings.pricing_mode == "fixed":
+        price = fixed_price(rt.settings, "PLAN", None) + fixed_price(rt.settings, "CONCEPT" if first == "CONCEPT" else "CHAPTER_1", None)
+    check_credits(rt, user, "CONCEPT_PAPER" if p.goal == "CONCEPT" else "PROPOSAL", price)
+
+    def begin(q: Project) -> Project:
+        q.auto, q.auto_failure = True, ""
+        return q
+
+    p = _change(rt, user, project_id, begin)
+    step: Step = first if p.plan is not None and p.plan_status == "APPROVED" else "PLAN"
+    quoted = quote_step(rt, user, project_id, step, "", bundled=True)
+    submit_step(rt, user, project_id, quoted.job.id, quoted.quote.id)
+    return view(rt, _owned(rt, user, project_id))
+
+
+def continue_after_plan(rt: Runtime, project_id: str, plan_job: str) -> None:
+    """Run by the worker once a plan started with one Start is published: approved by PaperAid's final
+    review and complete, it is approved and the first document starts; otherwise it stops and says so.
+    At most once per plan (only while that plan step is the project's last step)."""
+    p = rt.store.get_project(project_id)
+    if p is None or p.deleting or not p.auto or not p.jobs or p.jobs[-1] != plan_job:
+        return
+    owner = User(uid=p.owner_uid, email=p.owner_email, is_admin=False, verified=True)
+
+    def stop(message: str) -> None:
+        def apply(q: Project) -> Project:
+            q.auto_failure = message
+            return q
+
+        _change(rt, owner, project_id, apply)
+
+    approved = (p.plan is not None and p.plan_review is not None and p.plan_review.outcome == "APPROVED"
+                and not rulebook.plan_problems(p.rulebook, p.plan))
+    if not approved:
+        stop(NOT_FINISHED)
+        return
+
+    def approve(q: Project) -> Project:
+        assert q.plan is not None
+        if q.plan.sampling_assumed:  # the student was told the standard settings when they started
+            q.acknowledgments.append(Acknowledgment(kind="SAMPLING", plan_version=q.plan_version, text_sha256=hashlib.sha256(SAMPLING_CONSENT.encode()).hexdigest()))
+        q.plan_status = "APPROVED"
+        q.auto_chapter_one = False  # started here, never again by an approval
+        return q
+
+    try:
+        _change(rt, owner, project_id, approve)
+        quoted = quote_step(rt, owner, project_id, "CONCEPT" if p.goal == "CONCEPT" else "CHAPTER_1", "", bundled=True)
+        submit_step(rt, owner, project_id, quoted.job.id, quoted.quote.id)
+    except AppError as exc:  # credits ran out meanwhile, a figure only the student can give: say why
+        log(logger, logging.WARNING, "auto chapter did not start", projectId=project_id, code=exc.code)
+        stop(f"Your first chapter could not start: {exc.message}")
+
+
+def request_changes_with_document(rt: Runtime, user: User, project_id: str, number: int, instruction: str, sections: list[str], filename: str, data: bytes) -> ProjectView:
+    """A change request with a document for context: its text is read here and goes to the writer with
+    the request; the document itself is not kept."""
+
+    _rate_limit(rt, user, "upload", rt.settings.uploads_per_hour)
+    model = inspect_upload(data, filename, rt.settings.max_upload_bytes, 60000, rt.settings.max_pdf_pages, min_words=5)
+    context = "\n".join(b.text for b in model.blocks if b.text.strip())
+    return request_changes(rt, user, project_id, number, instruction, sections, filename.rsplit("/", 1)[-1], context)
+
+
+def framework_png(rt: Runtime, user: User, project_id: str) -> bytes:
+    """The conceptual framework figure drawn from the plan's variables (none for a study without
+    independent and dependent variables)."""
+    p = _owned(rt, user, project_id)
+    png = framework.draw(p.plan.variables) if p.plan else None
+    if png is None:
+        raise NotFound("This study has no conceptual framework figure.")
+    return png

@@ -30,7 +30,7 @@ try {
     const version = new URL(r.request().url()).searchParams.get('version')
     return version === '2' ? r.fulfill({ status: 503, json: { message: 'CHAPTER_TWO_LOAD_FAILED' } }) : r.fulfill({ json: chapter })
   })
-  await page.goto(`${base}/app/projects/${project.id}`)
+  await page.goto(`${base}/app/projects/${project.id}?tools=1`) // the full proposal tools ("More tools" in the workspace)
   await page.getByRole('tab', { name: 'Chapter 1', exact: true }).click()
   await page.getByText('VERSION ONE visible text', { exact: true }).waitFor()
   await page.getByLabel('Version', { exact: true }).selectOption('2')

@@ -170,6 +170,12 @@ export interface Project {
   candidatePlan: ProposalPlan | null
   planReview?: ReviewDecision | null
   autoChapterOne: boolean
+  /** Started with one Start (owner decision 2026-10-01): PaperAid continues by itself. */
+  auto: boolean
+  /** Why it stopped without a chapter ('' while running or done). */
+  autoFailure: string
+  /** The conceptual framework figure in words ('' when the study has none). */
+  framework: string
   /** CONCEPT: the concept paper first (Research Proposals → Concept note); FULL: the whole proposal. */
   goal: 'FULL' | 'CONCEPT'
   feedback: FeedbackComment[]

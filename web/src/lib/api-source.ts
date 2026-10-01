@@ -71,6 +71,19 @@ export function createApiSource({ config, getAuthHeaders }: Options): DataSource
     setTimeout(() => URL.revokeObjectURL(url), 5000)
   }
 
+  async function blob(path: string): Promise<Blob> {
+    const res = await fetch(path, { headers: await getAuthHeaders() })
+    if (!res.ok) throw new DataError('This could not be loaded.', res.status)
+    return res.blob()
+  }
+
+  function withDocument(fields: Record<string, string>, file: File) {
+    const form = new FormData()
+    for (const [k, v] of Object.entries(fields)) form.append(k, v)
+    form.append('file', file)
+    return form
+  }
+
   return {
     config,
 
@@ -240,6 +253,10 @@ export function createApiSource({ config, getAuthHeaders }: Options): DataSource
       downloadConcept: (id, fileName) => saveFile(`/api/projects/${id}/concept/export`, fileName),
       requestChanges: (id, chapter, instruction, sections) =>
         request<Project>(`/api/projects/${id}/chapters/${chapter}/request`, { method: 'POST', body: JSON.stringify({ instruction, sections }) }),
+      requestChangesWithDocument: (id, chapter, instruction, sections, file) =>
+        request<Project>(`/api/projects/${id}/chapters/${chapter}/request/with-document`, { method: 'POST', body: withDocument({ instruction, sections: sections.join(',') }, file) }),
+      start: (id) => request<Project>(`/api/projects/${id}/start`, { method: 'POST' }),
+      framework: (id) => blob(`/api/projects/${id}/framework.png`),
       uploadGuide(id, file) {
         const form = new FormData()
         form.append('file', file)
@@ -281,6 +298,11 @@ export function createApiSource({ config, getAuthHeaders }: Options): DataSource
         await request<Job>(`/api/works/${id}/steps/${jobId}/submit`, { method: 'POST', body: JSON.stringify({ quoteId }) })
       },
       requestChanges: (id, instruction, sections) => request<Work>(`/api/works/${id}/requests`, { method: 'POST', body: JSON.stringify({ instruction, sections }) }),
+      requestChangesWithDocument: (id, instruction, sections, file) =>
+        request<Work>(`/api/works/${id}/requests/with-document`, { method: 'POST', body: withDocument({ instruction, sections: sections.join(',') }, file) }),
+      read: (id) => request<Work>(`/api/works/${id}/read`, { method: 'POST' }),
+      start: (id) => request<Work>(`/api/works/${id}/start`, { method: 'POST' }),
+      applyFigures: (id) => request<Work>(`/api/works/${id}/figures`, { method: 'POST' }),
       removeRequest: (id, requestId) => request<Work>(`/api/works/${id}/requests/${requestId}`, { method: 'DELETE' }),
       setVersion: (id, version) => request<Work>(`/api/works/${id}/version`, { method: 'POST', body: JSON.stringify({ version }) }),
       document: (id, version) => request<WorkDocumentView>(`/api/works/${id}/document${query({ version })}`),

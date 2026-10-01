@@ -108,7 +108,8 @@ def _compact_spec(spec: ResolvedSpec) -> dict[str, Any]:
 
 
 def _student(inp: WorkStepInput) -> dict[str, Any]:
-    answers = {k: v for k, v in inp.inputs.answers.items() if v != "SKIPPED" and not k.startswith(("confirm:", "conflict:", "eligible:"))}
+    # The cover page's details (name, registration number...) never reach a model: they only print.
+    answers = {k: v for k, v in inp.inputs.answers.items() if v != "SKIPPED" and not k.startswith(("confirm:", "conflict:", "eligible:", "cover:"))}
     return {"title": inp.inputs.title, "description": inp.inputs.description, "answers": answers, "experience": inp.inputs.experience}
 
 
@@ -439,7 +440,7 @@ def _final_plan(runner: WorkRunner, payload: dict[str, Any], plan: WorkPlan, ske
 # The Results Model checks that concern what PaperAid's model writes (its links, indicators per result,
 # schedule and budget-line mapping), not the applicant's own figures (baselines, targets, quantities,
 # costs), which only the student adds.
-MODEL_RESULTS_RULES = ("FP-014", "FP-018", "FP-019", "FP-022", "FP-024", "FP-036", "FP-037", "FP-038")
+MODEL_RESULTS_RULES = ("FP-014", "FP-018", "FP-019", "FP-022", "FP-024", "FP-025", "FP-030", "FP-031", "FP-032", "FP-036", "FP-037", "FP-038")
 
 
 def _results_problems(model: ResultsModel, lines: list[BudgetLine], spec: ResolvedSpec) -> list[str]:
@@ -448,12 +449,6 @@ def _results_problems(model: ResultsModel, lines: list[BudgetLine], spec: Resolv
     blocking = {r["id"] for r in library.rules_for(spec.kind) if r["id"] in set(spec.active_rules) and r["severity"] == "BLOCKING"}
     found = [*results_engine.checks(model, spec), *budget_engine.checks(Budget(currency=(spec.currency or "USD")[:8], lines=lines), spec, model)]
     problems = [f"{rid}: {note}" for rid, status, note in found if rid in MODEL_RESULTS_RULES and rid in blocking and status == "FAIL"]
-    # The indicator-field rules mix what the writer supplies with the applicant's figures: only the
-    # writer's fields count here (Codex audit 2026-10-01: a missing means of verification was approved).
-    field_rule = next((rid for rid in ("FP-025", "FP-030", "FP-031", "FP-032") if rid in blocking), None)
-    gaps = [f"{i.id}: {', '.join(g)}" for i in model.indicators if (g := results_engine.written_gaps(i))]
-    if field_rule and gaps:
-        problems.append(f"{field_rule}: Missing: " + "; ".join(gaps))
     # No budget lines at all: the budget checks stop at "no lines", so the activities left unfunded are named here.
     unfunded = [a.id for a in model.activities if a.costed]
     if not lines and unfunded and "FP-037" in blocking:
@@ -1066,7 +1061,8 @@ def _document(inp: WorkStepInput, current: dict[str, SectionText], reviewed: set
     return WorkDocument(kind=inp.kind, variant=inp.variant, title=inp.plan.title, spec_version=spec.version, plan_version=inp.plan_version,
                         results_version=inp.results_version, budget_version=inp.budget_version, sections=sections, cited=cited, exploratory=spec.exploratory, ai_note=note,
                         spec_snapshot=spec, results_snapshot=inp.results, budget_snapshot=inp.budget,
-                        number_values={k: [v[0], v[1]] for k, v in _tokens(inp).items()})
+                        number_values={k: [v[0], v[1]] for k, v in _tokens(inp).items()},
+                        cover={k.removeprefix('cover:'): v for k, v in inp.inputs.answers.items() if k.startswith('cover:') and v.strip()})
 
 
 def _base(ctx: "StageContext", inp: WorkStepInput) -> WorkDocument:
@@ -1439,6 +1435,10 @@ def stage_exporting(ctx: "StageContext") -> None:
     ctx.rt.store.update_job_wallet_and_work(job_id, inp.work_id, finish)
     if gone:
         raise PermanentStageError("WORK_DELETED", "This work was deleted before the step finished, so nothing was charged.", "work deleting at export")
+    if inp.step == "PLAN":
+        from app.works import service as work_service
+
+        work_service.continue_after_plan(ctx.rt, inp.work_id, job_id)  # one Start: the draft follows an approved plan by itself
 
 
 def _warn(j: Job, warnings: list[str]) -> Job:

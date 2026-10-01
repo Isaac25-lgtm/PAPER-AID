@@ -408,6 +408,7 @@ class WorkDocument(Camel):
     results_snapshot: ResultsModel | None = None
     budget_snapshot: Budget | None = None
     number_values: dict[str, list[str]] = {}  # number token → [how it prints, what it means]
+    cover: dict[str, str] = {}  # the student's cover-page details (owner decision 2026-10-01), printed under the title
 
 
 class DocVersion(Camel):
@@ -432,6 +433,10 @@ class ChangeRequest(Camel):
     sections: list[str] = []
     status: Literal["OPEN", "APPLIED", "DECLINED"] = "OPEN"
     applied_in: int | None = None
+    # A document the student added for context ("Add documents for more context"): its name and text,
+    # given to the writer with the request.
+    context_name: str = Field(default="", max_length=120)
+    context: str = Field(default="", max_length=8000)
 
 
 Status = Literal["NONE", "DRAFT", "APPROVED"]
@@ -496,6 +501,10 @@ class WorkView(Camel):
     notice: str | None = None
     active_job: str | None = None
     jobs: list[str] = []
+    # Started with one Start (owner decision 2026-10-01): PaperAid reads, plans and drafts by itself
+    # and the student sees only the document. `auto_failure` says why it stopped without one.
+    auto: bool = False
+    auto_failure: str = ""
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
     expires_at: datetime

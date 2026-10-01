@@ -143,6 +143,11 @@ class Settings(BaseSettings):
         "CN_PLAN": 3, "CN_BRIEF": 20, "CN_STANDARD": 34, "CN_EXTENDED": 44,
         "FP_PLAN": 7, "FP_COMPACT": 57, "FP_STANDARD": 122, "FP_COMPREHENSIVE": 247,
     }
+    # The least balance (in credits) a student needs to start each service (owner decision 2026-10-01:
+    # "below a certain number of credits you cannot do coursework..."). Set with the final prices;
+    # 0 or absent: only the job's own price is checked. Keys: COURSEWORK, PROPOSAL, CONCEPT_PAPER,
+    # CONCEPT_NOTE, FUNDING_PROPOSAL.
+    min_credits: dict[str, float] = {}
     band_pages: int = 10
     band_step: float = 0.75
     words_per_page: int = 250

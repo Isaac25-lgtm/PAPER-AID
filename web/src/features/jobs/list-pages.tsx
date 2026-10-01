@@ -1,20 +1,13 @@
-import { ArrowRight, FileUp, Inbox, Loader2, SearchX } from 'lucide-react'
+import { Inbox, SearchX } from 'lucide-react'
 import { useState } from 'react'
-import { Link } from 'react-router'
 import { Button, ButtonLink } from '../../components/ui/button'
 import { Select } from '../../components/ui/field'
 import { Alert, Card, EmptyState, PageHeader, Skeleton } from '../../components/ui/primitives'
 import { SERVICES, SERVICE_ORDER, STATUS_LABELS } from '../../lib/services'
-import type { Job, JobStatus, ServiceId } from '../../lib/types'
+import type { JobStatus, ServiceId } from '../../lib/types'
 import { useTitle } from '../../lib/use-title'
-import { useAuth } from '../auth/auth-context'
 import { useJobList } from './hooks'
-import { jobTitle, JobRow } from './job-bits'
-
-function greeting() {
-  const h = new Date().getHours()
-  return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'
-}
+import { JobRow } from './job-bits'
 
 function ListSkeleton({ rows = 4 }: { rows?: number }) {
   return (
@@ -33,113 +26,7 @@ function ListSkeleton({ rows = 4 }: { rows?: number }) {
   )
 }
 
-function ActiveJobCard({ jobs }: { jobs: Job[] }) {
-  const active = jobs.filter((j) => j.status === 'QUEUED' || j.status === 'PROCESSING')
-  return (
-    <Card className="flex flex-col p-5 sm:p-6">
-      <h2 className="text-sm font-semibold">In progress</h2>
-      {active.length === 0 ? (
-        <p className="mt-2 flex-1 text-sm text-fg-muted">Nothing running right now. Jobs keep going if you close the page.</p>
-      ) : (
-        <ul className="mt-3 flex-1 space-y-4">
-          {active.slice(0, 2).map((job) => (
-            <li key={job.id}>
-              <Link to={`/app/jobs/${job.id}`} className="group block">
-                <p className="truncate text-sm font-medium group-hover:text-brand-700">{jobTitle(job)}</p>
-                <p className="mt-0.5 flex items-center gap-1.5 text-xs text-fg-subtle">
-                  <Loader2 className="size-3 animate-spin text-brand-600" aria-hidden />
-                  {job.status === 'QUEUED' ? 'Waiting to start' : 'Processing'}
-                </p>
-              </Link>
-            </li>
-          ))}
-        </ul>
-      )}
-    </Card>
-  )
-}
-
-export function DashboardPage() {
-  useTitle('Dashboard')
-  const { user } = useAuth()
-  const { jobs, loading, error } = useJobList({ limit: 6 })
-  const drafts = useJobList({ status: 'DRAFT', limit: 3 })
-  const firstName = user?.displayName.split(' ')[0] ?? ''
-
-  return (
-    <>
-      <PageHeader title={`${greeting()}, ${firstName}`} description="Start a new job or pick up where you left off." />
-
-      <div className="grid gap-4 lg:grid-cols-[2fr_1fr]">
-        <Link
-          to="/app/new"
-          className="group relative overflow-hidden rounded-2xl bg-brand-700 p-6 text-white shadow-raised transition-colors hover:bg-brand-800 sm:p-8"
-        >
-          <div aria-hidden className="absolute -top-16 -right-10 size-56 rounded-full bg-brand-500/40 blur-2xl" />
-          <div className="relative flex items-start gap-5">
-            <div className="grid size-12 shrink-0 place-items-center rounded-xl bg-white/15 ring-1 ring-white/20">
-              <FileUp className="size-6" aria-hidden />
-            </div>
-            <div>
-              <h2 className="text-xl font-bold text-white">Start a new job</h2>
-              <p className="mt-1 max-w-md text-sm text-brand-100">Choose what you need (a check, refinement, formatting or a research proposal), then upload and see your price before you start.</p>
-              <span className="mt-5 inline-flex items-center gap-2 text-sm font-semibold">
-                Choose a job <ArrowRight className="size-4 transition-transform group-hover:translate-x-1" aria-hidden />
-              </span>
-            </div>
-          </div>
-        </Link>
-        {loading ? <Skeleton className="h-full min-h-32 rounded-xl" /> : <ActiveJobCard jobs={jobs} />}
-      </div>
-
-      {drafts.jobs.length > 0 && (
-        <section className="mt-10" aria-labelledby="drafts-title">
-          <h2 id="drafts-title" className="mb-3 text-lg font-semibold">
-            Pick up where you left off
-          </h2>
-          <Card className="p-1.5">
-            <ul className="divide-y divide-line">
-              {drafts.jobs.map((job) => (
-                <JobRow key={job.id} job={job} />
-              ))}
-            </ul>
-          </Card>
-        </section>
-      )}
-
-      <section className="mt-10" aria-labelledby="recent-title">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 id="recent-title" className="text-lg font-semibold">
-            Recent jobs
-          </h2>
-          {jobs.length > 0 && (
-            <Link to="/app/history" className="-mr-2 inline-flex min-h-10 items-center px-2 text-sm font-semibold text-brand-700 hover:underline">
-              View all
-            </Link>
-          )}
-        </div>
-        {error && <Alert tone="danger">{error}</Alert>}
-        {loading ? (
-          <Card>
-            <ListSkeleton />
-          </Card>
-        ) : jobs.length === 0 ? (
-          <EmptyState icon={<Inbox className="size-5" />} title="No papers yet" action={<ButtonLink to="/app/new">Start your first job</ButtonLink>}>
-            Choose a job, upload your paper and see your price. Your finished files will appear here.
-          </EmptyState>
-        ) : (
-          <Card className="p-1.5">
-            <ul className="divide-y divide-line">
-              {jobs.map((job) => (
-                <JobRow key={job.id} job={job} />
-              ))}
-            </ul>
-          </Card>
-        )}
-      </section>
-    </>
-  )
-}
+export { DashboardPage, YourWorkPage } from './your-work'
 
 export function HistoryPage() {
   useTitle('History')

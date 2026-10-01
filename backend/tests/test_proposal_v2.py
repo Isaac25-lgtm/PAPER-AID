@@ -120,8 +120,10 @@ def test_the_conceptual_framework_is_drawn_from_the_plan(client):
     doc = Document(io.BytesIO(client.get(f"/api/projects/{project_id}/export", headers=STUDENT).content))
     texts = [p.text for p in doc.paragraphs]
     assert "Figure 1.1: Conceptual framework" in texts and "List of Figures" in texts
-    figure = next(t for t in doc.tables if "Independent variables" in t.cell(0, 0).text)
-    assert "vaccine uptake" in figure.cell(0, 2).text and figure.cell(0, 1).text == "→"
+    # a figure drawn from the plan (owner request 2026-10-01), its words as the image's alternative text
+    figure = doc.inline_shapes[0]
+    assert "vaccine uptake" in figure._inline.docPr.get("descr") and "distance" in figure._inline.docPr.get("descr")
+    assert any(t.startswith("Note. Arrows show the associations") for t in texts)
 
 
 def test_the_research_gap_rests_only_on_confirmed_evidence_and_changing_it_flags_its_sections(client):

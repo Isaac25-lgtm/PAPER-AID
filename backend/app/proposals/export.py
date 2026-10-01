@@ -20,7 +20,8 @@ from docx.shared import Inches, Pt
 
 from app.formatting.apply import _page_field_paragraph, _set_font, _set_page_numbering
 from app.proposals import decisions, evidence, rulebook
-from app.proposals.models import ChapterDocument, EvidenceItem, Project, ProposalPlan
+from app.proposals import framework as framework_figure
+from app.proposals.models import ChapterDocument, EvidenceItem, Project, ProposalPlan, Variables
 
 ORDINALS = {1: "ONE", 2: "TWO", 3: "THREE"}
 
@@ -161,9 +162,21 @@ def _box_borders(cell) -> None:
     tcpr.append(parse_xml(f'<w:tcBorders {nsdecls("w")}>' + "".join(f'<w:{side} w:val="single" w:sz="8" w:color="000000"/>' for side in ("top", "left", "bottom", "right")) + "</w:tcBorders>"))
 
 
-def _framework(doc, columns: list[tuple[str, list[str]]], figure: str = "Figure 1.1") -> None:
+def _framework(doc, columns: list[tuple[str, list[str]]], figure: str = "Figure 1.1", variables: Variables | None = None) -> None:
+    """The figure drawn from the plan's variables (owner request 2026-10-01), with its alternative text
+    and a note on what the arrows mean; the boxed table only if no figure can be drawn."""
     caption = doc.add_paragraph()
     caption.add_run(f"{figure}: Conceptual framework").bold = True
+    png = framework_figure.draw(variables) if variables is not None else None
+    if png is not None:
+        holder = doc.add_paragraph()
+        holder.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        picture = holder.add_run().add_picture(io.BytesIO(png), width=Inches(6.2))
+        picture._inline.docPr.set("descr", framework_figure.describe(variables))  # read aloud in place of the image
+        note = doc.add_paragraph()
+        note.add_run("Note.").italic = True
+        note.add_run(" Arrows show the associations this study will examine; they do not imply proven causes. Source: Researcher's own conceptualisation.")
+        return
     grid = doc.add_table(rows=1, cols=len(columns) * 2 - 1)
     for i, (label, items) in enumerate(columns):
         cell = grid.cell(0, i * 2)
@@ -243,7 +256,7 @@ def build(project: Project, chapters: dict[int, ChapterDocument], library: dict[
                 p = doc.add_paragraph(citer.render(paragraph))
                 p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
             if n == 1 and s.key == "framework" and has_figure:
-                _framework(doc, columns)
+                _framework(doc, columns, variables=project.plan.variables if project.plan else None)
             if s.table:
                 table_count += 1
                 for field in [s.table_caption, *[c for row in s.table for c in row]]:
@@ -292,7 +305,7 @@ def concept(project: Project, paper: ChapterDocument, library: dict[str, Evidenc
             cited += [i for i in evidence.cited_ids(paragraph) if i not in cited]
             doc.add_paragraph(citer.render(paragraph)).alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         if s.key == "framework" and columns:
-            _framework(doc, columns, "Figure 1")
+            _framework(doc, columns, "Figure 1", variables=plan.variables if plan else None)
     sources = [library[i] for i in cited if i in library]
     if sources:
         doc.add_heading("Annotated References", level=2)

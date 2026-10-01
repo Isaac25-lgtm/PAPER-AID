@@ -112,6 +112,10 @@ class ServiceSelection(Camel):
     work: WorkStep = "NONE"
     work_kind: WorkKind = "NONE"
     work_band: str = ""
+    # Started with one Start (owner decision 2026-10-01): the student never sees or pays for the read
+    # and plan steps on their own; the first document's price includes the plan, and a document that
+    # is not delivered returns everything. Older releases ignore it.
+    bundled: bool = False
 
     def services(self) -> list[ServiceId]:
         ids = []

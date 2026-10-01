@@ -370,7 +370,7 @@ export function JobOptions({ job, mode, initial }: { job: Job; mode: Mode; initi
         ) : pricing.loading ? (
           <Skeleton className="h-10 w-full" />
         ) : pricing.error ? (
-          <Alert tone="warning" action={pricing.needsCredits ? <ButtonLink to="/app/credits" size="sm" variant="secondary">Your tokens</ButtonLink> : undefined}>
+          <Alert tone="warning" action={pricing.needsCredits ? <ButtonLink to="/app/credits" size="sm" variant="secondary">Your credits</ButtonLink> : undefined}>
             {pricing.error}
           </Alert>
         ) : estimateRunning ? (
@@ -396,7 +396,7 @@ export function JobOptions({ job, mode, initial }: { job: Job; mode: Mode; initi
               <p className="mt-1 text-xs text-amber-800">
                 Your balance is {formatTokens(wallet.available)}.{' '}
                 <Link to="/app/credits" className="font-semibold underline">
-                  Buy tokens
+                  Buy credits
                 </Link>
               </p>
             )}

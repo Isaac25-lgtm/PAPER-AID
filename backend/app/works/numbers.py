@@ -10,6 +10,9 @@ from typing import Any
 from app.works import budget as budget_engine
 from app.works.models import Budget, ResolvedSpec, ResultsModel, WorkInputs
 
+# A figure only the applicant can give that is not there yet (owner decision 2026-10-01): the draft is
+# written with this in its place, never an invented number, and the student fills it in afterwards.
+TO_ADD = "[{} to be added]"
 NUMBER_TOKEN = re.compile(r"⟦N:([A-Za-z][A-Za-z0-9_\-]*(?:\.[A-Za-z0-9_\-]+)*)⟧")
 NUMERIC_ANSWERS = {"duration_months": "months", "budget_envelope": "money", "amount_requested": "money", "word_limit": "words"}
 
@@ -32,7 +35,13 @@ def values(spec: ResolvedSpec, results: ResultsModel | None, money_plan: Budget 
         out["duration"] = (f"{spec.duration_months} months", "the project's duration")
     if spec.cost_share is not None:
         out["cost_share_rate"] = (f"{spec.cost_share:g}%", "the cost share the call requires")
-    if money_plan and money_plan.lines:
+    if money_plan and money_plan.lines and not budget_engine.complete(money_plan):
+        # costs still to be entered: every money figure is a marked gap, never a misleading zero
+        out["budget.total"] = (TO_ADD.format("total"), "the budget's grand total (the applicant still enters the costs)")
+        out["budget.requested"] = (TO_ADD.format("amount requested"), "the amount requested (the applicant still enters the costs)")
+        for line in money_plan.lines:
+            out[f"budget.line.{line.id}"] = (TO_ADD.format("amount"), f"budget line {line.id}: {line.description[:60]} (cost still to be entered)")
+    elif money_plan and money_plan.lines:
         t = budget_engine.totals(money_plan)
         out["budget.total"] = (budget_engine.money(t.total, currency), "the budget's grand total")
         out["budget.requested"] = (budget_engine.money(money_plan.requested if money_plan.requested is not None else t.total, currency), "the amount requested")
@@ -52,6 +61,8 @@ def values(spec: ResolvedSpec, results: ResultsModel | None, money_plan: Budget 
             value = getattr(ind, part)
             if value is not None:
                 out[f"indicator.{ind.id}.{part}"] = (_plain(value) + ("%" if percent else ""), f"the {part} of indicator {ind.id} ({ind.definition[:60]}), in {ind.unit or 'its unit'}")
+            else:
+                out[f"indicator.{ind.id}.{part}"] = (TO_ADD.format(part), f"the {part} of indicator {ind.id} ({ind.definition[:60]}): the applicant still adds it")
     for key, kind in NUMERIC_ANSWERS.items():
         raw = inputs.answers.get(key, "").replace(",", "").strip()
         try:

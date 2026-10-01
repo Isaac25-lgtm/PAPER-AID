@@ -40,13 +40,13 @@ export function ServiceGrid() {
 const PRICING_STEPS = [
   {
     icon: Wallet,
-    title: 'Buy tokens',
-    body: 'Buy tokens with mobile money, from 10 tokens (UGX 10,000). Tokens never expire.',
+    title: 'Buy credits',
+    body: 'Buy credits with mobile money, from 10 credits (UGX 10,000). Credits never expire.',
   },
   {
     icon: ScanSearch,
     title: 'See the price first',
-    body: 'Every service has a fixed price in tokens for your paper’s length. You see it before anything runs.',
+    body: 'Every service has a fixed price in credits for your paper’s length. You see it before anything runs.',
   },
   {
     icon: Scale,

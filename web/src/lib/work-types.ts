@@ -230,6 +230,8 @@ export interface ChangeRequest {
   sections: string[]
   status: 'OPEN' | 'APPLIED' | 'DECLINED'
   appliedIn: number | null
+  contextName: string
+  context: string
 }
 
 export interface Work {
@@ -268,6 +270,10 @@ export interface Work {
   notice: string | null
   activeJob: string | null
   jobs: string[]
+  /** Started with one Start (owner decision 2026-10-01): PaperAid continues by itself. */
+  auto: boolean
+  /** Why it stopped without a document ('' while running or done). */
+  autoFailure: string
   createdAt: string
   updatedAt: string
   expiresAt: string
@@ -300,4 +306,6 @@ export interface WorkDocumentView {
   words: number
   aiNote: string
   tables: { caption: string; rows: string[][] }[]
+  /** A revision: the sections it changed (highlighted on screen only). */
+  revised: string[]
 }

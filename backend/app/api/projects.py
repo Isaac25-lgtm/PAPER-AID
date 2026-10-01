@@ -3,7 +3,7 @@
 from typing import Literal
 from urllib.parse import quote
 
-from fastapi import APIRouter, Body, Depends, File, Query, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, Query, UploadFile
 from fastapi.responses import Response
 from pydantic import Field
 
@@ -205,6 +205,26 @@ def default_rulebook(project_id: str, user: User = Depends(current_user), rt: Ru
 @router.post("/{project_id}/chapters/{number}/request", response_model=ProjectView)
 def request_changes(project_id: str, number: int, body: ChangeRequest, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> ProjectView:
     return projects.request_changes(rt, user, project_id, number, body.instruction, body.sections)
+
+
+@router.post("/{project_id}/chapters/{number}/request/with-document", response_model=ProjectView)
+def request_changes_with_document(project_id: str, number: int, instruction: str = Form(..., min_length=3, max_length=2000), sections: str = Form(default=""),
+                                  file: UploadFile = File(...), user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> ProjectView:
+    """Ask for changes with a document added for context (Word or PDF): its text goes to the writer with the request."""
+    data = file.file.read(rt.settings.max_upload_bytes + 1)
+    return projects.request_changes_with_document(rt, user, project_id, number, instruction, [s for s in sections.split(",") if s], file.filename or "document", data)
+
+
+@router.post("/{project_id}/start", response_model=ProjectView)
+def start(project_id: str, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> ProjectView:
+    """One Start (owner decision 2026-10-01): plan, then the first chapter, by itself."""
+    return projects.start(rt, user, project_id)
+
+
+@router.get("/{project_id}/framework.png")
+def framework(project_id: str, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> Response:
+    """The conceptual framework figure, as it appears in the Word file."""
+    return Response(projects.framework_png(rt, user, project_id), media_type="image/png", headers={"Cache-Control": "private, no-store"})
 
 
 @router.post("/{project_id}/feedback", response_model=ProjectView)

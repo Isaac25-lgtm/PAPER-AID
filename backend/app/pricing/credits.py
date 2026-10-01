@@ -14,18 +14,19 @@ Kind = Literal["TOP_UP", "HOLD", "CHARGE", "RELEASE", "REFUND"]
 
 
 def tokens(ugx: int) -> str:
-    """A UGX amount as students see it: tokens, to one decimal (owner decision 2026-09-28)."""
+    """A UGX amount as students see it: credits, to one decimal (owner decisions 2026-09-28; called
+    credits since 2026-10-01)."""
     from app.core.config import get_settings
 
     value = ugx / get_settings().ugx_per_token
     text = f"{value:,.1f}".rstrip("0").rstrip(".")
-    return f"{text} token" if text == "1" else f"{text} tokens"
+    return f"{text} credit" if text == "1" else f"{text} credits"
 
 
 class InsufficientCredits(AppError):
     def __init__(self, needed: int, available: int):
         super().__init__(
-            f"You need {tokens(needed)} for this, and your balance is {tokens(available)}. Buy tokens to continue.",
+            f"You need {tokens(needed)} for this, and your balance is {tokens(available)}. Buy credits to continue.",
             code="INSUFFICIENT_CREDITS",
             status=402,
         )

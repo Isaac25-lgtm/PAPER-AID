@@ -11,6 +11,10 @@ from app.rules import library
 from app.rules.validators import VALIDATORS, Context
 
 AUTHOR_VALIDATORS = {"eligibility.thresholds", "eligibility.evaluated", "gate.core_inputs", "gate.task_present", "gate.experience_present", "requirements.conflict"}
+# Rules about figures only the applicant gives (baselines, targets, quantities, costs, the amount
+# requested): settled by the AUTHOR, so a draft started with one Start marks them for the student
+# instead of stopping or failing (owner decision 2026-10-01). PaperAid's own fields stay CODE.
+STUDENT_FIGURES = {"FP-026", "FP-027", "FP-039", "FP-040", "FP-041", "FP-042", "FP-043", "FP-045", "FP-046", "FP-047", "FP-048", "CN-022"}
 
 
 PAGE_VALIDATORS = {"limits.rendered_pages", "limits.hard_max"}
@@ -65,7 +69,7 @@ def report(ctx: Context, stages: tuple[str, ...]) -> list[ReadinessItem]:
             if outcome is None:
                 continue
             result, note, where = outcome
-            basis = "AUTHOR" if validator in AUTHOR_VALIDATORS else "CODE"
+            basis = "AUTHOR" if validator in AUTHOR_VALIDATORS or rule["id"] in STUDENT_FIGURES else "CODE"
         # "WARN": a point the student should check that does not hold the document back (an uncertainty
         # such as whether references count toward a limit): shown as needing review, at warning level.
         severity = "WARNING" if result == "WARN" and rule["severity"] == "BLOCKING" else rule["severity"]

@@ -20,6 +20,7 @@ from app.works import budget as budget_engine
 from app.works import numbers
 from app.works import results as results_engine
 from app.works.models import Budget, ResolvedSpec, ResultsModel, WorkDocument
+from app.works.results import TO_ADD
 
 KIND_LABELS = {"FUNDING_CONCEPT": "Concept Note", "PROJECT_CONCEPT": "Project Concept Note", "NGO_PROJECT": "Project Proposal", "RESEARCH_GRANT": "Research Grant Proposal"}
 # Where each table goes: after the section with this key (or at the end when the key is absent).
@@ -88,16 +89,25 @@ def _table(doc, rows: list[list[str]], caption: str) -> None:
 
 
 def _budget_tables(budget: Budget) -> tuple[list[list[str]], list[list[str]]]:
+    """The budget's summary and detail. A cost the applicant has not entered yet prints as a marked
+    gap, and so does every total it affects, never a misleading zero (owner decision 2026-10-01)."""
     t = budget_engine.totals(budget)
     cur = budget.currency
-    summary = [["Category", "Amount"], *[[k, budget_engine.money(v, cur)] for k, v in sorted(t.by_category.items())], ["Total", budget_engine.money(t.total, cur)]]
+    complete = budget_engine.complete(budget)
+
+    def money(value: float, known: bool = True) -> str:
+        return budget_engine.money(value, cur) if known else TO_ADD
+
+    summary = [["Category", "Amount"], *[[k, money(v, complete)] for k, v in sorted(t.by_category.items())], ["Total", money(t.total, complete)]]
     detail = [["Line", "Description", "Quantity", "Unit", "Unit cost", "Total", "Year", "Activities"]]
     for li in budget.lines:
-        detail.append([li.id, li.description, f"{li.quantity:g}", li.unit, budget_engine.money(li.unit_cost, cur), budget_engine.money(budget_engine.line_total(li), cur),
+        known = bool(li.quantity and li.unit_cost)
+        detail.append([li.id, li.description, f"{li.quantity:g}" if li.quantity else TO_ADD, li.unit, money(li.unit_cost, bool(li.unit_cost)), money(budget_engine.line_total(li), known),
                        str(li.year), ", ".join(li.activity_ids) or ("Support" if li.support else "")])
     return summary, detail
 
 
+COVER_FIELDS = (("name", "Name"), ("reg", "Registration number"), ("course", "Course"), ("lecturer", "Lecturer"), ("institution", "Institution"), ("due", "Date"))
 EXPLORATORY = "Exploratory draft: not every eligibility criterion is met, so this is not ready to submit."
 DRAFT_LABEL = "Draft: some requirements still need your attention (see PaperAid's checklist)."
 
@@ -127,6 +137,9 @@ def layout(document: WorkDocument, spec: ResolvedSpec, results: ResultsModel | N
     label = KIND_LABELS.get(document.variant, "")
     if label:
         blocks.append(Block("label", label))
+    for key, name in COVER_FIELDS:  # the student's own details, as they gave them
+        if document.cover.get(key, "").strip():
+            blocks.append(Block("label", f"{name}: {document.cover[key].strip()}"))
     if document.exploratory:
         blocks.append(Block("label", EXPLORATORY))
     elif draft and document.status == "NOT_READY":

@@ -61,31 +61,32 @@ try {
   await page.waitForURL(/\/app\/new/)
   step('sign-in returns to the new-job page')
   await page.getByRole('heading', { name: 'What would you like PaperAid to do?' }).waitFor()
-  for (const section of ['Paper Check', 'Research Proposals', 'Academic Formatting']) await page.getByRole('heading', { name: section, exact: true }).waitFor()
+  for (const group of ['Coursework', 'Research proposals', 'Funding', 'Your own paper']) await page.getByRole('heading', { name: group, exact: true }).waitFor()
   for (const gone of [/Check \+ Refine/, /Deep redraft/, /^Source check/, /University templates/, /LaTeX conversion/])
     if (await page.locator('main').getByRole('link', { name: gone }).count()) throw new Error(`${gone} should be a step inside a section, not a job of its own`)
-  await page.locator('main').getByRole('link', { name: /Academic Formatting/ }).click()
+  await page.locator('main').getByRole('link', { name: /Format my paper/ }).click()
   await page.waitForURL(/\/app\/new\?service=ACADEMIC_FORMAT/)
   await page.getByRole('heading', { name: 'Academic Formatting' }).waitFor()
-  await page.getByRole('link', { name: 'Paper Check' }).first().click() // the menu switches section from anywhere
+  await page.getByRole('button', { name: 'New' }).click() // every service is one click away under New
+  await page.getByRole('menuitem', { name: /Paper Check/ }).click()
   await page.waitForURL(/service=PAPER_CHECK/)
   await page.getByRole('heading', { name: 'Paper Check' }).waitFor()
   await page.goto(`${base}/app/new?service=REFINE`) // a link from before the sections opens its section
   await page.getByRole('heading', { name: 'Paper Check' }).waitFor()
-  step('three sections: Paper Check, Research Proposals and Academic Formatting; old links open their section')
+  step('the New page groups every service; New in the top bar opens any of them; old links open their section')
 
   // Payments aren't live: an admin adds test credits, as the owner will while testing.
-  const chip = page.getByRole('link', { name: /^Tokens: / })
+  const chip = page.getByRole('link', { name: /^Credits: / })
   await chip.waitFor()
   const startTokens = Number((await chip.getAttribute('aria-label')).replace(/[^0-9.]/g, ''))
   await page.goto(`${base}/admin/credits`)
   await page.getByLabel('Student email').fill('demo@paperaid.app')
-  await page.getByLabel('Amount (tokens)').fill('500')
+  await page.getByLabel('Amount (credits)').fill('500')
   await page.getByRole('button', { name: 'Add credits' }).click()
-  const tokens = `${(startTokens + 500).toLocaleString('en', { maximumFractionDigits: 1 })} tokens`
-  await page.getByText(`Their balance is now ${tokens}`).waitFor()
-  await page.getByRole('link', { name: `Tokens: ${tokens}` }).waitFor()
-  step('admin added test tokens; the header balance shows tokens')
+  const balance = (startTokens + 500).toLocaleString('en', { maximumFractionDigits: 1 })
+  await page.getByText(`Their balance is now ${balance} credits`).waitFor()
+  await page.getByRole('link', { name: new RegExp(`^Credits: ${balance}`) }).waitFor()
+  step('admin added test credits; the header balance shows credits')
 
   // --- AI Check: upload, the paper opens at once, check it, results on the same screen -------------
   await page.goto(`${base}/app/new?service=AI_CHECK`)
@@ -245,7 +246,7 @@ try {
 
   // Credits: every job settled, nothing left held, and the history explains each movement.
   await page.goto(`${base}/app/credits`)
-  await page.getByText('Tokens added').first().waitFor()
+  await page.getByText('Credits added').first().waitFor()
   await page.getByText(/Held · Held for your job/).first().waitFor()
   if (await page.getByText('held for work in progress').count()) throw new Error('credits still held after every job finished')
   step('credits page shows the balance and the history of holds and settlements')

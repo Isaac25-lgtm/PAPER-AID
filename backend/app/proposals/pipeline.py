@@ -1249,6 +1249,10 @@ def stage_exporting(ctx: "StageContext") -> None:
     ctx.rt.store.update_job_wallet_and_project(ctx.job.id, inp.project_id, finish)
     if gone:
         raise PermanentStageError("PROJECT_DELETED", "This proposal was deleted before the step finished, so nothing was charged.", "project deleting at export")
+    if inp.step == "PLAN":
+        from app.proposals import service as project_service
+
+        project_service.continue_after_plan(ctx.rt, inp.project_id, ctx.job.id)  # one Start: the first chapter follows an approved plan
 
 
 def _warn(j: Job, warnings: list[str], partial: bool) -> Job:

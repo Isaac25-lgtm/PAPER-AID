@@ -43,13 +43,12 @@ try {
   step('signed in')
   await page.goto(`${base}/admin/credits`) // payments aren't live: an admin adds test credits
   await page.getByLabel('Student email').fill('demo@paperaid.app')
-  await page.getByLabel('Amount (tokens)').fill('1000')
+  await page.getByLabel('Amount (credits)').fill('1000')
   await page.getByRole('button', { name: 'Add credits' }).click()
   await page.getByText(/Their balance is now/).first().waitFor()
   await page.goto(`${base}/app`)
 
-  await page.getByRole('link', { name: 'Proposals' }).first().click()
-  await page.getByRole('link', { name: 'New proposal' }).click()
+  await page.goto(`${base}/app/projects/new`) // the earlier proposal pages, kept for proposals set up before one Start
   await page.getByLabel('Topic').fill('Malaria vaccine uptake among caregivers of young children in Mukono District')
   await page.getByLabel('Programme').fill('Master of Public Health')
   await page.getByLabel('Faculty or school').fill('Faculty of Health Sciences')
@@ -164,7 +163,7 @@ try {
 
   // Another institution: a new proposal follows the student's own research guide.
   await page.goto(`${base}/app/projects`)
-  await page.getByRole('link', { name: 'New proposal' }).click()
+  await page.goto(`${base}/app/projects/new`)
   await page.getByLabel('Topic').fill('Teacher motivation and pupil performance in Kampala primary schools')
   await page.getByRole('button', { name: 'Create proposal' }).click()
   await page.waitForURL(/\/app\/projects\/prj_/)

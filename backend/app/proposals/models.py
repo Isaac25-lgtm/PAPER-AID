@@ -235,6 +235,8 @@ class FeedbackComment(Camel):
     applied_in: int | None = None  # the chapter version that applied it
     response: str = Field(default="", max_length=1000)  # the student's own reply for the response report
     by: Literal["SUPERVISOR", "STUDENT"] = "SUPERVISOR"  # STUDENT: the student's own request (not in the response report)
+    context_name: str = Field(default="", max_length=120)  # a document the student added for context, given to the writer
+    context: str = Field(default="", max_length=8000)
 
     def signature(self) -> str:
         """What a revision was priced to answer: the comment and where it was placed. A revision
@@ -294,6 +296,11 @@ class ProjectView(Camel):
     plan_problems: list[str] = []  # what must be fixed before the plan can be approved (computed for the view)
     candidate_plan: ProposalPlan | None = None  # a plan PaperAid produced while the student was editing theirs
     auto_chapter_one: bool = False  # the student started the plan with Chapter One to follow on approval
+    # Started with one Start (owner decision 2026-10-01): PaperAid plans and writes Chapter One (or the
+    # concept paper) by itself; `auto_failure` says why it stopped without one.
+    auto: bool = False
+    auto_failure: str = ""
+    framework: str = ""  # the conceptual framework figure in words (computed for the view; "" when the study has none)
     plan_review: PlanReview | None = None  # the final reviewer's decision on the delivered plan (None: older plans)
     candidate_review: PlanReview | None = None  # the same for a candidate plan
     acknowledgments: list[Acknowledgment] = []  # what the student acknowledged when approving, per plan version

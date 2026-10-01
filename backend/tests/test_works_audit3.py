@@ -217,7 +217,7 @@ def test_a_missing_field_the_writer_supplies_or_no_budget_lines_block_the_result
     answer["indicators"][0]["meansOfVerification"] = ""
     model, lines = works_pipeline._results_from(answer)
     problems = works_pipeline._results_problems(model, lines, fake_works_spec())
-    assert any("I1: means of verification" in p for p in problems) and not any("target" in p or "baseline" in p for p in problems)
+    assert any(p.startswith("FP-030") and "I1" in p for p in problems) and not any("target" in p or "baseline" in p for p in problems)
     model, _ = works_pipeline._results_from(fake_works.results({"spec": {"duration": 12}}))
     assert any(p.startswith("FP-037: Activities with no budget line: A1, A2, A3") for p in works_pipeline._results_problems(model, [], fake_works_spec()))
 

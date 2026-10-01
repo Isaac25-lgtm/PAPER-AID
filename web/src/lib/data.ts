@@ -110,6 +110,12 @@ export interface DataSource {
     downloadConcept(id: string, fileName: string): Promise<void>
     /** The student's own request for changes to a chapter (4: the concept paper). */
     requestChanges(id: string, chapter: number, instruction: string, sections: string[]): Promise<Project>
+    /** The same, with a document (Word or PDF) whose text the writer gets for context. */
+    requestChangesWithDocument(id: string, chapter: number, instruction: string, sections: string[], file: File): Promise<Project>
+    /** One Start (owner decision 2026-10-01): plan, then the first chapter, by itself. */
+    start(id: string): Promise<Project>
+    /** The conceptual framework figure, as an image the page can show. */
+    framework(id: string): Promise<Blob>
     /** The institution's research guide, read into a profile by the PROFILE step. */
     uploadGuide(id: string, file: File): Promise<Project>
     useDefaultRulebook(id: string): Promise<Project>
@@ -135,7 +141,15 @@ export interface DataSource {
     quoteStep(id: string, step: WorkStep, note: string): Promise<WorkStepQuote>
     submitStep(id: string, jobId: string, quoteId: string): Promise<void>
     requestChanges(id: string, instruction: string, sections: string[]): Promise<Work>
+    /** The same, with a document (Word or PDF) whose text the writer gets for context. */
+    requestChangesWithDocument(id: string, instruction: string, sections: string[], file: File): Promise<Work>
     removeRequest(id: string, requestId: string): Promise<Work>
+    /** One Start (owner decision 2026-10-01): read the documents just added (no charge of its own). */
+    read(id: string): Promise<Work>
+    /** One Start: confirm, check credits, plan; the draft follows by itself. */
+    start(id: string): Promise<Work>
+    /** The student's saved figures go into the current document (code only, no charge). */
+    applyFigures(id: string): Promise<Work>
     setVersion(id: string, version: number): Promise<Work>
     document(id: string, version?: number): Promise<WorkDocumentView>
     download(id: string, fileName: string, version?: number): Promise<void>

@@ -210,7 +210,7 @@ def test_chapter_one_that_cannot_start_says_why(client):
     owner = rt.store.get_project(project["id"]).owner_uid
     rt.store.update_wallet(owner, "student@example.com", lambda w: w.model_copy(update={"available": 1}))  # almost nothing left
     approved = _approved(client, project["id"])
-    assert approved["activeJob"] is None and "could not start automatically" in approved["notice"] and "tokens" in approved["notice"]
+    assert approved["activeJob"] is None and "could not start automatically" in approved["notice"] and "credits" in approved["notice"]
 
 
 def test_a_stale_plan_edit_is_refused_and_approval_needs_a_complete_plan(client):

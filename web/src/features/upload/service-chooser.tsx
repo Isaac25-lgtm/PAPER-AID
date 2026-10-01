@@ -1,9 +1,10 @@
 import { clsx } from 'clsx'
-import { ArrowRight, Check, FilePen, FileSearch, HandCoins, Lightbulb, NotebookPen } from 'lucide-react'
+import { ArrowRight, BookCheck, Check, FilePen, FileSearch, HandCoins, Lightbulb, NotebookPen, ShieldCheck } from 'lucide-react'
 import { Link } from 'react-router'
-import { Badge, PageHeader } from '../../components/ui/primitives'
+import { Badge } from '../../components/ui/primitives'
 import { useData } from '../../lib/data'
 import { AVAILABILITY_BADGE, INVITE_ONLY_REASON, NOT_CONFIGURED_REASON, SECTIONS, type SectionInfo } from '../../lib/services'
+import { START_CHOICES } from '../../lib/start'
 import type { ServiceId, ServiceSelection } from '../../lib/types'
 import { useTitle } from '../../lib/use-title'
 
@@ -136,65 +137,86 @@ export function jobType(id: string | null): JobType | null {
   return current ?? (EARLIER[id] ? { ...EARLIER[id], id } : null)
 }
 
-/** The first step of a new job: choose what PaperAid will do, then upload knowing what happens. */
+/** The New page (owner decision 2026-10-01): every service, grouped, the flagship first. Each card is
+ *  one link with a labelled action; a service only invited testers can use says so; one that is only
+ *  "coming soon" is not shown at all. */
 export function ServiceChooser() {
-  useTitle('New job')
+  useTitle('New')
   const { config } = useData()
+  const review = JOB_GROUPS.flatMap((g) => g.types).find((t) => t.id === 'PROPOSAL_REVIEW')
+  const cards: { group: string; id: string; name: string; short: string; benefits: string[]; action: string; icon: typeof FilePen; to: string; service: ServiceId; soon?: string[] }[] = [
+    ...START_CHOICES.map((c) => ({ ...c, group: c.group as string })),
+    ...(review ? [{ group: 'Research proposals', id: review.id, name: 'Review my proposal', short: 'Your own proposal checked the way an examiner would.',
+      benefits: ['What a supervisor is likely to raise', 'A readiness checklist and a Word report'], action: 'Review my proposal', icon: FileSearch,
+      to: `/app/new?service=${review.id}`, service: review.service }] : []),
+  ].filter((c) => config.availability[c.service] && config.availability[c.service] !== 'soon')
+  const groups = ['Coursework', 'Research proposals', 'Funding', 'Your own paper'].map((g) => ({ title: g, cards: cards.filter((c) => c.group === g) })).filter((g) => g.cards.length)
   return (
     <>
-      <PageHeader title="What would you like PaperAid to do?" description="Choose the job first. You upload your paper on the next page and see the price before anything starts." />
+      <div className="mb-8 rounded-3xl bg-gradient-to-br from-brand-50 via-white to-brand-50/60 px-6 py-7 ring-1 ring-brand-100 sm:px-8">
+        <p className="text-xs font-semibold tracking-[0.18em] text-brand-700 uppercase">Get started</p>
+        <h1 className="mt-1.5 text-2xl font-bold tracking-tight text-fg sm:text-3xl">
+          What would you like <span className="text-brand-700">PaperAid</span> to do?
+        </h1>
+        <p className="mt-2 max-w-2xl text-sm text-fg-muted sm:text-base">Choose what you need. Answer a few questions, then PaperAid gets to work and opens the finished document.</p>
+        <div className="mt-4 flex flex-wrap gap-2 text-xs font-medium text-fg-muted">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1 ring-1 ring-line"><ShieldCheck className="size-3.5 text-brand-700" aria-hidden /> Your work stays private</span>
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1 ring-1 ring-line"><BookCheck className="size-3.5 text-brand-700" aria-hidden /> Only sources PaperAid confirmed</span>
+        </div>
+      </div>
       <div className="space-y-8">
-        {JOB_GROUPS.filter((group) => group.types.some((t) => config.availability[t.service] !== 'soon') || group.title === PAPER_CHECK_INFO.name).map((group) => (
+        {groups.map((group) => (
           <section key={group.title} aria-labelledby={`group-${group.title}`}>
-            <h2 id={`group-${group.title}`} className="mb-3 text-sm font-semibold tracking-wide text-fg-subtle uppercase">
+            <h2 id={`group-${group.title}`} className="mb-3 text-lg font-semibold text-fg">
               {group.title}
             </h2>
-            <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              {group.types.map((type) => {
-                const availability = config.availability[type.service]
-                const reason = availability === 'invite_only' ? INVITE_ONLY_REASON : availability === 'not_configured' ? NOT_CONFIGURED_REASON : availability === 'soon' ? 'Coming soon.' : null
-                const card = (
-                  <div className={clsx('flex h-full flex-col rounded-2xl border bg-white p-5 shadow-card transition-colors', reason ? 'border-line opacity-70' : 'border-line group-hover:border-brand-400')}>
+            <ul className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              {group.cards.map((card) => {
+                const availability = config.availability[card.service]
+                const reason = availability === 'invite_only' ? INVITE_ONLY_REASON : availability === 'not_configured' ? NOT_CONFIGURED_REASON : null
+                const body = (
+                  <div className={clsx('flex h-full flex-col rounded-2xl border bg-white p-5 shadow-card transition', reason ? 'border-line opacity-75' : 'border-line-strong/70 group-hover:-translate-y-0.5 group-hover:border-brand-500 group-hover:shadow-raised')}>
                     <div className="flex items-start gap-3">
-                      <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-700">
-                        <type.icon className="size-5" aria-hidden />
+                      <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-700 ring-1 ring-brand-100">
+                        <card.icon className="size-5" aria-hidden />
                       </span>
                       <div className="min-w-0">
-                        <p className="flex flex-wrap items-center gap-2 font-semibold text-fg">
-                          {type.name} {availability !== 'available' && <Badge>{AVAILABILITY_BADGE[availability]}</Badge>}
+                        <p className="flex flex-wrap items-center gap-2 text-base font-semibold text-fg">
+                          {card.name} {availability === 'invite_only' && <Badge>{AVAILABILITY_BADGE.invite_only}</Badge>}
                         </p>
-                        <p className="mt-1 text-sm leading-relaxed text-fg-muted">{reason ?? type.short}</p>
+                        <p className="mt-1 text-sm leading-relaxed text-fg-muted">{reason ?? card.short}</p>
                       </div>
                     </div>
                     <ul className="mt-4 space-y-1.5">
-                      {type.youGet.map((item) => (
-                        <li key={item} className="flex gap-2 text-xs text-fg-muted">
-                          <Check className="mt-0.5 size-3.5 shrink-0 text-brand-600" aria-hidden /> {item}
+                      {card.benefits.slice(0, 2).map((item) => (
+                        <li key={item} className="flex gap-2 text-sm text-fg-muted">
+                          <Check className="mt-0.5 size-4 shrink-0 text-brand-600" aria-hidden /> {item}
                         </li>
                       ))}
                     </ul>
-                    {type.soon?.map((item) => (
+                    {'soon' in card && card.soon?.map((item) => (
                       <p key={item} className="mt-2 flex items-center gap-2 text-xs text-fg-subtle">
                         {item} <Badge>Coming soon</Badge>
                       </p>
                     ))}
-                    <p className="mt-auto pt-4 text-xs text-fg-subtle">{type.accepts}</p>
                     {!reason && (
-                      <span className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-brand-700">
-                        {type.to ? 'Start' : 'Choose and upload'} <ArrowRight className="size-4 transition-transform group-hover:translate-x-1" aria-hidden />
+                      <span className="mt-auto pt-5">
+                        <span className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-brand-700 px-4 text-sm font-semibold text-white group-hover:bg-brand-800">
+                          {card.action} <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" aria-hidden />
+                        </span>
                       </span>
                     )}
                   </div>
                 )
                 return (
-                  <li key={type.id}>
+                  <li key={card.id}>
                     {reason ? (
                       <div aria-disabled className="h-full cursor-not-allowed">
-                        {card}
+                        {body}
                       </div>
                     ) : (
-                      <Link to={type.to ?? `/app/new?service=${type.id}`} className="group block h-full rounded-2xl focus:outline-none focus-visible:ring-3 focus-visible:ring-brand-200">
-                        {card}
+                      <Link to={card.to} className="group block h-full rounded-2xl focus:outline-none focus-visible:ring-3 focus-visible:ring-brand-300">
+                        {body}
                       </Link>
                     )}
                   </li>

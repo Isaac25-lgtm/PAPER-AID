@@ -418,12 +418,21 @@ def price(
         ceiling = settings.work_budget_cap_usd.get(selection.work_kind)
         services.append((selection.work_band, WORK_LABELS.get(selection.work_band, selection.work_band) + label_note, min(usd, ceiling) if ceiling else usd, banded))
 
+    if selection.bundled:
+        services = _bundled(settings, selection, services, fixed_mode)
     lines: list[QuoteLine] = []
     if fee_paid:
         lines.append(QuoteLine(label="AI estimate (already paid, counts toward this job)", amount=fee_paid))
     ai = 0
+    plan_key = _plan_key(selection) if selection.bundled else None
     for key, label, usd, banded in services:
+        if key.endswith(":BUNDLED"):  # read or plan within one Start: charged with the document
+            lines.append(QuoteLine(label=label, amount=0, service=key.split(":")[0]))
+            continue
         amount = fixed_price(settings, key, banded) if fixed_mode else with_margin(usd, settings)
+        if plan_key and key not in BUNDLE_FREE and fixed_mode and plan_key in settings.fixed_tokens:
+            amount += fixed_price(settings, plan_key, None)
+            label += ", plan included"
         if part < 1.0 and selection.finish:
             amount = round_up(amount * part)
         if cap is not None and selection.finish:  # what the chapter has not yet cost (Codex review #3)
@@ -440,6 +449,31 @@ def price(
         fixed += conversion
     budget = sum(usd for _, _, usd, _ in services) * (1 + settings.quote_safety_margin)
     return Priced(lines=lines, ai_ugx=ai, fixed_ugx=fixed, budget_usd=budget)
+
+
+BUNDLE_FREE = {"WORK_READ", "CW_PLAN", "CN_PLAN", "FP_PLAN", "PLAN"}
+
+
+def _bundled(settings: Settings, selection: ServiceSelection, services: list[tuple[str, str, float, int | None]], fixed_mode: bool) -> list[tuple[str, str, float, int | None]]:
+    """One Start, one charge (owner decision 2026-10-01): reading the student's documents and the plan
+    cost nothing on their own (their spend cap stays real); the first document carries the plan's
+    price, so a document that fails returns everything that was charged."""
+    out = []
+    for key, label, usd, banded in services:
+        if key in BUNDLE_FREE:
+            out.append((f"{key}:BUNDLED", label + " (part of your document)", usd, banded))
+        else:
+            out.append((key, label, usd, banded))
+    return out
+
+
+def _plan_key(selection: ServiceSelection) -> str | None:
+    """The plan whose price a bundled first document carries."""
+    if selection.work == "DRAFT" and selection.work_band:
+        return selection.work_band.split("_")[0] + "_PLAN"
+    if selection.proposal in ("CHAPTER_1", "CONCEPT"):
+        return "PLAN"
+    return None
 
 
 def bound_quote(

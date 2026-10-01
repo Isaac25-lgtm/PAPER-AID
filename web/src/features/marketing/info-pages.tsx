@@ -98,24 +98,24 @@ export function FeaturesPage() {
 const FAQ = [
   {
     q: 'How is the price worked out?',
-    a: 'Each service has a fixed price in tokens that covers a paper of up to 10 pages (about 2,500 words). Longer papers cost more in steps of 10 pages. You always see the exact price before anything runs.',
+    a: 'Each service has a fixed price in credits that covers a paper of up to 10 pages (about 2,500 words). Longer papers cost more in steps of 10 pages. The credits for a job are reserved when you start it and charged only for what is delivered; if PaperAid cannot deliver, they come back.',
   },
   {
     q: 'Can I be charged more than the price I saw?',
-    a: 'No. The tokens are held from your balance when you start, and the price you saw is the most you pay.',
+    a: 'No. The credits are held from your balance when you start, and the price you saw is the most you pay.',
   },
   {
     q: 'What if my job fails, or only part of it works?',
     a: "A job that fails costs nothing. If only part of a job can be delivered, for example some passages keep your wording because a change couldn't be verified, you pay only for the part you received, and the rest returns to your balance.",
   },
-  { q: 'Do tokens expire?', a: 'No. Tokens stay in your account until you use them. They can’t be exchanged for cash.' },
+  { q: 'Do credits expire?', a: 'No. Credits stay in your account until you use them. They can’t be exchanged for cash.' },
   {
-    q: 'Can I buy tokens now?',
-    a: 'Not yet. Buying tokens opens when mobile-money payments launch. Until then, beta jobs run without charge.',
+    q: 'Can I buy credits now?',
+    a: 'Not yet. Buying credits opens when mobile-money payments launch. Until then, beta jobs run without charge.',
   },
   {
     q: 'Do I need an account?',
-    a: 'Yes, so your papers and tokens stay private to you. We only ask for what we need to run your jobs.',
+    a: 'Yes, so your papers and credits stay private to you. We only ask for what we need to run your jobs.',
   },
 ]
 
@@ -146,7 +146,7 @@ function PriceTable() {
             {r.name}
             {r.note && <span className="block text-xs text-fg-subtle">{r.note}</span>}
           </span>
-          <span className="font-semibold whitespace-nowrap">{p.tokens[r.key]} tokens</span>
+          <span className="font-semibold whitespace-nowrap">{p.tokens[r.key]} credits</span>
         </li>
       ))}
       <li className="flex items-center justify-between gap-3 px-4 py-2.5">
@@ -172,8 +172,8 @@ export function PricingPage() {
   const { config } = useData()
   return (
     <>
-      <PageHero eyebrow="Pricing" title="Simple prices in tokens.">
-        No subscription. Buy tokens, see the price for your paper before anything runs, and pay only for what you get. One token is UGX{' '}
+      <PageHero eyebrow="Pricing" title="Simple prices in credits.">
+        No subscription. Buy credits, see the price for your paper before anything runs, and pay only for what you get. One credit is UGX{' '}
         {config.ugxPerToken.toLocaleString('en')}.
       </PageHero>
       <div className="mx-auto max-w-6xl px-4 py-14 sm:px-6">

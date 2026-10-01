@@ -11,7 +11,7 @@ import { useTitle } from '../../lib/use-title'
 import { useWallet } from '../../lib/use-wallet'
 
 const KIND_LABELS: Record<LedgerEntry['kind'], string> = {
-  TOP_UP: 'Tokens added',
+  TOP_UP: 'Credits added',
   HOLD: 'Held',
   CHARGE: 'Charged',
   RELEASE: 'Returned',
@@ -22,7 +22,7 @@ const KIND_LABELS: Record<LedgerEntry['kind'], string> = {
 const SIGN: Record<LedgerEntry['kind'], 1 | -1 | 0> = { TOP_UP: 1, HOLD: -1, CHARGE: 0, RELEASE: 1, REFUND: 1 }
 
 export function CreditsPage() {
-  useTitle('Tokens')
+  useTitle('Credits')
   const data = useData()
   const { config } = data
   const { wallet, error } = useWallet()
@@ -56,15 +56,15 @@ export function CreditsPage() {
 
   return (
     <>
-      <PageHeader title="Tokens" description="You pay for the work each paper needs with tokens you buy in advance. Tokens never expire." />
+      <PageHeader title="Credits" description="You pay for the work you ask for with credits you buy in advance. Credits never expire." />
       {error && (
         <Alert tone="danger" className="mb-5">
           {error}
         </Alert>
       )}
       {wallet?.testCredits && (
-        <Alert tone="warning" className="mb-5" title="Test tokens">
-          This is a local test setup. These tokens are added by an admin for testing and are not money.
+        <Alert tone="warning" className="mb-5" title="Test credits">
+          This is a local test setup. These credits are added by an admin for testing and are not money.
         </Alert>
       )}
 
@@ -88,12 +88,12 @@ export function CreditsPage() {
         </Card>
         <Card className="p-5">
           <p className="flex items-center gap-2 text-sm font-semibold">
-            <Smartphone className="size-4 text-brand-600" aria-hidden /> Buy tokens
+            <Smartphone className="size-4 text-brand-600" aria-hidden /> Buy credits
           </p>
           <p className="mt-2 text-sm leading-relaxed text-fg-muted">
-            Buying tokens with mobile money opens soon, from {formatTokens(config.minTopUpUgx)} ({formatUGX(config.minTopUpUgx)}). One token is {formatUGX(config.ugxPerToken)}.
+            Buying credits with mobile money opens soon, from {formatTokens(config.minTopUpUgx)} ({formatUGX(config.minTopUpUgx)}). One credit is {formatUGX(config.ugxPerToken)}.
           </p>
-          <p className="mt-3 text-xs text-fg-subtle">Until then, PaperAid adds tokens for you. Tokens can&rsquo;t be exchanged for cash.</p>
+          <p className="mt-3 text-xs text-fg-subtle">Until then, PaperAid adds credits for you. Credits can&rsquo;t be exchanged for cash.</p>
         </Card>
       </div>
 
@@ -102,7 +102,7 @@ export function CreditsPage() {
         <Skeleton className="h-40 w-full" />
       ) : wallet.entries.length === 0 ? (
         <EmptyState icon={<WalletIcon className="size-5" aria-hidden />} title="No activity yet">
-          Tokens you add, estimates and jobs will appear here.
+          Credits you add, and the work they pay for, will appear here.
         </EmptyState>
       ) : (
         <Card className="divide-y divide-line">

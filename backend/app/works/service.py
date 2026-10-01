@@ -29,7 +29,8 @@ from app.jobs.models import Camel, Job, JobEvent, JobStatus, JobView, Quote, Rea
 from app.jobs.service import ACCOUNT_CLOSING, User, _erase_work, _rate_limit, availability, step_running, submit
 from app.latex.convert import convert as to_latex
 from app.latex.package import compile_pdf
-from app.pricing.quote import bound_quote
+from app.pricing.credits import InsufficientCredits
+from app.pricing.quote import bound_quote, fixed_price
 from app.proposals import evidence as ev
 from app.proposals.pipeline import load_library
 from app.rules import compliance, library
@@ -52,6 +53,7 @@ from app.works.models import (
     ReviewDecision,
     SourceFile,
     SourceRole,
+    StoredDocVersion,
     Work,
     WorkAcknowledgment,
     WorkDocument,
@@ -60,7 +62,7 @@ from app.works.models import (
     WorkStepInput,
     WorkView,
 )
-from app.works.pipeline import INPUT, _plan_problems
+from app.works.pipeline import DOCX, INPUT, _plan_problems
 
 logger = logging.getLogger("paperaid.works")
 Step = Literal["READ", "PLAN", "DRAFT", "REVISE"]
@@ -182,6 +184,12 @@ def view(rt: Runtime, work: Work) -> WorkView:
         out.budget_totals = {"total": t.total, "direct": t.direct, "indirect": t.indirect, "byCategory": t.by_category, "byYear": {str(y): v for y, v in t.by_year.items()},
                              "lines": {li.id: budget_engine.line_total(li) for li in work.budget.lines}, "currency": work.budget.currency}
     out.active_job = work.active_job if step_running(rt, work) else None
+    if work.auto and not work.documents and out.active_job is None and not work.auto_failure and work.jobs:
+        last = rt.store.get(work.jobs[-1])
+        if last is not None and last.status == JobStatus.FAILED and last.failure is not None:
+            out.auto_failure = last.failure.user_message
+        elif last is not None and last.status == JobStatus.CANCELLED:
+            out.auto_failure = "Stopped at your request. Nothing was delivered and you were not charged."
     return out
 
 
@@ -568,7 +576,10 @@ def _band(spec: ResolvedSpec, step: Step) -> str:
     return "CN_BRIEF" if words <= 1200 else "CN_STANDARD" if words <= 2300 else "CN_EXTENDED"
 
 
-def _draft_blockers(rt: Runtime, k: Work, spec: ResolvedSpec) -> list[str]:
+def _draft_blockers(rt: Runtime, k: Work, spec: ResolvedSpec, auto: bool = False) -> list[str]:
+    """What stops a draft. Started with one Start (`auto`), figures only the student can give (targets,
+    baselines, quantities, costs) never do: the draft marks them for the student to fill in
+    (owner decision 2026-10-01); PaperAid's own defects still do."""
     problems = []
     if k.spec_status != "CONFIRMED":
         problems.append("Confirm what PaperAid understood first.")
@@ -577,9 +588,11 @@ def _draft_blockers(rt: Runtime, k: Work, spec: ResolvedSpec) -> list[str]:
     if k.kind == "FUNDING_PROPOSAL":
         if k.results is None or k.results_status != "APPROVED":
             problems.append("Approve your Results Model first.")
-        if k.budget is None or not k.budget.lines or not any(li.unit_cost for li in k.budget.lines):
+        if not auto and (k.budget is None or not k.budget.lines or not any(li.unit_cost for li in k.budget.lines)):
             problems.append("Add your budget lines (quantities and unit costs) first.")
     for item in before_draft(rt, k, spec):
+        if auto and item.id in compliance.STUDENT_FIGURES:
+            continue
         # Only a failed blocking check stops the draft. What PaperAid cannot measure yet (a page count
         # before rendering) does not, and neither does an eligibility criterion the student knowingly
         # does not meet when they chose an exploratory draft.
@@ -589,7 +602,7 @@ def _draft_blockers(rt: Runtime, k: Work, spec: ResolvedSpec) -> list[str]:
     return problems
 
 
-def quote_step(rt: Runtime, user: User, work_id: str, step: Step, note: str) -> WorkStepQuote:
+def quote_step(rt: Runtime, user: User, work_id: str, step: Step, note: str, bundled: bool = False) -> WorkStepQuote:
     """Freeze the work's input for a step, price it and return the quote. Nothing is held until the
     student submits. A step is priced only when everything it needs from the student is in place."""
     k = _owned(rt, user, work_id)
@@ -612,7 +625,7 @@ def quote_step(rt: Runtime, user: User, work_id: str, step: Step, note: str) -> 
         if k.spec_status != "CONFIRMED":
             raise AppError("Confirm what PaperAid understood first.", code="SPEC_NOT_CONFIRMED")
     elif step == "DRAFT":
-        blockers = _draft_blockers(rt, k, spec)
+        blockers = _draft_blockers(rt, k, spec, auto=bundled)
         if blockers:
             raise AppError("Before the draft can be written: " + " ".join(blockers), code="NOT_READY_TO_DRAFT")
     else:  # REVISE
@@ -626,9 +639,10 @@ def quote_step(rt: Runtime, user: User, work_id: str, step: Step, note: str) -> 
         for request in k.requests:
             if request.status != "OPEN":
                 continue
+            asked = request.text + (f" (They added their document \"{request.context_name}\" for context: {request.context})" if request.context else "")
             for key in request.sections or list(written):
                 if key in written and len(revise.setdefault(key, [])) < 8:
-                    revise[key].append(request.text)
+                    revise[key].append(asked)
             request_ids.append(request.id)
         revise = {key: texts for key, texts in revise.items() if texts}
         if not revise:
@@ -650,7 +664,7 @@ def quote_step(rt: Runtime, user: User, work_id: str, step: Step, note: str) -> 
     data = inp.model_dump_json(by_alias=True).encode()
     sha = hashlib.sha256(data).hexdigest()
     now = utcnow()
-    selection = ServiceSelection(work=step, work_kind=k.kind, work_band=band)
+    selection = ServiceSelection(work=step, work_kind=k.kind, work_band=band, bundled=bundled and step in ("READ", "PLAN", "DRAFT"))
     label_note = "exploratory draft, not ready to submit" if step == "DRAFT" and spec.exploratory else ""
     job = Job(
         id=f"job_{secrets.token_hex(6)}", status=JobStatus.DRAFT, owner_uid=user.uid, owner_email=user.email, work_id=k.id, input_sha256=sha, selection=selection,
@@ -749,8 +763,9 @@ def submit_step(rt: Runtime, user: User, work_id: str, job_id: str, quote_id: st
     return submit(rt, user, job_id, quote_id, work_gate=gate)
 
 
-def request_changes(rt: Runtime, user: User, work_id: str, text: str, sections: list[str]) -> WorkView:
-    """Ask for changes: the student's own words reach the writer, on the sections chosen (or all)."""
+def request_changes(rt: Runtime, user: User, work_id: str, text: str, sections: list[str], context_name: str = "", context: str = "") -> WorkView:
+    """Ask for changes: the student's own words reach the writer, on the sections chosen (or all),
+    with any document they added for context."""
     clean = " ".join(text.split())[:1500]
     if len(clean) < 3:
         raise AppError("Say what you would like changed.", code="NO_REQUEST")
@@ -764,10 +779,19 @@ def request_changes(rt: Runtime, user: User, work_id: str, text: str, sections: 
     def apply(w: Work) -> Work:
         if len(w.requests) >= MAX_REQUESTS:
             raise AppError("Remove requests already dealt with first.", code="TOO_MANY_REQUESTS")
-        w.requests.append(ChangeRequest(id=f"rq_{secrets.token_hex(4)}", text=clean, sections=chosen))
+        w.requests.append(ChangeRequest(id=f"rq_{secrets.token_hex(4)}", text=clean, sections=chosen, context_name=context_name[:120], context=context[:CONTEXT_CHARS]))
         return w
 
     return view(rt, _change(rt, user, work_id, apply))
+
+
+def request_changes_with_document(rt: Runtime, user: User, work_id: str, text: str, sections: list[str], filename: str, data: bytes) -> WorkView:
+    """A change request with a document for context: its text is read here (Word or PDF) and goes to
+    the writer with the request; the document itself is not kept."""
+    _rate_limit(rt, user, "upload", rt.settings.uploads_per_hour)
+    model = inspect_upload(data, filename, rt.settings.max_upload_bytes, MAX_SOURCE_WORDS, rt.settings.max_pdf_pages, min_words=5)
+    context = "\n".join(b.text for b in model.blocks if b.text.strip())
+    return request_changes(rt, user, work_id, text, sections, PurePosixPath(filename).name, context)
 
 
 def remove_request(rt: Runtime, user: User, work_id: str, request_id: str) -> WorkView:
@@ -812,6 +836,7 @@ class DocumentView(Camel):
     words: int
     ai_note: str
     tables: list[dict[str, Any]] = []  # funding: logframe, workplan, M&E and budget tables (rendered from the data)
+    revised: list[str] = []  # a revision: the sections it changed (highlighted on screen only)
 
 
 def document(rt: Runtime, user: User, work_id: str, version: int | None = None) -> DocumentView:
@@ -854,6 +879,7 @@ def document(rt: Runtime, user: User, work_id: str, version: int | None = None) 
     return DocumentView(
         version=version or k.current, title=doc.title, status=doc.status, exploratory=doc.exploratory, sections=sections,
         references=ev.reference_list([library[i].source for i in cited], spec.citation_style), readiness=doc.readiness, words=doc.words, ai_note=doc.ai_note, tables=tables,
+        revised=list(doc.revised),
     )
 
 
@@ -897,3 +923,156 @@ def delete(rt: Runtime, user: User, work_id: str) -> None:
     if not _erase_work(rt, k) and rt.store.get_work(k.id) is not None:
         raise Conflict("A step is running for this work. Delete it when the step finishes.", code="STEP_RUNNING")
     log(logger, logging.INFO, "work deleted", workId=work_id)
+
+
+# --- one Start (owner decision 2026-10-01) ------------------------------------------------------------------
+# The student enters their task, answers a few questions and presses Start. PaperAid reads their
+# documents, plans and drafts by itself, and the student sees the document. The plan stays internal:
+# it continues only when PaperAid's own final review and code checks approve it (never approved in the
+# student's name otherwise, Codex 2026-10-01); a figure only the student can give is drafted as a
+# marked gap. One charge: the read and plan steps are part of the document's price.
+
+CONTEXT_CHARS = 6000
+NOT_FINISHED = "We couldn't finish this one: PaperAid could not make a plan it was satisfied with. You were not charged. Please try again."
+
+
+def check_credits(rt: Runtime, user: User, key: str, price: int) -> None:
+    """Enough credits for this job and at least the service's minimum (when one is set), checked
+    before any AI runs. The job's own hold still happens atomically when it is submitted."""
+    if not rt.settings.credits_enabled:
+        return
+    wallet = rt.store.get_wallet(user.uid)
+    available = wallet.available if wallet else 0
+    minimum = round(rt.settings.min_credits.get(key, 0) * rt.settings.ugx_per_token)
+    needed = max(minimum, price)
+    if available < needed:
+        raise InsufficientCredits(needed, available)
+
+
+def _document_price(rt: Runtime, spec: ResolvedSpec) -> int:
+    """What the first document will cost, plan included (fixed prices; 0 under the cost policy, where
+    the hold at submission is the check)."""
+    if rt.settings.pricing_mode != "fixed":
+        return 0
+    band = _band(spec, "DRAFT")
+    plan = band.split("_")[0] + "_PLAN"
+    return fixed_price(rt.settings, band, None) + (fixed_price(rt.settings, plan, None) if plan in rt.settings.fixed_tokens else 0)
+
+
+def auto_read(rt: Runtime, user: User, work_id: str) -> WorkView:
+    """Read the documents the student just added (part of one Start, no charge of its own)."""
+    k = _owned(rt, user, work_id)
+    if not k.sources or all(s.id in set(k.read_sources) for s in k.sources):
+        return view(rt, k)
+    quoted = quote_step(rt, user, work_id, "READ", "", bundled=True)
+    submit_step(rt, user, work_id, quoted.job.id, quoted.quote.id)
+    return view(rt, _owned(rt, user, work_id))
+
+
+def start(rt: Runtime, user: User, work_id: str) -> WorkView:
+    """Start: confirm what PaperAid understood, check credits, and plan; the draft follows by itself.
+    Pressed again after a stop, it continues from where it stopped (the draft, if the plan was made)."""
+    k = _owned(rt, user, work_id)
+    _require(rt, user, k.kind)
+    if step_running(rt, k):
+        raise Conflict("PaperAid is already working on this.", code="STEP_RUNNING")
+    if any(s.id not in set(k.read_sources) for s in k.sources):
+        raise AppError("PaperAid is still reading your documents. Try again in a moment.", code="SOURCES_UNREAD")
+    spec = spec_of(rt, k)
+    if spec is None:
+        raise AppError("PaperAid has not worked out the requirements yet.", code="NO_SPEC")
+    if spec.gate != "PASS":
+        raise AppError(("Answer the questions marked Required first. " + " ".join(spec.blockers)).strip(), code="QUESTIONS_OPEN")
+    check_credits(rt, user, k.kind, _document_price(rt, spec))
+    if k.spec_status != "CONFIRMED":
+        confirm_spec(rt, user, work_id, k.spec_version)
+
+    def begin(w: Work) -> Work:
+        w.auto, w.auto_failure = True, ""
+        return w
+
+    k = _change(rt, user, work_id, begin)
+    ready = k.plan is not None and k.plan_status == "APPROVED" and (k.kind != "FUNDING_PROPOSAL" or k.results_status == "APPROVED")
+    step: Step = "DRAFT" if ready and not k.documents else "PLAN"
+    quoted = quote_step(rt, user, work_id, step, "", bundled=True)
+    submit_step(rt, user, work_id, quoted.job.id, quoted.quote.id)
+    return view(rt, _owned(rt, user, work_id))
+
+
+def continue_after_plan(rt: Runtime, work_id: str, plan_job: str) -> None:
+    """Run by the worker once a plan started with one Start is published: approve it only if
+    PaperAid's final review approved it (and the Results Model, for funding), then start the draft.
+    Otherwise stop, and say so. Runs at most once per plan: only while that plan step is the work's
+    last step."""
+    k = rt.store.get_work(work_id)
+    if k is None or k.deleting or not k.auto or not k.jobs or k.jobs[-1] != plan_job:
+        return
+    owner = User(uid=k.owner_uid, email=k.owner_email, is_admin=False, verified=True)
+    decisions = [k.plan_review] + ([k.results_review] if k.kind == "FUNDING_PROPOSAL" else [])
+    spec = spec_of(rt, k)
+    approved = k.plan is not None and spec is not None and all(d is not None and d.outcome == "APPROVED" for d in decisions) and not _plan_problems(k.plan, spec)
+
+    def stop(message: str) -> None:
+        def apply(w: Work) -> Work:
+            w.auto_failure = message
+            return w
+
+        _change(rt, owner, work_id, apply)
+
+    if not approved:
+        stop(NOT_FINISHED)
+        return
+
+    def approve(w: Work) -> Work:
+        w.plan_status = "APPROVED"
+        if w.kind == "FUNDING_PROPOSAL":
+            w.results_status = "APPROVED"
+        return w
+
+    try:
+        _change(rt, owner, work_id, approve)
+        quoted = quote_step(rt, owner, work_id, "DRAFT", "", bundled=True)
+        submit_step(rt, owner, work_id, quoted.job.id, quoted.quote.id)
+    except AppError as exc:  # credits ran out meanwhile, the work changed, a blocking check: say why
+        log(logger, logging.WARNING, "auto draft did not start", workId=work_id, code=exc.code)
+        stop(f"The draft could not start: {exc.message}")
+
+
+def apply_figures(rt: Runtime, user: User, work_id: str) -> WorkView:
+    """The student's figures (targets, baselines, quantities, costs) go into the current document as a
+    new version: the same text, its number tokens, tables and figure checks from the figures now
+    saved. Code only, no AI, no charge."""
+    k = _owned(rt, user, work_id)
+    if step_running(rt, k):
+        raise Conflict("PaperAid is working on this. Try again when it finishes.", code="STEP_RUNNING")
+    doc = _doc(rt, k)
+    if doc is None:
+        raise AppError("Write the document first.", code="NOTHING_TO_EXPORT")
+    spec = doc.spec_snapshot or spec_of(rt, k)
+    assert spec is not None
+    tokens = numbers.values(spec, k.results, k.budget, k.inputs)
+    for section in doc.sections:
+        for text in [*section.paragraphs, *[c for row in (section.table or []) for c in row]]:
+            if numbers.render(text, tokens)[1]:
+                raise AppError("Your figures no longer match this draft (an indicator or budget line was removed). Ask for changes instead.", code="FIGURES_CHANGED")
+    library_items = load_library(rt.files, k.evidence_files)
+    updated = doc.model_copy(update={"results_snapshot": k.results, "budget_snapshot": k.budget, "number_values": {key: [v[0], v[1]] for key, v in tokens.items()}})
+    context = Context(spec=spec, stage="FINAL", inputs=k.inputs, plan=k.plan, results=k.results, budget=k.budget, doc=updated, library=library_items, tokens=tokens)
+    fresh = {i.id: i for i in compliance.report(context, ("DRAFT", "FINAL", "PLAN")) if i.id in compliance.STUDENT_FIGURES}
+    items = [fresh.get(i.id, i) for i in doc.readiness] + [i for rid, i in fresh.items() if rid not in {x.id for x in doc.readiness}]
+    updated.readiness = items
+    updated.status = compliance.overall(items, spec.exploratory)  # type: ignore[assignment]
+    data = export.build(updated, spec, k.results, k.budget, library_items, tokens, draft=updated.status == "NOT_READY")
+    tag = secrets.token_hex(4)
+    doc_path, docx_path = f"{k.storage_prefix()}/documents/figures_{tag}.json", f"{k.storage_prefix()}/documents/figures_{tag}.docx"
+    rt.files.put(doc_path, updated.model_dump_json(by_alias=True).encode(), "application/json")
+    rt.files.put(docx_path, data, DOCX)
+
+    def publish(w: Work) -> Work:
+        version = len(w.documents) + 1
+        w.documents.append(StoredDocVersion(version=version, job_id=f"figures_{tag}", words=updated.words, status=updated.status, path=doc_path, docx_path=docx_path,
+                                            note="Your figures added"))
+        w.current = version
+        return w
+
+    return view(rt, _change(rt, user, work_id, publish))
