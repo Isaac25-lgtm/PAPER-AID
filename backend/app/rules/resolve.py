@@ -163,8 +163,12 @@ def resolve(
         qid = spec_q["id"]
         value = inputs.answers.get(qid, "").strip()
         answered = bool(value)
-        if qid in ("problem", "task") and not answered and len(inputs.description.split()) >= 12:
+        if qid == "problem" and not answered and len(inputs.description.split()) >= 12:
             answered = True  # the description already gives it
+        if qid == "task" and not answered and len(inputs.description.split()) >= 4:
+            # A short question is still the question ("Discuss the impact of social media on youth"): a
+            # tester was blocked three times by a 12-word minimum the page never showed (live, 2026-10-01).
+            answered = True
         if qid == "task" and not answered and (many("directive") or many("subquestion")):
             answered = True  # read from the brief
         if qid == "experience" and inputs.experience.strip():

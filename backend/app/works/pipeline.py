@@ -1285,8 +1285,10 @@ def stage_auditing(ctx: "StageContext") -> None:
         length_rules = {r["id"] for r in library.rules_for(spec.kind) if r["check"].get("validator") == "coursework.word_tolerance"}
         own_failures += [i for i in items if i.id in length_rules and i.severity == "BLOCKING" and i.status == "NEEDS_REVIEW"]
     if own_failures:
+        # The student sees which requirement could not be met, in their terms (owner request 2026-10-01).
+        unmet = "; ".join(dict.fromkeys(i.question for i in own_failures))[:300]
         raise PermanentStageError(
-            "DOCUMENT_NOT_READY", "PaperAid could not produce a draft that meets every required rule this time. Nothing was charged; please try again.",
+            "DOCUMENT_NOT_READY", f"PaperAid could not write a draft that meets: {unmet}. Nothing was charged; please try again.",
             "blocking: " + "; ".join(f"{i.id} {i.note[:80]}" for i in own_failures)[:400],
         )
     document.readiness = items

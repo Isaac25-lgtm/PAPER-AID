@@ -113,7 +113,7 @@ export interface DataSource {
     /** The same, with a document (Word or PDF) whose text the writer gets for context. */
     requestChangesWithDocument(id: string, chapter: number, instruction: string, sections: string[], file: File): Promise<Project>
     /** One Start (owner decision 2026-10-01): plan, then the first chapter, by itself. */
-    start(id: string): Promise<Project>
+    start(id: string, acceptSampling?: boolean): Promise<Project>
     /** The conceptual framework figure, as an image the page can show. */
     framework(id: string): Promise<Blob>
     /** The institution's research guide, read into a profile by the PROFILE step. */

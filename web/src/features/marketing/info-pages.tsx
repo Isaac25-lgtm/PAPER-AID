@@ -137,7 +137,7 @@ const PRICE_ROWS: { key: string; name: string; note?: string; service: ServiceId
 function PriceTable() {
   const { config } = useData()
   const p = config.pricing
-  const perPage = (ugx: number) => `${formatTokenNumber(ugx)} tokens`
+  const perPage = (ugx: number) => `${formatTokenNumber(ugx)} credits`
   return (
     <ul className="mt-4 divide-y divide-line rounded-xl border border-line bg-white text-sm">
       {PRICE_ROWS.filter((r) => p.tokens[r.key] !== undefined && config.availability[r.service] !== 'soon').map((r) => (
@@ -173,7 +173,7 @@ export function PricingPage() {
   return (
     <>
       <PageHero eyebrow="Pricing" title="Simple prices in credits.">
-        No subscription. Buy credits, see the price for your paper before anything runs, and pay only for what you get. One credit is UGX{' '}
+        No subscription. Buy credits; the credits for a job are reserved when you start it, and you pay only for what is delivered. One credit is UGX{' '}
         {config.ugxPerToken.toLocaleString('en')}.
       </PageHero>
       <div className="mx-auto max-w-6xl px-4 py-14 sm:px-6">

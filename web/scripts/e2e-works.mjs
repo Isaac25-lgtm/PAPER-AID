@@ -65,6 +65,29 @@ async function understood(answers) {
   await page.getByText('You confirmed what PaperAid understood.').waitFor()
 }
 
+
+// New work starts with one Start (owner decision 2026-10-01); these journeys cover the earlier pages that
+// work set up before it keeps, so they create that work directly through the API.
+const DEV = { Authorization: 'Dev demo@paperaid.app' }
+const INPUTS = { level: 'MASTERS', programme: '', faculty: '', studyArea: '', population: '', studyType: null, notes: '', populationSize: null, populationSource: '', expectedParticipants: null }
+async function createWork(body) {
+  const res = await page.request.post(`${base}/api/works`, { headers: DEV, data: body })
+  if (!res.ok()) throw new Error(`creating a work: ${res.status()} ${await res.text()}`)
+  const work = await res.json()
+  await page.goto(`${base}/app/works/${work.id}`)
+  await page.waitForURL(/\/app\/works\/wrk_/)
+}
+async function createProject(inputs, titlePage = {}, goal = 'FULL') {
+  const res = await page.request.post(`${base}/api/projects`, {
+    headers: DEV,
+    data: { inputs: { ...INPUTS, ...inputs }, titlePage: { studentName: '', regNumber: '', supervisor: '', submissionDate: '', ...titlePage }, citation: 'APA6', goal },
+  })
+  if (!res.ok()) throw new Error(`creating a proposal: ${res.status()} ${await res.text()}`)
+  const project = await res.json()
+  await page.goto(`${base}/app/projects/${project.id}`)
+  await page.waitForURL(/\/app\/projects\/prj_/)
+}
+
 try {
   await page.goto(`${base}/sign-in`)
   await page.getByLabel('Email').fill('demo@paperaid.app')
@@ -83,13 +106,8 @@ try {
   step('the new sections are offered, and AI detection shows as coming soon')
 
   // --- coursework: an essay whose brief bans AI -----------------------------------------------
-  await page.goto(`${base}/app/works/new?kind=COURSEWORK`) // the earlier works pages, kept for works set up before one Start
-  await page.getByLabel('Title or topic').fill('Community health workers and maternal health')
-  await page.getByLabel('The assignment question, word for word').fill(
-    'Critically evaluate the effectiveness of community health workers in improving maternal health outcomes in rural Uganda since 2015.',
-  )
-  await page.getByRole('button', { name: 'Continue' }).click()
-  await page.waitForURL(/\/app\/works\/wrk_/)
+  await createWork({ kind: 'COURSEWORK', variant: 'ESSAY', mode: '', citation: 'APA7', inputs: { title: 'Community health workers and maternal health',
+    description: 'Critically evaluate the effectiveness of community health workers in improving maternal health outcomes in rural Uganda since 2015.', answers: {}, experience: '' } })
   await understood([
     ['What word limit did your lecturer give you?', '1,500 words', 'fill'], // live case wrk_64b3b916e144: a limit typed with words
     ['What level is this work?', 'Later ug', 'select'],
@@ -115,12 +133,8 @@ try {
   step('the coursework draft shows its checks and last-page note, and downloads')
 
   // --- a funding proposal: Results Model, budget, tables ------------------------------------------
-  await page.goto(`${base}/app/works/new?kind=FUNDING_PROPOSAL`)
-  await page.getByLabel('Length').selectOption({ label: 'Compact (about 2,500 words)' })
-  await page.getByLabel('Project name or topic').fill('Safer deliveries in Kamuli')
-  await page.getByLabel('Your idea: the problem, who it affects and what you propose').fill('Too many mothers in Kamuli deliver at home without skilled care, and referrals are late.')
-  await page.getByRole('button', { name: 'Continue' }).click()
-  await page.waitForURL(/\/app\/works\/wrk_/)
+  await createWork({ kind: 'FUNDING_PROPOSAL', variant: 'NGO_PROJECT', mode: 'COMPACT', citation: 'APA7', inputs: { title: 'Safer deliveries in Kamuli',
+    description: 'Too many mothers in Kamuli deliver at home without skilled care, and referrals are late.', answers: {}, experience: '' } })
   await understood([
     ['What do you propose to do about it?', 'Train village health teams and fund referral transport.', 'fill'],
     ['How many months will the work last?', '12', 'fill'],
@@ -153,10 +167,7 @@ try {
   step('the funding proposal has its logframe, workplan and budget tables, built from the data')
 
   // --- a research concept note: no Chapter One by itself -------------------------------------------
-  await page.goto(`${base}/app/projects/new?goal=CONCEPT`)
-  await page.getByLabel('Topic').fill('Malaria vaccine uptake among caregivers of young children in Mukono District')
-  await page.getByRole('button', { name: 'Create concept note' }).click()
-  await page.waitForURL(/\/app\/projects\/prj_/)
+  await createProject({ topic: 'Malaria vaccine uptake among caregivers of young children in Mukono District' }, {}, 'CONCEPT')
   await page.getByRole('button', { name: 'See the price' }).click()
   if (await page.getByText('Plan and Chapter One together').count()) throw new Error('a concept note must not price Chapter One')
   await page.getByRole('button', { name: 'Start' }).click()

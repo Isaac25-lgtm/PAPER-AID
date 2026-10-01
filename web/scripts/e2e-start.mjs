@@ -59,7 +59,7 @@ try {
   await shot('03-coursework-page1')
   await page.getByRole('button', { name: 'Continue' }).click()
   await page.getByRole('heading', { name: 'A few details' }).waitFor()
-  await page.getByLabel(/word limit/i).fill('1500')
+  await page.getByLabel(/^Word limit/).first().selectOption('1500')
   for (const label of [/level is this work/i, /referencing style/i, /using AI/i]) {
     const field = page.getByLabel(label).first()
     if ((await field.count()) && (await field.evaluate((e) => e.tagName)) === 'SELECT') await field.selectOption({ index: 1 })
@@ -130,6 +130,9 @@ try {
   await page.getByLabel(/Your name/).fill('Grace Namukasa')
   await page.getByLabel(/Registration number/).fill('M24/U001')
   await page.getByLabel(/Faculty or school/).fill('Faculty of Public Health')
+  await page.getByRole('button', { name: 'Start', exact: true }).click()
+  await page.getByText(/Tick to use the standard settings/).waitFor() // assumed sample-size settings need the student's own tick
+  await page.getByLabel(/Use the standard sample-size settings/).check()
   await shot('11-proposal-page2')
   await page.getByRole('button', { name: 'Start', exact: true }).click()
   await page.waitForURL(/\/app\/projects\//)

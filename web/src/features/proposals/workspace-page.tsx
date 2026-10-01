@@ -3,6 +3,7 @@ import { Check, Wrench } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router'
 import { Button } from '../../components/ui/button'
+import { Input } from '../../components/ui/field'
 import { Alert, Card, Skeleton } from '../../components/ui/primitives'
 import { DataError, useData } from '../../lib/data'
 import type { ChapterView, Project, ReadinessItem } from '../../lib/proposal-types'
@@ -54,11 +55,12 @@ export function ProjectPage() {
   const written = project.chapters.filter((c) => c.current).map((c) => c.number)
   if (!project.auto && !written.length) return <LegacyProjectPage />
 
+  const sampling = project.autoFailure.startsWith('PaperAid needs one answer') // the standard sample-size settings, not yet confirmed
   const retry = async () => {
     setRetrying(true)
     setRetryError(null)
     try {
-      setProject(await data.projects.start(project.id))
+      setProject(await data.projects.start(project.id, sampling))
     } catch (e) {
       setRetryError(e instanceof DataError ? e.message : 'It could not start. Try again.')
     } finally {
@@ -72,10 +74,75 @@ export function ProjectPage() {
         <StartProgress key={project.activeJob} jobId={project.activeJob} phase={project.planStatus === 'APPROVED' ? 'write' : 'plan'}
           title={first === CONCEPT ? 'Writing your concept paper' : 'Writing Chapter One'} estimate="This usually takes 10 to 20 minutes." onDone={onStepDone} />
       )
-    if (project.autoFailure) return <StoppedCard message={project.autoFailure} onRetry={retry} busy={retrying} error={retryError} />
+    if (project.autoFailure)
+      return sampling ? (
+        <StoppedCard title="We need one answer to continue" retryLabel="Use the standard settings and continue"
+          message={`${project.autoFailure} The standard settings are 95% confidence, a 5% margin of error and a 50% expected proportion; the chapter says they were assumed.`}
+          onRetry={retry} busy={retrying} error={retryError} />
+      ) : (
+        <StoppedCard message={project.autoFailure} onRetry={retry} busy={retrying} error={retryError} />
+      )
     return <Waiting onCheck={load} />
   }
   return <Workspace project={project} onChange={setProject} onReload={load} />
+}
+
+/** The complete proposal: what it still needs, each with its action here (Codex audit 2026-10-01: the
+ *  download must not be promised while the server would refuse it). */
+function FinishCard({ project, onChange, onDownload }: { project: Project; onChange: (p: Project) => void; onDownload: () => void }) {
+  const data = useData()
+  const [supervisor, setSupervisor] = useState(project.titlePage.supervisor)
+  const [date, setDate] = useState(project.titlePage.submissionDate)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const needsPage = project.blockers.some((b) => /title page/.test(b))
+  const others = project.blockers.filter((b) => !/title page/.test(b))
+  const saveDetails = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      onChange(await data.projects.updateDetails(project.id, project.inputs, { ...project.titlePage, supervisor, submissionDate: date }, project.citation))
+    } catch (e) {
+      setError(e instanceof DataError ? e.message : 'These details could not be saved.')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Card className="p-5">
+      <p className="text-base font-semibold">{project.blockers.length ? 'Before your complete proposal' : 'Your proposal is complete'}</p>
+      {project.blockers.length === 0 ? (
+        <>
+          <p className="mt-1 text-sm text-fg-muted">Download all three chapters with the title page, contents and references.</p>
+          <Button className="mt-3 w-full" onClick={onDownload}>
+            Download complete proposal
+          </Button>
+        </>
+      ) : (
+        <div className="mt-2 space-y-3">
+          {others.length > 0 && (
+            <ul className="list-disc space-y-1 pl-5 text-sm text-fg-muted">
+              {others.map((b) => (
+                <li key={b}>{b}</li>
+              ))}
+            </ul>
+          )}
+          {needsPage && (
+            <div className="space-y-2">
+              <p className="text-sm text-fg-muted">Your title page needs:</p>
+              <Input label="Supervisor" required maxLength={160} value={supervisor} onChange={(e) => setSupervisor(e.target.value)} />
+              <Input label="Submission date" required maxLength={40} value={date} placeholder="e.g. October 2026" onChange={(e) => setDate(e.target.value)} />
+              <Button size="sm" variant="secondary" loading={busy} disabled={!supervisor.trim() || !date.trim()} onClick={saveDetails}>
+                Save title page
+              </Button>
+            </div>
+          )}
+          <ErrorNote text={error} />
+          <p className="text-xs text-fg-subtle">Until then, Download Word above gives the draft with everything written so far.</p>
+        </div>
+      )}
+    </Card>
+  )
 }
 
 function Waiting({ onCheck }: { onCheck: () => void }) {
@@ -288,15 +355,24 @@ function Workspace({ project, onChange, onReload }: { project: Project; onChange
                 onPick={(v) => data.projects.setChapter(project.id, shown, v, false).then(onChange).catch(failed)} />
             </PanelSection>
           )}
-          {!next && !concept && (
+          {state?.current && shown !== CONCEPT && (
             <Card className="p-5">
-              <p className="text-base font-semibold">Your proposal is complete</p>
-              <p className="mt-1 text-sm text-fg-muted">Download all three chapters with the title page, contents and references.</p>
-              <Button className="mt-3 w-full" onClick={() => data.projects.download(project.id, true, `${stem}.docx`).catch(failed)}>
-                Download complete proposal
-              </Button>
+              {state.approved ? (
+                <p className="flex items-center gap-2 text-sm font-medium text-brand-800">
+                  <Check className="size-4" aria-hidden /> You approved {NAMES[shown]}.
+                </p>
+              ) : (
+                <>
+                  <p className="text-sm text-fg-muted">Happy with {NAMES[shown]} as it is? Approving it marks it final for your complete proposal; you can still ask for changes.</p>
+                  <Button variant="secondary" className="mt-3 w-full" disabled={running}
+                    onClick={() => data.projects.setChapter(project.id, shown, state.current, true).then(onChange).catch(failed)}>
+                    Approve {NAMES[shown]}
+                  </Button>
+                </>
+              )}
             </Card>
           )}
+          {!next && !concept && <FinishCard project={project} onChange={onChange} onDownload={() => data.projects.download(project.id, true, `${stem}.docx`).catch(failed)} />}
         </aside>
       </div>
     </>

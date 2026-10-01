@@ -226,7 +226,7 @@ def test_one_start_plans_and_writes_chapter_one(client):
     from app.runtime import get_runtime
 
     project = _create(client)
-    started = client.post(f"/api/projects/{project['id']}/start", headers=H)
+    started = client.post(f"/api/projects/{project['id']}/start", headers=H, json={"acceptSampling": True})
     assert started.status_code == 200, started.json()
     project = _settled(client, f"/api/projects/{project['id']}", lambda p: any(c["number"] == 1 and c["current"] for c in p["chapters"]) or p["autoFailure"], timeout=180)
     assert not project["autoFailure"] and project["planStatus"] == "APPROVED"
@@ -250,7 +250,7 @@ def test_a_proposal_plan_paperaid_does_not_approve_stops_without_a_chapter(clien
 
 def test_the_conceptual_framework_is_a_figure_in_the_app_and_the_word_file(client):
     project = _create(client)
-    client.post(f"/api/projects/{project['id']}/start", headers=H)
+    client.post(f"/api/projects/{project['id']}/start", headers=H, json={"acceptSampling": True})
     project = _settled(client, f"/api/projects/{project['id']}", lambda p: any(c["number"] == 1 and c["current"] for c in p["chapters"]) or p["autoFailure"], timeout=180)
     if not PLAN["variables"]["independent"]:
         pytest.skip("the fake plan has no variables")
@@ -262,3 +262,120 @@ def test_the_conceptual_framework_is_a_figure_in_the_app_and_the_word_file(clien
     document = Document(io.BytesIO(word.content))
     pictures = document.inline_shapes
     assert len(pictures) >= 1 and pictures[0]._inline.docPr.get("descr", "").startswith("The study will examine")
+
+
+
+# --- Codex's verification of the one-Start release (2026-10-01) ---------------------------------------------------
+
+
+def _wallet(client):
+    return client.get("/api/wallet", headers=H).json()
+
+
+def _with_brief(client):
+    work = client.post("/api/works", headers=H, json={"kind": "COURSEWORK", "variant": "ESSAY", "inputs": {"title": "CHWs", "description": QUESTION}}).json()
+    client.post(f"/api/works/{work['id']}/sources/text", headers=H, json={"role": "BRIEF", "name": "Brief", "text": "Write an essay of 2,000 words that critically evaluates community health workers in Uganda."})
+    return work
+
+
+def test_reading_a_brief_needs_the_credits_the_document_will_take(works_client, monkeypatch):
+    from app.runtime import get_runtime
+
+    client = works_client
+    monkeypatch.setattr(get_runtime().settings, "min_credits", {"COURSEWORK": 5000})
+    work = _with_brief(client)
+    refused = client.post(f"/api/works/{work['id']}/read", headers=H)
+    assert refused.status_code == 402 and "w_read" not in client.models.tasks  # no AI before the credits are there
+
+
+def test_start_reserves_the_document_price_until_the_document_holds_it(works_client):
+    from app.runtime import get_runtime
+
+    client = works_client
+    before = _wallet(client)["available"]
+    work = _coursework(client)
+    client.post(f"/api/works/{work['id']}/start", headers=H)
+    work = _settled(client, f"/api/works/{work['id']}", _done)
+    store = get_runtime().store
+    draft = store.get(work["jobs"][1])
+    wallet = store.get_wallet(draft.owner_uid)
+    assert work["documents"] and wallet.reservations == {} and wallet.held == 0  # reserved at Start, then the draft's hold, then settled
+    assert before - wallet.available == draft.billing.charged > 0
+    assert any(e.kind == "HOLD" and e.note == "Reserved for your document" for e in wallet.entries)
+
+
+def test_a_stopped_plan_returns_what_start_reserved(works_client):
+    client = works_client
+    client.models.overrides["w_plan_review"] = lambda payload: {"verdict": "REPAIR", "rules": [{"rule": r["rule"], "status": "PASS", "note": "Met."} for r in payload.get("rules", [])],
+                                                                "issues": ["The plan does not answer the question."]}
+    before = _wallet(client)["available"]
+    work = _coursework(client)
+    client.post(f"/api/works/{work['id']}/start", headers=H)
+    _settled(client, f"/api/works/{work['id']}", _done)
+    after = _wallet(client)
+    assert after["available"] == before and after["held"] == 0
+
+
+def test_a_failed_read_says_so_instead_of_waiting(works_client):
+    client = works_client
+    client.models.refuse.add("w_read")  # the model refuses: the read fails
+    work = _with_brief(client)
+    client.post(f"/api/works/{work['id']}/read", headers=H)
+    work = _settled(client, f"/api/works/{work['id']}", lambda w: w["activeJob"] is None and bool(w["autoFailure"]), timeout=180)
+    assert work["needsRead"] and work["autoFailure"]
+
+
+def test_adding_figures_refuses_anything_but_figures_and_keeps_the_approval(works_client):
+    client = works_client
+    work = _funding(client)
+    client.post(f"/api/works/{work['id']}/start", headers=H)
+    work = _settled(client, f"/api/works/{work['id']}", _done, timeout=180)
+    assert work["documents"]
+    results = work["results"]
+    for ind in results["indicators"]:
+        ind["target"] = 60
+    work = client.post(f"/api/works/{work['id']}/results", headers=H, json={"results": results, "baseVersion": work["resultsVersion"]}).json()
+    assert work["resultsStatus"] == "APPROVED"  # numbers only: the approval stands
+    results = work["results"]
+    results["goal"]["statement"] = "A different goal the student typed in"
+    work = client.post(f"/api/works/{work['id']}/results", headers=H, json={"results": results, "baseVersion": work["resultsVersion"]}).json()
+    refused = client.post(f"/api/works/{work['id']}/figures", headers=H)
+    assert refused.status_code == 400 and refused.json()["code"] == "NOT_ONLY_FIGURES"
+
+
+def test_assumed_sample_settings_need_the_students_tick(client):
+    from tests.fake_models import PLAN as BASE
+
+    client.models.overrides["p_finalise"] = lambda payload: {**BASE, "sampleSize": {**BASE["sampleSize"], "margin": 7}} if "title" in payload["draft"] else payload["draft"]
+    project = _create(client)
+    client.post(f"/api/projects/{project['id']}/start", headers=H)
+    project = _settled(client, f"/api/projects/{project['id']}", lambda p: bool(p["autoFailure"]) or any(c["current"] for c in p["chapters"]), timeout=180)
+    if not project["plan"]["samplingAssumed"]:
+        pytest.skip("this plan assumed no sample-size settings")
+    assert project["autoFailure"].startswith("PaperAid needs one answer") and not any(a["kind"] == "SAMPLING" for a in project["acknowledgments"])
+    client.post(f"/api/projects/{project['id']}/start", headers=H, json={"acceptSampling": True})
+    project = _settled(client, f"/api/projects/{project['id']}", lambda p: any(c["number"] == 1 and c["current"] for c in p["chapters"]) or bool(p["autoFailure"]), timeout=180)
+    assert not project["autoFailure"] and any(a["kind"] == "SAMPLING" for a in project["acknowledgments"])
+
+
+def test_the_pdf_compiler_keeps_what_windows_needs():
+    import os
+
+    from app.latex.package import _tex_env
+
+    env = _tex_env("C:/texlive/bin/pdflatex.exe" if os.name == "nt" else "/usr/bin/pdflatex", "tmp")
+    assert env["openin_any"] == "p" and "PATH" in env
+    if os.name == "nt":
+        assert "SYSTEMROOT" in env
+
+
+
+def test_a_short_assignment_question_does_not_block_start(works_client):
+    """Live, 2026-10-01: a tester's seven-word question was refused three times by a twelve-word minimum
+    the page never showed. A short question is still the question."""
+    client = works_client
+    work = client.post("/api/works", headers=H, json={"kind": "COURSEWORK", "variant": "ESSAY", "inputs": {"title": "Social media", "description": "Discuss the impact of social media on youth."}}).json()
+    work = client.post(f"/api/works/{work['id']}/answers", headers=H, json={"answers": {"level": "LATER_UG", "citation_style": "APA7", "ai_policy": "NOT_MENTIONED"},
+                                                                         "skipRest": True, "baseVersion": work["specVersion"]}).json()
+    assert work["spec"]["gate"] == "PASS", work["spec"]["blockers"]  # no word limit given either: PaperAid uses the usual length
+    assert client.post(f"/api/works/{work['id']}/start", headers=H).status_code == 200

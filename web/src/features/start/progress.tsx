@@ -114,10 +114,12 @@ export function StartProgress({ jobId, phase, title, estimate, onDone }: { jobId
 }
 
 /** Why a one-Start job stopped without a document, with the way forward. */
-export function StoppedCard({ message, onRetry, busy, error }: { message: string; onRetry: () => void; busy: boolean; error: string | null }) {
+export function StoppedCard({ message, onRetry, busy, error, title = "We couldn't finish this one", retryLabel = 'Try again' }: {
+  message: string; onRetry: () => void; busy: boolean; error: string | null; title?: string; retryLabel?: string
+}) {
   return (
     <Card className="mx-auto max-w-2xl p-6 sm:p-8">
-      <h1 className="text-xl font-bold text-fg">We couldn't finish this one</h1>
+      <h1 className="text-xl font-bold text-fg">{title}</h1>
       <p className="mt-2 text-sm text-fg-muted">{message}</p>
       {error && (
         <Alert tone="warning" className="mt-4">
@@ -126,7 +128,7 @@ export function StoppedCard({ message, onRetry, busy, error }: { message: string
       )}
       <div className="mt-5 flex flex-wrap gap-2">
         <Button loading={busy} onClick={onRetry}>
-          Try again
+          {retryLabel}
         </Button>
         <Link to="/app" className="inline-flex min-h-10 items-center rounded-lg border border-line bg-white px-4 text-sm font-semibold text-fg hover:bg-surface-muted">
           Go to dashboard

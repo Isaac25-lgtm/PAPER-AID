@@ -1,15 +1,14 @@
 import { HandCoins, NotebookPen, Plus } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router'
-import { Button, ButtonLink } from '../../components/ui/button'
-import { Input, Select, TextArea } from '../../components/ui/field'
-import { Alert, Card, EmptyState, PageHeader, Skeleton } from '../../components/ui/primitives'
+import { Link, Navigate, useSearchParams } from 'react-router'
+import { ButtonLink } from '../../components/ui/button'
+import { Alert, EmptyState, PageHeader, Skeleton } from '../../components/ui/primitives'
 import { DataError, useData } from '../../lib/data'
 import { formatDate } from '../../lib/format'
 import { INVITE_ONLY_REASON, NOT_CONFIGURED_REASON } from '../../lib/services'
 import { useTitle } from '../../lib/use-title'
-import type { Variant, Work, WorkCitation, WorkKind } from '../../lib/work-types'
-import { KIND_LABELS, KIND_VARIANTS, MODES, ReadinessBadge, VARIANT_LABELS } from './shared'
+import type { Work, WorkKind } from '../../lib/work-types'
+import { KIND_LABELS, ReadinessBadge, VARIANT_LABELS } from './shared'
 
 /** Coursework, or Funding (concept notes and funding proposals): the two new sections. */
 export type Section = 'COURSEWORK' | 'FUNDING'
@@ -55,7 +54,7 @@ export function WorksPage() {
         title={SECTION_TEXT[section].title}
         description={SECTION_TEXT[section].description}
         actions={offered.map((k) => (
-          <ButtonLink key={k} to={`/app/works/new?kind=${k}`} size="sm" variant={k === 'FUNDING_PROPOSAL' ? 'secondary' : 'primary'}>
+          <ButtonLink key={k} to={START[k]} size="sm" variant={k === 'FUNDING_PROPOSAL' ? 'secondary' : 'primary'}>
             <Plus className="size-4" aria-hidden /> New {KIND_LABELS[k].toLowerCase()}
           </ButtonLink>
         ))}
@@ -78,7 +77,7 @@ export function WorksPage() {
         <EmptyState
           icon={section === 'COURSEWORK' ? <NotebookPen className="size-6" aria-hidden /> : <HandCoins className="size-6" aria-hidden />}
           title="Nothing here yet"
-          action={offered[0] && <ButtonLink to={`/app/works/new?kind=${offered[0]}`}><Plus className="size-4" aria-hidden /> Start</ButtonLink>}
+          action={offered[0] && <ButtonLink to={START[offered[0]]}><Plus className="size-4" aria-hidden /> Start</ButtonLink>}
         >
           {section === 'COURSEWORK'
             ? 'Start from your assignment question. PaperAid reads it and your brief, shows what it understood, and plans the answer with you before anything is written.'
@@ -106,88 +105,11 @@ export function WorksPage() {
   )
 }
 
+const START: Record<WorkKind, string> = { COURSEWORK: '/app/start/coursework', CONCEPT_NOTE: '/app/start/concept-note', FUNDING_PROPOSAL: '/app/start/funding' }
+
+/** New work starts with one Start (owner decision 2026-10-01): the earlier creation page is not offered. */
 export function NewWorkPage() {
   const [params] = useSearchParams()
   const kind = (['CONCEPT_NOTE', 'COURSEWORK', 'FUNDING_PROPOSAL'].includes(params.get('kind') ?? '') ? params.get('kind') : 'COURSEWORK') as WorkKind
-  useTitle(`New ${KIND_LABELS[kind].toLowerCase()}`)
-  const data = useData()
-  const navigate = useNavigate()
-  const variants = KIND_VARIANTS[kind]
-  const [variant, setVariant] = useState<Variant>((params.get('variant') as Variant) ?? variants[0])
-  const [mode, setMode] = useState(MODES[kind][1]?.id ?? '')
-  const [title, setTitle] = useState('')
-  const [description, setDescription] = useState('')
-  const [citation, setCitation] = useState<WorkCitation>('APA7')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const blocked = reason(data.config.availability[kind])
-  const coursework = kind === 'COURSEWORK'
-
-  const create = async () => {
-    setBusy(true)
-    setError(null)
-    try {
-      const work = await data.works.create(kind, variant, mode, { title, description, answers: {}, experience: '' }, citation)
-      navigate(`/app/works/${work.id}`)
-    } catch (e) {
-      setError(e instanceof DataError ? e.message : 'We could not start this.')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <>
-      <PageHeader
-        title={`New ${KIND_LABELS[kind].toLowerCase()}`}
-        description={
-          coursework
-            ? 'Tell PaperAid what you have been asked to write. On the next page you can add your brief, rubric and readings.'
-            : 'Tell PaperAid about your idea. On the next page you can add the call or template, and PaperAid reads its requirements.'
-        }
-      />
-      {blocked ? (
-        <Alert tone="info">{blocked}</Alert>
-      ) : (
-        <Card className="max-w-3xl space-y-4 p-5">
-          <Select label={coursework ? 'Type of assignment' : 'What are you preparing?'} value={variant} onChange={(e) => setVariant(e.target.value as Variant)}>
-            {variants.map((v) => (
-              <option key={v} value={v}>
-                {VARIANT_LABELS[v]}
-              </option>
-            ))}
-          </Select>
-          {MODES[kind].length > 0 && (
-            <Select label="Length" value={mode} onChange={(e) => setMode(e.target.value)} hint="A call's own limit always replaces this.">
-              {MODES[kind].map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.label}
-                </option>
-              ))}
-            </Select>
-          )}
-          <Input label={coursework ? 'Title or topic' : 'Project name or topic'} value={title} maxLength={300} onChange={(e) => setTitle(e.target.value)} />
-          <TextArea
-            label={coursework ? 'The assignment question, word for word' : 'Your idea: the problem, who it affects and what you propose'}
-            rows={5}
-            maxLength={8000}
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            hint={coursework ? 'Every part of it. You can also upload the brief on the next page.' : 'Your own words are enough. PaperAid finds the evidence.'}
-          />
-          {coursework && (
-            <Select label="Referencing style" value={citation} onChange={(e) => setCitation(e.target.value as WorkCitation)} hint="Your brief's style always wins if it names one.">
-              <option value="APA7">APA 7th edition</option>
-              <option value="APA6">APA 6th edition</option>
-              <option value="HARVARD">Harvard</option>
-            </Select>
-          )}
-          {error && <Alert tone="danger">{error}</Alert>}
-          <Button size="lg" loading={busy} disabled={title.trim().length < 3} onClick={create}>
-            Continue
-          </Button>
-        </Card>
-      )}
-    </>
-  )
+  return <Navigate to={START[kind]} replace />
 }

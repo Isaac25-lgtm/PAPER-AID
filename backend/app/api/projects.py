@@ -216,9 +216,11 @@ def request_changes_with_document(project_id: str, number: int, instruction: str
 
 
 @router.post("/{project_id}/start", response_model=ProjectView)
-def start(project_id: str, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> ProjectView:
-    """One Start (owner decision 2026-10-01): plan, then the first chapter, by itself."""
-    return projects.start(rt, user, project_id)
+def start(project_id: str, accept_sampling: bool = Body(default=False, embed=True, alias="acceptSampling"), user: User = Depends(current_user),
+          rt: Runtime = Depends(get_runtime)) -> ProjectView:
+    """One Start (owner decision 2026-10-01): plan, then the first chapter, by itself. `acceptSampling`:
+    the student ticked the standard sample-size settings."""
+    return projects.start(rt, user, project_id, accept_sampling)
 
 
 @router.get("/{project_id}/framework.png")

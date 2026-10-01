@@ -300,6 +300,9 @@ class ProjectView(Camel):
     # concept paper) by itself; `auto_failure` says why it stopped without one.
     auto: bool = False
     auto_failure: str = ""
+    # The student ticked "use the standard sample-size settings" at Start (Codex audit 2026-10-01): only
+    # then is an assumed setting acknowledged for them.
+    sampling_consent: bool = False
     framework: str = ""  # the conceptual framework figure in words (computed for the view; "" when the study has none)
     plan_review: PlanReview | None = None  # the final reviewer's decision on the delivered plan (None: older plans)
     candidate_review: PlanReview | None = None  # the same for a candidate plan

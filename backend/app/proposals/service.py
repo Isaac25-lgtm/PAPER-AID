@@ -1018,6 +1018,9 @@ def delete(rt: Runtime, user: User, project_id: str) -> None:
         return  # already gone (or never the user's): idempotent, and reveals nothing
     if not _erase_project(rt, p) and rt.store.get_project(p.id) is not None:
         raise Conflict("A step is running for this proposal. Delete it when the step finishes.", code="STEP_RUNNING")
+    from app.works.service import unreserve
+
+    unreserve(rt, user, f"project:{project_id}", "Reserved for a deleted proposal: returned")
     log(logger, logging.INFO, "project deleted", projectId=project_id)
 
 
@@ -1035,13 +1038,14 @@ def sample_size_preview(sample: SampleSize) -> dict[str, object]:
 # document's price.
 
 NOT_FINISHED = "We couldn't finish this one: PaperAid could not make a plan it was satisfied with. You were not charged. Please try again."
+SAMPLING_NEEDED = "PaperAid needs one answer to continue: may it use the standard sample-size settings where you gave no figures?"
 SAMPLING_CONSENT = "Standard sample-size settings (95% confidence, 5% margin, 50% proportion) where the student gave none, as stated when they started."
 
 
-def start(rt: Runtime, user: User, project_id: str) -> ProjectView:
+def start(rt: Runtime, user: User, project_id: str, accept_sampling: bool = False) -> ProjectView:
     """Start, or continue after a stop: plan (bundled) if there is no approved plan, otherwise write the
     first document."""
-    from app.works.service import check_credits  # the same credit and minimum check for every service
+    from app.works.service import check_credits, reserve, unreserve  # the same credit checks and reservation for every service
 
     p = _owned(rt, user, project_id)
     _require_ai(rt, user)
@@ -1055,12 +1059,25 @@ def start(rt: Runtime, user: User, project_id: str) -> ProjectView:
 
     def begin(q: Project) -> Project:
         q.auto, q.auto_failure = True, ""
+        q.sampling_consent = q.sampling_consent or accept_sampling
         return q
 
     p = _change(rt, user, project_id, begin)
+    if p.plan is not None and p.plan_status != "APPROVED" and p.plan_review is not None and p.plan_review.outcome == "APPROVED" \
+            and p.plan.sampling_assumed and p.sampling_consent and p.jobs:
+        # stopped only for the sample-size settings, now confirmed: continue from the plan already made
+        reserve(rt, user, f"project:{project_id}", price)
+        continue_after_plan(rt, project_id, p.jobs[-1])
+        return view(rt, _owned(rt, user, project_id))
     step: Step = first if p.plan is not None and p.plan_status == "APPROVED" else "PLAN"
-    quoted = quote_step(rt, user, project_id, step, "", bundled=True)
-    submit_step(rt, user, project_id, quoted.job.id, quoted.quote.id)
+    key = f"project:{project_id}"
+    reserve(rt, user, key, price)
+    try:
+        quoted = quote_step(rt, user, project_id, step, "", bundled=True)
+        submit_step(rt, user, project_id, quoted.job.id, quoted.quote.id)
+    except AppError:
+        unreserve(rt, user, key, "Reserved for your document: returned, as it did not start")
+        raise
     return view(rt, _owned(rt, user, project_id))
 
 
@@ -1074,16 +1091,26 @@ def continue_after_plan(rt: Runtime, project_id: str, plan_job: str) -> None:
     owner = User(uid=p.owner_uid, email=p.owner_email, is_admin=False, verified=True)
 
     def stop(message: str) -> None:
+        from app.works.service import unreserve
+
         def apply(q: Project) -> Project:
             q.auto_failure = message
             return q
 
         _change(rt, owner, project_id, apply)
+        unreserve(rt, owner, f"project:{project_id}")
 
     approved = (p.plan is not None and p.plan_review is not None and p.plan_review.outcome == "APPROVED"
                 and not rulebook.plan_problems(p.rulebook, p.plan))
     if not approved:
-        stop(NOT_FINISHED)
+        objections = list(p.plan_review.objections) if p.plan_review is not None else []
+        problems = rulebook.plan_problems(p.rulebook, p.plan) if p.plan is not None else []
+        why = [*problems, *objections][:2]
+        stop(NOT_FINISHED + (f" What it could not settle: {' '.join(why)[:400]}" if why else ""))
+        return
+    assert p.plan is not None
+    if p.plan.sampling_assumed and not p.sampling_consent:
+        stop(SAMPLING_NEEDED + " " + "; ".join(p.plan.sampling_assumed))
         return
 
     def approve(q: Project) -> Project:

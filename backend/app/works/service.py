@@ -29,6 +29,7 @@ from app.jobs.models import Camel, Job, JobEvent, JobStatus, JobView, Quote, Rea
 from app.jobs.service import ACCOUNT_CLOSING, User, _erase_work, _rate_limit, availability, step_running, submit
 from app.latex.convert import convert as to_latex
 from app.latex.package import compile_pdf
+from app.pricing import credits
 from app.pricing.credits import InsufficientCredits
 from app.pricing.quote import bound_quote, fixed_price
 from app.proposals import evidence as ev
@@ -184,6 +185,11 @@ def view(rt: Runtime, work: Work) -> WorkView:
         out.budget_totals = {"total": t.total, "direct": t.direct, "indirect": t.indirect, "byCategory": t.by_category, "byYear": {str(y): v for y, v in t.by_year.items()},
                              "lines": {li.id: budget_engine.line_total(li) for li in work.budget.lines}, "currency": work.budget.currency}
     out.active_job = work.active_job if step_running(rt, work) else None
+    if out.needs_read and out.active_job is None and work.jobs and not work.auto_failure:
+        # The documents could not be read (Codex audit 2026-10-01: the page waited for ever): say why.
+        last = rt.store.get(work.jobs[-1])
+        if last is not None and last.selection.work == "READ" and last.status in (JobStatus.FAILED, JobStatus.CANCELLED):
+            out.auto_failure = last.failure.user_message if last.failure else "PaperAid could not read your documents. Nothing was charged."
     if work.auto and not work.documents and out.active_job is None and not work.auto_failure and work.jobs:
         last = rt.store.get(work.jobs[-1])
         if last is not None and last.status == JobStatus.FAILED and last.failure is not None:
@@ -509,7 +515,8 @@ def save_results(rt: Runtime, user: User, work_id: str, model: ResultsModel, bas
         if k.kind != "FUNDING_PROPOSAL":
             raise AppError("Only funding proposals have a Results Model.", code="NOT_FUNDING")
         changed = k.results is None or _reviewed_part(model) != _reviewed_part(k.results)
-        k.results, k.results_status, k.results_version = model, "DRAFT", k.results_version + 1
+        # Only the applicant's own figures changed: what was approved still stands (Codex audit 2026-10-01).
+        k.results, k.results_status, k.results_version = model, "DRAFT" if changed else k.results_status, k.results_version + 1
         if changed:
             k.results_review = edited_decision(k.results_review, k.results_version)
         return k
@@ -922,6 +929,7 @@ def delete(rt: Runtime, user: User, work_id: str) -> None:
         return
     if not _erase_work(rt, k) and rt.store.get_work(k.id) is not None:
         raise Conflict("A step is running for this work. Delete it when the step finishes.", code="STEP_RUNNING")
+    unreserve(rt, user, f"work:{work_id}", "Reserved for a deleted work: returned")
     log(logger, logging.INFO, "work deleted", workId=work_id)
 
 
@@ -959,11 +967,30 @@ def _document_price(rt: Runtime, spec: ResolvedSpec) -> int:
     return fixed_price(rt.settings, band, None) + (fixed_price(rt.settings, plan, None) if plan in rt.settings.fixed_tokens else 0)
 
 
+def reserve(rt: Runtime, user: User, key: str, amount: int) -> None:
+    """Set the document's price aside at Start (Codex audit 2026-10-01): nothing else can spend it while
+    the plan runs; the document's own step then holds it in the same transaction that starts it."""
+    if rt.settings.credits_enabled and amount > 0:
+        rt.store.update_wallet(user.uid, user.email, lambda w: credits.reserve(w, key, amount, "Reserved for your document"))
+
+
+def unreserve(rt: Runtime, user: User, key: str, note: str = "Reserved for your document: returned, as nothing was delivered") -> None:
+    if rt.settings.credits_enabled:
+        def give_back(w):
+            credits.release_reservation(w, key, note)
+            return w
+
+        rt.store.update_wallet(user.uid, user.email, give_back)
+
+
 def auto_read(rt: Runtime, user: User, work_id: str) -> WorkView:
-    """Read the documents the student just added (part of one Start, no charge of its own)."""
+    """Read the documents the student just added (part of one Start, no charge of its own). Only for a
+    student whose credits could pay for the document (Codex audit 2026-10-01: no AI before that)."""
     k = _owned(rt, user, work_id)
     if not k.sources or all(s.id in set(k.read_sources) for s in k.sources):
         return view(rt, k)
+    spec = spec_of(rt, k)
+    check_credits(rt, user, k.kind, _document_price(rt, spec) if spec is not None and spec.target_words else 0)
     quoted = quote_step(rt, user, work_id, "READ", "", bundled=True)
     submit_step(rt, user, work_id, quoted.job.id, quoted.quote.id)
     return view(rt, _owned(rt, user, work_id))
@@ -994,8 +1021,14 @@ def start(rt: Runtime, user: User, work_id: str) -> WorkView:
     k = _change(rt, user, work_id, begin)
     ready = k.plan is not None and k.plan_status == "APPROVED" and (k.kind != "FUNDING_PROPOSAL" or k.results_status == "APPROVED")
     step: Step = "DRAFT" if ready and not k.documents else "PLAN"
-    quoted = quote_step(rt, user, work_id, step, "", bundled=True)
-    submit_step(rt, user, work_id, quoted.job.id, quoted.quote.id)
+    key = f"work:{work_id}"
+    reserve(rt, user, key, _document_price(rt, spec))
+    try:
+        quoted = quote_step(rt, user, work_id, step, "", bundled=True)
+        submit_step(rt, user, work_id, quoted.job.id, quoted.quote.id)
+    except AppError:
+        unreserve(rt, user, key, "Reserved for your document: returned, as it did not start")
+        raise
     return view(rt, _owned(rt, user, work_id))
 
 
@@ -1018,9 +1051,11 @@ def continue_after_plan(rt: Runtime, work_id: str, plan_job: str) -> None:
             return w
 
         _change(rt, owner, work_id, apply)
+        unreserve(rt, owner, f"work:{work_id}")
 
     if not approved:
-        stop(NOT_FINISHED)
+        objections = [o for d in decisions if d is not None and d.outcome != "APPROVED" for o in d.objections]
+        stop(NOT_FINISHED + (f" What it could not settle: {' '.join(objections[:2])[:400]}" if objections else ""))
         return
 
     def approve(w: Work) -> Work:
@@ -1038,18 +1073,43 @@ def continue_after_plan(rt: Runtime, work_id: str, plan_job: str) -> None:
         stop(f"The draft could not start: {exc.message}")
 
 
+BUDGET_FIGURES = {"quantity", "unit_cost", "entered_total"}
+# The checks a change of figures can change (Codex audit 2026-10-01: every one is worked out again);
+# page limits keep their measured result, since figures barely move the length.
+FIGURE_VALIDATORS = ("results.", "budget.", "staff.", "timeline.", "tables.", "numbers.")
+
+
+def _same_but_figures(doc: WorkDocument, k: Work) -> bool:
+    """Only the applicant's figures differ from what the document was written from."""
+    if (doc.results_snapshot is None) != (k.results is None) or (doc.budget_snapshot is None) != (k.budget is None):
+        return False
+    if k.results is not None and doc.results_snapshot is not None and _reviewed_part(k.results) != _reviewed_part(doc.results_snapshot):
+        return False
+    if k.budget is not None and doc.budget_snapshot is not None:
+        def lines(b: Budget) -> list[dict[str, Any]]:
+            return [li.model_dump(exclude=BUDGET_FIGURES) for li in b.lines]
+
+        if lines(k.budget) != lines(doc.budget_snapshot) or k.budget.currency != doc.budget_snapshot.currency:
+            return False
+    return True
+
+
 def apply_figures(rt: Runtime, user: User, work_id: str) -> WorkView:
     """The student's figures (targets, baselines, quantities, costs) go into the current document as a
-    new version: the same text, its number tokens, tables and figure checks from the figures now
-    saved. Code only, no AI, no charge."""
+    new version: the same text, its number tokens, tables and every check that depends on figures,
+    worked out again from the figures now saved. Code only, no AI, no charge. Anything other than
+    figures changed since the document was written is refused here: that is a change to ask for."""
     k = _owned(rt, user, work_id)
     if step_running(rt, k):
         raise Conflict("PaperAid is working on this. Try again when it finishes.", code="STEP_RUNNING")
     doc = _doc(rt, k)
     if doc is None:
         raise AppError("Write the document first.", code="NOTHING_TO_EXPORT")
+    if not _same_but_figures(doc, k):
+        raise AppError("Only figures can be added here: targets, baselines, quantities and costs. For anything else, ask for changes.", code="NOT_ONLY_FIGURES")
     spec = doc.spec_snapshot or spec_of(rt, k)
     assert spec is not None
+    seen = (k.results_version, k.budget_version, k.current)
     tokens = numbers.values(spec, k.results, k.budget, k.inputs)
     for section in doc.sections:
         for text in [*section.paragraphs, *[c for row in (section.table or []) for c in row]]:
@@ -1058,7 +1118,8 @@ def apply_figures(rt: Runtime, user: User, work_id: str) -> WorkView:
     library_items = load_library(rt.files, k.evidence_files)
     updated = doc.model_copy(update={"results_snapshot": k.results, "budget_snapshot": k.budget, "number_values": {key: [v[0], v[1]] for key, v in tokens.items()}})
     context = Context(spec=spec, stage="FINAL", inputs=k.inputs, plan=k.plan, results=k.results, budget=k.budget, doc=updated, library=library_items, tokens=tokens)
-    fresh = {i.id: i for i in compliance.report(context, ("DRAFT", "FINAL", "PLAN")) if i.id in compliance.STUDENT_FIGURES}
+    affected = {r["id"] for r in library.rules_for(spec.kind) if r["check"].get("validator", "").startswith(FIGURE_VALIDATORS)} | compliance.STUDENT_FIGURES
+    fresh = {i.id: i for i in compliance.report(context, ("DRAFT", "FINAL", "PLAN")) if i.id in affected}
     items = [fresh.get(i.id, i) for i in doc.readiness] + [i for rid, i in fresh.items() if rid not in {x.id for x in doc.readiness}]
     updated.readiness = items
     updated.status = compliance.overall(items, spec.exploratory)  # type: ignore[assignment]
@@ -1069,10 +1130,17 @@ def apply_figures(rt: Runtime, user: User, work_id: str) -> WorkView:
     rt.files.put(docx_path, data, DOCX)
 
     def publish(w: Work) -> Work:
+        if (w.results_version, w.budget_version, w.current) != seen:  # changed in another tab while this was built
+            raise Conflict("Your figures or document changed meanwhile. Reload and add them again.", code="FIGURES_CHANGED")
         version = len(w.documents) + 1
         w.documents.append(StoredDocVersion(version=version, job_id=f"figures_{tag}", words=updated.words, status=updated.status, path=doc_path, docx_path=docx_path,
                                             note="Your figures added"))
         w.current = version
         return w
 
-    return view(rt, _change(rt, user, work_id, publish))
+    try:
+        return view(rt, _change(rt, user, work_id, publish))
+    except Conflict:
+        rt.files.delete(doc_path)
+        rt.files.delete(docx_path)
+        raise

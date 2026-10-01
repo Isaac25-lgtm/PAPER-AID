@@ -53,7 +53,7 @@ from app.jobs.models import (
     utcnow,
 )
 from app.pricing import credits
-from app.pricing.billing import hold_for_job, refund_job, release_hold
+from app.pricing.billing import hold_for_job, is_bundled_document, refund_job, release_hold, reservation_key
 from app.pricing.quote import ai_cap_usd, bound_quote, estimate_charged, estimate_scan_usd, needs_estimate, with_margin, work_prices_set
 from app.proposals.models import Project, moved_path
 from app.runtime import Runtime
@@ -627,6 +627,9 @@ def submit(rt: Runtime, user: User, job_id: str, quote_id: str, project_gate: Pr
         else:
             j.budget_usd = max(0, q.amount - q.paid - q.fixed_ugx) / q.ugx_per_usd / q.multiplier if q.ugx_per_usd and q.multiplier else 0.0
         if settings.credits_enabled:
+            key = reservation_key(j)
+            if key and is_bundled_document(j):  # the credits Start reserved become this document's hold, in one transaction
+                credits.release_reservation(w, key, "Reserved credits now held for your document")
             held = hold_for_job(j, w)  # raises InsufficientCredits, which aborts the whole transaction
             state.transition(j, JobStatus.QUEUED, f"Queued ({credits.tokens(held)} held)")
         else:

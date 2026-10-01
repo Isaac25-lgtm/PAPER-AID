@@ -1,6 +1,6 @@
 import { FileSearch, GraduationCap, Plus } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router'
+import { Link, Navigate, useSearchParams } from 'react-router'
 import { Button, ButtonLink } from '../../components/ui/button'
 import { Input, Select, TextArea } from '../../components/ui/field'
 import { Alert, Card, EmptyState, PageHeader, Skeleton } from '../../components/ui/primitives'
@@ -40,10 +40,10 @@ export function ProjectsPage() {
         actions={
           !blocked && (
             <div className="flex flex-wrap gap-2">
-              <ButtonLink to="/app/projects/new?goal=CONCEPT" variant="secondary">
+              <ButtonLink to="/app/start/concept-paper" variant="secondary">
                 <Plus className="size-4" aria-hidden /> New concept note
               </ButtonLink>
-              <ButtonLink to="/app/projects/new">
+              <ButtonLink to="/app/start/proposal">
                 <Plus className="size-4" aria-hidden /> New proposal
               </ButtonLink>
             </div>
@@ -83,7 +83,7 @@ export function ProjectsPage() {
           title="No proposals yet"
           action={
             !blocked && (
-              <ButtonLink to="/app/projects/new">
+              <ButtonLink to="/app/start/proposal">
                 <Plus className="size-4" aria-hidden /> Start a proposal
               </ButtonLink>
             )
@@ -113,21 +113,6 @@ export function ProjectsPage() {
     </>
   )
 }
-
-const EMPTY_INPUTS: ProposalInputs = {
-  topic: '',
-  level: 'MASTERS',
-  programme: '',
-  faculty: '',
-  studyArea: '',
-  population: '',
-  studyType: null,
-  notes: '',
-  populationSize: null,
-  populationSource: '',
-  expectedParticipants: null,
-}
-const EMPTY_TITLE: TitlePage = { studentName: '', regNumber: '', supervisor: '', submissionDate: '' }
 
 /** The study details and title page, used when creating a project and on its Details tab. */
 export function DetailsForm({
@@ -250,41 +235,8 @@ export function DetailsForm({
   )
 }
 
+/** New proposals start with one Start (owner decision 2026-10-01): the earlier creation page is not offered. */
 export function NewProjectPage() {
   const [params] = useSearchParams()
-  const concept = params.get('goal') === 'CONCEPT'
-  useTitle(concept ? 'New concept note' : 'New proposal')
-  const data = useData()
-  const navigate = useNavigate()
-  const [rulebook, setRulebook] = useState<Rulebook | null>(null)
-  useEffect(() => {
-    data.projects.rulebook().then(setRulebook).catch(() => setRulebook(null))
-  }, [data])
-  return (
-    <>
-      <PageHeader
-        title={concept ? 'New research concept note' : 'New research proposal'}
-        description={
-          concept ? (
-            <>Tell PaperAid about your study. It researches the evidence and drafts a plan for you to approve, then writes your concept paper. You can continue into the full proposal later.</>
-          ) : (
-            <>Tell PaperAid about your study. It researches the evidence and drafts a plan for you to edit and approve before any chapter is written.</>
-          )
-        }
-      />
-      <div className="max-w-3xl">
-        <DetailsForm
-          initial={EMPTY_INPUTS}
-          titlePage={EMPTY_TITLE}
-          citation={rulebook?.defaultCitation ?? 'APA6'}
-          rulebook={rulebook}
-          submitLabel={concept ? 'Create concept note' : 'Create proposal'}
-          onSubmit={async (inputs, titlePage, citation) => {
-            const project = await data.projects.create(inputs, titlePage, citation, concept ? 'CONCEPT' : 'FULL')
-            navigate(`/app/projects/${project.id}`)
-          }}
-        />
-      </div>
-    </>
-  )
+  return <Navigate to={params.get('goal') === 'CONCEPT' ? '/app/start/concept-paper' : '/app/start/proposal'} replace />
 }

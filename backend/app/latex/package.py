@@ -6,6 +6,7 @@ hidden: the .tex is still delivered and the job is marked as partial.
 """
 
 import io
+import os
 import shutil
 import subprocess
 import tempfile
@@ -15,6 +16,18 @@ from pathlib import Path
 from app.latex.convert import Result, convert
 
 COMPILE_TIMEOUT_SEC = 90
+
+
+def _tex_env(engine: str, folder: str) -> dict[str, str]:
+    """A minimal environment: the engine, a private writable home and no file access outside the
+    project. Windows also needs its system variables, without which MiKTeX cannot start (Codex audit
+    2026-10-01); nothing else from the server's environment is passed."""
+    env = {"PATH": str(Path(engine).parent), "HOME": folder, "TEXMFVAR": folder, "openout_any": "p", "openin_any": "p"}
+    if os.name == "nt":
+        for key in ("SYSTEMROOT", "WINDIR", "TEMP", "TMP", "USERPROFILE", "LOCALAPPDATA", "APPDATA", "PROGRAMDATA"):
+            if os.environ.get(key):
+                env[key] = os.environ[key]
+    return env
 
 
 def compile_pdf(result: Result) -> tuple[bytes | None, str]:
@@ -36,14 +49,18 @@ def compile_pdf(result: Result) -> tuple[bytes | None, str]:
                 capture_output=True,
                 text=True,
                 timeout=COMPILE_TIMEOUT_SEC,
-                env={"PATH": str(Path(engine).parent), "HOME": folder, "TEXMFVAR": folder, "openout_any": "p", "openin_any": "p"},
+                env=_tex_env(engine, folder),
             )
         except subprocess.TimeoutExpired:
             return None, "compiling took too long"
         pdf = root / "main.pdf"
         if run.returncode == 0 and pdf.exists():
             return pdf.read_bytes(), ""
-        error = next((line[1:].strip() for line in run.stdout.splitlines() if line.startswith("!")), "unknown error")
+        # TeX's own error is a "!" line on stdout; a distribution that fails before TeX runs (MiKTeX on
+        # Windows) says why on stderr (Codex audit 2026-10-01: it was reported as "unknown error").
+        error = next((line[1:].strip() for line in run.stdout.splitlines() if line.startswith("!")), "")
+        if not error:
+            error = next((line.strip() for line in reversed(run.stderr.splitlines()) if line.strip()), "") or f"pdflatex exited with {run.returncode}"
         return None, error[:200]
 
 

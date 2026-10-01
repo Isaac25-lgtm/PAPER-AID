@@ -722,7 +722,9 @@ def stage_auditing(ctx: "StageContext") -> None:
         missing = [k for k in items if k not in approved] if inp.step in ("CHAPTER", "COMPLETE") else []
         if base is None and (not approved or (missing and not runner._engine.partial_chapters)):
             raise PermanentStageError(
-                "DOCUMENT_NOT_APPROVED", "PaperAid could not write and approve every section of this draft. No document was released and nothing was charged. Please try again.",
+                "DOCUMENT_NOT_APPROVED",
+                "PaperAid could not finish these sections to its standard: " + ", ".join(f"{items[k]['number']} {items[k]['heading']}" for k in items if k in unresolved)[:300]
+                + ". No document was released and nothing was charged. Please try again.",
                 # Admin-only: which sections and why, so the next failure is diagnosed from its record.
                 (f"{len(approved)} of {len(items)} sections approved; not approved: "
                  + "; ".join(f"{items[k]['heading']}: {unresolved[k][0][:90]}" for k in items if k in unresolved))[:470],

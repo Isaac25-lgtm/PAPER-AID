@@ -308,6 +308,10 @@ class Wallet(Camel):
     grant_ops: list[str] = []  # every manual grant's operation id, kept for good (not trimmed like entries)
     closing: bool = False  # the account is being deleted: nothing new may start or move credits
     ledger_backfilled: bool = False  # entries from before the complete history was kept were copied into it
+    # Credits reserved for a document started with one Start (owner decision 2026-10-01; Codex audit):
+    # "work:<id>" or "project:<id>" → amount, held from Start until the document's own step holds it,
+    # or returned when nothing is delivered.
+    reservations: dict[str, int] = {}
 
 
 class QuoteResponse(Camel):

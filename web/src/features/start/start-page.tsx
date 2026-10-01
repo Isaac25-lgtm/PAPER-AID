@@ -59,10 +59,14 @@ const TITLES: Record<WorkKind, [string, string]> = {
 }
 /** Questions that decide the document, asked as required on page 2 (owner decision 2026-10-01). */
 const MUST_ANSWER: Record<WorkKind, string[]> = {
-  COURSEWORK: ['word_limit', 'level', 'citation_style', 'ai_policy'],
+  COURSEWORK: ['level', 'citation_style', 'ai_policy'],
   CONCEPT_NOTE: ['applicant', 'geography', 'duration_months', 'currency'],
   FUNDING_PROPOSAL: ['applicant', 'geography', 'amount_requested', 'duration_months', 'currency'],
 }
+/** Asked up front, but optional (owner request 2026-10-01: the coursework word limit is suggested, not demanded). */
+const UP_FRONT: Record<WorkKind, string[]> = { COURSEWORK: ['word_limit'], CONCEPT_NOTE: [], FUNDING_PROPOSAL: [] }
+const COMMON_LIMITS = ['1000', '1500', '2000', '2500', '3000', '4000', '5000']
+
 const COVER: [string, string][] = [
   ['cover:name', 'Your name'],
   ['cover:reg', 'Registration number'],
@@ -245,7 +249,8 @@ function WorkPageTwo({ work, onChange }: { work: Work; onChange: (w: Work) => vo
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [tried, setTried] = useState(false)
-  const reading = work.needsRead || Boolean(work.activeJob)
+  const readFailed = work.needsRead && !work.activeJob && Boolean(work.autoFailure)
+  const reading = Boolean(work.activeJob) || (work.needsRead && !readFailed)
 
   // PaperAid is still reading the documents: check again until it has finished.
   useEffect(() => {
@@ -256,6 +261,45 @@ function WorkPageTwo({ work, onChange }: { work: Work; onChange: (w: Work) => vo
     return () => window.clearInterval(timer)
   }, [data, work.id, reading, onChange])
 
+  if (readFailed)
+    return (
+      <Shell title="We couldn't read your documents" step={2}>
+        <Card className="space-y-4 p-6">
+          <p className="text-sm text-fg-muted">{work.autoFailure}</p>
+          {error && <Alert tone="warning">{error}</Alert>}
+          <div className="flex flex-wrap gap-2">
+            <Button loading={busy} onClick={async () => {
+              setBusy(true)
+              setError(null)
+              try {
+                onChange(await data.works.read(work.id))
+              } catch (e) {
+                setError(e instanceof DataError ? e.message : 'It could not start. Try again.')
+              } finally {
+                setBusy(false)
+              }
+            }}>
+              Try reading again
+            </Button>
+            <Button variant="secondary" disabled={busy} onClick={async () => {
+              setBusy(true)
+              setError(null)
+              try {
+                let w = work
+                for (const source of work.sources) w = await data.works.removeSource(work.id, source.id)
+                onChange(w)
+              } catch (e) {
+                setError(e instanceof DataError ? e.message : 'That did not work. Try again.')
+              } finally {
+                setBusy(false)
+              }
+            }}>
+              Continue without them
+            </Button>
+          </div>
+        </Card>
+      </Shell>
+    )
   if (reading)
     return (
       <Shell title="Reading your documents" step={2}>
@@ -269,21 +313,30 @@ function WorkPageTwo({ work, onChange }: { work: Work; onChange: (w: Work) => vo
   const spec = work.spec
   if (!spec) return <Alert tone="info">PaperAid is working out the requirements.</Alert>
   const must = new Set(MUST_ANSWER[work.kind])
-  const value = (id: string) => answers[id] ?? work.inputs.answers[id] ?? ''
+  const upFront = new Set(UP_FRONT[work.kind])
+  // The question itself, when PaperAid still needs it, starts from what the student typed on page 1.
+  const value = (id: string) => answers[id] ?? work.inputs.answers[id] ?? (id === 'task' ? work.inputs.description : '')
   const skippable = (q: Question) => q.gate === 'ASK_ONCE' && !must.has(q.id)
-  const shown = spec.questions.filter((q) => q.id !== 'task' && q.id !== 'confirm:all' && (!q.answered || must.has(q.id) || q.id in answers || q.id.startsWith('eligible:')))
+  // A question the server still needs is never hidden (live, 2026-10-01: a tester was refused for a field this page did not show).
+  const shown = spec.questions.filter((q) => (q.id !== 'task' || !q.answered) && q.id !== 'confirm:all' && (!q.answered || must.has(q.id) || upFront.has(q.id) || q.id in answers || q.id.startsWith('eligible:')))
   const required = (q: Question) => q.gate === 'BLOCK' || must.has(q.id)
   const missing = shown.filter((q) => required(q) && !value(q.id) && !(q.answered && must.has(q.id)))
   const confirmAll = spec.questions.some((q) => q.id === 'confirm:all' && !q.answered)
   const found = spec.requirements.filter((r) => r.authority === 'EXTERNAL_MANDATORY' && r.quote)
 
+  const showProblem = () => window.setTimeout(() => document.querySelector('[aria-invalid="true"]')?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 50)
   const start = async () => {
     setTried(true)
-    if (missing.length || (confirmAll && !confirmed)) return
+    if (missing.length || (confirmAll && !confirmed)) {
+      showProblem()
+      return
+    }
     setBusy(true)
     setError(null)
     try {
-      const given = { ...Object.fromEntries(Object.entries(answers).filter(([, v]) => v.trim())), ...(confirmAll ? { 'confirm:all': 'yes' } : {}) }
+      const given: Record<string, string> = Object.fromEntries(Object.entries(answers).filter(([, v]) => v.trim()))
+      if (shown.some((q) => q.id === 'task') && value('task').trim()) given.task = value('task').trim()
+      if (confirmAll) given['confirm:all'] = 'yes'
       const answered = await data.works.answer(work.id, given, work.specVersion, true)
       onChange(answered)
       if (work.kind === 'COURSEWORK' && answered.spec?.aiPolicy !== 'BANNED' && aiNote !== answered.aiNote) await data.works.setAiNote(work.id, aiNote)
@@ -293,6 +346,7 @@ function WorkPageTwo({ work, onChange }: { work: Work; onChange: (w: Work) => vo
       setError(e instanceof DataError ? e.message : 'We could not start. Try again.')
       const fresh = await data.works.get(work.id).catch(() => null)
       if (fresh) onChange(fresh)
+      showProblem()
     } finally {
       setBusy(false)
     }
@@ -324,18 +378,23 @@ function WorkPageTwo({ work, onChange }: { work: Work; onChange: (w: Work) => vo
           </Card>
         )}
         <Card className="space-y-4 p-5 sm:p-6">
-          {shown.filter(required).length === 0 && <p className="text-sm text-fg-muted">PaperAid has everything it needs. Add more below if you like.</p>}
+          {shown.filter((q) => required(q) || upFront.has(q.id)).length === 0 && <p className="text-sm text-fg-muted">PaperAid has everything it needs. Add more below if you like.</p>}
+          {shown.filter((q) => upFront.has(q.id) && !required(q)).map((q) =>
+            q.id === 'word_limit' ? (
+              <WordLimit key={q.id} found={q.answered} value={value(q.id)} usual={spec.targetWords} onChange={(v) => setAnswers((a) => ({ ...a, [q.id]: v }))} />
+            ) : null,
+          )}
           {shown.filter(required).map((q) => (
             <Answer key={q.id} spec={spec} question={q} required value={value(q.id)} onChange={(v) => setAnswers((a) => ({ ...a, [q.id]: v }))}
               error={tried && !value(q.id) && !(q.answered && must.has(q.id)) ? 'This is needed to write your document.' : null} skippable={false} />
           ))}
         </Card>
-        {shown.some((q) => !required(q)) && (
+        {shown.some((q) => !required(q) && !upFront.has(q.id)) && (
           <details className="rounded-2xl border border-line bg-white p-5 shadow-card">
             <summary className="cursor-pointer text-base font-semibold">More details (optional)</summary>
             <p className="mt-1 text-sm text-fg-muted">PaperAid uses sensible defaults for anything you leave, and says so in your document where it matters.</p>
             <div className="mt-4 space-y-4">
-              {shown.filter((q) => !required(q)).map((q) => (
+              {shown.filter((q) => !required(q) && !upFront.has(q.id)).map((q) => (
                 <Answer key={q.id} spec={spec} question={q} required={false} value={value(q.id)} onChange={(v) => setAnswers((a) => ({ ...a, [q.id]: v }))} error={null} skippable={skippable(q)} />
               ))}
             </div>
@@ -379,6 +438,37 @@ const CHOICE_LABELS: Record<string, string> = {
   NOT_MENTIONED: 'It does not say', BANNED: 'AI tools are not allowed', ALLOWED_WITH_DISCLOSURE: 'Allowed if I say I used them', ALLOWED: 'AI tools are allowed',
   USD: 'US dollars (USD)', EUR: 'Euros (EUR)', GBP: 'Pounds (GBP)', UGX: 'Uganda shillings (UGX)', KES: 'Kenya shillings (KES)', TZS: 'Tanzania shillings (TZS)',
   yes: 'Yes', no: 'No',
+}
+
+/** The word limit: suggested, picked from the usual ones, or the student's own; left empty, PaperAid
+ *  uses the usual length for the level and says so (owner request 2026-10-01). */
+function WordLimit({ found, value, usual, onChange }: { found: boolean; value: string; usual: number; onChange: (v: string) => void }) {
+  const own = value !== '' && !COMMON_LIMITS.includes(value.replace(/,/g, ''))
+  const [typing, setTyping] = useState(own)
+  return (
+    <div className="space-y-2">
+      <Select label="Word limit" value={typing ? 'own' : value.replace(/,/g, '')}
+        hint={found ? 'PaperAid found your limit in your brief. Change it only if it is wrong.' : `Not sure? Leave it and PaperAid writes about ${usual.toLocaleString()} words, the usual length for your level, and says so.`}
+        onChange={(e) => {
+          if (e.target.value === 'own') {
+            setTyping(true)
+            onChange('')
+          } else {
+            setTyping(false)
+            onChange(e.target.value)
+          }
+        }}>
+        <option value="">{found ? 'Keep the limit in my brief' : `Let PaperAid choose (about ${usual.toLocaleString()} words)`}</option>
+        {COMMON_LIMITS.map((n) => (
+          <option key={n} value={n}>
+            {Number(n).toLocaleString()} words
+          </option>
+        ))}
+        <option value="own">Enter my own</option>
+      </Select>
+      {typing && <Input label="Your word limit" inputMode="numeric" value={value} placeholder="e.g. 1,800" onChange={(e) => onChange(e.target.value)} />}
+    </div>
+  )
 }
 
 const NUMBER_HINTS: Record<string, string> = { word_limit: 'For example 2,000.', duration_months: 'In months, for example 12.', amount_requested: 'The amount you will ask for.' }
@@ -447,6 +537,10 @@ function suggestDesign(topic: string): StudyType | null {
 function ProposalStart({ concept }: { concept: boolean }) {
   const data = useData()
   const navigate = useNavigate()
+  const [params] = useSearchParams()
+  // Once created, the proposal's id is kept in the address: a retried Start never creates a second one (Codex audit 2026-10-01).
+  const [created, setCreated] = useState<string | null>(params.get('project'))
+  const [samplingOk, setSamplingOk] = useState(false)
   const [page, setPage] = useState<1 | 2>(1)
   const [inputs, setInputs] = useState<ProposalInputs>({
     topic: '', level: 'MASTERS', programme: '', faculty: '', studyArea: '', population: '', studyType: null, notes: '',
@@ -458,6 +552,17 @@ function ProposalStart({ concept }: { concept: boolean }) {
   const [error, setError] = useState<string | null>(null)
   const [tried, setTried] = useState(false)
   const set = (patch: Partial<ProposalInputs>) => setInputs((i) => ({ ...i, ...patch }))
+  useEffect(() => {
+    // back on this page after a reload: the details already saved for this proposal, never an empty form over them
+    if (!created) return
+    data.projects.get(created).then((p) => {
+      if (!p) return
+      if (p.auto && p.jobs.length) navigate(`/app/projects/${p.id}`, { replace: true }) // already started: its own page
+      setInputs(p.inputs)
+      setCover(p.titlePage)
+      setCitation(p.citation)
+    })
+  }, [created]) // eslint-disable-line react-hooks/exhaustive-deps
   const title = concept ? 'Your academic concept paper' : 'Your research proposal'
   const pageOneProblem = inputs.topic.trim().length < 10 ? 'Give your working title or topic (at least a few words).' : null
   const pageTwo = {
@@ -468,15 +573,23 @@ function ProposalStart({ concept }: { concept: boolean }) {
     faculty: !inputs.faculty.trim() ? 'Your faculty or school goes on the title page.' : null,
   }
 
+  const needsSampling = (inputs.studyType === null || inputs.studyType === 'QUANTITATIVE' || inputs.studyType === 'MIXED') && !inputs.populationSize
   const start = async () => {
     setTried(true)
-    if (Object.values(pageTwo).some(Boolean)) return
+    if (Object.values(pageTwo).some(Boolean) || (needsSampling && !samplingOk)) return
     setBusy(true)
     setError(null)
     try {
-      const project = await data.projects.create({ ...inputs, studyType: inputs.studyType ?? suggestDesign(inputs.topic) }, cover, citation, concept ? 'CONCEPT' : 'FULL')
-      await data.projects.start(project.id)
-      navigate(`/app/projects/${project.id}`)
+      const details = { ...inputs, studyType: inputs.studyType ?? suggestDesign(inputs.topic) }
+      let id = created
+      if (id) await data.projects.updateDetails(id, details, cover, citation)
+      else {
+        id = (await data.projects.create(details, cover, citation, concept ? 'CONCEPT' : 'FULL')).id
+        setCreated(id)
+        navigate(`?project=${id}`, { replace: true })
+      }
+      await data.projects.start(id, needsSampling && samplingOk)
+      navigate(`/app/projects/${id}`)
     } catch (e) {
       setError(e instanceof DataError ? e.message : 'We could not start. Try again.')
     } finally {
@@ -558,14 +671,23 @@ function ProposalStart({ concept }: { concept: boolean }) {
             <Input label="Your name" required maxLength={120} value={cover.studentName} onChange={(e) => setCover({ ...cover, studentName: e.target.value })} error={tried ? pageTwo.name : null} />
             <Input label="Registration number" required maxLength={60} value={cover.regNumber} onChange={(e) => setCover({ ...cover, regNumber: e.target.value })} error={tried ? pageTwo.reg : null} />
             <Input label="Faculty or school" required maxLength={150} value={inputs.faculty} onChange={(e) => set({ faculty: e.target.value })} error={tried ? pageTwo.faculty : null} />
-            <Input label="Supervisor (optional)" maxLength={160} value={cover.supervisor} onChange={(e) => setCover({ ...cover, supervisor: e.target.value })} />
-            <Input label="Submission date (optional)" maxLength={40} value={cover.submissionDate} onChange={(e) => setCover({ ...cover, submissionDate: e.target.value })} placeholder="e.g. October 2026" />
+            <Input label="Supervisor" maxLength={160} value={cover.supervisor} onChange={(e) => setCover({ ...cover, supervisor: e.target.value })}
+              hint="Can wait: the complete proposal needs it." />
+            <Input label="Submission date" maxLength={40} value={cover.submissionDate} onChange={(e) => setCover({ ...cover, submissionDate: e.target.value })} placeholder="e.g. October 2026"
+              hint="Can wait: the complete proposal needs it." />
             <Select label="Referencing style" value={citation} onChange={(e) => setCitation(e.target.value as CitationStyle)}>
               <option value="APA6">APA 6th edition</option>
               <option value="APA7">APA 7th edition</option>
             </Select>
           </div>
         </Card>
+        {needsSampling && (
+          <Card className="p-5">
+            <Checkbox required checked={samplingOk} onChange={(e) => setSamplingOk(e.target.checked)}
+              label={<span className="text-fg">Use the standard sample-size settings where I have not given my own figures: 95% confidence, a 5% margin of error and a 50% expected proportion. The chapter says they were assumed. <span className="text-xs font-semibold text-red-700"><span aria-hidden>*</span> Required</span></span>} />
+            {tried && !samplingOk && <p className="mt-1.5 text-xs font-medium text-red-600">Tick to use the standard settings, or give your population size above.</p>}
+          </Card>
+        )}
         {error && <Alert tone="danger">{error}</Alert>}
         <div className="flex items-center justify-between gap-3">
           <button className="text-sm font-medium text-fg-muted hover:text-fg" onClick={() => setPage(1)}>

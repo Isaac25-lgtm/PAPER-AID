@@ -70,6 +70,32 @@ def hold(w: Wallet, amount: int, job_id: str, note: str) -> Wallet:
     return _record(w, "HOLD", amount, job_id, note)
 
 
+def reserve(w: Wallet, key: str, amount: int, note: str) -> Wallet:
+    """Set credits aside for a document before any of its paid work runs (one Start): available to
+    held, under `key`. A key reserved again is first returned, so it never holds twice."""
+    release_reservation(w, key, "Earlier reservation returned")
+    if amount <= 0:
+        return w
+    if w.available < amount:
+        raise InsufficientCredits(amount, w.available)
+    w.available -= amount
+    w.held += amount
+    w.reservations = {**w.reservations, key: amount}
+    return _record(w, "HOLD", amount, None, note)
+
+
+def release_reservation(w: Wallet, key: str, note: str) -> int:
+    """Return what `key` reserved to the balance (0 when nothing was)."""
+    amount = w.reservations.get(key, 0)
+    if not amount:
+        return 0
+    w.reservations = {k: v for k, v in w.reservations.items() if k != key}
+    w.held -= amount
+    w.available += amount
+    _record(w, "RELEASE", amount, None, note)
+    return amount
+
+
 def settle(w: Wallet, held: int, charge: int, job_id: str, note: str) -> Wallet:
     """Charge part of a hold and release the rest."""
     if not 0 <= charge <= held <= w.held:

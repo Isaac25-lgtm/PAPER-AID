@@ -255,7 +255,7 @@ export function createApiSource({ config, getAuthHeaders }: Options): DataSource
         request<Project>(`/api/projects/${id}/chapters/${chapter}/request`, { method: 'POST', body: JSON.stringify({ instruction, sections }) }),
       requestChangesWithDocument: (id, chapter, instruction, sections, file) =>
         request<Project>(`/api/projects/${id}/chapters/${chapter}/request/with-document`, { method: 'POST', body: withDocument({ instruction, sections: sections.join(',') }, file) }),
-      start: (id) => request<Project>(`/api/projects/${id}/start`, { method: 'POST' }),
+      start: (id, acceptSampling = false) => request<Project>(`/api/projects/${id}/start`, { method: 'POST', body: JSON.stringify({ acceptSampling }) }),
       framework: (id) => blob(`/api/projects/${id}/framework.png`),
       uploadGuide(id, file) {
         const form = new FormData()

@@ -75,8 +75,27 @@ def settle_completed(j: Job, w: Wallet) -> None:
     j.payment_status = PaymentStatus.PAID
 
 
+def reservation_key(j: Job) -> str | None:
+    """The one-Start reservation a job belongs to: its work's or its proposal's."""
+    return f"work:{j.work_id}" if j.work_id else f"project:{j.project_id}" if j.project_id else None
+
+
+def is_bundled_plan(j: Job) -> bool:
+    s = j.selection
+    return s.bundled and (s.work == "PLAN" or s.proposal == "PLAN")
+
+
+def is_bundled_document(j: Job) -> bool:
+    s = j.selection
+    return s.bundled and (s.work == "DRAFT" or s.proposal in ("CHAPTER_1", "CONCEPT"))
+
+
 def release_hold(j: Job, w: Wallet, reason: str) -> None:
-    """Return the whole hold (the job never ran)."""
+    """Return the whole hold (the job never ran). A one-Start plan that fails or is cancelled also
+    returns what Start reserved for the document: nothing will be delivered."""
+    key = reservation_key(j)
+    if key and is_bundled_plan(j):
+        credits.release_reservation(w, key, "Reserved for your document: returned, as nothing was delivered")
     b = j.billing
     if b.state == "HELD":
         credits.settle(w, held=b.held, charge=0, job_id=j.id, note=reason)

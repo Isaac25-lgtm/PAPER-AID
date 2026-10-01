@@ -23,7 +23,7 @@ const CONCEPT = 4
 
 function Progress({ project }: { project: Project }) {
   const steps = [
-    { label: 'Plan', done: project.planStatus === 'APPROVED', started: project.planStatus !== 'NONE' },
+    ...(project.auto ? [] : [{ label: 'Plan', done: project.planStatus === 'APPROVED', started: project.planStatus !== 'NONE' }]),
     ...(project.goal === 'CONCEPT'
       ? project.chapters.filter((c) => c.number === CONCEPT).map((c) => ({ label: 'Concept paper', done: c.approved, started: c.current > 0 }))
       : project.chapters.filter((c) => c.number !== CONCEPT).map((c) => ({ label: `Chapter ${c.number}`, done: c.approved, started: c.current > 0 }))),
@@ -744,9 +744,9 @@ export function ProjectPage() {
         </Alert>
       )}
       <Progress project={project} />
-      <Tabs defaultValue="plan">
+      <Tabs defaultValue={project.auto ? 'feedback' : 'plan'}>
         <TabsList className="mb-5">
-          <TabsTrigger value="plan">Plan</TabsTrigger>
+          {!project.auto && <TabsTrigger value="plan">Plan</TabsTrigger>}
           <TabsTrigger value="concept">Concept paper</TabsTrigger>
           {project.chapters.filter((c) => c.number !== CONCEPT && !conceptOnly).map((c) => (
             <TabsTrigger key={c.number} value={`c${c.number}`}>
@@ -765,7 +765,7 @@ export function ProjectPage() {
           </TabsTrigger>
           <TabsTrigger value="details">Details</TabsTrigger>
         </TabsList>
-        <TabsContent value="plan" className="space-y-5">
+        <TabsContent value="plan" className={project.auto ? 'hidden' : 'space-y-5'}>
           {project.candidatePlan && (
             <Alert
               tone="info"
