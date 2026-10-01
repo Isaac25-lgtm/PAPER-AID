@@ -390,3 +390,35 @@ def test_a_final_review_repair_gets_the_sections_evidence_and_brief(works_client
     for section in calls[-1]:
         assert section["evidence"] and {"id", "statement"} <= set(section["evidence"][0])
         assert section["brief"] and "rules" in section and any("Answer this part" in i for i in section["issues"])
+
+
+def test_a_draft_well_under_its_word_limit_is_developed_before_delivery(works_client):
+    """Sections each a little short add up to a document well under its limit (CW-007, a blocking
+    "Not ready"): the final loop develops the sections furthest under their planned length with their
+    evidence, and the document is delivered within its length (live coursework, 2026-10-01)."""
+    client = works_client
+    asked = []
+
+    def short_draft(payload):
+        answer = fake_works.draft(payload)
+        for s in answer["sections"]:
+            words = " ".join(s["paragraphs"]).split()
+            s["paragraphs"] = [" ".join(words[: int(len(words) * 0.7)]).rstrip(".,;") + "."]
+        return answer
+
+    def repair(payload):
+        out = []
+        for s in payload["sections"]:
+            asked.extend(i for i in s["issues"] if "well short" in i)
+            full = fake_works._text({"key": s["key"], "heading": s["heading"], "words": s["words"], "evidence": s["evidence"]}, [])
+            out.append({"key": s["key"], "paragraphs": full if any("well short" in i for i in s["issues"]) else s["text"], "table": {"caption": "", "rows": []}})
+        return {"sections": out}
+
+    client.models.overrides["w_draft"] = short_draft
+    client.models.overrides["w_repair"] = repair
+    work = _approved(client, _coursework(client))
+    _, job = _run(client, work["id"], "DRAFT")
+    assert job["status"] == "COMPLETED" and asked
+    doc = client.get(f"/api/works/{work['id']}/document", headers=STUDENT).json()
+    length = next(i for i in doc["readiness"] if i["id"] == "CW-007")
+    assert length["status"] == "PASS" and 1275 <= doc["words"] <= 1500, (length, doc["words"])

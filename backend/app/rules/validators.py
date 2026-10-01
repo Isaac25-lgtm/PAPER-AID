@@ -202,6 +202,9 @@ def _limits_hard_max(ctx: Context, rule: dict[str, Any]) -> Result:
     return _ok("; ".join(notes) + ".")
 
 
+UNDER_LENGTH = 0.85  # below this share of a word limit a draft is "well under" it (CW-007); the works pipeline expands it first
+
+
 def _count_words(texts: list[str]) -> int:
     return sum(len(t.split()) for t in texts)
 
@@ -232,7 +235,7 @@ def _word_tolerance(ctx: Context, rule: dict[str, Any]) -> Result:
     allowed = limit.max * (1 + limit.tolerance / 100)
     if words > allowed:
         return ("FAIL", f"{words:,} words is over the {int(limit.max):,}-word limit{' and its stated tolerance' if limit.tolerance else ''}.", "")
-    if words < limit.max * 0.85:
+    if words < limit.max * UNDER_LENGTH:
         return ("NEEDS_REVIEW", f"{words:,} words is well under the {int(limit.max):,}-word limit.", "")
     return _ok(f"{words:,} words against a limit of {int(limit.max):,}{f' (tolerance {limit.tolerance:g}% as stated)' if limit.tolerance else ' (no tolerance assumed)'}.")
 

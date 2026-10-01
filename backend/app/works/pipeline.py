@@ -29,13 +29,15 @@ from app.proposals.models import EvidenceItem, EvidenceSource
 from app.proposals.pipeline import _from_literature, _from_web, load_library
 from app.rules import compliance, library
 from app.rules.extract import KEYS, requirements_from
-from app.rules.validators import Context
+from app.rules.resolve import PLAN_SHARE_OF_LIMIT
+from app.rules.validators import UNDER_LENGTH, Context
 from app.works import directives, numbers, templates
 from app.works.ai import Covered, Evaluation, Final, FinalRule, PlanReview, Priority, ResultsReview, WorkRunner
 from app.works.models import (
     AI_NOTE,
     Budget,
     BudgetLine,
+    Limit,
     PlanSection,
     ResolvedSpec,
     ResultsModel,
@@ -846,22 +848,52 @@ def _where_keys(where: str, plan_sections: list[PlanSection]) -> list[str]:
     return [s.key for s in plan_sections if s.key in text or s.heading.lower() in text or text in s.heading.lower()]
 
 
-def _word_excess(inp: WorkStepInput, current: dict[str, SectionText], library_items: dict[str, EvidenceItem], tokens: dict[str, tuple[str, str]]) -> tuple[int, set[str] | None]:
-    """How many words must go for the text the word limit counts (its scope: sections, their tables,
-    and the references or generated tables where the instructions count them) to fit with a margin,
-    and the sections the limit covers (None: all). 0 when it already fits."""
+def _limit_words(inp: WorkStepInput, current: dict[str, SectionText], library_items: dict[str, EvidenceItem],
+                 tokens: dict[str, tuple[str, str]]) -> tuple[int, Limit | None, set[str] | None]:
+    """The words the word limit counts (its scope: sections, their tables, and the references or
+    generated tables where the instructions count them), counted as its check counts them, the limit,
+    and the sections it covers (None: all)."""
     spec = _spec(inp)
     limit = next((lim for lim in spec.limits if lim.type == "WORD"), None)
     if limit is None:
-        return 0, None
+        return 0, None, None
     context = Context(spec=spec, stage="FINAL", inputs=inp.inputs, plan=inp.plan, results=inp.results, budget=inp.budget,
                       doc=_document(inp, current, set()), library=library_items, tokens=tokens)
     total = sum(len(t.split()) for t in context.limit_texts(limit)[0])
     named = set(limit.scope) & set(current)
-    covered = named if named and named == set(limit.scope) else None
-    if total <= limit.max * (1 + limit.tolerance / 100):
+    return total, limit, named if named and named == set(limit.scope) else None
+
+
+def _word_excess(inp: WorkStepInput, current: dict[str, SectionText], library_items: dict[str, EvidenceItem], tokens: dict[str, tuple[str, str]]) -> tuple[int, set[str] | None]:
+    """How many words must go for the counted text to fit with a margin, and the sections the limit
+    covers (None: all). 0 when it already fits."""
+    total, limit, covered = _limit_words(inp, current, library_items, tokens)
+    if limit is None or total <= limit.max * (1 + limit.tolerance / 100):
         return 0, covered
     return int(total - limit.max * 0.95), covered
+
+
+def _too_short(inp: WorkStepInput, current: dict[str, SectionText], library_items: dict[str, EvidenceItem], tokens: dict[str, tuple[str, str]],
+               editable: list[str]) -> dict[str, list[str]]:
+    """A draft well under its word limit (the length check's own threshold, CW-007) is PaperAid's to
+    fix: the sections furthest under their planned length are developed further with their evidence,
+    never padded (live coursework came out at 1,259 of 1,500 words, 2026-10-01)."""
+    assert inp.plan is not None
+    total, limit, covered = _limit_words(inp, current, library_items, tokens)
+    if limit is None or total >= limit.max * UNDER_LENGTH:
+        return {}
+    short = sorted(((s.words - _rendered_words(current[s.key], tokens), s) for s in inp.plan.sections
+                    if s.key in current and s.key in editable and (covered is None or s.key in covered)), key=lambda x: -x[0])
+    needed = int(limit.max * PLAN_SHARE_OF_LIMIT) - total
+    fix: dict[str, list[str]] = {}
+    for gap, s in short:
+        if gap <= 0 or needed <= 0:
+            break
+        have = _rendered_words(current[s.key], tokens)
+        fix[s.key] = [f"The document is {total} words against a {int(limit.max)}-word limit, well short of it. This section has {have} words; "
+                      f"develop it to about {s.words} words with deeper analysis drawn from the evidence given, without padding, repetition or new unsupported claims."]
+        needed -= gap
+    return fix
 
 
 def _compress_to_limits(ctx: "StageContext", runner: WorkRunner, inp: WorkStepInput, current: dict[str, SectionText], tokens: dict[str, tuple[str, str]],
@@ -1023,6 +1055,8 @@ def stage_auditing(ctx: "StageContext") -> None:
             if not c.answered:
                 for key in fixable([s.key for s in inp.plan.sections if c.id in s.coverage] or _where_keys(c.where, inp.plan.sections)):
                     fix.setdefault(key, []).append(f"Answer this part of the question explicitly: {texts.get(c.id, c.id)}")
+        for key, issues in _too_short(inp, current, library_items, tokens, editable).items():
+            fix.setdefault(key, []).extend(issues)
         return fix
 
     def settle_wording() -> None:
