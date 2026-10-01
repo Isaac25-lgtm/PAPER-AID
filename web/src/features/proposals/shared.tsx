@@ -238,11 +238,22 @@ export function PlanStatusBadge({ status }: { status: 'NONE' | 'DRAFT' | 'APPROV
 export function ReviewNotice({ review, what, acknowledged, onAcknowledge }: { review: ReviewDecision | null | undefined; what: string; acknowledged: boolean; onAcknowledge: (on: boolean) => void }) {
   if (!review || review.outcome === 'APPROVED') return null
   return (
-    <Alert tone="warning" title={review.outcome === 'NOT_REVIEWED' ? `PaperAid could not finish reviewing this ${what}` : `PaperAid's reviewer did not approve this ${what}`}>
+    <Alert
+      tone="warning"
+      title={
+        review.reason === 'EDITED'
+          ? `You changed this ${what} after PaperAid's review`
+          : review.outcome === 'NOT_REVIEWED'
+            ? `PaperAid could not finish reviewing this ${what}`
+            : `PaperAid's reviewer did not approve this ${what}`
+      }
+    >
       <p>
-        {review.outcome === 'NOT_REVIEWED'
-          ? `Its final review could not be completed, so this ${what} was not charged. Check it carefully before you approve it.`
-          : `These points remained after two rounds of repair, so this ${what} was not charged. Edit it to address them before you approve it.`}
+        {review.reason === 'EDITED'
+          ? `PaperAid reviewed the earlier version, not yours. Check your changes before you approve it.`
+          : review.outcome === 'NOT_REVIEWED'
+            ? `Its final review could not be completed, so this ${what} was not charged. Check it carefully before you approve it.`
+            : `These points remained after two rounds of repair, so this ${what} was not charged. Edit it to address them before you approve it.`}
       </p>
       {review.objections.length > 0 && (
         <ul className="mt-2 list-disc pl-5">

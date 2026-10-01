@@ -355,6 +355,29 @@ class ProposalRunner(AIRunner):
         critique = {"items": [{"issue": o, "fix": "Fix exactly this, changing nothing else."} for o in objections], "overall": "Repair only what these points name."}
         return self._raw("p_finalise", {**payload, "kind": "plan", "draft": plan, "critique": critique}, schema, None)
 
+    def review_profile(self, payload: dict[str, Any]) -> tuple[bool, list[str]]:
+        """The one final reviewer's decision on the exact profile: (approved, objections). A missing,
+        cut-off or unaffordable answer is not approval."""
+        schema = _obj({"approved": {"type": "boolean"}, "issues": _STRS})
+        try:
+            answer = self._call("p_profile_review", payload, schema, Permission)
+        except PermanentStageError as exc:
+            if exc.code != "BUDGET_EXCEEDED":
+                raise
+            self.budget_reached = True
+            return False, []
+        if answer is None:
+            return False, []
+        issues = [i.strip() for i in answer.issues if i.strip()]
+        return answer.approved and not issues, issues
+
+    def repair_profile(self, payload: dict[str, Any], profile: dict[str, Any], objections: list[str]) -> dict[str, Any]:
+        """A targeted repair of the profile for exactly the objections raised (Sonnet finalises again)."""
+        from app.proposals.profile import SCHEMA as PROFILE
+
+        critique = {"items": [{"issue": o, "fix": "Fix exactly this, changing nothing else."} for o in objections], "overall": "Repair only what these points name."}
+        return self._raw("p_profile_finalise", {**payload, "draft": profile, "critique": critique}, PROFILE, None)
+
     def approve_profile(self, payload: dict[str, Any]) -> None:
         """Both approvals for an institution profile before any proposal is written to it."""
         self._approve(

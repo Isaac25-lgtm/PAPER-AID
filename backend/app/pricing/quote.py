@@ -263,7 +263,7 @@ def work_usd(settings: Settings, step: str, kind: str, words: int, engine: Engin
         # The final review of the whole deliverable (tables, references and notes included), in parts of
         # at most FINAL_PART_WORDS, after every change; up to two targeted repairs; compression and a
         # check of what it changed before each final review.
-        parts = max(1, math.ceil(words * 1.3 / FINAL_PART_WORDS))
+        parts = max(1, math.ceil(words * 1.3 / FINAL_PART_WORDS)) + (1 if words * 1.3 > FINAL_PART_WORDS else 0)  # a long section split across parts can add one
         final_chars = base + words * CHARS_PER_WORD * 1.5 / parts + 9000
         usd += (REVIEW_REPAIRS + 1) * parts * _step_usd(settings, "w_final", final_chars, 0, e) + REVIEW_REPAIRS * _step_usd(settings, "w_repair", section_input, words, e)
         usd += (REVIEW_REPAIRS + 1) * 2 * _step_usd(settings, "w_compress", section_input + words * CHARS_PER_WORD, words, e)
@@ -306,6 +306,8 @@ def profile_usd(settings: Settings, guide_words: int, engine: Engine | None = No
         usd += _step_usd(settings, "p_profile_review", guide + 16000, 0, e)
         if not e.single_reviewer:
             usd += _step_usd(settings, "p_profile_review_peer", guide + 16000, 0, e)
+        else:  # up to two targeted repairs, each reviewed again
+            usd += REVIEW_REPAIRS * (_step_usd(settings, "p_profile_finalise", guide + 16000, 0, e) + _step_usd(settings, "p_profile_review", guide + 16000, 0, e))
     return usd
 
 

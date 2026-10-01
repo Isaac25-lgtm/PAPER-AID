@@ -501,6 +501,8 @@ function PlanPanel({ work, onChange }: { work: Work; onChange: (w: Work) => void
         </Button>
         <Button loading={busy} disabled={work.planStatus === 'APPROVED' || (!!work.planReview && work.planReview.outcome !== 'APPROVED' && !ackPlan)} onClick={() => run(async () => {
           const saved = JSON.stringify(plan) === JSON.stringify(work.plan) ? work : await data.works.savePlan(work.id, plan, work.planVersion)
+          // An edit is not what PaperAid reviewed: show the saved version and ask for confirmation first.
+          if (saved.planReview && saved.planReview.outcome !== 'APPROVED' && !ackPlan) return saved
           return data.works.approvePlan(work.id, saved.planVersion, ackPlan ? ['PLAN_OBJECTIONS'] : [])
         })}>
           {work.planStatus === 'APPROVED' ? 'Approved' : 'Approve the plan'}
@@ -566,6 +568,7 @@ function ResultsPanel({ work, onChange }: { work: Work; onChange: (w: Work) => v
         </Button>
         <Button loading={busy} disabled={work.resultsStatus === 'APPROVED' || (!!work.resultsReview && work.resultsReview.outcome !== 'APPROVED' && !ackResults)} onClick={() => run(async () => {
           const saved = JSON.stringify(model) === JSON.stringify(work.results) ? work : await data.works.saveResults(work.id, model, work.resultsVersion)
+          if (saved.resultsReview && saved.resultsReview.outcome !== 'APPROVED' && !ackResults) return saved
           return data.works.approveResults(work.id, saved.resultsVersion, ackResults ? ['RESULTS_OBJECTIONS'] : [])
         })}>
           {work.resultsStatus === 'APPROVED' ? 'Approved' : 'Approve the Results Model'}

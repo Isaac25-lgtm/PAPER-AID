@@ -205,7 +205,7 @@ def test_a_quote_freezes_roles_tier_price_table_and_content(works_client):
     job = get_runtime().store.get(quoted["job"]["id"])
     engine = job.quote.engine
     assert engine.tier == "STANDARD" and engine.roles["WRITER"] == "google:gemini-3.8-flash" and engine.price_table == costs.table_in_force()
-    assert engine.content["prompt:w-draft-v1"] and engine.content["rules:coursework-v1"] and engine.content["validators"] == "validators-v1"
+    assert engine.content["prompt:w-draft-v1"] and engine.content["rules:coursework-v1"] and engine.content["validators"] == "validators-v2"
     assert job.selection.work == "PLAN" and job.selection.work_band == "CW_PLAN" and job.work_id == work["id"]
 
 

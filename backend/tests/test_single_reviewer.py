@@ -241,7 +241,7 @@ def test_the_final_reviewer_sees_exactly_what_will_be_delivered(works_client):
     assert job["status"] == "COMPLETED", job.get("failure")
     final = _requests(client, "w_final")[-1]
     document = final["document"]
-    assert any(s.get("table", {}).get("caption") == "Coverage by district" for s in document["sections"])
+    assert any(t["caption"] == "Coverage by district" for s in document["sections"] for t in s["tables"])
     assert document["references"] and document["notes"] == ["This document was drafted by an AI-assisted third party."]
     assert final["part"] == "1 of 1" and {m["key"] for m in final["manifest"]} == {s["key"] for s in document["sections"]}
     assert not any("⟦" in p for s in document["sections"] for p in s["text"])  # citations and figures as they print

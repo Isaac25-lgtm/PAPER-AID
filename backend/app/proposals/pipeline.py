@@ -19,7 +19,9 @@ from pydantic import ValidationError
 from app.ai.orchestration import REVIEW_REPAIRS
 from app.analysis import fetch, research
 from app.core.errors import PermanentStageError
-from app.jobs.models import Job, ReadinessItem, Stage, utcnow
+from app.jobs import state
+from app.jobs.models import Job, JobStatus, ReadinessItem, Stage, Wallet, utcnow
+from app.pricing.billing import settle_completed
 from app.pricing.quote import round_up
 from app.proposals import decisions, evidence, profile, rulebook, sampling
 from app.proposals.ai import Grade, ProposalRunner, SectionText, Table
@@ -266,14 +268,36 @@ def stage_planning(ctx: "StageContext") -> None:
             raise PermanentStageError("GUIDE_EXPIRED", "Your guide is no longer stored. Upload it again, then read it. Nothing was charged.", "profile: guide missing")
         guide = ctx.rt.files.get(guide_path).decode("utf-8")
         final, draft, critique = runner.profile({"guide": guide, "reference": profile.reference()})
-        try:
-            book = profile.build(final, inp.guide_name)
+
+        def built(answer: dict[str, Any]) -> dict[str, Any]:
+            try:
+                book = profile.build(answer, inp.guide_name)
+            except profile.NotAGuide as exc:
+                raise PermanentStageError(
+                    "NOT_A_GUIDE", "PaperAid could not find a proposal structure in this guide, so nothing was charged. Check it is your institution's research guide.", f"profile: {exc}"
+                ) from exc
             book["guide_sha256"] = hashlib.sha256(guide.encode()).hexdigest()  # which upload it was read from
-        except profile.NotAGuide as exc:
-            raise PermanentStageError(
-                "NOT_A_GUIDE", "PaperAid could not find a proposal structure in this guide, so nothing was charged. Check it is your institution's research guide.", f"profile: {exc}"
-            ) from exc
-        runner.approve_profile({"guide": guide, "reference": profile.reference(), "finalProfile": book})  # the exact profile to be used
+            return book
+
+        book = built(final)
+        payload = {"guide": guide, "reference": profile.reference()}
+        if not runner._engine.single_reviewer:  # older engines: both approvals, as they were priced
+            runner.approve_profile({**payload, "finalProfile": book})
+        else:
+            # One final reviewer (owner decision 2026-09-30): an objection is repaired and the repaired profile
+            # reviewed again, at most twice (Codex audit 2026-10-01). A profile still not approved is never used:
+            # proposals are built on it, so the step fails without charge.
+            for round_ in range(REVIEW_REPAIRS + 1):
+                approved, objections = runner.review_profile({**payload, "finalProfile": book})  # the exact profile to be used
+                if approved:
+                    break
+                if round_ == REVIEW_REPAIRS or runner.budget_reached or not objections:
+                    raise PermanentStageError(
+                        "PROFILE_NOT_APPROVED", "PaperAid could not confirm your institution's structure from this guide, so nothing was changed and you were not charged. "
+                        "You can try again, or continue with the standard structure.", f"profile not approved after {round_} repairs",
+                    )
+                final = runner.repair_profile(payload, final, objections)
+                book = built(final)
         ctx.put_json("profile.json", {"profile": book, "draft": draft, "critique": critique.model_dump()})
         return
     usable = [i for i in _library(ctx, inp).values() if i.usable]
@@ -1185,22 +1209,42 @@ def stage_exporting(ctx: "StageContext") -> None:
         p.updated_at = utcnow()
         return p
 
-    if ctx.rt.store.update_project(inp.project_id, publish) is None:
-        raise PermanentStageError("PROJECT_DELETED", "This proposal was deleted before the step finished, so nothing was charged.", "project deleting at export")
-    notes = ["You edited your plan while PaperAid was drafting one, so the new plan is kept alongside yours for you to compare."] if candidate else []
-    if kept_choice:
-        notes.append("You chose another version while PaperAid was revising, so the revision is saved as a new version without replacing your choice.")
-    if left_open:
-        notes.append(f"{len(left_open)} of your supervisor's comments stay open because their sections were not revised or were changed meanwhile.")
-    if written_meanwhile:
-        notes.append("A chapter was written before your institution's profile was ready, so your proposal keeps its current structure.")
+    gone = False
 
-    def done(j: Job) -> Job:
-        j = _warn(j, notes, partial=False)
+    def finish(j: Job, w: Wallet, p: Project | None) -> tuple[Job, Wallet, Project] | None:
+        """Publish, complete and settle as one unit (Codex audit 2026-10-01, as works already do): a
+        published result is never refunded by a later failure, and a refunded step is never published."""
+        nonlocal gone, candidate, kept_choice, written_meanwhile
+        candidate = kept_choice = written_meanwhile = False  # the transaction may run more than once
+        left_open.clear()
+        gone = p is None or p.deleting
+        if p is None or p.deleting:
+            return None
+        if j.status != JobStatus.PROCESSING or j.stage != Stage.EXPORTING:
+            return None  # failed, cancelled or already completed meanwhile: nothing more to do
+        already = job_id in p.published
+        if publish(p) is None:
+            gone = True
+            return None
+        notes = ["You edited your plan while PaperAid was drafting one, so the new plan is kept alongside yours for you to compare."] if candidate else []
+        if kept_choice:
+            notes.append("You chose another version while PaperAid was revising, so the revision is saved as a new version without replacing your choice.")
+        if left_open:
+            notes.append(f"{len(left_open)} of your supervisor's comments stay open because their sections were not revised or were changed meanwhile.")
+        if written_meanwhile:
+            notes.append("A chapter was written before your institution's profile was ready, so your proposal keeps its current structure.")
+        j = _warn(j, notes if not already else [], partial=False)
         j.outcome = j.outcome or "FULL"
-        return j
+        if Stage.EXPORTING not in j.completed_stages:
+            j.completed_stages.append(Stage.EXPORTING)
+        j.attempts, j.lease_until, j.stage = 0, None, None
+        state.transition(j, JobStatus.COMPLETED, "Completed with warnings" if j.outcome == "PARTIAL" else "Completed")
+        settle_completed(j, w)
+        return j, w, p
 
-    ctx.update(done)
+    ctx.rt.store.update_job_wallet_and_project(ctx.job.id, inp.project_id, finish)
+    if gone:
+        raise PermanentStageError("PROJECT_DELETED", "This proposal was deleted before the step finished, so nothing was charged.", "project deleting at export")
 
 
 def _warn(j: Job, warnings: list[str], partial: bool) -> Job:

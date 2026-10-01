@@ -138,7 +138,10 @@ def _approved(client, project_id, **plan_changes):
     edited = {**project["plan"], **plan_changes}
     saved = client.post(f"/api/projects/{project_id}/plan", headers=STUDENT, json={"plan": edited, "baseVersion": project["planVersion"]})
     assert saved.status_code == 200, saved.json()
-    approved = client.post(f"/api/projects/{project_id}/plan/approve", headers=STUDENT, json={"baseVersion": saved.json()["planVersion"]})
+    review = saved.json().get("planReview") or {}  # the student confirms their own edits (and any objections), as the page asks
+    acknowledge = ["OBJECTIONS"] if review.get("outcome") not in (None, "APPROVED") else []
+    acknowledge += ["SAMPLING"] if saved.json()["plan"].get("samplingAssumed") else []
+    approved = client.post(f"/api/projects/{project_id}/plan/approve", headers=STUDENT, json={"baseVersion": saved.json()["planVersion"], "acknowledge": acknowledge})
     assert approved.status_code == 200, approved.json()
     body = approved.json()
     if body["activeJob"]:  # Chapter One starts on the first approval (owner request 2026-09-28)

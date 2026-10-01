@@ -165,6 +165,10 @@ try {
   await page.getByLabel('Accessible population (N)').fill('2400')
   await page.getByLabel('Where this figure comes from').fill('Mukono District Health Office records, 2025')
   await page.getByRole('button', { name: 'Save changes' }).first().click()
+  // An edited plan is not what PaperAid reviewed: the student confirms their changes first (Codex audit 2026-10-01)
+  const confirmEdits = page.getByLabel('I have checked these points and want to approve this plan')
+  await confirmEdits.waitFor({ timeout: 15_000 }).catch(() => {}) // appears once the save has returned
+  if (await confirmEdits.count()) await confirmEdits.check()
   await page.getByRole('button', { name: 'Approve plan' }).click()
   await page.getByText('Approved', { exact: true }).first().waitFor()
   await page.waitForTimeout(1500)

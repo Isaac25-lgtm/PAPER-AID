@@ -13,8 +13,8 @@ from typing import Any
 DATA = Path(__file__).parent / "data"
 VERSION = "rules-v1"
 FILES = {"SHARED": "shared-v1", "CONCEPT_NOTE": "concept-note-v1", "COURSEWORK": "coursework-v1", "FUNDING_PROPOSAL": "funding-v1"}
-VALIDATORS_VERSION = "validators-v1"  # bumped whenever a validator's behaviour changes
-RENDER_PROFILE_VERSION = "render-v1"  # the Word layout the documents are exported with
+VALIDATORS_VERSION = "validators-v2"  # bumped whenever a validator's behaviour changes (v2, 2026-10-01: FP-048 compares the answered request; WARN results)
+RENDER_PROFILE_VERSION = "render-v2"  # the Word layout the documents are exported with (v2, 2026-10-01: one shared layout with the final review)
 
 
 @cache

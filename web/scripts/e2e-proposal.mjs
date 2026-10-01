@@ -75,6 +75,10 @@ try {
   await page.getByText(/≈ 343/).waitFor()
   step('sample size calculated from the student’s figure (343)')
   await page.getByRole('button', { name: 'Save changes' }).first().click()
+  // An edited plan is not what PaperAid reviewed: the student confirms their changes first (Codex audit 2026-10-01)
+  const confirmEdits = page.getByLabel('I have checked these points and want to approve this plan')
+  await confirmEdits.waitFor({ timeout: 15_000 }).catch(() => {}) // appears once the save has returned
+  if (await confirmEdits.count()) await confirmEdits.check()
   await page.getByRole('button', { name: 'Approve plan' }).click()
   await page.getByText('Approved', { exact: true }).first().waitFor()
   await shot('p2-plan-approved')

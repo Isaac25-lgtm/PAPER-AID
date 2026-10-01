@@ -5,6 +5,8 @@ the reference list in the required style, and, where it applies, the last-page n
 
 import io
 import re
+from dataclasses import dataclass
+from typing import Literal
 
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
@@ -96,60 +98,108 @@ def _budget_tables(budget: Budget) -> tuple[list[list[str]], list[list[str]]]:
     return summary, detail
 
 
+EXPLORATORY = "Exploratory draft: not every eligibility criterion is met, so this is not ready to submit."
+DRAFT_LABEL = "Draft: some requirements still need your attention (see PaperAid's checklist)."
+
+
+@dataclass(frozen=True)
+class Block:
+    """One piece of the delivered document, in order. The Word file and PaperAid's final review are
+    both built from the same list, so the reviewer judges exactly what prints (Codex audit 2026-10-01)."""
+
+    kind: Literal["title", "label", "heading", "paragraph", "count", "table", "references_heading", "reference", "note"]
+    text: str = ""
+    rows: tuple[tuple[str, ...], ...] = ()
+    section: str = ""  # the section key it belongs to ("" outside sections)
+
+
+def layout(document: WorkDocument, spec: ResolvedSpec, results: ResultsModel | None, budget: Budget | None, library: dict[str, EvidenceItem],
+           tokens: dict[str, tuple[str, str]], draft: bool) -> list[Block]:
+    """The document as delivered: citations and figures filled in, tables that print (at least a header
+    and one row), the reference list and the last-page note. `draft` adds the not-ready label, which
+    only the stored file carries: it is decided after the final review, from its result."""
+    citer = ev.Citer(library, spec.citation_style)
+
+    def show(text: str) -> str:
+        return numbers.render(citer.render(text), tokens)[0]
+
+    blocks = [Block("title", document.title)]
+    label = KIND_LABELS.get(document.variant, "")
+    if label:
+        blocks.append(Block("label", label))
+    if document.exploratory:
+        blocks.append(Block("label", EXPLORATORY))
+    elif draft and document.status == "NOT_READY":
+        blocks.append(Block("label", DRAFT_LABEL))
+    generated: dict[str, list[tuple[list[list[str]], str]]] = {}
+    for key, _, rows, caption in generated_tables(document, spec, results, budget):
+        generated.setdefault(key, []).append((rows, caption))
+
+    def table(rows: list[list[str]], caption: str, section: str) -> list[Block]:
+        if len(rows) < 2:  # a header alone does not print
+            return []
+        width = max(len(r) for r in rows)
+        return [Block("table", caption, tuple(tuple([*r, *[""] * (width - len(r))]) for r in rows), section)]
+
+    for s in document.sections:
+        blocks.append(Block("heading", s.heading, section=s.key))
+        rendered = [show(paragraph) for paragraph in s.paragraphs]
+        blocks += [Block("paragraph", text, section=s.key) for text in rendered]
+        field = next((f for f in spec.fields if f.id == s.field_id), None) if s.field_id else None
+        if field is not None:
+            whole = " ".join(rendered)
+            limit = f"{field.max_characters:,} characters" if field.max_characters else f"{field.max_words:,} words"
+            count = f"{len(whole):,} characters" if field.max_characters else f"{len(whole.split()):,} words"
+            blocks.append(Block("count", f"{count} (limit {limit})", section=s.key))
+        if s.table:
+            blocks += table([[show(c) for c in row] for row in s.table], show(s.table_caption) or s.heading, s.key)
+        for rows, caption in generated.pop(s.key, []):
+            blocks += table(rows, caption, s.key)
+    for rows, caption in [t for group in generated.values() for t in group]:  # tables whose section is absent
+        blocks += table(rows, caption, "")
+    cited = [i for i in document.cited if i in library]
+    if cited:
+        blocks.append(Block("references_heading", "Reference List" if spec.citation_style == "HARVARD" else "References"))
+        blocks += [Block("reference", entry) for entry in ev.reference_list([library[i].source for i in cited], spec.citation_style)]
+    if document.ai_note:
+        blocks.append(Block("note", document.ai_note))
+    return blocks
+
+
 def build(document: WorkDocument, spec: ResolvedSpec, results: ResultsModel | None, budget: Budget | None, library: dict[str, EvidenceItem],
           tokens: dict[str, tuple[str, str]], draft: bool) -> bytes:
+    """The Word file, written block by block from `layout`."""
     profile = Profile(spec)
     doc = Document()
     _setup(doc, profile)
-    title = doc.add_paragraph()
-    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    title.add_run(document.title).bold = True
-    label = KIND_LABELS.get(document.variant, "")
-    if label:
-        sub = doc.add_paragraph(label)
-        sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    if document.exploratory:
-        note = doc.add_paragraph()
-        note.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        note.add_run("Exploratory draft: not every eligibility criterion is met, so this is not ready to submit.").italic = True
-    elif draft and document.status == "NOT_READY":
-        note = doc.add_paragraph()
-        note.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        note.add_run("Draft: some requirements still need your attention (see PaperAid's checklist).").italic = True
     _footer_numbers(doc.sections[0], "decimal")
-    citer = ev.Citer(library, spec.citation_style)
-    tables: dict[str, list[tuple[list[list[str]], str]]] = {}
-    for key, _, rows, caption in generated_tables(document, spec, results, budget):
-        tables.setdefault(key, []).append((rows, caption))
-    for s in document.sections:
-        doc.add_heading(s.heading, level=1 if not spec.fields else 2)
-        for paragraph in s.paragraphs:
-            text = numbers.render(citer.render(paragraph), tokens)[0]
-            p = doc.add_paragraph(text)
-            p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-        if s.field_id:
-            field = next((f for f in spec.fields if f.id == s.field_id), None)
-            rendered = " ".join(numbers.render(citer.render(p), tokens)[0] for p in s.paragraphs)
-            if field is not None:
-                limit = f"{field.max_characters:,} characters" if field.max_characters else f"{field.max_words:,} words"
-                count = f"{len(rendered):,} characters" if field.max_characters else f"{len(rendered.split()):,} words"
-                doc.add_paragraph().add_run(f"{count} (limit {limit})").italic = True
-        if s.table:
-            _table(doc, [[numbers.render(citer.render(c), tokens)[0] for c in row] for row in s.table], numbers.render(citer.render(s.table_caption), tokens)[0] or s.heading)
-        for rows, caption in tables.pop(s.key, []):
-            _table(doc, rows, caption)
-    for rows, caption in [t for group in tables.values() for t in group]:  # tables whose section is absent
-        _table(doc, rows, caption)
-    cited = [i for i in document.cited if i in library]
-    if cited:
-        doc.add_heading("Reference List" if spec.citation_style == "HARVARD" else "References", level=1)
-        for entry in ev.reference_list([library[i].source for i in cited], spec.citation_style):
-            p = doc.add_paragraph(entry)
-            p.paragraph_format.left_indent = Inches(0.5)
-            p.paragraph_format.first_line_indent = Inches(-0.5)
-    if document.ai_note:  # on a page of its own at the end (owner decision 2026-09-30)
-        doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
-        doc.add_paragraph(document.ai_note)
+    for block in layout(document, spec, results, budget, library, tokens, draft):
+        if block.kind == "title":
+            title = doc.add_paragraph()
+            title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            title.add_run(block.text).bold = True
+        elif block.kind == "label":
+            label = doc.add_paragraph()
+            label.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            run = label.add_run(block.text)
+            run.italic = block.text in (EXPLORATORY, DRAFT_LABEL)
+        elif block.kind == "heading":
+            doc.add_heading(block.text, level=1 if not spec.fields else 2)
+        elif block.kind == "paragraph":
+            doc.add_paragraph(block.text).alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        elif block.kind == "count":
+            doc.add_paragraph().add_run(block.text).italic = True
+        elif block.kind == "table":
+            _table(doc, [list(r) for r in block.rows], block.text)
+        elif block.kind == "references_heading":
+            doc.add_heading(block.text, level=1)
+        elif block.kind == "reference":
+            entry = doc.add_paragraph(block.text)
+            entry.paragraph_format.left_indent = Inches(0.5)
+            entry.paragraph_format.first_line_indent = Inches(-0.5)
+        elif block.kind == "note":  # on a page of its own at the end (owner decision 2026-09-30)
+            doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
+            doc.add_paragraph(block.text)
     out = io.BytesIO()
     doc.save(out)
     return out.getvalue()

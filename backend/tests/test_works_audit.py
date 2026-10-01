@@ -314,7 +314,7 @@ def test_a_step_priced_before_a_rule_changed_fails_without_charge(works_client, 
     work = _coursework(client)
     quoted = client.post(f"/api/works/{work['id']}/steps", headers=STUDENT, json={"step": "PLAN"}).json()
     hashes = library.content_hashes()
-    monkeypatch.setattr(library, "content_hashes", lambda: {**hashes, "validators": "validators-v2"})  # a release that changed the validators
+    monkeypatch.setattr(library, "content_hashes", lambda: {**hashes, "validators": "validators-v3"})  # a release that changed the validators
     client.post(f"/api/works/{work['id']}/steps/{quoted['job']['id']}/submit", headers=STUDENT, json={"quoteId": quoted["quote"]["id"]})
     from tests.test_api import wait
 

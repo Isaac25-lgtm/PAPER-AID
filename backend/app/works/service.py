@@ -419,11 +419,39 @@ def save_plan(rt: Runtime, user: User, work_id: str, plan: WorkPlan, base_versio
             raise AppError("These sections are required and cannot be removed: " + "; ".join(dropped), code="SECTION_REQUIRED")
         merged = [before[s.key].model_copy(update={"heading": s.heading, "words": s.words, "brief": s.brief}) if s.key in before else s.model_copy(update={"locked": False, "required": False})
                   for s in plan.sections]
-        k.plan = plan.model_copy(update={"sections": merged})
+        edited = plan.model_copy(update={"sections": merged})
+        changed = k.plan is None or edited.model_dump() != k.plan.model_dump()
+        k.plan = edited
         k.plan_status, k.plan_version = "DRAFT", k.plan_version + 1
+        if changed:
+            k.plan_review = edited_decision(k.plan_review, k.plan_version)
         return k
 
     return view(rt, _change(rt, user, work_id, apply))
+
+
+EDITED_NOTE = "You changed this after PaperAid's final review, so PaperAid has not reviewed your version."
+STUDENT_FIGURES = ("baseline", "target", "baseline_year", "target_date")  # the applicant's own figures: never written or judged by PaperAid's models
+
+
+def _reviewed_part(model: ResultsModel) -> dict[str, Any]:
+    """What the final reviewer judged in a Results Model: everything but the applicant's own figures,
+    which only the student adds (so adding them does not undo the review)."""
+    data = model.model_dump()
+    for indicator in data.get("indicators", []):
+        for key in STUDENT_FIGURES:
+            indicator.pop(key, None)
+    return data
+
+
+def edited_decision(decision: ReviewDecision | None, version: int) -> ReviewDecision | None:
+    """A student's edit replaces PaperAid's decision on the earlier version (Codex audit 2026-10-01): the
+    edited version was never reviewed, so approving it needs the student's explicit confirmation.
+    Earlier objections stay listed. Older work that was never reviewed keeps no decision."""
+    if decision is None:
+        return None
+    earlier = decision.objections if decision.outcome != "APPROVED" else []
+    return ReviewDecision(outcome="NOT_REVIEWED", reason="EDITED", objections=[EDITED_NOTE, *[o for o in earlier if o != EDITED_NOTE]], version=version)
 
 
 def _acknowledge(k: Work, decision: ReviewDecision | None, kind: str, version: int, given: set[str]) -> None:
@@ -472,7 +500,10 @@ def save_results(rt: Runtime, user: User, work_id: str, model: ResultsModel, bas
         _expect(k.results_version, base_version, "Results Model")
         if k.kind != "FUNDING_PROPOSAL":
             raise AppError("Only funding proposals have a Results Model.", code="NOT_FUNDING")
+        changed = k.results is None or _reviewed_part(model) != _reviewed_part(k.results)
         k.results, k.results_status, k.results_version = model, "DRAFT", k.results_version + 1
+        if changed:
+            k.results_review = edited_decision(k.results_review, k.results_version)
         return k
 
     return view(rt, _change(rt, user, work_id, apply))

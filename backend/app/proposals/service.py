@@ -42,6 +42,7 @@ from app.proposals.models import (
     FeedbackComment,
     FeedbackStatus,
     GuideFile,
+    PlanReview,
     Project,
     ProjectView,
     ProposalInputs,
@@ -221,9 +222,16 @@ def save_plan(rt: Runtime, user: User, project_id: str, plan: ProposalPlan, base
         if p.plan is not None and not decisions.changed(p.plan, edited) and edited.questions_for_student == p.plan.questions_for_student:
             return p  # nothing changed: keep the approval
         p.plan, p.plan_status, p.plan_version = edited, "DRAFT", p.plan_version + 1
+        if p.plan_review is not None:  # PaperAid reviewed the earlier version, not this one (Codex audit 2026-10-01)
+            earlier = p.plan_review.objections if p.plan_review.outcome != "APPROVED" else []
+            p.plan_review = PlanReview(outcome="NOT_REVIEWED", reason="EDITED", plan_version=p.plan_version,
+                                       objections=[EDITED_NOTE, *[o for o in earlier if o != EDITED_NOTE]])
         return p
 
     return view(rt, _change(rt, user, project_id, apply))
+
+
+EDITED_NOTE = "You changed this plan after PaperAid's final review, so PaperAid has not reviewed your version."
 
 
 def needed_acknowledgments(p: Project) -> dict[str, str]:

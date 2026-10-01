@@ -31,7 +31,7 @@ from app.rules import compliance, library
 from app.rules.extract import KEYS, requirements_from
 from app.rules.validators import Context
 from app.works import directives, numbers, templates
-from app.works.ai import Covered, Evaluation, Final, FinalRule, Priority, WorkRunner
+from app.works.ai import Covered, Evaluation, Final, FinalRule, PlanReview, Priority, ResultsReview, WorkRunner
 from app.works.models import (
     AI_NOTE,
     Budget,
@@ -392,11 +392,24 @@ def stage_planning(ctx: "StageContext") -> None:
         ctx.update(lambda j: _unapproved(j, unapproved))
 
 
-def _decision(review_issues: list[str] | None, problems: list[str], reason: str) -> ReviewDecision:
-    if review_issues is None:
+NOT_COMPLETE = "PaperAid's review gave no verdict on: {}."
+
+
+def _plan_decision(review: "PlanReview | None", plan_rules: list[dict[str, Any]], problems: list[str], reason: str) -> ReviewDecision:
+    """Approved only when the reviewer passed the plan, gave a verdict on every rule it was asked to
+    judge, failed none and raised no issue, and code finds nothing either (Codex audit 2026-10-01: a
+    PASS with a failed rule was approved). A missing verdict is "not reviewed", never approval."""
+    if review is None:
         return ReviewDecision(outcome="NOT_REVIEWED", reason=reason, objections=["PaperAid could not complete its final review."])
-    return ReviewDecision(outcome="OBJECTIONS", reason="CODE_RULE" if not review_issues and problems else "REVIEW_OBJECTION",
-                          objections=list(dict.fromkeys([*review_issues, *problems]))[:20])
+    missing = sorted({r["rule"] for r in plan_rules} - {r.rule for r in review.rules})
+    if missing:
+        return ReviewDecision(outcome="NOT_REVIEWED", reason="REVIEW_UNAVAILABLE", objections=[NOT_COMPLETE.format(", ".join(missing))])
+    failed = [f"{r.rule}: {r.note}" for r in review.rules if r.status == "FAIL"]
+    objections = [*review.issues, *failed, *problems]
+    if review.verdict == "PASS" and not objections:
+        return ReviewDecision(outcome="APPROVED")
+    return ReviewDecision(outcome="OBJECTIONS", reason="CODE_RULE" if problems and not review.issues and not failed else "REVIEW_OBJECTION",
+                          objections=list(dict.fromkeys(objections or ["Not approved, without a stated reason."]))[:20])
 
 
 def _final_plan(runner: WorkRunner, payload: dict[str, Any], plan: WorkPlan, skeleton: list[PlanSection], spec: ResolvedSpec,
@@ -408,30 +421,41 @@ def _final_plan(runner: WorkRunner, payload: dict[str, Any], plan: WorkPlan, ske
     for round_ in range(REVIEW_REPAIRS + 1):
         problems = _plan_problems(plan, spec)
         review = runner.final_review_plan({**payload, "plan": plan.model_dump(by_alias=True), "rules": plan_rules, "paperaidChecks": problems})
-        if review is not None and review.verdict == "PASS" and not problems:
-            return plan, ReviewDecision(outcome="APPROVED")
-        failed = [f"{r.rule}: {r.note}" for r in review.rules if r.status == "FAIL"] if review else []
-        decision = _decision([*review.issues, *failed] if review else None, problems, "SPEND_CAP" if runner.budget_reached else "REVIEW_UNAVAILABLE")
-        if round_ == REVIEW_REPAIRS or runner.budget_reached or review is None:
-            break
+        decision = _plan_decision(review, plan_rules, problems, "SPEND_CAP" if runner.budget_reached else "REVIEW_UNAVAILABLE")
+        if decision.outcome != "OBJECTIONS" or round_ == REVIEW_REPAIRS or runner.budget_reached:
+            break  # approved, or not reviewed (a repair cannot supply a missing verdict), or out of rounds
         answer = runner.plan({**payload, "draft": plan.model_dump(by_alias=True), "critique": decision.objections}).model_dump()
         plan = _plan_from(answer, skeleton, spec)
     return plan, decision
 
 
+def _results_decision(checked: "ResultsReview | None", model: ResultsModel, rules: list[dict[str, Any]], reason: str) -> ReviewDecision:
+    """Approved only when every rule has a verdict and none failed, every goal, outcome and output was
+    classified and each reads at its real level (code knows the level; the model's own "stated as" is
+    not trusted), and no issue was raised. A missing verdict or classification is "not reviewed"."""
+    if checked is None:
+        return ReviewDecision(outcome="NOT_REVIEWED", reason=reason, objections=["PaperAid could not complete its final review."])
+    levels = {model.goal.id: "goal", **{o.id: "outcome" for o in model.outcomes}, **{o.id: "output" for o in model.outputs}}
+    seen = {c.id: c for c in checked.classified}
+    missing = sorted({r["rule"] for r in rules} - {r.rule for r in checked.rules}) + sorted(set(levels) - set(seen))
+    if missing:
+        return ReviewDecision(outcome="NOT_REVIEWED", reason="REVIEW_UNAVAILABLE", objections=[NOT_COMPLETE.format(", ".join(missing))])
+    failed = [f"{r.rule}: {r.note}" for r in checked.rules if r.status == "FAIL"]
+    misread = [f"{i} is a {level} but reads as a {seen[i].reads}: {seen[i].note}" for i, level in levels.items() if seen[i].reads != level]
+    objections = [*checked.issues, *failed, *misread]
+    if not objections:
+        return ReviewDecision(outcome="APPROVED")
+    return ReviewDecision(outcome="OBJECTIONS", reason="REVIEW_OBJECTION", objections=list(dict.fromkeys(objections))[:20])
+
+
 def _final_results(runner: WorkRunner, payload: dict[str, Any], model: ResultsModel, lines: list[BudgetLine],
                    rules: list[dict[str, Any]]) -> tuple[ResultsModel, list[BudgetLine], ReviewDecision]:
-    """The same final review loop for a funding Results Model: every result's level read correctly and
-    every issue repaired, reviewed again after each repair."""
+    """The same final review loop for a funding Results Model, reviewed again after each repair."""
     decision = ReviewDecision(outcome="NOT_REVIEWED", reason="REVIEW_UNAVAILABLE")
     for round_ in range(REVIEW_REPAIRS + 1):
         checked = runner.final_review_results({**payload, "results": model.model_dump(by_alias=True), "rules": rules})
-        wrong = [c for c in checked.classified if c.reads != c.statedAs.lower()] if checked else []
-        if checked is not None and not wrong and not checked.issues:
-            return model, lines, ReviewDecision(outcome="APPROVED")
-        issues = [*checked.issues, *[f"{c.id} is stated as a {c.statedAs} but reads as a {c.reads}: {c.note}" for c in wrong]] if checked else None
-        decision = _decision(issues, [], "SPEND_CAP" if runner.budget_reached else "REVIEW_UNAVAILABLE")
-        if round_ == REVIEW_REPAIRS or runner.budget_reached or checked is None:
+        decision = _results_decision(checked, model, rules, "SPEND_CAP" if runner.budget_reached else "REVIEW_UNAVAILABLE")
+        if decision.outcome != "OBJECTIONS" or round_ == REVIEW_REPAIRS or runner.budget_reached:
             break
         model, lines = _results_from(runner.results({**payload, "draft": model.model_dump(by_alias=True), "critique": decision.objections}))
     return model, lines, decision
@@ -704,59 +728,85 @@ def _document_rules(spec: ResolvedSpec) -> list[dict[str, Any]]:
 
 
 def deliverable(inp: WorkStepInput, document: WorkDocument, library_items: dict[str, EvidenceItem], tokens: dict[str, tuple[str, str]]) -> dict[str, Any]:
-    """Exactly what the student receives, as the Word file shows it: each section's paragraphs and its
-    table and caption with citations and figures filled in, the tables code renders from the Results
-    Model and budget, the reference list and the last-page note (owner decision 2026-09-30)."""
-    from app.works.export import generated_tables
+    """Exactly what the student receives, from the same ordered layout the Word file is written from
+    (app.works.export.layout; Codex audit 2026-10-01): the title and labels, each section's heading,
+    paragraphs, form-box count and tables (its own and those rendered from the Results Model and
+    budget), any table whose section is absent, the reference list and the last-page note."""
+    from app.works import export
 
-    spec = _spec(inp)
-    citer = ev.Citer(library_items, spec.citation_style)
-
-    def show(text: str) -> str:
-        return numbers.render(citer.render(text), tokens)[0]
-
-    sections = []
-    for s in document.sections:
-        entry: dict[str, Any] = {"key": s.key, "heading": s.heading, "text": [show(p) for p in s.paragraphs]}
-        if s.table:
-            entry["table"] = {"caption": show(s.table_caption), "rows": [[show(c) for c in row] for row in s.table]}
-        sections.append(entry)
-    tables = [{"after": key, "caption": caption, "rows": rows} for key, _, rows, caption in generated_tables(document, spec, inp.results, inp.budget)]
-    cited = [i for i in document.cited if i in library_items]
-    return {"title": document.title, "sections": sections, "tables": tables,
-            "references": ev.reference_list([library_items[i].source for i in cited], spec.citation_style),
-            "notes": [document.ai_note] if document.ai_note else []}
+    blocks = export.layout(document, _spec(inp), inp.results, inp.budget, library_items, tokens, draft=False)
+    out: dict[str, Any] = {"front": [], "sections": [], "tables": [], "references": [], "notes": []}
+    by_key: dict[str, dict[str, Any]] = {}
+    for b in blocks:
+        if b.kind in ("title", "label"):
+            out["front"].append(b.text)
+        elif b.kind == "heading":
+            by_key[b.section] = {"key": b.section, "heading": b.text, "text": [], "tables": []}
+            out["sections"].append(by_key[b.section])
+        elif b.kind in ("paragraph", "count"):
+            by_key[b.section]["text"].append(b.text)
+        elif b.kind == "table":
+            target = by_key[b.section]["tables"] if b.section in by_key else out["tables"]
+            target.append({"caption": b.text, "rows": [list(r) for r in b.rows]})
+        elif b.kind == "reference":
+            out["references"].append(b.text)
+        elif b.kind == "note":
+            out["notes"].append(b.text)
+    return out
 
 
 def _words_of_entry(entry: dict[str, Any]) -> int:
-    return len(" ".join(entry.get("text", [])).split()) + len(" ".join(c for row in entry.get("table", {}).get("rows", []) for c in row).split())
+    return len(" ".join(entry.get("text", [])).split()) + sum(len(" ".join(c for row in t["rows"] for c in row).split()) for t in entry.get("tables", []))
+
+
+def _split_entry(entry: dict[str, Any], limit: int) -> list[dict[str, Any]]:
+    """A section longer than one review part is reviewed in consecutive pieces, its tables with the last."""
+    if _words_of_entry(entry) <= limit:
+        return [entry]
+    pieces: list[list[str]] = [[]]
+    for paragraph in entry["text"]:
+        if pieces[-1] and len(" ".join([*pieces[-1], paragraph]).split()) > limit:
+            pieces.append([])
+        pieces[-1].append(paragraph)
+    out = [{"key": entry["key"], "heading": entry["heading"] if n == 0 else f"{entry['heading']} (continued, piece {n + 1} of {len(pieces)})",
+            "text": text, "tables": []} for n, text in enumerate(pieces)]
+    out[-1]["tables"] = entry["tables"]
+    return out
+
+
+def _complete(answer: "Final", rule_ids: set[str], coverage_ids: set[str], priorities: set[str]) -> bool:
+    """Every rule, question part and priority has a verdict in this answer: a part's omission is never
+    filled in by another part (Codex audit 2026-10-01)."""
+    return rule_ids <= {r.rule for r in answer.rules} and coverage_ids <= {c.id for c in answer.coverage} and priorities <= {p.priority for p in answer.priorities}
 
 
 def _final_review(runner: WorkRunner, inp: WorkStepInput, document: WorkDocument, library_items: dict[str, EvidenceItem],
                   tokens: dict[str, tuple[str, str]], doc_rules: list[dict[str, Any]]) -> "Final | None":
     """Sol's review of the exact deliverable, with a verdict required for every document rule, every
-    part of the question and every funder priority. A long document is reviewed in bounded parts, each
-    with a manifest of the whole; a rule fails if any part fails it, and a part of the question is
-    answered if any part answers it. Any verdict missing, cut off or unaffordable: None (not reviewed)."""
+    part of the question and every funder priority, in every part. A long document is reviewed in
+    bounded parts (a long section split across them), each with a manifest of the whole; a rule fails
+    if any part fails it, and a part of the question is answered if any part answers it. Any verdict
+    missing, cut off or unaffordable: None (not reviewed)."""
     spec = _spec(inp)
     whole = deliverable(inp, document, library_items, tokens)
+    entries = [piece for entry in whole["sections"] for piece in _split_entry(entry, FINAL_PART_WORDS)]
     parts: list[list[dict[str, Any]]] = [[]]
-    for entry in whole["sections"]:
+    for entry in entries:
         if parts[-1] and sum(_words_of_entry(e) for e in parts[-1]) + _words_of_entry(entry) > FINAL_PART_WORDS:
             parts.append([])
         parts[-1].append(entry)
-    manifest = [{"key": e["key"], "heading": e["heading"], "words": _words_of_entry(e), "part": n}
-                for n, part in enumerate(parts, start=1) for e in part]
+    manifest = [{"key": e["key"], "heading": e["heading"], "words": _words_of_entry(e), "part": n} for n, part in enumerate(parts, start=1) for e in part]
     base = {"spec": _compact_spec(spec), "student": _student(inp), "position": inp.plan.position if inp.plan else "",
             "rules": [{"rule": r["id"], "requirement": r["requirement"], "severity": r["severity"]} for r in doc_rules],
             "coverage": [c.model_dump(by_alias=True) for c in spec.coverage], "priorities": spec.priorities}
+    rule_ids, coverage_ids, priorities = {r["id"] for r in doc_rules}, {c.id for c in spec.coverage}, set(spec.priorities)
     answers = []
     for n, part in enumerate(parts, start=1):
         last = n == len(parts)
-        document_part = {"title": whole["title"], "sections": part, "tables": whole["tables"] if last else [],
+        document_part = {"front": whole["front"], "sections": part, "tables": whole["tables"] if last else [],
                          "references": whole["references"] if last else [], "notes": whole["notes"] if last else []}
         answer = runner.final({**base, "document": document_part, "manifest": manifest, "part": f"{n} of {len(parts)}"})
-        if answer is None:
+        if answer is None or not _complete(answer, rule_ids, coverage_ids, priorities):
             return None
         answers.append(answer)
     rules: dict[str, FinalRule] = {}
@@ -770,15 +820,13 @@ def _final_review(runner: WorkRunner, inp: WorkStepInput, document: WorkDocument
         for c in answer.coverage:
             if c.id not in coverage or (c.answered and not coverage[c.id].answered):
                 coverage[c.id] = c
-    priorities: dict[str, Priority] = {}
+    priorities_seen: dict[str, Priority] = {}
     for answer in answers:
         for pr in answer.priorities:
-            if pr.priority not in priorities or (pr.addressed and not priorities[pr.priority].addressed):
-                priorities[pr.priority] = pr
-    expected_rules = {r["id"] for r in doc_rules}
-    if expected_rules - set(rules) or {c.id for c in spec.coverage} - set(coverage) or set(spec.priorities) - set(priorities):
-        return None  # a verdict is missing: not reviewed, never approval
-    return Final(rules=[rules[i] for i in sorted(expected_rules)], coverage=list(coverage.values()), priorities=list(priorities.values()))
+            if pr.priority not in priorities_seen or (pr.addressed and not priorities_seen[pr.priority].addressed):
+                priorities_seen[pr.priority] = pr
+    return Final(rules=[rules[i] for i in sorted(rule_ids)], coverage=[coverage[i] for i in sorted(coverage_ids)],
+                 priorities=[priorities_seen[p] for p in spec.priorities])
 
 
 def _where_keys(where: str, plan_sections: list[PlanSection]) -> list[str]:
