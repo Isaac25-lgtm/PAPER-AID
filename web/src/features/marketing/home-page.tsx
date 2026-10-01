@@ -11,14 +11,14 @@ export function HomePage() {
   const { config } = useData()
 
   const steps = [
-    { icon: FileUp, title: 'Upload and choose', body: 'A Word document or text-based PDF, plus your university guide if you have one. Pick check, refine, format, or a mix.' },
-    { icon: ScanSearch, title: 'See your estimate', body: 'PaperAid sizes the work your paper needs and shows the price before anything runs. Nothing starts until you approve it.' },
+    { icon: FileUp, title: 'Tell us what you need', body: 'Your question, topic or call, or your own paper to check or format. Answer a few questions; nothing else to set up.' },
+    { icon: ScanSearch, title: 'Press Start', body: 'Credits are reserved when you start and charged only for what is delivered. If PaperAid cannot deliver, they come back.' },
     {
       icon: Sparkles,
       title: 'We do the work',
-      body: 'PaperAid refines the passages that need it and applies your formatting. Your citations, quotes and numbers stay locked.',
+      body: 'PaperAid researches confirmed sources, writes and checks every requirement, or refines and formats your own paper with its citations, quotes and numbers kept.',
     },
-    { icon: Download, title: 'Review and download', body: 'A Word file you can review, plus a report of every change and why it was made.' },
+    { icon: Download, title: 'Review and download', body: 'Read it on screen, ask for changes in your own words, then download Word or PDF.' },
   ]
 
   return (

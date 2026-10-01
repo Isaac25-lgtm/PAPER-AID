@@ -1375,6 +1375,8 @@ def stage_exporting(ctx: "StageContext") -> None:
             k.read_sources = [s.id for s in inp.sources]
             work_service.respec(ctx.rt, k)
         if planned is not None:
+            if k.auto and ctx.job.selection.bundled:
+                k.auto_next = job_id  # one Start: the draft (or a stop) is still to happen
             plan = WorkPlan.model_validate(planned["plan"])
             plan_review = ReviewDecision.model_validate(planned["planReview"]) if planned.get("planReview") else None
             if k.plan_version == inp.plan_version:

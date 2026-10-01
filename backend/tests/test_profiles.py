@@ -58,7 +58,8 @@ def test_the_proposal_follows_the_students_institution(client):
     job = _run(client, project["id"], "PROFILE")
     assert job["status"] == "COMPLETED", job
     # One final reviewer; Opus's guidance is optional and off (owner decision 2026-09-30)
-    assert client.models.tasks[-4:] == ["p_profile", "p_profile_critique", "p_profile_finalise", "p_profile_review"]
+    profile_calls = [t for t in client.models.tasks if t.startswith("p_profile")]  # another step's calls may interleave under load
+    assert profile_calls[-4:] == ["p_profile", "p_profile_critique", "p_profile_finalise", "p_profile_review"]
     project = client.get(f"/api/projects/{project['id']}", headers=STUDENT).json()
     assert project["rulebook"].startswith("custom-") and project["institution"] == "Kyambogo University" and project["citation"] == "APA7"
     assert "The guide does not say how long the literature review should be." in project["institutionNotes"] and project["guideRead"]

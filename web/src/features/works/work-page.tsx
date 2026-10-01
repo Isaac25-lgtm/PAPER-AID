@@ -35,7 +35,7 @@ function useAction(onDone: (work: Work) => void) {
 }
 
 /** The page for works set up before one Start (owner decision 2026-10-01), until they are written. */
-export function LegacyWorkPage() {
+export function LegacyWorkPage({ onWritten }: { onWritten?: (work: Work) => void }) {
   const { workId = '' } = useParams()
   const data = useData()
   const [work, setWork] = useState<Work | null | undefined>(undefined)
@@ -46,9 +46,12 @@ export function LegacyWorkPage() {
   const load = useCallback(() => {
     data.works
       .get(workId)
-      .then(setWork)
+      .then((w) => {
+        setWork(w)
+        if (w?.documents.length && onWritten) onWritten(w) // written now: it opens in the workspace
+      })
       .catch((e: unknown) => setError(e instanceof DataError ? e.message : 'We could not load this work.'))
-  }, [data, workId])
+  }, [data, workId, onWritten])
   useEffect(load, [load])
   const onStepDone = useCallback(() => load(), [load])
 

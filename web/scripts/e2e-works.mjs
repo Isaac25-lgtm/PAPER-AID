@@ -105,42 +105,49 @@ try {
   await page.getByText('Coming soon').first().waitFor()
   step('the new sections are offered, and AI detection shows as coming soon')
 
-  // --- coursework: an essay whose brief bans AI -----------------------------------------------
-  await createWork({ kind: 'COURSEWORK', variant: 'ESSAY', mode: '', citation: 'APA7', inputs: { title: 'Community health workers and maternal health',
-    description: 'Critically evaluate the effectiveness of community health workers in improving maternal health outcomes in rural Uganda since 2015.', answers: {}, experience: '' } })
-  await understood([
-    ['What word limit did your lecturer give you?', '1,500 words', 'fill'], // live case wrk_64b3b916e144: a limit typed with words
-    ['What level is this work?', 'Later ug', 'select'],
-    ['Does your assignment say anything about using AI?', 'Banned', 'select'],
-  ])
-  await page.getByText('at most 1,500 words', { exact: false }).first().waitFor() // the limit typed as "1,500 words" was saved and applied
-  step('what PaperAid understood was answered (a limit typed with words, saved as it was given) and confirmed')
-  await shot('w1-understood')
-  await run('Make my plan')
-  await aside().getByText('Review and approve your plan').waitFor()
-  await aside().getByRole('button', { name: 'Open' }).click()
+  // --- older work: set up before one Start, it keeps its plan, Results Model and budget pages --------
+  // (New work starts with one Start, covered by e2e-start.mjs. Here the setup and the plan go through the
+  // API, as they did on the earlier pages, and the browser covers what such work still shows.)
+  async function apiJson(method, path, data) {
+    const res = await page.request.fetch(`${base}${path}`, { method, headers: DEV, data })
+    if (!res.ok()) throw new Error(`${method} ${path}: ${res.status()} ${await res.text()}`)
+    return res.json()
+  }
+  async function olderWork(body, answers) {
+    let work = await apiJson('POST', '/api/works', body)
+    work = await apiJson('POST', `/api/works/${work.id}/answers`, { answers, skipRest: true, baseVersion: work.specVersion })
+    work = await apiJson('POST', `/api/works/${work.id}/spec/confirm`, { baseVersion: work.specVersion })
+    const quoted = await apiJson('POST', `/api/works/${work.id}/steps`, { step: 'PLAN', note: '' })
+    await apiJson('POST', `/api/works/${work.id}/steps/${quoted.job.id}/submit`, { quoteId: quoted.quote.id })
+    for (let i = 0; i < 300; i++) {
+      const job = await apiJson('GET', `/api/jobs/${quoted.job.id}`)
+      if (['COMPLETED', 'FAILED', 'CANCELLED'].includes(job.status)) break
+      await page.waitForTimeout(300)
+    }
+    await page.goto(`${base}/app/works/${work.id}`)
+    return work
+  }
+
+  await olderWork({ kind: 'COURSEWORK', variant: 'ESSAY', mode: '', citation: 'APA7', inputs: { title: 'Community health workers and maternal health',
+    description: 'Critically evaluate the effectiveness of community health workers in improving maternal health outcomes in rural Uganda since 2015.', answers: {}, experience: '' } },
+    { word_limit: '1,500 words', level: 'LATER_UG', ai_policy: 'BANNED' })
+  await page.getByRole('tab', { name: 'Plan' }).click()
   await page.getByRole('button', { name: 'Approve the plan' }).click()
   await page.getByRole('button', { name: 'Approved' }).waitFor()
-  step('the plan was drafted and approved')
+  step('an older plan is still approved on its own page')
   await run('Write my draft', 'AI-assisted third party')
   step('before buying, the student was told about the last-page note')
-  await page.getByRole('tab', { name: 'Your draft' }).click()
-  await page.getByText('Last page: This document was drafted by an AI-assisted third party.').waitFor()
-  await page.getByText(/checks pass/).first().waitFor()
-  const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Word' }).click()])
+  await page.getByRole('button', { name: /Download Word/ }).waitFor() // a written document opens in the workspace
+  await page.getByText('This document was drafted by an AI-assisted third party.').waitFor()
+  const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: /Download Word/ }).click()])
   if (!download.suggestedFilename().endsWith('.docx')) throw new Error('no Word file')
   await shot('w2-coursework-document')
-  step('the coursework draft shows its checks and last-page note, and downloads')
+  step('the coursework draft opens in the workspace with its last-page note, and downloads')
 
-  // --- a funding proposal: Results Model, budget, tables ------------------------------------------
-  await createWork({ kind: 'FUNDING_PROPOSAL', variant: 'NGO_PROJECT', mode: 'COMPACT', citation: 'APA7', inputs: { title: 'Safer deliveries in Kamuli',
-    description: 'Too many mothers in Kamuli deliver at home without skilled care, and referrals are late.', answers: {}, experience: '' } })
-  await understood([
-    ['What do you propose to do about it?', 'Train village health teams and fund referral transport.', 'fill'],
-    ['How many months will the work last?', '12', 'fill'],
-  ])
-  await run('Make my plan')
-  await aside().getByRole('button', { name: 'Open' }).click()
+  await olderWork({ kind: 'FUNDING_PROPOSAL', variant: 'NGO_PROJECT', mode: 'COMPACT', citation: 'APA7', inputs: { title: 'Safer deliveries in Kamuli',
+    description: 'Too many mothers in Kamuli deliver at home without skilled care, and referrals are late.', answers: {}, experience: '' } },
+    { intervention: 'Train village health teams and fund referral transport.', duration_months: '12' })
+  await page.getByRole('tab', { name: 'Plan' }).click()
   await page.getByRole('button', { name: 'Approve the plan' }).click()
   await page.getByRole('button', { name: 'Approved' }).waitFor()
   await page.getByRole('tab', { name: 'Results Model' }).click()
@@ -161,7 +168,7 @@ try {
   await page.getByText(/Total \(calculated by PaperAid when you save\): USD 3,000/).waitFor()
   step('budget totals come from the server')
   await run('Write my draft')
-  await page.getByRole('tab', { name: 'Your draft' }).click()
+  await page.getByRole('button', { name: /Download Word/ }).waitFor()
   for (const caption of ['Logframe', 'Workplan', 'Budget summary']) await page.getByText(caption, { exact: true }).first().waitFor()
   await shot('w3-funding-document')
   step('the funding proposal has its logframe, workplan and budget tables, built from the data')

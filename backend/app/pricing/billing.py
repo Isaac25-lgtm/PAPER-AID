@@ -95,7 +95,7 @@ def release_hold(j: Job, w: Wallet, reason: str) -> None:
     returns what Start reserved for the document: nothing will be delivered."""
     key = reservation_key(j)
     if key and is_bundled_plan(j):
-        credits.release_reservation(w, key, "Reserved for your document: returned, as nothing was delivered")
+        credits.release_reservations(w, key, "Reserved for your document: returned, as nothing was delivered")
     b = j.billing
     if b.state == "HELD":
         credits.settle(w, held=b.held, charge=0, job_id=j.id, note=reason)

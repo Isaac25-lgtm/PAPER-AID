@@ -300,6 +300,7 @@ class ProjectView(Camel):
     # concept paper) by itself; `auto_failure` says why it stopped without one.
     auto: bool = False
     auto_failure: str = ""
+    auto_next: str = ""  # the one-Start plan step whose next step is still to happen (see works)
     # The student ticked "use the standard sample-size settings" at Start (Codex audit 2026-10-01): only
     # then is an assumed setting acknowledged for them.
     sampling_consent: bool = False

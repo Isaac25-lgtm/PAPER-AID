@@ -1,5 +1,5 @@
 import { ArrowLeft, CheckCircle2, FileText, Quote, X } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router'
 import { Button } from '../../components/ui/button'
 import { Checkbox, Input, Select, TextArea } from '../../components/ui/field'
@@ -118,6 +118,9 @@ function WorkPageOne({ kind, onCreated }: { kind: WorkKind; onCreated: (w: Work)
   const [proposal, setProposal] = useState('')
   const [pasted, setPasted] = useState('')
   const [uploads, setUploads] = useState<Upload[]>([])
+  // What Continue already saved (Codex audit 2026-10-01): pressed again after a refusal, it reuses the
+  // same work and never uploads a file twice.
+  const made = useRef<{ id: string; uploaded: number; pasted: boolean } | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [tried, setTried] = useState(false)
@@ -138,10 +141,21 @@ function WorkPageOne({ kind, onCreated }: { kind: WorkKind; onCreated: (w: Work)
     try {
       const name = title.trim() || description.trim().split(/\s+/).slice(0, 12).join(' ')
       const answers: Record<string, string> = coursework ? {} : { problem: description.trim(), intervention: proposal.trim() }
-      let w = await data.works.create(kind, variant, coursework ? '' : mode, { title: name.slice(0, 300), description: description.trim(), answers, experience: '' }, 'APA7')
-      for (const u of uploads) w = await data.works.uploadSource(w.id, u.role, u.file)
-      if (pasted.trim()) w = await data.works.pasteSource(w.id, 'CALL', 'The call (pasted)', pasted.trim())
-      if (w.sources.length) w = await data.works.read(w.id)
+      let w: Work | null = made.current ? await data.works.get(made.current.id) : null
+      if (!w) {
+        w = await data.works.create(kind, variant, coursework ? '' : mode, { title: name.slice(0, 300), description: description.trim(), answers, experience: '' }, 'APA7')
+        made.current = { id: w.id, uploaded: 0, pasted: false }
+      }
+      const saved = made.current!
+      for (const u of uploads.slice(saved.uploaded)) {
+        w = await data.works.uploadSource(w.id, u.role, u.file)
+        saved.uploaded += 1
+      }
+      if (pasted.trim() && !saved.pasted) {
+        w = await data.works.pasteSource(w.id, 'CALL', 'The call (pasted)', pasted.trim())
+        saved.pasted = true
+      }
+      if (w.needsRead) w = await data.works.read(w.id)
       onCreated(w)
     } catch (e) {
       setError(e instanceof DataError ? e.message : 'We could not start this. Try again.')
@@ -249,8 +263,10 @@ function WorkPageTwo({ work, onChange }: { work: Work; onChange: (w: Work) => vo
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [tried, setTried] = useState(false)
-  const readFailed = work.needsRead && !work.activeJob && Boolean(work.autoFailure)
-  const reading = Boolean(work.activeJob) || (work.needsRead && !readFailed)
+  // Not read and nothing reading them: a failure, or a read that was never started (refused, or the page
+  // was left): either way the student can read them now (Codex audit 2026-10-01: never a spinner for ever).
+  const readFailed = work.needsRead && !work.activeJob
+  const reading = Boolean(work.activeJob)
 
   // PaperAid is still reading the documents: check again until it has finished.
   useEffect(() => {
@@ -263,9 +279,10 @@ function WorkPageTwo({ work, onChange }: { work: Work; onChange: (w: Work) => vo
 
   if (readFailed)
     return (
-      <Shell title="We couldn't read your documents" step={2}>
+      <Shell title={work.autoFailure ? "We couldn't read your documents" : 'Your documents are not read yet'} step={2}>
         <Card className="space-y-4 p-6">
-          <p className="text-sm text-fg-muted">{work.autoFailure}</p>
+          <p className="text-sm text-fg-muted">{work.autoFailure || 'PaperAid reads them so it can fill in what they say. It takes under a minute.'}</p>
+          {work.kind !== 'COURSEWORK' && <p className="text-sm text-fg-muted">The call is needed to write a funding document, so it has to be read.</p>}
           {error && <Alert tone="warning">{error}</Alert>}
           <div className="flex flex-wrap gap-2">
             <Button loading={busy} onClick={async () => {
@@ -279,9 +296,9 @@ function WorkPageTwo({ work, onChange }: { work: Work; onChange: (w: Work) => vo
                 setBusy(false)
               }
             }}>
-              Try reading again
+              {work.autoFailure ? 'Try reading again' : 'Read my documents'}
             </Button>
-            <Button variant="secondary" disabled={busy} onClick={async () => {
+            {work.kind === 'COURSEWORK' && <Button variant="secondary" disabled={busy} onClick={async () => {
               setBusy(true)
               setError(null)
               try {
@@ -295,7 +312,7 @@ function WorkPageTwo({ work, onChange }: { work: Work; onChange: (w: Work) => vo
               }
             }}>
               Continue without them
-            </Button>
+            </Button>}
           </div>
         </Card>
       </Shell>

@@ -629,7 +629,7 @@ def submit(rt: Runtime, user: User, job_id: str, quote_id: str, project_gate: Pr
         if settings.credits_enabled:
             key = reservation_key(j)
             if key and is_bundled_document(j):  # the credits Start reserved become this document's hold, in one transaction
-                credits.release_reservation(w, key, "Reserved credits now held for your document")
+                credits.release_reservations(w, key, "Reserved credits now held for your document")
             held = hold_for_job(j, w)  # raises InsufficientCredits, which aborts the whole transaction
             state.transition(j, JobStatus.QUEUED, f"Queued ({credits.tokens(held)} held)")
         else:
@@ -1097,7 +1097,28 @@ def reconcile(rt: Runtime) -> int:
     estimates = [j for j in every_job(rt, None, {JobStatus.DRAFT}) if _estimating(j) and j.estimate and (j.estimate.lease_until is None or j.estimate.lease_until < now)]
     for job in estimates:
         rt.queue.enqueue(job.id, f"{job.id}-e{job.estimate.id}-r{int(now.timestamp()) // 300}" if job.estimate else job.id)
-    return len(stuck) + len(estimates)
+    return len(stuck) + len(estimates) + resume_continuations(rt)
+
+
+CONTINUATION_GRACE = timedelta(minutes=2)  # the worker normally continues within seconds of publishing
+
+
+def resume_continuations(rt: Runtime) -> int:
+    """One Start (Codex audit 2026-10-01): a plan published while its worker stopped before starting
+    the document (or before stopping and returning the reservation) is continued here; every part of
+    the continuation can be repeated safely, and it runs only while still pending."""
+    from app.proposals import service as projects
+    from app.works import service as works
+
+    now = utcnow()
+    done = 0
+    for item, resume in [*((w, works.continue_after_plan) for w in rt.store.pending_works()), *((p, projects.continue_after_plan) for p in rt.store.pending_projects())]:
+        plan = rt.store.get(item.auto_next)
+        if plan is None or plan.status != JobStatus.COMPLETED or plan.completed_at is None or now - plan.completed_at < CONTINUATION_GRACE:
+            continue
+        resume(rt, item.id, item.auto_next)
+        done += 1
+    return done
 
 
 def cleanup_expired(rt: Runtime) -> int:

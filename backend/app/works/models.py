@@ -505,6 +505,10 @@ class WorkView(Camel):
     # and the student sees only the document. `auto_failure` says why it stopped without one.
     auto: bool = False
     auto_failure: str = ""
+    # The one-Start plan step whose next step is still to happen (Codex audit 2026-10-01): set in the
+    # transaction that publishes the plan, cleared in the one that submits the draft or by a stop;
+    # maintenance finishes it if a worker stopped in between.
+    auto_next: str = ""
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
     expires_at: datetime

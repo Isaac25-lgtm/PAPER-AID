@@ -379,3 +379,79 @@ def test_a_short_assignment_question_does_not_block_start(works_client):
                                                                          "skipRest": True, "baseVersion": work["specVersion"]}).json()
     assert work["spec"]["gate"] == "PASS", work["spec"]["blockers"]  # no word limit given either: PaperAid uses the usual length
     assert client.post(f"/api/works/{work['id']}/start", headers=H).status_code == 200
+
+
+
+# --- Codex's second verification (2026-10-01): durable continuation, reservations per attempt, reads ---------
+
+
+def test_a_plan_whose_worker_stopped_before_the_draft_is_continued_by_maintenance(works_client, monkeypatch):
+    from datetime import timedelta
+
+    from app.jobs import service as jobs_service
+    from app.runtime import get_runtime
+    from app.works import service as works_service
+
+    client = works_client
+    real = works_service.continue_after_plan
+    monkeypatch.setattr(works_service, "continue_after_plan", lambda rt, work_id, plan_job: None)  # the worker stops right after publishing
+    work = _coursework(client)
+    client.post(f"/api/works/{work['id']}/start", headers=H)
+    work = _settled(client, f"/api/works/{work['id']}", lambda w: w["planStatus"] != "NONE" and w["activeJob"] is None)
+    store = get_runtime().store
+    pending = store.get_work(work["id"])
+    assert pending.auto_next == work["jobs"][0] and len(work["jobs"]) == 1 and not work["documents"]
+    monkeypatch.setattr(works_service, "continue_after_plan", real)
+    store.update(pending.auto_next, lambda j: j.model_copy(update={"completed_at": j.completed_at - timedelta(minutes=5)}))
+    assert jobs_service.resume_continuations(get_runtime()) == 1
+    work = _settled(client, f"/api/works/{work['id']}", _done)
+    assert work["documents"] and store.get_work(work["id"]).auto_next == ""
+    assert jobs_service.resume_continuations(get_runtime()) == 0  # nothing pending: never a second draft
+
+
+def test_a_start_that_loses_the_race_returns_only_its_own_reservation(works_client, monkeypatch):
+    from app.core.errors import Conflict
+    from app.pricing import credits
+    from app.runtime import get_runtime
+    from app.works import service as works_service
+
+    client = works_client
+    work = _coursework(client)
+    store = get_runtime().store
+    uid = store.get_work(work["id"]).owner_uid
+    email = store.get_work(work["id"]).owner_email
+    store.update_wallet(uid, email, lambda w: credits.reserve(w, f"work:{work['id']}:winner", 3000, "Reserved for your document"))  # the request that won
+
+    def lost(*args, **kwargs):
+        raise Conflict("PaperAid is already working on this.", code="STEP_RUNNING")
+
+    monkeypatch.setattr(works_service, "quote_step", lost)
+    refused = client.post(f"/api/works/{work['id']}/start", headers=H)
+    assert refused.status_code == 409
+    wallet = store.get_wallet(uid)
+    assert list(wallet.reservations) == [f"work:{work['id']}:winner"] and wallet.held == 3000  # the winner's reservation stands
+
+
+def test_reads_for_work_never_started_are_capped_per_day(works_client, monkeypatch):
+    from app.runtime import get_runtime
+
+    client = works_client
+    monkeypatch.setattr(get_runtime().settings, "free_reads_per_day", 1)
+    first = _with_brief(client)
+    assert client.post(f"/api/works/{first['id']}/read", headers=H).status_code == 200
+    _settled(client, f"/api/works/{first['id']}", lambda w: w["activeJob"] is None)
+    second = _with_brief(client)
+    refused = client.post(f"/api/works/{second['id']}/read", headers=H)
+    assert refused.status_code == 400 and refused.json()["code"] == "READS_LIMIT"
+
+
+def test_a_refused_read_leaves_the_work_ready_to_read_again(works_client, monkeypatch):
+    """The page shows "not read yet" with Read my documents, never a spinner: no read job is left behind."""
+    from app.runtime import get_runtime
+
+    client = works_client
+    work = _with_brief(client)
+    monkeypatch.setattr(get_runtime().settings, "min_credits", {"COURSEWORK": 5000})
+    assert client.post(f"/api/works/{work['id']}/read", headers=H).status_code == 402
+    work = client.get(f"/api/works/{work['id']}", headers=H).json()
+    assert work["needsRead"] and work["activeJob"] is None and work["jobs"] == []

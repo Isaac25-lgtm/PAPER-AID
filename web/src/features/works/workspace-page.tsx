@@ -56,7 +56,7 @@ export function WorkPage() {
   // tester's coursework refused at Start must not reopen on the earlier plan pages). Older work with a
   // plan keeps its earlier page until written.
   if (!work.auto && !work.documents.length && !work.plan) return <Navigate to={`${START[work.kind]}?work=${work.id}`} replace />
-  if (!work.auto && !work.documents.length) return <LegacyWorkPage />
+  if (!work.auto && !work.documents.length) return <LegacyWorkPage onWritten={setWork} />
 
   const retry = async () => {
     setRetrying(true)

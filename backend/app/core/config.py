@@ -148,6 +148,9 @@ class Settings(BaseSettings):
     # 0 or absent: only the job's own price is checked. Keys: COURSEWORK, PROPOSAL, CONCEPT_PAPER,
     # CONCEPT_NOTE, FUNDING_PROPOSAL.
     min_credits: dict[str, float] = {}
+    # Reading a student's documents is free (part of the document's price); reads for work that was then
+    # never started are capped per student per day, so they cannot run up AI cost (Codex audit 2026-10-01).
+    free_reads_per_day: int = 5
     band_pages: int = 10
     band_step: float = 0.75
     words_per_page: int = 250

@@ -797,6 +797,8 @@ def submit_step(rt: Runtime, user: User, project_id: str, job_id: str, quote_id:
             return None  # the chapter version, a comment, the guide or the structure changed after pricing
         q.active_job = j.id
         q.jobs = q.jobs if j.id in q.jobs else (q.jobs + [j.id])[-100:]
+        if inp.step == "CHAPTER":
+            q.auto_next = ""  # the plan's next step happens here, in the same transaction
         if inp.step == "PLAN" and not q.chapter(1).versions and q.goal == "FULL":
             q.auto_chapter_one = True  # agreed with the plan's price: starts when the plan is approved (never for a concept note)
         return _renew(rt, q)
@@ -1063,14 +1065,21 @@ def start(rt: Runtime, user: User, project_id: str, accept_sampling: bool = Fals
         return q
 
     p = _change(rt, user, project_id, begin)
+    key = f"project:{project_id}:{secrets.token_hex(4)}"  # this attempt's own reservation (see works)
     if p.plan is not None and p.plan_status != "APPROVED" and p.plan_review is not None and p.plan_review.outcome == "APPROVED" \
             and p.plan.sampling_assumed and p.sampling_consent and p.jobs:
         # stopped only for the sample-size settings, now confirmed: continue from the plan already made
-        reserve(rt, user, f"project:{project_id}", price)
-        continue_after_plan(rt, project_id, p.jobs[-1])
+        reserve(rt, user, key, price)
+        plan_job = p.jobs[-1]
+
+        def pending(q: Project) -> Project:
+            q.auto_next = plan_job
+            return q
+
+        _change(rt, user, project_id, pending)
+        continue_after_plan(rt, project_id, plan_job)
         return view(rt, _owned(rt, user, project_id))
     step: Step = first if p.plan is not None and p.plan_status == "APPROVED" else "PLAN"
-    key = f"project:{project_id}"
     reserve(rt, user, key, price)
     try:
         quoted = quote_step(rt, user, project_id, step, "", bundled=True)
@@ -1086,19 +1095,20 @@ def continue_after_plan(rt: Runtime, project_id: str, plan_job: str) -> None:
     review and complete, it is approved and the first document starts; otherwise it stops and says so.
     At most once per plan (only while that plan step is the project's last step)."""
     p = rt.store.get_project(project_id)
-    if p is None or p.deleting or not p.auto or not p.jobs or p.jobs[-1] != plan_job:
-        return
+    if p is None or p.deleting or not p.auto or p.auto_next != plan_job:
+        return  # nothing pending for this plan
     owner = User(uid=p.owner_uid, email=p.owner_email, is_admin=False, verified=True)
 
     def stop(message: str) -> None:
         from app.works.service import unreserve
 
+        unreserve(rt, owner, f"project:{project_id}")  # first: a half-finished stop stays pending and is repeated
+
         def apply(q: Project) -> Project:
-            q.auto_failure = message
+            q.auto_failure, q.auto_next = message, ""
             return q
 
         _change(rt, owner, project_id, apply)
-        unreserve(rt, owner, f"project:{project_id}")
 
     approved = (p.plan is not None and p.plan_review is not None and p.plan_review.outcome == "APPROVED"
                 and not rulebook.plan_problems(p.rulebook, p.plan))

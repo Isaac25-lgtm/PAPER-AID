@@ -62,6 +62,7 @@ class JobStore(Protocol):
     def expired_project_ids(self, before: datetime) -> list[str]: ...
     def delete_project(self, project_id: str) -> None: ...
     def all_projects(self) -> list[Project]: ...
+    def pending_projects(self) -> list[Project]: ...  # one-Start proposals whose plan's next step is still to happen
     # works (concept notes, coursework, funding proposals): their own collection, same guarantees
     def create_work_if_open(self, work: Work) -> bool: ...
     def get_work(self, work_id: str) -> Work | None: ...
@@ -70,6 +71,7 @@ class JobStore(Protocol):
     def list_works(self, owner_uid: str) -> list[Work]: ...
     def expired_work_ids(self, before: datetime) -> list[str]: ...
     def delete_work(self, work_id: str) -> None: ...
+    def pending_works(self) -> list[Work]: ...  # one-Start works whose plan's next step is still to happen
 
 
 # Firestore stores at most 1 MiB per document. Job records are kept well under that (long change
@@ -413,6 +415,9 @@ class LocalJobStore:
         with self._lock:
             return [Project.model_validate_json(p.read_text(encoding="utf-8")) for p in self._projects.glob("*.json")]
 
+    def pending_projects(self) -> list[Project]:
+        return [p for p in self.all_projects() if p.auto_next]
+
     # works: one file each in their own directory, replaced atomically under the same lock
     def _work_path(self, work_id: str) -> Path:
         if not work_id.replace("_", "").isalnum():
@@ -469,6 +474,9 @@ class LocalJobStore:
 
     def list_works(self, owner_uid: str) -> list[Work]:
         return sorted((w for w in self._all_works() if w.owner_uid == owner_uid), key=lambda w: w.updated_at, reverse=True)
+
+    def pending_works(self) -> list[Work]:
+        return [w for w in self._all_works() if w.auto_next]
 
     def expired_work_ids(self, before: datetime) -> list[str]:
         return [w.id for w in sorted((w for w in self._all_works() if w.expires_at < before), key=lambda w: (w.expires_at, w.id))]
@@ -724,6 +732,10 @@ class FirestoreJobStore:
         # Only the maintenance migration uses this; a student has few projects and there are few in all.
         return [Project.model_validate(d.to_dict()) for d in self._projects.stream()]
 
+    def pending_projects(self) -> list[Project]:
+        # A single-field range filter: no composite index; only records with a pending step match.
+        return [Project.model_validate(d.to_dict()) for d in self._projects.where(filter=self._fs.FieldFilter("autoNext", ">", "")).stream()]
+
     def list_projects(self, owner_uid: str) -> list[Project]:
         # An equality filter alone needs no composite index; a student has only a few projects.
         docs = self._projects.where(filter=self._fs.FieldFilter("ownerUid", "==", owner_uid)).stream()
@@ -799,6 +811,9 @@ class FirestoreJobStore:
     def list_works(self, owner_uid: str) -> list[Work]:
         docs = self._works.where(filter=self._fs.FieldFilter("ownerUid", "==", owner_uid)).stream()
         return sorted((Work.model_validate(d.to_dict()) for d in docs), key=lambda w: w.updated_at, reverse=True)
+
+    def pending_works(self) -> list[Work]:
+        return [Work.model_validate(d.to_dict()) for d in self._works.where(filter=self._fs.FieldFilter("autoNext", ">", "")).stream()]
 
     def expired_work_ids(self, before: datetime) -> list[str]:
         iso = before.isoformat().replace("+00:00", "Z")

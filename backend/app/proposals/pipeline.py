@@ -1180,6 +1180,8 @@ def stage_exporting(ctx: "StageContext") -> None:
             p.evidence_files.append(evidence_path)
         p.evidence_count = usable
         if plan is not None:
+            if p.auto and ctx.job.selection.bundled:
+                p.auto_next = ctx.job.id  # one Start: the first chapter (or a stop) is still to happen
             if p.plan_version == inp.plan_version:
                 p.plan, p.plan_status, p.plan_version = plan, "DRAFT", p.plan_version + 1
                 p.candidate_plan = None

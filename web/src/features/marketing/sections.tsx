@@ -36,17 +36,17 @@ export function ServiceGrid() {
   )
 }
 
-// How PaperAid is paid for: fixed token prices by paper length (owner decision 2026-09-28).
+// How PaperAid is paid for: fixed prices in credits by paper length (owner decisions 2026-09-28 and 2026-10-01).
 const PRICING_STEPS = [
   {
     icon: Wallet,
-    title: 'Buy credits',
-    body: 'Buy credits with mobile money, from 10 credits (UGX 10,000). Credits never expire.',
+    title: 'Credits',
+    body: 'You pay with credits, from 10 credits (UGX 10,000). Credits never expire. While PaperAid is in testing, nothing is charged.',
   },
   {
     icon: ScanSearch,
-    title: 'See the price first',
-    body: 'Every service has a fixed price in credits for your paper’s length. You see it before anything runs.',
+    title: 'Fixed prices by length',
+    body: 'Every service has a fixed price in credits for your paper’s length. Credits are reserved when you start and charged only for what is delivered.',
   },
   {
     icon: Scale,

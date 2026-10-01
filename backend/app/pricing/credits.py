@@ -96,6 +96,11 @@ def release_reservation(w: Wallet, key: str, note: str) -> int:
     return amount
 
 
+def release_reservations(w: Wallet, prefix: str, note: str) -> int:
+    """Return every reservation of one work or proposal (`prefix`, e.g. "work:wrk_1"): its attempts."""
+    return sum(release_reservation(w, key, note) for key in [k for k in w.reservations if k == prefix or k.startswith(prefix + ":")])
+
+
 def settle(w: Wallet, held: int, charge: int, job_id: str, note: str) -> Wallet:
     """Charge part of a hold and release the rest."""
     if not 0 <= charge <= held <= w.held:

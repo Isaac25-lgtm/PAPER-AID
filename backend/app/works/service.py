@@ -765,6 +765,8 @@ def submit_step(rt: Runtime, user: User, work_id: str, job_id: str, quote_id: st
             return None
         w.active_job = j.id
         w.jobs = w.jobs if j.id in w.jobs else (w.jobs + [j.id])[-100:]
+        if inp.step == "DRAFT":
+            w.auto_next = ""  # the plan's next step happens here, in the same transaction
         return _renew(rt, w)
 
     return submit(rt, user, job_id, quote_id, work_gate=gate)
@@ -975,9 +977,13 @@ def reserve(rt: Runtime, user: User, key: str, amount: int) -> None:
 
 
 def unreserve(rt: Runtime, user: User, key: str, note: str = "Reserved for your document: returned, as nothing was delivered") -> None:
+    """Return a reservation: one Start attempt's (its exact key), or all of an item's ("work:<id>")."""
     if rt.settings.credits_enabled:
         def give_back(w):
-            credits.release_reservation(w, key, note)
+            if key.count(":") >= 2:
+                credits.release_reservation(w, key, note)
+            else:
+                credits.release_reservations(w, key, note)
             return w
 
         rt.store.update_wallet(user.uid, user.email, give_back)
@@ -991,6 +997,11 @@ def auto_read(rt: Runtime, user: User, work_id: str) -> WorkView:
         return view(rt, k)
     spec = spec_of(rt, k)
     check_credits(rt, user, k.kind, _document_price(rt, spec) if spec is not None and spec.target_words else 0)
+    since = utcnow() - timedelta(days=1)
+    reads = [j for j in rt.store.list(user.uid, None, None, None, 100)[0] if j.work_id and j.selection.work == "READ" and j.created_at > since and j.status in state.SUBMITTED]
+    unstarted = [j for j in reads if (w := rt.store.get_work(j.work_id)) is not None and not w.auto]
+    if len(unstarted) >= rt.settings.free_reads_per_day:
+        raise AppError("You have had several documents read today without starting one. Start one of your works, or try again tomorrow.", code="READS_LIMIT")
     quoted = quote_step(rt, user, work_id, "READ", "", bundled=True)
     submit_step(rt, user, work_id, quoted.job.id, quoted.quote.id)
     return view(rt, _owned(rt, user, work_id))
@@ -1021,7 +1032,9 @@ def start(rt: Runtime, user: User, work_id: str) -> WorkView:
     k = _change(rt, user, work_id, begin)
     ready = k.plan is not None and k.plan_status == "APPROVED" and (k.kind != "FUNDING_PROPOSAL" or k.results_status == "APPROVED")
     step: Step = "DRAFT" if ready and not k.documents else "PLAN"
-    key = f"work:{work_id}"
+    # This attempt's own reservation (Codex audit 2026-10-01): a second Start that loses the race
+    # returns only what it reserved, never the winner's.
+    key = f"work:{work_id}:{secrets.token_hex(4)}"
     reserve(rt, user, key, _document_price(rt, spec))
     try:
         quoted = quote_step(rt, user, work_id, step, "", bundled=True)
@@ -1038,20 +1051,23 @@ def continue_after_plan(rt: Runtime, work_id: str, plan_job: str) -> None:
     Otherwise stop, and say so. Runs at most once per plan: only while that plan step is the work's
     last step."""
     k = rt.store.get_work(work_id)
-    if k is None or k.deleting or not k.auto or not k.jobs or k.jobs[-1] != plan_job:
-        return
+    if k is None or k.deleting or not k.auto or k.auto_next != plan_job:
+        return  # nothing pending for this plan: done already, or never started with one Start
     owner = User(uid=k.owner_uid, email=k.owner_email, is_admin=False, verified=True)
     decisions = [k.plan_review] + ([k.results_review] if k.kind == "FUNDING_PROPOSAL" else [])
     spec = spec_of(rt, k)
     approved = k.plan is not None and spec is not None and all(d is not None and d.outcome == "APPROVED" for d in decisions) and not _plan_problems(k.plan, spec)
 
     def stop(message: str) -> None:
+        # The reservation first, then the record: if this stops half way, the step is still pending
+        # and maintenance repeats it (each part can be repeated safely).
+        unreserve(rt, owner, f"work:{work_id}")
+
         def apply(w: Work) -> Work:
-            w.auto_failure = message
+            w.auto_failure, w.auto_next = message, ""
             return w
 
         _change(rt, owner, work_id, apply)
-        unreserve(rt, owner, f"work:{work_id}")
 
     if not approved:
         objections = [o for d in decisions if d is not None and d.outcome != "APPROVED" for o in d.objections]
@@ -1074,9 +1090,9 @@ def continue_after_plan(rt: Runtime, work_id: str, plan_job: str) -> None:
 
 
 BUDGET_FIGURES = {"quantity", "unit_cost", "entered_total"}
-# The checks a change of figures can change (Codex audit 2026-10-01: every one is worked out again);
-# page limits keep their measured result, since figures barely move the length.
-FIGURE_VALIDATORS = ("results.", "budget.", "staff.", "timeline.", "tables.", "numbers.")
+# The checks a change of figures can change (Codex audit 2026-10-01: every one is worked out again,
+# the length limits too, on the rebuilt document: bigger tables can push a strict limit over).
+FIGURE_VALIDATORS = ("results.", "budget.", "staff.", "timeline.", "tables.", "numbers.", "limits.")
 
 
 def _same_but_figures(doc: WorkDocument, k: Work) -> bool:
@@ -1117,7 +1133,12 @@ def apply_figures(rt: Runtime, user: User, work_id: str) -> WorkView:
                 raise AppError("Your figures no longer match this draft (an indicator or budget line was removed). Ask for changes instead.", code="FIGURES_CHANGED")
     library_items = load_library(rt.files, k.evidence_files)
     updated = doc.model_copy(update={"results_snapshot": k.results, "budget_snapshot": k.budget, "number_values": {key: [v[0], v[1]] for key, v in tokens.items()}})
-    context = Context(spec=spec, stage="FINAL", inputs=k.inputs, plan=k.plan, results=k.results, budget=k.budget, doc=updated, library=library_items, tokens=tokens)
+    pages = None
+    if rt.settings.render_pages and any(limit.type == "PAGE" for limit in spec.limits):
+        from app.works import render
+
+        pages = render.page_count(export.build(updated, spec, k.results, k.budget, library_items, tokens, draft=False))
+    context = Context(spec=spec, stage="FINAL", inputs=k.inputs, plan=k.plan, results=k.results, budget=k.budget, doc=updated, library=library_items, tokens=tokens, pages=pages)
     affected = {r["id"] for r in library.rules_for(spec.kind) if r["check"].get("validator", "").startswith(FIGURE_VALIDATORS)} | compliance.STUDENT_FIGURES
     fresh = {i.id: i for i in compliance.report(context, ("DRAFT", "FINAL", "PLAN")) if i.id in affected}
     items = [fresh.get(i.id, i) for i in doc.readiness] + [i for rid, i in fresh.items() if rid not in {x.id for x in doc.readiness}]
