@@ -217,14 +217,23 @@ def _plain_figure(figure: str) -> bool:
     return number <= 12 and number == int(number)
 
 
+# "Section 1.9", "Table 3.2", "Figure 1.1", "Chapter 2": numbers that point inside the document, not
+# statistics (a "Section 1.9" cross-reference was refused as an unsupported figure, live 2026-10-01).
+REFERENCE = re.compile(r"\b(?:sections?|sub-?sections?|chapters?|tables?|figures?|appendix|appendices|annex(?:es)?|equations?|objectives?|"
+                       r"questions?|hypothes[ie]s|steps?|phases?|pages?|items?|§)\s*(?:\d+(?:\.\d+)*|[A-Z])(?:\s*(?:and|to|–|-)\s*\d+(?:\.\d+)*)?",
+                       re.IGNORECASE)
+LIST_MARKER = re.compile(r"\(?(?:\d{1,2}|[a-z]|[ivx]{1,4})[.)]")
+
+
 def figure_problems(paragraph: str, library: dict[str, EvidenceItem], allowed_text: str) -> list[str]:
     """Figures must come from the evidence cited in the same paragraph, or from the student's
-    own inputs and plan (`allowed_text`)."""
+    own inputs and plan (`allowed_text`). References to the document's own sections, tables and
+    figures are not figures."""
     cited = [library[i] for i in cited_ids(paragraph) if i in library]
     known = _figures(allowed_text)
     for item in cited:
         known |= _figures(item.passage) | _figures(item.statement)
-    missing = sorted(f for f in _figures(ANY_TOKEN.sub(" ", paragraph)) if not _plain_figure(f) and f not in known)
+    missing = sorted(f for f in _figures(REFERENCE.sub(" ", ANY_TOKEN.sub(" ", paragraph))) if not _plain_figure(f) and f not in known)
     return [f"The figure {f} is not in the evidence cited in this paragraph or in your plan." for f in missing]
 
 
@@ -245,6 +254,8 @@ def strip_unsupported(paragraph: str, library: dict[str, EvidenceItem], usable: 
         context = sentence if cited_ids(sentence) else sentence + " " + " ".join(f"⟦{i}⟧" for i in cited_ids(paragraph))
         if figure_problems(context, library, allowed_text):
             removed = True
+            if kept and LIST_MARKER.fullmatch(kept[-1]):
+                kept.pop()  # "1." whose objective was withheld is never left behind on its own
             continue
         kept.append(sentence)
     return " ".join(kept).strip() if removed else paragraph

@@ -115,7 +115,8 @@ def _student(inp: WorkStepInput) -> dict[str, Any]:
 def _allowed_text(inp: WorkStepInput) -> str:
     """What the student supplied or the documents state: figures in it need no citation."""
     spec = _spec(inp)
-    return " ".join([json.dumps(_student(inp)), " ".join(r.value + " " + r.quote for r in spec.requirements), str(spec.duration_months or "")])
+    # Unescaped, so a figure after a dash or symbol ("6–24", "≥18") is found (live, 2026-10-01).
+    return " ".join([json.dumps(_student(inp), ensure_ascii=False), " ".join(r.value + " " + r.quote for r in spec.requirements), str(spec.duration_months or "")])
 
 
 def _tokens(inp: WorkStepInput) -> dict[str, tuple[str, str]]:

@@ -86,8 +86,10 @@ def _plan(inp: StepInput) -> dict[str, Any]:
 
 
 def _allowed_text(inp: StepInput, extra: str = "") -> str:
-    """Everything the student supplied or approved: figures in it need no source."""
-    return json.dumps(_study(inp)) + " " + (json.dumps(_plan(inp)) if inp.plan else "") + " " + extra
+    """Everything the student supplied or approved: figures in it need no source. Written unescaped:
+    JSON's default escaping wrote the dash in "6–24" as a code that hid the 24 from the figure check,
+    so every sentence about children aged 6–24 months was refused (live, 2026-10-01)."""
+    return json.dumps(_study(inp), ensure_ascii=False) + " " + (json.dumps(_plan(inp), ensure_ascii=False) if inp.plan else "") + " " + extra
 
 
 # --- RESEARCHING --------------------------------------------------------------------------------
@@ -721,7 +723,9 @@ def stage_auditing(ctx: "StageContext") -> None:
         if base is None and (not approved or (missing and not runner._engine.partial_chapters)):
             raise PermanentStageError(
                 "DOCUMENT_NOT_APPROVED", "PaperAid could not write and approve every section of this draft. No document was released and nothing was charged. Please try again.",
-                f"{len(approved)} of {len(items)} sections approved",
+                # Admin-only: which sections and why, so the next failure is diagnosed from its record.
+                (f"{len(approved)} of {len(items)} sections approved; not approved: "
+                 + "; ".join(f"{items[k]['heading']}: {unresolved[k][0][:90]}" for k in items if k in unresolved))[:470],
             )
         for key in unresolved:
             current.pop(key, None)  # never rejected new text: _merge keeps earlier wording, a finish keeps it missing
