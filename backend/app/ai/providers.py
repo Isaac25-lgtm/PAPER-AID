@@ -11,6 +11,8 @@ from app.core.config import Settings
 from app.core.errors import PermanentStageError, RetryableStageError
 
 UNAVAILABLE = "Processing was delayed by a temporary service problem. We'll keep trying."
+# Said once the retries are used up: never "we'll keep trying" on a step that has stopped (live 2026-10-01).
+UNAVAILABLE_FINAL = "A service PaperAid relies on was unavailable for too long, so this could not finish. You were not charged. Please try again in a few minutes."
 MISCONFIGURED = "PaperAid couldn't reach its AI service. Our team has been notified — you don't need to upload again."
 AI_NOT_CONFIGURED = "AI not configured. This job could not run."
 

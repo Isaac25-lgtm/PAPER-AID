@@ -95,7 +95,9 @@ class Settings(BaseSettings):
     max_pdf_pages: int = 150
     retention_days: int = 30
     quote_ttl_minutes: int = 30
-    stage_max_attempts: int = 4
+    # A provider outage often lasts minutes: with backoff (20 s doubling, at most 5 min) six attempts wait
+    # about ten minutes before a stage fails; completed AI calls replay from the job's cache (live 2026-10-01).
+    stage_max_attempts: int = 6
     repair_attempts: int = 2
     research_max_claims: int = 10  # source check: most claims checked in one paper
     research_max_searches: int = 2  # source check: most web searches per claim

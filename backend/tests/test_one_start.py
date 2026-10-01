@@ -455,3 +455,23 @@ def test_a_refused_read_leaves_the_work_ready_to_read_again(works_client, monkey
     assert client.post(f"/api/works/{work['id']}/read", headers=H).status_code == 402
     work = client.get(f"/api/works/{work['id']}", headers=H).json()
     assert work["needsRead"] and work["activeJob"] is None and work["jobs"] == []
+
+
+
+def test_a_step_that_used_up_its_retries_never_says_it_will_keep_trying(works_client, monkeypatch):
+    """Live, 2026-10-01: a provider outage outlasted the retries and the failed step still said "We'll keep trying"."""
+    from app.ai.providers import UNAVAILABLE, UNAVAILABLE_FINAL
+    from app.core.errors import RetryableStageError
+    from app.runtime import get_runtime
+
+    client = works_client
+    monkeypatch.setattr(get_runtime().settings, "stage_max_attempts", 1)
+
+    def down(payload):
+        raise RetryableStageError("PROVIDER_UNAVAILABLE", UNAVAILABLE, "google 503")
+
+    client.models.overrides["w_plan"] = down
+    work = _coursework(client)
+    client.post(f"/api/works/{work['id']}/start", headers=H)
+    work = _settled(client, f"/api/works/{work['id']}", _done)
+    assert work["autoFailure"] == UNAVAILABLE_FINAL and "keep trying" not in work["autoFailure"]

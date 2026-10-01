@@ -1374,7 +1374,10 @@ def _handle_failure(rt: Runtime, job_id: str, stage: Stage, code: str, message: 
             j.events.append(JobEvent(label=f"Retrying {stage.value.lower()} after {code}"))
             retry_again = True
             return j, w
-        j.failure = JobFailure(code=code, user_message=message, retryable=retryable)
+        from app.ai.providers import UNAVAILABLE, UNAVAILABLE_FINAL
+
+        final = UNAVAILABLE_FINAL if message == UNAVAILABLE else message  # the retries are used up: say it stopped
+        j.failure = JobFailure(code=code, user_message=final, retryable=retryable)
         j.failure_detail = f"stage={stage.value} {detail}"[:500]
         state.transition(j, JobStatus.FAILED, f"Failed: {code}")
         refund_job(j, w, "Job failed, so nothing was charged")
