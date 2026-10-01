@@ -159,7 +159,7 @@ STEPS: dict[str, Step] = {
     "w_extract": Step("ANALYST", Stage.RESEARCHING, "p-extract-v1", 4000),
     "w_search": Step("ANALYST", Stage.RESEARCHING, "p-search-v1", 4000),
     "w_verify": Step("INTEGRITY", Stage.RESEARCHING, "verify-v1", 6000),
-    "w_plan": Step("WRITER", Stage.PLANNING, "w-plan-v1", 12000),
+    "w_plan": Step("WRITER", Stage.PLANNING, "w-plan-v2", 12000),  # v2: claims within the evidence; a repair changes only what was raised (live 2026-10-01: 2 of 6 plans)
     "w_plan_review": Step("EVALUATOR", Stage.PLANNING, "w-plan-review-v1", 6000),
     "w_results": Step("WRITER", Stage.PLANNING, "w-results-v1", 16000),
     "w_results_review": Step("EVALUATOR", Stage.PLANNING, "w-results-review-v1", 8000),
