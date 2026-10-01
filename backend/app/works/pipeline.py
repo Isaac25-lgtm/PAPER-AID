@@ -31,7 +31,9 @@ from app.rules import compliance, library
 from app.rules.extract import KEYS, requirements_from
 from app.rules.resolve import PLAN_SHARE_OF_LIMIT
 from app.rules.validators import UNDER_LENGTH, Context
+from app.works import budget as budget_engine
 from app.works import directives, numbers, templates
+from app.works import results as results_engine
 from app.works.ai import Covered, Evaluation, Final, FinalRule, PlanReview, Priority, ResultsReview, WorkRunner
 from app.works.models import (
     AI_NOTE,
@@ -316,11 +318,13 @@ def _plan_from(answer: dict[str, Any], skeleton: list[PlanSection], spec: Resolv
 
 
 def _results_from(answer: dict[str, Any]) -> tuple[ResultsModel, list[BudgetLine]]:
-    """The writer's Results Model. Baselines and targets are the applicant's figures: the writer
-    never supplies them (the schema has no field for them); the student adds them."""
+    """The writer's Results Model. Baselines, targets and their dates are the applicant's figures
+    (STUDENT_FIGURES): whatever the writer supplies for them is cleared; the student adds them, and
+    adding them does not undo the review (Codex audit 2026-10-01: a model-written target date could
+    be changed while the model stayed approved)."""
     data = {k: v for k, v in answer.items() if k != "budgetLines"}
     for indicator in data.get("indicators", []):
-        indicator.update({"baseline": None, "target": None, "baselineYear": None})
+        indicator.update({"baseline": None, "target": None, "baselineYear": None, "targetDate": ""})
     for activity in data.get("activities", []):
         for key in ("startMonth", "endMonth"):
             if isinstance(activity.get(key), int) and not 1 <= activity[key] <= 120:
@@ -384,7 +388,7 @@ def stage_planning(ctx: "StageContext") -> None:
                 critique = [*checked.issues, *[f"{c.id} is stated as a {c.statedAs} but reads as a {c.reads}: {c.note}" for c in wrong]]
                 model, lines = _results_from(runner.results({**results_payload, "draft": model.model_dump(by_alias=True), "critique": critique}))
         else:
-            model, lines, results_decision = _final_results(runner, results_payload, model, lines, results_rules)
+            model, lines, results_decision = _final_results(runner, results_payload, model, lines, results_rules, spec)
             out["resultsReview"] = results_decision.model_dump(by_alias=True)
         out["results"] = model.model_dump(by_alias=True)
         out["budgetLines"] = [li.model_dump(by_alias=True) for li in lines]
@@ -431,10 +435,36 @@ def _final_plan(runner: WorkRunner, payload: dict[str, Any], plan: WorkPlan, ske
     return plan, decision
 
 
-def _results_decision(checked: "ResultsReview | None", model: ResultsModel, rules: list[dict[str, Any]], reason: str) -> ReviewDecision:
+# The Results Model checks that concern what PaperAid's model writes (its links, indicators per result,
+# schedule and budget-line mapping), not the applicant's own figures (baselines, targets, quantities,
+# costs), which only the student adds.
+MODEL_RESULTS_RULES = ("FP-014", "FP-018", "FP-019", "FP-022", "FP-024", "FP-036", "FP-037", "FP-038")
+
+
+def _results_problems(model: ResultsModel, lines: list[BudgetLine], spec: ResolvedSpec) -> list[str]:
+    """PaperAid's own defects in a Results Model that a blocking code check would later stop the draft
+    for (Codex audit 2026-10-01: an approved model failed FP-019): never approved or charged."""
+    blocking = {r["id"] for r in library.rules_for(spec.kind) if r["id"] in set(spec.active_rules) and r["severity"] == "BLOCKING"}
+    found = [*results_engine.checks(model, spec), *budget_engine.checks(Budget(currency=(spec.currency or "USD")[:8], lines=lines), spec, model)]
+    problems = [f"{rid}: {note}" for rid, status, note in found if rid in MODEL_RESULTS_RULES and rid in blocking and status == "FAIL"]
+    # The indicator-field rules mix what the writer supplies with the applicant's figures: only the
+    # writer's fields count here (Codex audit 2026-10-01: a missing means of verification was approved).
+    field_rule = next((rid for rid in ("FP-025", "FP-030", "FP-031", "FP-032") if rid in blocking), None)
+    gaps = [f"{i.id}: {', '.join(g)}" for i in model.indicators if (g := results_engine.written_gaps(i))]
+    if field_rule and gaps:
+        problems.append(f"{field_rule}: Missing: " + "; ".join(gaps))
+    # No budget lines at all: the budget checks stop at "no lines", so the activities left unfunded are named here.
+    unfunded = [a.id for a in model.activities if a.costed]
+    if not lines and unfunded and "FP-037" in blocking:
+        problems.append(f"FP-037: Activities with no budget line: {', '.join(unfunded)}.")
+    return problems
+
+
+def _results_decision(checked: "ResultsReview | None", model: ResultsModel, rules: list[dict[str, Any]], reason: str, problems: list[str]) -> ReviewDecision:
     """Approved only when every rule has a verdict and none failed, every goal, outcome and output was
     classified and each reads at its real level (code knows the level; the model's own "stated as" is
-    not trusted), and no issue was raised. A missing verdict or classification is "not reviewed"."""
+    not trusted), no issue was raised and code finds none of PaperAid's own defects. A missing verdict
+    or classification is "not reviewed"."""
     if checked is None:
         return ReviewDecision(outcome="NOT_REVIEWED", reason=reason, objections=["PaperAid could not complete its final review."])
     levels = {model.goal.id: "goal", **{o.id: "outcome" for o in model.outcomes}, **{o.id: "output" for o in model.outputs}}
@@ -444,19 +474,22 @@ def _results_decision(checked: "ResultsReview | None", model: ResultsModel, rule
         return ReviewDecision(outcome="NOT_REVIEWED", reason="REVIEW_UNAVAILABLE", objections=[NOT_COMPLETE.format(", ".join(missing))])
     failed = [f"{r.rule}: {r.note}" for r in checked.rules if r.status == "FAIL"]
     misread = [f"{i} is a {level} but reads as a {seen[i].reads}: {seen[i].note}" for i, level in levels.items() if seen[i].reads != level]
-    objections = [*checked.issues, *failed, *misread]
+    objections = [*checked.issues, *failed, *misread, *problems]
     if not objections:
         return ReviewDecision(outcome="APPROVED")
-    return ReviewDecision(outcome="OBJECTIONS", reason="REVIEW_OBJECTION", objections=list(dict.fromkeys(objections))[:20])
+    return ReviewDecision(outcome="OBJECTIONS", reason="CODE_RULE" if problems and len(problems) == len(objections) else "REVIEW_OBJECTION",
+                          objections=list(dict.fromkeys(objections))[:20])
 
 
 def _final_results(runner: WorkRunner, payload: dict[str, Any], model: ResultsModel, lines: list[BudgetLine],
-                   rules: list[dict[str, Any]]) -> tuple[ResultsModel, list[BudgetLine], ReviewDecision]:
-    """The same final review loop for a funding Results Model, reviewed again after each repair."""
+                   rules: list[dict[str, Any]], spec: ResolvedSpec) -> tuple[ResultsModel, list[BudgetLine], ReviewDecision]:
+    """The same final review loop for a funding Results Model, reviewed again after each repair; code's
+    findings of PaperAid's own defects count as objections and go to the repair."""
     decision = ReviewDecision(outcome="NOT_REVIEWED", reason="REVIEW_UNAVAILABLE")
     for round_ in range(REVIEW_REPAIRS + 1):
+        problems = _results_problems(model, lines, spec)
         checked = runner.final_review_results({**payload, "results": model.model_dump(by_alias=True), "rules": rules})
-        decision = _results_decision(checked, model, rules, "SPEND_CAP" if runner.budget_reached else "REVIEW_UNAVAILABLE")
+        decision = _results_decision(checked, model, rules, "SPEND_CAP" if runner.budget_reached else "REVIEW_UNAVAILABLE", problems)
         if decision.outcome != "OBJECTIONS" or round_ == REVIEW_REPAIRS or runner.budget_reached:
             break
         model, lines = _results_from(runner.results({**payload, "draft": model.model_dump(by_alias=True), "critique": decision.objections}))
@@ -769,23 +802,85 @@ def deliverable(inp: WorkStepInput, document: WorkDocument, library_items: dict[
     return out
 
 
+def _table_words(table: dict[str, Any]) -> int:
+    return len(" ".join([table.get("caption", ""), *[c for row in table["rows"] for c in row]]).split())
+
+
 def _words_of_entry(entry: dict[str, Any]) -> int:
-    return len(" ".join(entry.get("text", [])).split()) + sum(len(" ".join(c for row in t["rows"] for c in row).split()) for t in entry.get("tables", []))
+    return len(" ".join([entry["heading"], *entry.get("text", [])]).split()) + sum(_table_words(t) for t in entry.get("tables", []))
+
+
+def _chunks(text: str, limit: int) -> list[str]:
+    """A paragraph longer than `limit` words, in consecutive pieces of at most `limit` words, cut at
+    sentence ends (a single sentence longer than that, between words)."""
+    if len(text.split()) <= limit:
+        return [text]
+    pieces: list[list[str]] = [[]]
+    for sentence in re.split(r"(?<=[.!?])\s+", text):
+        words = sentence.split()
+        while len(words) > limit:
+            if pieces[-1]:
+                pieces.append([])
+            pieces[-1].append(" ".join(words[:limit]))
+            pieces.append([])
+            words = words[limit:]
+        if pieces[-1] and len(" ".join([*pieces[-1], *words]).split()) > limit:
+            pieces.append([])
+        if words:
+            pieces[-1].append(" ".join(words))
+    return [" ".join(p) for p in pieces if p]
+
+
+def _table_pieces(table: dict[str, Any], limit: int) -> list[dict[str, Any]]:
+    """A table longer than `limit` words in pieces of rows (the header repeated), each within it; a
+    single row too long for one piece continues on further rows, each cell cut in step (Codex audit
+    2026-10-01: one 7,100-word row overran the bound)."""
+    if _table_words(table) <= limit:
+        return [table]
+    header, rows = (table["rows"][0], table["rows"][1:]) if len(table["rows"]) > 1 else ([], table["rows"])
+    room = max(len(header) + 1, limit - _table_words({"caption": f"{table.get('caption', '')} (continued)", "rows": [header]}))
+    fitted: list[list[str]] = []
+    for row in rows:
+        if _table_words({"caption": "", "rows": [row]}) <= room:
+            fitted.append(row)
+            continue
+        cells = [c.split() for c in row]
+        share = max(1, room // max(1, len(cells)))
+        for start in range(0, max(len(c) for c in cells), share):
+            fitted.append([" ".join(c[start:start + share]) for c in cells])
+    out: list[dict[str, Any]] = []
+    for row in fitted:
+        if out and _table_words({"caption": out[-1]["caption"], "rows": [*out[-1]["rows"], row]}) <= limit:
+            out[-1]["rows"].append(row)
+        else:
+            out.append({"caption": f"{table.get('caption', '')} (continued)" if out else table.get("caption", ""), "rows": [header, row] if header else [row]})
+    return out
 
 
 def _split_entry(entry: dict[str, Any], limit: int) -> list[dict[str, Any]]:
-    """A section longer than one review part is reviewed in consecutive pieces, its tables with the last."""
+    """A section longer than one review part is reviewed in consecutive pieces of at most `limit`
+    words (its heading counted), long paragraphs cut at sentence ends and long tables by rows (Codex
+    audit 2026-10-01: one long paragraph, or the tables, could exceed the bound)."""
     if _words_of_entry(entry) <= limit:
         return [entry]
-    pieces: list[list[str]] = [[]]
+    room = max(50, limit - len(entry["heading"].split()) - 8)  # the heading, and "(continued, piece n of m)"
+    pieces: list[dict[str, Any]] = [{"text": [], "tables": []}]
+
+    def size(piece: dict[str, Any]) -> int:
+        return len(" ".join(piece["text"]).split()) + sum(_table_words(t) for t in piece["tables"])
+
     for paragraph in entry["text"]:
-        if pieces[-1] and len(" ".join([*pieces[-1], paragraph]).split()) > limit:
-            pieces.append([])
-        pieces[-1].append(paragraph)
-    out = [{"key": entry["key"], "heading": entry["heading"] if n == 0 else f"{entry['heading']} (continued, piece {n + 1} of {len(pieces)})",
-            "text": text, "tables": []} for n, text in enumerate(pieces)]
-    out[-1]["tables"] = entry["tables"]
-    return out
+        for chunk in _chunks(paragraph, room):
+            if size(pieces[-1]) and size(pieces[-1]) + len(chunk.split()) > room:
+                pieces.append({"text": [], "tables": []})
+            pieces[-1]["text"].append(chunk)
+    for table in entry["tables"]:
+        for piece_of_table in _table_pieces(table, room):
+            if size(pieces[-1]) and size(pieces[-1]) + _table_words(piece_of_table) > room:
+                pieces.append({"text": [], "tables": []})
+            pieces[-1]["tables"].append(piece_of_table)
+    return [{"key": entry["key"], "heading": entry["heading"] if n == 0 else f"{entry['heading']} (continued, piece {n + 1} of {len(pieces)})",
+             "text": piece["text"], "tables": piece["tables"]} for n, piece in enumerate(pieces)]
 
 
 def _complete(answer: "Final", rule_ids: set[str], coverage_ids: set[str], priorities: set[str]) -> bool:
@@ -803,22 +898,36 @@ def _final_review(runner: WorkRunner, inp: WorkStepInput, document: WorkDocument
     missing, cut off or unaffordable: None (not reviewed)."""
     spec = _spec(inp)
     whole = deliverable(inp, document, library_items, tokens)
-    entries = [piece for entry in whole["sections"] for piece in _split_entry(entry, FINAL_PART_WORDS)]
-    parts: list[list[dict[str, Any]]] = [[]]
-    for entry in entries:
-        if parts[-1] and sum(_words_of_entry(e) for e in parts[-1]) + _words_of_entry(entry) > FINAL_PART_WORDS:
-            parts.append([])
-        parts[-1].append(entry)
-    manifest = [{"key": e["key"], "heading": e["heading"], "words": _words_of_entry(e), "part": n} for n, part in enumerate(parts, start=1) for e in part]
+    # Every part, the front matter, tables, references and notes included, stays within FINAL_PART_WORDS
+    # (Codex audit 2026-10-01): what follows the sections goes on the last part while it fits, else on
+    # further parts of its own.
+    bound = max(100, FINAL_PART_WORDS - len(" ".join(whole["front"]).split()))
+    parts: list[dict[str, Any]] = [{"sections": [], "tables": [], "references": [], "notes": [], "words": 0}]
+
+    def place(kind: str, item: Any, words: int) -> None:
+        if parts[-1]["words"] and parts[-1]["words"] + words > bound:
+            parts.append({"sections": [], "tables": [], "references": [], "notes": [], "words": 0})
+        parts[-1][kind].append(item)
+        parts[-1]["words"] += words
+
+    for entry in whole["sections"]:
+        for piece in _split_entry(entry, bound):
+            place("sections", piece, _words_of_entry(piece))
+    for table in whole["tables"]:
+        for piece_of_table in _table_pieces(table, bound):
+            place("tables", piece_of_table, _table_words(piece_of_table))
+    for kind in ("references", "notes"):
+        for text in whole[kind]:
+            for chunk in _chunks(text, bound):
+                place(kind, chunk, len(chunk.split()))
+    manifest = [{"key": e["key"], "heading": e["heading"], "words": _words_of_entry(e), "part": n} for n, part in enumerate(parts, start=1) for e in part["sections"]]
     base = {"spec": _compact_spec(spec), "student": _student(inp), "position": inp.plan.position if inp.plan else "",
             "rules": [{"rule": r["id"], "requirement": r["requirement"], "severity": r["severity"]} for r in doc_rules],
             "coverage": [c.model_dump(by_alias=True) for c in spec.coverage], "priorities": spec.priorities}
     rule_ids, coverage_ids, priorities = {r["id"] for r in doc_rules}, {c.id for c in spec.coverage}, set(spec.priorities)
     answers = []
     for n, part in enumerate(parts, start=1):
-        last = n == len(parts)
-        document_part = {"front": whole["front"], "sections": part, "tables": whole["tables"] if last else [],
-                         "references": whole["references"] if last else [], "notes": whole["notes"] if last else []}
+        document_part = {"front": whole["front"], "sections": part["sections"], "tables": part["tables"], "references": part["references"], "notes": part["notes"]}
         answer = runner.final({**base, "document": document_part, "manifest": manifest, "part": f"{n} of {len(parts)}"})
         if answer is None or not _complete(answer, rule_ids, coverage_ids, priorities):
             return None
@@ -844,7 +953,11 @@ def _final_review(runner: WorkRunner, inp: WorkStepInput, document: WorkDocument
 
 
 def _where_keys(where: str, plan_sections: list[PlanSection]) -> list[str]:
-    text = where.lower()
+    """The sections a reviewer's location names; a blank location names none (Codex audit 2026-10-01:
+    it matched every section, so a document-wide objection rewrote the whole document)."""
+    text = where.lower().strip()
+    if not text:
+        return []
     return [s.key for s in plan_sections if s.key in text or s.heading.lower() in text or text in s.heading.lower()]
 
 
@@ -1044,7 +1157,13 @@ def stage_auditing(ctx: "StageContext") -> None:
         fix: dict[str, list[str]] = {}
 
         def fixable(keys: list[str]) -> list[str]:
-            return [k for k in keys if k in editable] or editable[-1:]
+            """The named sections this step may change; otherwise one bounded choice: the main section
+            (the largest planned), never the whole document."""
+            named = [k for k in keys if k in editable]
+            if named or not editable:
+                return named
+            planned = {s.key: s.words for s in inp.plan.sections}
+            return [max(editable, key=lambda k: planned.get(k, 0))]
 
         for r in final.rules:
             if r.status == "FAIL" and r.rule in blocking_ids:
@@ -1055,6 +1174,10 @@ def stage_auditing(ctx: "StageContext") -> None:
             if not c.answered:
                 for key in fixable([s.key for s in inp.plan.sections if c.id in s.coverage] or _where_keys(c.where, inp.plan.sections)):
                     fix.setdefault(key, []).append(f"Answer this part of the question explicitly: {texts.get(c.id, c.id)}")
+        for pr in final.priorities:  # a funder priority not addressed is repaired too, not only reported (Codex audit 2026-10-01)
+            if not pr.addressed:
+                for key in fixable(_where_keys(pr.where, inp.plan.sections)):
+                    fix.setdefault(key, []).append(f"Address this priority of the call explicitly, as it applies to this project, without inventing facts: {pr.priority}")
         for key, issues in _too_short(inp, current, library_items, tokens, editable).items():
             fix.setdefault(key, []).extend(issues)
         return fix
@@ -1158,6 +1281,12 @@ def stage_auditing(ctx: "StageContext") -> None:
     # the student can settle (eligibility, their facts) or PaperAid cannot measure (an estimated page
     # count) stays visible as "Not ready" instead.
     own_failures = [i for i in items if i.status == "BLOCKED" and i.basis != "AUTHOR"]
+    if base is None:
+        # A new draft still well under its length after the repairs is PaperAid's shortfall too, though
+        # the check reports it as needing review (Codex audit 2026-10-01): it is not delivered or charged.
+        # A revision is not refused for it: the student's own requests may have shortened it.
+        length_rules = {r["id"] for r in library.rules_for(spec.kind) if r["check"].get("validator") == "coursework.word_tolerance"}
+        own_failures += [i for i in items if i.id in length_rules and i.severity == "BLOCKING" and i.status == "NEEDS_REVIEW"]
     if own_failures:
         raise PermanentStageError(
             "DOCUMENT_NOT_READY", "PaperAid could not produce a draft that meets every required rule this time. Nothing was charged; please try again.",

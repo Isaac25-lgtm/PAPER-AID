@@ -5,6 +5,13 @@ disagree with it or with each other (FP-073 to FP-075)."""
 from app.works.budget import Check
 from app.works.models import Indicator, ResolvedSpec, ResultsModel
 
+WRITTEN_FIELDS = ("unit", "means of verification", "frequency", "responsible role")  # what the Results Model's writer supplies; baselines and targets are the applicant's
+
+
+def written_gaps(ind: Indicator) -> list[str]:
+    """The indicator fields missing that PaperAid's writer, not the applicant, must supply."""
+    return [g for g in _missing(ind) if g in WRITTEN_FIELDS]
+
 
 def _missing(ind: Indicator) -> list[str]:
     gaps = []
