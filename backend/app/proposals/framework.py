@@ -103,12 +103,23 @@ def _arrow(d: ImageDraw.ImageDraw, x0: float, y0: float, x1: float, y1: float, c
     d.polygon([(x1, y1), left, right], fill=colour)
 
 
+def _label(item: str) -> str:
+    """A box shows the variable, not its whole operational definition ("...uptake, defined using the
+    national schedule; history checked against the card..."): the first clause; the alternative text
+    keeps every word."""
+    text = item.split(";")[0].strip()
+    for marker in (", defined ", " defined as ", ", measured "):
+        if marker in text:
+            text = text.split(marker)[0].strip()
+    return text.rstrip(",.") or item.strip()
+
+
 def draw(variables: Variables) -> bytes | None:
     """The framework as a PNG, or None when the study has no independent and dependent variables
     (a qualitative design gets no variable diagram)."""
-    independent = [v for v in variables.independent if v.strip()][:10]
-    dependent = [v for v in variables.dependent if v.strip()][:3]
-    intervening = [v for v in variables.intervening if v.strip()][:6]
+    independent = [_label(v) for v in variables.independent if v.strip()][:10]
+    dependent = [_label(v) for v in variables.dependent if v.strip()][:3]
+    intervening = [_label(v) for v in variables.intervening if v.strip()][:6]
     if not independent or not dependent:
         return None
     size = 30 if len(independent) <= 5 else 26
