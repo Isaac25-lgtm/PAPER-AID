@@ -236,7 +236,8 @@ class FeedbackComment(Camel):
     response: str = Field(default="", max_length=1000)  # the student's own reply for the response report
     by: Literal["SUPERVISOR", "STUDENT"] = "SUPERVISOR"  # STUDENT: the student's own request (not in the response report)
     context_name: str = Field(default="", max_length=120)  # a document the student added for context, given to the writer
-    context: str = Field(default="", max_length=8000)
+    context: str = Field(default="", max_length=8000)  # older comments only: the text is now kept in file storage
+    context_path: str = ""  # where that document's text (its first CONTEXT_WORDS words) is kept
 
     def signature(self) -> str:
         """What a revision was priced to answer: the comment and where it was placed. A revision

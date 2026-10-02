@@ -1,5 +1,5 @@
 import { ArrowLeft, CheckCircle2, FileText, Quote, X } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router'
 import { Button } from '../../components/ui/button'
 import { Checkbox, Input, Select, TextArea } from '../../components/ui/field'
@@ -77,8 +77,10 @@ const COVER: [string, string][] = [
 ]
 
 interface Upload {
-  file: File
+  file: File | null // null: saved before the page was reloaded (only its name is known here)
+  name: string
   role: SourceRole
+  sourceId?: string // set once it is saved on the work
 }
 
 function WorkStart({ type }: { type: StartType }) {
@@ -93,21 +95,32 @@ function WorkStart({ type }: { type: StartType }) {
     if (!id) return
     data.works.get(id).then((w) => setWork(w)).finally(() => setLoading(false))
   }, [data, params])
+  const onSaved = useCallback((id: string) => navigate(`?draft=${id}`, { replace: true }), [navigate])
+  const onCreated = useCallback(
+    (w: Work) => {
+      setWork(w)
+      navigate(`?work=${w.id}`, { replace: true })
+    },
+    [navigate],
+  )
   if (loading) return <Skeleton className="mx-auto h-96 max-w-2xl rounded-2xl" />
   if (!work)
-    return (
-      <WorkPageOne
-        kind={kind}
-        onCreated={(w) => {
-          setWork(w)
-          navigate(`?work=${w.id}`, { replace: true })
-        }}
-      />
-    )
-  return <WorkPageTwo work={work} onChange={setWork} />
+    // Page 1 of a work already saved (Codex audit of 9239dd0): after a reload, or back from page 2 to
+    // change the documents, it is the same work, never a second one.
+    return <WorkPageOne kind={kind} draftId={params.get('draft')} onSaved={onSaved} onCreated={onCreated} />
+  return (
+    <WorkPageTwo
+      work={work}
+      onChange={setWork}
+      onBack={() => {
+        setWork(null)
+        navigate(`?draft=${work.id}`, { replace: true })
+      }}
+    />
+  )
 }
 
-function WorkPageOne({ kind, onCreated }: { kind: WorkKind; onCreated: (w: Work) => void }) {
+function WorkPageOne({ kind, draftId, onSaved, onCreated }: { kind: WorkKind; draftId: string | null; onSaved: (id: string) => void; onCreated: (w: Work) => void }) {
   const data = useData()
   const coursework = kind === 'COURSEWORK'
   const variants = KIND_VARIANTS[kind]
@@ -118,9 +131,11 @@ function WorkPageOne({ kind, onCreated }: { kind: WorkKind; onCreated: (w: Work)
   const [proposal, setProposal] = useState('')
   const [pasted, setPasted] = useState('')
   const [uploads, setUploads] = useState<Upload[]>([])
-  // What Continue already saved (Codex audit 2026-10-01): pressed again after a refusal, it reuses the
-  // same work and never uploads a file twice.
-  const made = useRef<{ id: string; uploaded: number; pasted: boolean } | null>(null)
+  // The work Continue saved, and the pasted call it saved (Codex audits 2026-10-01 and of 9239dd0):
+  // pressed again, Continue brings that same work in line with the page (details, files removed or
+  // added, the pasted text) and never adds a file twice.
+  const saved = useRef<{ id: string; pasted: { id: string; text: string } | null } | null>(null)
+  const [restoring, setRestoring] = useState(Boolean(draftId))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [tried, setTried] = useState(false)
@@ -133,6 +148,34 @@ function WorkPageOne({ kind, onCreated }: { kind: WorkKind; onCreated: (w: Work)
   }
   const ok = !problems.description && !problems.title && !problems.call && !problems.proposal
 
+  // A work already saved from this page (reloaded, or back from page 2): its details and documents.
+  useEffect(() => {
+    if (!draftId || saved.current?.id === draftId) {
+      setRestoring(false)
+      return
+    }
+    let live = true
+    data.works
+      .get(draftId)
+      .then((w) => {
+        if (!live || !w || w.auto) return
+        if (w.activeJob) return onCreated(w) // it is being read: page 2 shows that
+        saved.current = { id: w.id, pasted: null }
+        setVariant(w.variant)
+        if (w.mode) setMode(w.mode)
+        setTitle(kind === 'COURSEWORK' ? '' : w.inputs.title)
+        setDescription(w.inputs.description)
+        setProposal(w.inputs.answers.intervention ?? '')
+        setUploads(w.sources.map((source) => ({ file: null, name: source.name, role: source.role, sourceId: source.id })))
+      })
+      .finally(() => {
+        if (live) setRestoring(false)
+      })
+    return () => {
+      live = false
+    }
+  }, [data, draftId, kind, onCreated])
+
   const create = async () => {
     setTried(true)
     if (!ok) return
@@ -141,19 +184,40 @@ function WorkPageOne({ kind, onCreated }: { kind: WorkKind; onCreated: (w: Work)
     try {
       const name = title.trim() || description.trim().split(/\s+/).slice(0, 12).join(' ')
       const answers: Record<string, string> = coursework ? {} : { problem: description.trim(), intervention: proposal.trim() }
-      let w: Work | null = made.current ? await data.works.get(made.current.id) : null
+      const inputs = { title: name.slice(0, 300), description: description.trim(), answers, experience: '' }
+      let w: Work | null = saved.current ? await data.works.get(saved.current.id) : null
       if (!w) {
-        w = await data.works.create(kind, variant, coursework ? '' : mode, { title: name.slice(0, 300), description: description.trim(), answers, experience: '' }, 'APA7')
-        made.current = { id: w.id, uploaded: 0, pasted: false }
+        w = await data.works.create(kind, variant, coursework ? '' : mode, inputs, 'APA7')
+        saved.current = { id: w.id, pasted: null }
+        onSaved(w.id) // in the address, so a reload continues this work
+      } else {
+        const before = w.inputs
+        if (w.variant !== variant || (!coursework && w.mode !== mode) || before.title !== inputs.title || before.description !== inputs.description ||
+          Object.entries(answers).some(([key, value]) => (before.answers[key] ?? '') !== value))
+          w = await data.works.updateDetails(w.id, { ...inputs, answers: { ...before.answers, ...answers } }, { variant, mode: coursework ? undefined : mode }, w.specVersion)
       }
-      const saved = made.current!
-      for (const u of uploads.slice(saved.uploaded)) {
+      const record = saved.current!
+      // Files removed from the page are removed from the work; new ones are added once each.
+      const kept = new Set(uploads.flatMap((u) => (u.sourceId ? [u.sourceId] : [])))
+      for (const source of w.sources) if (!kept.has(source.id) && source.id !== record.pasted?.id) w = await data.works.removeSource(w.id, source.id)
+      for (const u of uploads) {
+        if (u.sourceId || !u.file) continue
+        const known = new Set(w.sources.map((source) => source.id))
         w = await data.works.uploadSource(w.id, u.role, u.file)
-        saved.uploaded += 1
+        const id = w.sources.find((source) => !known.has(source.id))?.id
+        u.sourceId = id // this pass too: pressed again, it is never uploaded twice
+        setUploads((list) => list.map((x) => (x === u ? { ...x, sourceId: id } : x)))
       }
-      if (pasted.trim() && !saved.pasted) {
-        w = await data.works.pasteSource(w.id, 'CALL', 'The call (pasted)', pasted.trim())
-        saved.pasted = true
+      const text = pasted.trim()
+      if (record.pasted && record.pasted.text !== text) {
+        const old = record.pasted.id
+        if (w.sources.some((source) => source.id === old)) w = await data.works.removeSource(w.id, old)
+        record.pasted = null
+      }
+      if (text && !record.pasted) {
+        const known = new Set(w.sources.map((source) => source.id))
+        w = await data.works.pasteSource(w.id, 'CALL', 'The call (pasted)', text)
+        record.pasted = { id: w.sources.find((source) => !known.has(source.id))?.id ?? '', text }
       }
       if (w.needsRead) w = await data.works.read(w.id)
       onCreated(w)
@@ -164,7 +228,8 @@ function WorkPageOne({ kind, onCreated }: { kind: WorkKind; onCreated: (w: Work)
     }
   }
 
-  const add = (role: SourceRole) => (file: File) => setUploads((u) => [...u, { file, role }])
+  const add = (role: SourceRole) => (file: File) => setUploads((u) => [...u, { file, name: file.name, role }])
+  if (restoring) return <Skeleton className="mx-auto h-96 max-w-2xl rounded-2xl" />
   return (
     <Shell title={TITLES[kind][0]} step={1}>
       <Card className="space-y-5 p-5 sm:p-6">
@@ -233,10 +298,10 @@ function WorkPageOne({ kind, onCreated }: { kind: WorkKind; onCreated: (w: Work)
         {uploads.length > 0 && (
           <ul className="space-y-1.5">
             {uploads.map((u, i) => (
-              <li key={`${u.file.name}-${i}`} className="flex items-center gap-2 rounded-lg bg-surface-subtle px-3 py-2 text-sm">
+              <li key={`${u.name}-${i}`} className="flex items-center gap-2 rounded-lg bg-surface-subtle px-3 py-2 text-sm">
                 <FileText className="size-4 text-fg-subtle" aria-hidden />
-                <span className="min-w-0 flex-1 truncate">{u.file.name}</span>
-                <button className="rounded p-1 text-fg-subtle hover:text-red-600" aria-label={`Remove ${u.file.name}`} onClick={() => setUploads((x) => x.filter((_, j) => j !== i))}>
+                <span className="min-w-0 flex-1 truncate">{u.name}</span>
+                <button className="rounded p-1 text-fg-subtle hover:text-red-600" aria-label={`Remove ${u.name}`} disabled={busy} onClick={() => setUploads((x) => x.filter((_, j) => j !== i))}>
                   <X className="size-4" aria-hidden />
                 </button>
               </li>
@@ -254,7 +319,7 @@ function WorkPageOne({ kind, onCreated }: { kind: WorkKind; onCreated: (w: Work)
   )
 }
 
-function WorkPageTwo({ work, onChange }: { work: Work; onChange: (w: Work) => void }) {
+function WorkPageTwo({ work, onChange, onBack }: { work: Work; onChange: (w: Work) => void; onBack: () => void }) {
   const data = useData()
   const navigate = useNavigate()
   const [answers, setAnswers] = useState<Record<string, string>>({})
@@ -297,6 +362,10 @@ function WorkPageTwo({ work, onChange }: { work: Work; onChange: (w: Work) => vo
               }
             }}>
               {work.autoFailure ? 'Try reading again' : 'Read my documents'}
+            </Button>
+            {/* A call that cannot be read can be replaced (Codex audit of 9239dd0), as can any document. */}
+            <Button variant="secondary" disabled={busy} onClick={onBack}>
+              Change my documents
             </Button>
             {work.kind === 'COURSEWORK' && <Button variant="secondary" disabled={busy} onClick={async () => {
               setBusy(true)

@@ -646,7 +646,8 @@ def quote_step(rt: Runtime, user: User, work_id: str, step: Step, note: str, bun
         for request in k.requests:
             if request.status != "OPEN":
                 continue
-            asked = request.text + (f" (They added their document \"{request.context_name}\" for context: {request.context})" if request.context else "")
+            context = context_text(rt, request.context, request.context_path)
+            asked = request.text + (f" (They added their document \"{request.context_name}\" for context: {context})" if context else "")
             for key in request.sections or list(written):
                 if key in written and len(revise.setdefault(key, [])) < 8:
                     revise[key].append(asked)
@@ -742,10 +743,11 @@ def _current(k: Work, inp: WorkStepInput) -> bool:
     return True
 
 
-def submit_step(rt: Runtime, user: User, work_id: str, job_id: str, quote_id: str) -> JobView:
+def submit_step(rt: Runtime, user: User, work_id: str, job_id: str, quote_id: str, start: bool = False, reservation: tuple[str, int] | None = None) -> JobView:
     """Accept a step's quote. The work is checked and claimed in the same transaction that holds the
     credits: still the student's, not being deleted, on the versions the step was priced on, and
-    with no other step claimed since it was looked at."""
+    with no other step claimed since it was looked at. `start` (one Start) marks the work started in
+    that transaction, and `reservation` sets the document's price aside in it."""
     k = _owned(rt, user, work_id)
     job = rt.store.get(job_id)
     if job is None or job.owner_uid != user.uid or job.work_id != k.id:
@@ -767,9 +769,11 @@ def submit_step(rt: Runtime, user: User, work_id: str, job_id: str, quote_id: st
         w.jobs = w.jobs if j.id in w.jobs else (w.jobs + [j.id])[-100:]
         if inp.step == "DRAFT":
             w.auto_next = ""  # the plan's next step happens here, in the same transaction
+        if start:
+            w.auto, w.auto_failure = True, ""
         return _renew(rt, w)
 
-    return submit(rt, user, job_id, quote_id, work_gate=gate)
+    return submit(rt, user, job_id, quote_id, work_gate=gate, reservation=reservation)
 
 
 def request_changes(rt: Runtime, user: User, work_id: str, text: str, sections: list[str], context_name: str = "", context: str = "") -> WorkView:
@@ -784,14 +788,22 @@ def request_changes(rt: Runtime, user: User, work_id: str, text: str, sections: 
         raise AppError("Write the document before asking for changes.", code="NOTHING_TO_REVISE")
     keys = {s.key for s in doc.sections}
     chosen = [s for s in dict.fromkeys(sections) if s in keys]
+    request_id = f"rq_{secrets.token_hex(4)}"
+    path = save_context(rt, k.storage_prefix(), request_id, context)
 
     def apply(w: Work) -> Work:
         if len(w.requests) >= MAX_REQUESTS:
             raise AppError("Remove requests already dealt with first.", code="TOO_MANY_REQUESTS")
-        w.requests.append(ChangeRequest(id=f"rq_{secrets.token_hex(4)}", text=clean, sections=chosen, context_name=context_name[:120], context=context[:CONTEXT_CHARS]))
+        w.requests.append(ChangeRequest(id=request_id, text=clean, sections=chosen, context_name=context_name[:120] if path else "", context_path=path))
         return w
 
-    return view(rt, _change(rt, user, work_id, apply))
+    saved: Work | None = None
+    try:
+        saved = _change(rt, user, work_id, apply)
+    finally:
+        if saved is None and path:
+            rt.files.delete(path)
+    return view(rt, saved)
 
 
 def request_changes_with_document(rt: Runtime, user: User, work_id: str, text: str, sections: list[str], filename: str, data: bytes) -> WorkView:
@@ -804,11 +816,17 @@ def request_changes_with_document(rt: Runtime, user: User, work_id: str, text: s
 
 
 def remove_request(rt: Runtime, user: User, work_id: str, request_id: str) -> WorkView:
+    removed: list[str] = []
+
     def apply(w: Work) -> Work:
+        removed[:] = [r.context_path for r in w.requests if r.id == request_id and r.context_path]
         w.requests = [r for r in w.requests if r.id != request_id]
         return w
 
-    return view(rt, _change(rt, user, work_id, apply))
+    changed = _change(rt, user, work_id, apply)
+    for path in removed:
+        rt.files.delete(path)
+    return view(rt, changed)
 
 
 def set_version(rt: Runtime, user: User, work_id: str, version: int) -> WorkView:
@@ -942,7 +960,25 @@ def delete(rt: Runtime, user: User, work_id: str) -> None:
 # student's name otherwise, Codex 2026-10-01); a figure only the student can give is drafted as a
 # marked gap. One charge: the read and plan steps are part of the document's price.
 
-CONTEXT_CHARS = 6000
+CONTEXT_WORDS = 1000  # of a document added for context: the page says so before it is added
+
+
+def save_context(rt: Runtime, prefix: str, request_id: str, text: str) -> str:
+    """Keep a context document's text in file storage (Codex audit of 9239dd0: records hold metadata only),
+    its first CONTEXT_WORDS words; the path, or "" when there is none."""
+    words = text.split()
+    if not words:
+        return ""
+    path = f"{prefix}/requests/{request_id}.txt"
+    rt.files.put(path, " ".join(words[:CONTEXT_WORDS]).encode("utf-8"), "text/plain")
+    return path
+
+
+def context_text(rt: Runtime, context: str, context_path: str) -> str:
+    """A request's context text: from file storage, or from the record for older requests."""
+    if context_path and rt.files.exists(context_path):
+        return rt.files.get(context_path).decode("utf-8")
+    return context
 NOT_FINISHED = "We couldn't finish this one: PaperAid could not make a plan it was satisfied with. You were not charged. Please try again."
 
 
@@ -1000,7 +1036,11 @@ def auto_read(rt: Runtime, user: User, work_id: str) -> WorkView:
     since = utcnow() - timedelta(days=1)
     reads = [j for j in rt.store.list(user.uid, None, None, None, 100)[0] if j.work_id and j.selection.work == "READ" and j.created_at > since and j.status in state.SUBMITTED]
     unstarted = [j for j in reads if (w := rt.store.get_work(j.work_id)) is not None and not w.auto]
-    if len(unstarted) >= rt.settings.free_reads_per_day:
+    # Two limits (Codex audit of 9239dd0): the friendly one counts works read today but not started; the
+    # firm one is an atomic daily counter of reads of new works (retries of the same work are free), so
+    # several tabs at once or more than the newest jobs can never pass more than twice the allowance.
+    first_read = not any((j := rt.store.get(job_id)) is not None and j.selection.work == "READ" for job_id in k.jobs)
+    if len(unstarted) >= rt.settings.free_reads_per_day or (first_read and rt.store.hit(f"{user.uid}:read", 86400) > 2 * rt.settings.free_reads_per_day):
         raise AppError("You have had several documents read today without starting one. Start one of your works, or try again tomorrow.", code="READS_LIMIT")
     quoted = quote_step(rt, user, work_id, "READ", "", bundled=True)
     submit_step(rt, user, work_id, quoted.job.id, quoted.quote.id)
@@ -1024,24 +1064,15 @@ def start(rt: Runtime, user: User, work_id: str) -> WorkView:
     check_credits(rt, user, k.kind, _document_price(rt, spec))
     if k.spec_status != "CONFIRMED":
         confirm_spec(rt, user, work_id, k.spec_version)
-
-    def begin(w: Work) -> Work:
-        w.auto, w.auto_failure = True, ""
-        return w
-
-    k = _change(rt, user, work_id, begin)
+        k = _owned(rt, user, work_id)
     ready = k.plan is not None and k.plan_status == "APPROVED" and (k.kind != "FUNDING_PROPOSAL" or k.results_status == "APPROVED")
     step: Step = "DRAFT" if ready and not k.documents else "PLAN"
-    # This attempt's own reservation (Codex audit 2026-10-01): a second Start that loses the race
-    # returns only what it reserved, never the winner's.
-    key = f"work:{work_id}:{secrets.token_hex(4)}"
-    reserve(rt, user, key, _document_price(rt, spec))
-    try:
-        quoted = quote_step(rt, user, work_id, step, "", bundled=True)
-        submit_step(rt, user, work_id, quoted.job.id, quoted.quote.id)
-    except AppError:
-        unreserve(rt, user, key, "Reserved for your document: returned, as it did not start")
-        raise
+    # One transaction (Codex audit of 9239dd0): the step is submitted, the work marked started and the
+    # document's price reserved together, or none of them happens; nothing is left "starting" and no
+    # credits are set aside without a step. The draft holds its own price, so it reserves nothing.
+    reservation = (f"work:{work_id}:{secrets.token_hex(4)}", _document_price(rt, spec)) if step == "PLAN" else None
+    quoted = quote_step(rt, user, work_id, step, "", bundled=True)
+    submit_step(rt, user, work_id, quoted.job.id, quoted.quote.id, start=True, reservation=reservation)
     return view(rt, _owned(rt, user, work_id))
 
 

@@ -582,11 +582,14 @@ ProjectGate = Callable[[Job, Project | None], Project | None]
 WorkGate = Callable[[Job, Work | None], Work | None]
 
 
-def submit(rt: Runtime, user: User, job_id: str, quote_id: str, project_gate: ProjectGate | None = None, work_gate: WorkGate | None = None) -> JobView:
+def submit(rt: Runtime, user: User, job_id: str, quote_id: str, project_gate: ProjectGate | None = None, work_gate: WorkGate | None = None,
+           reservation: tuple[str, int] | None = None) -> JobView:
     """Accept a quote. A proposal step is submitted through its project (app.proposals.service),
     whose `project_gate` runs in the same transaction as the hold: it refuses (None) or returns the
     project with the step claimed, so a project can never be deleted between its claim and the
-    credits being held (Codex audit 2026-09-28 #4)."""
+    credits being held (Codex audit 2026-09-28 #4). `reservation` (one Start's plan step): the
+    document's price, reserved in the same transaction, so a Start never leaves credits set aside
+    without its step (Codex audit of 9239dd0)."""
     job = _owned(rt, user, job_id)
     if job.project_id and project_gate is None:
         raise AppError("Start this step from the proposal's page.", code="PROPOSAL_STEP")
@@ -631,6 +634,8 @@ def submit(rt: Runtime, user: User, job_id: str, quote_id: str, project_gate: Pr
             if key and is_bundled_document(j):  # the credits Start reserved become this document's hold, in one transaction
                 credits.release_reservations(w, key, "Reserved credits now held for your document")
             held = hold_for_job(j, w)  # raises InsufficientCredits, which aborts the whole transaction
+            if reservation is not None:
+                credits.reserve(w, reservation[0], reservation[1], "Reserved for your document")  # raises the same way
             state.transition(j, JobStatus.QUEUED, f"Queued ({credits.tokens(held)} held)")
         else:
             j.payment_status = PaymentStatus.NOT_REQUIRED

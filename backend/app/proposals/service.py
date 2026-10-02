@@ -582,7 +582,10 @@ def quote_step(rt: Runtime, user: User, project_id: str, step: Step, note: str, 
             if included and comment.status == "OPEN" and comment.chapter == chapter:
                 for key in comment.sections:
                     if key in written and len(revise.setdefault(key, [])) < 8:
-                        revise[key].append(comment.text + (f" (The student added their document \"{comment.context_name}\" for context: {comment.context})" if comment.context else ""))
+                        from app.works.service import context_text  # the same storage for every service's context documents
+
+                        context = context_text(rt, comment.context, comment.context_path)
+                        revise[key].append(comment.text + (f" (The student added their document \"{comment.context_name}\" for context: {context})" if context else ""))
                         comment_ids.append(comment.id)
         revise = {k: v for k, v in revise.items() if v}
         if not revise:
@@ -768,10 +771,11 @@ def _revision_current(p: Project, inp: StepInput) -> bool:
     )
 
 
-def submit_step(rt: Runtime, user: User, project_id: str, job_id: str, quote_id: str) -> JobView:
+def submit_step(rt: Runtime, user: User, project_id: str, job_id: str, quote_id: str, start: bool = False, reservation: tuple[str, int] | None = None) -> JobView:
     """Accept a step's quote. The project is checked and claimed in the same transaction that
     holds the credits (Codex audit 2026-09-28 #4): still the student's, not being deleted, on the
-    plan version the step was priced on, and with no other step claimed since it was looked at."""
+    plan version the step was priced on, and with no other step claimed since it was looked at.
+    `start` and `reservation`: one Start, in the same transaction (see app.works.service.submit_step)."""
     p = _owned(rt, user, project_id)
     job = rt.store.get(job_id)
     if job is None or job.owner_uid != user.uid or job.project_id != p.id:
@@ -801,9 +805,11 @@ def submit_step(rt: Runtime, user: User, project_id: str, job_id: str, quote_id:
             q.auto_next = ""  # the plan's next step happens here, in the same transaction
         if inp.step == "PLAN" and not q.chapter(1).versions and q.goal == "FULL":
             q.auto_chapter_one = True  # agreed with the plan's price: starts when the plan is approved (never for a concept note)
+        if start:
+            q.auto, q.auto_failure = True, ""
         return _renew(rt, q)
 
-    return submit(rt, user, job_id, quote_id, project_gate=gate)
+    return submit(rt, user, job_id, quote_id, project_gate=gate, reservation=reservation)
 
 
 # --- supervisor feedback (V2) -------------------------------------------------------------------
@@ -876,24 +882,40 @@ def request_changes(rt: Runtime, user: User, project_id: str, number: int, instr
     if not keys:
         raise AppError("Write this chapter before asking for changes.", code="NOTHING_TO_REVISE")
     chosen = [k for k in dict.fromkeys(sections) if k in set(keys)] or keys
+    from app.works.service import save_context  # the same storage for every service's context documents
+
+    comment_id = f"fb_{secrets.token_hex(4)}"
+    path = save_context(rt, p.storage_prefix(), comment_id, context)
 
     def apply(q: Project) -> Project:
         if len(q.feedback) >= feedback.MAX_COMMENTS:
             raise AppError(f"A proposal keeps up to {feedback.MAX_COMMENTS} comments. Remove ones already dealt with first.", code="TOO_MANY_COMMENTS")
         round_ = max((c.round for c in q.feedback), default=0) + 1
-        q.feedback.append(FeedbackComment(id=f"fb_{secrets.token_hex(4)}", round=round_, text=text, anchor="Your request", chapter=number, sections=chosen, by="STUDENT",
-                                          context_name=context_name[:120], context=context[:6000]))
+        q.feedback.append(FeedbackComment(id=comment_id, round=round_, text=text, anchor="Your request", chapter=number, sections=chosen, by="STUDENT",
+                                          context_name=context_name[:120] if path else "", context_path=path))
         return q
 
-    return view(rt, _change(rt, user, project_id, apply))
+    saved: Project | None = None
+    try:
+        saved = _change(rt, user, project_id, apply)
+    finally:
+        if saved is None and path:
+            rt.files.delete(path)
+    return view(rt, saved)
 
 
 def delete_feedback(rt: Runtime, user: User, project_id: str, comment_id: str) -> ProjectView:
+    removed: list[str] = []
+
     def apply(q: Project) -> Project:
+        removed[:] = [c.context_path for c in q.feedback if c.id == comment_id and c.context_path]
         q.feedback = [c for c in q.feedback if c.id != comment_id]
         return q
 
-    return view(rt, _change(rt, user, project_id, apply))
+    changed = _change(rt, user, project_id, apply)
+    for path in removed:
+        rt.files.delete(path)
+    return view(rt, changed)
 
 
 def response_report(rt: Runtime, user: User, project_id: str) -> tuple[bytes, str]:
@@ -1047,7 +1069,8 @@ SAMPLING_CONSENT = "Standard sample-size settings (95% confidence, 5% margin, 50
 def start(rt: Runtime, user: User, project_id: str, accept_sampling: bool = False) -> ProjectView:
     """Start, or continue after a stop: plan (bundled) if there is no approved plan, otherwise write the
     first document."""
-    from app.works.service import check_credits, reserve, unreserve  # the same credit checks and reservation for every service
+    from app.pricing.credits import InsufficientCredits
+    from app.works.service import check_credits, reserve  # the same credit checks and reservation for every service
 
     p = _owned(rt, user, project_id)
     _require_ai(rt, user)
@@ -1059,34 +1082,40 @@ def start(rt: Runtime, user: User, project_id: str, accept_sampling: bool = Fals
         price = fixed_price(rt.settings, "PLAN", None) + fixed_price(rt.settings, "CONCEPT" if first == "CONCEPT" else "CHAPTER_1", None)
     check_credits(rt, user, "CONCEPT_PAPER" if p.goal == "CONCEPT" else "PROPOSAL", price)
 
-    def begin(q: Project) -> Project:
-        q.auto, q.auto_failure = True, ""
-        q.sampling_consent = q.sampling_consent or accept_sampling
-        return q
+    if accept_sampling and not p.sampling_consent:
+        def consent(q: Project) -> Project:
+            q.sampling_consent = True
+            return q
 
-    p = _change(rt, user, project_id, begin)
+        p = _change(rt, user, project_id, consent)
     key = f"project:{project_id}:{secrets.token_hex(4)}"  # this attempt's own reservation (see works)
     if p.plan is not None and p.plan_status != "APPROVED" and p.plan_review is not None and p.plan_review.outcome == "APPROVED" \
             and p.plan.sampling_assumed and p.sampling_consent and p.jobs:
-        # stopped only for the sample-size settings, now confirmed: continue from the plan already made
-        reserve(rt, user, key, price)
+        # Stopped only for the sample-size settings, now confirmed: continue from the plan already made.
+        # Pending first, then the reservation (Codex audit of 9239dd0): if this stops in between,
+        # maintenance continues and the chapter holds its own price; credits are never stranded.
         plan_job = p.jobs[-1]
 
         def pending(q: Project) -> Project:
-            q.auto_next = plan_job
+            q.auto, q.auto_failure, q.auto_next = True, "", plan_job
             return q
 
         _change(rt, user, project_id, pending)
+        try:
+            reserve(rt, user, key, price)
+        except InsufficientCredits:
+            def withdrawn(q: Project) -> Project:
+                q.auto_next = "" if q.auto_next == plan_job else q.auto_next
+                return q
+
+            _change(rt, user, project_id, withdrawn)
+            raise
         continue_after_plan(rt, project_id, plan_job)
         return view(rt, _owned(rt, user, project_id))
     step: Step = first if p.plan is not None and p.plan_status == "APPROVED" else "PLAN"
-    reserve(rt, user, key, price)
-    try:
-        quoted = quote_step(rt, user, project_id, step, "", bundled=True)
-        submit_step(rt, user, project_id, quoted.job.id, quoted.quote.id)
-    except AppError:
-        unreserve(rt, user, key, "Reserved for your document: returned, as it did not start")
-        raise
+    # One transaction (see works): submitted, started and reserved together, or none of them.
+    quoted = quote_step(rt, user, project_id, step, "", bundled=True)
+    submit_step(rt, user, project_id, quoted.job.id, quoted.quote.id, start=True, reservation=(key, price) if step == "PLAN" else None)
     return view(rt, _owned(rt, user, project_id))
 
 

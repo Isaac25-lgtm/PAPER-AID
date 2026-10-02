@@ -436,7 +436,8 @@ class ChangeRequest(Camel):
     # A document the student added for context ("Add documents for more context"): its name and text,
     # given to the writer with the request.
     context_name: str = Field(default="", max_length=120)
-    context: str = Field(default="", max_length=8000)
+    context: str = Field(default="", max_length=8000)  # older requests only: the text is now kept in file storage
+    context_path: str = ""  # where the document's text (its first CONTEXT_WORDS words) is kept
 
 
 Status = Literal["NONE", "DRAFT", "APPROVED"]

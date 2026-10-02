@@ -227,7 +227,7 @@ export function ChangeBox({ parts, busy, running, onApply, whole = 'The whole do
       <div>
         <label htmlFor={pick} className="flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-line-strong px-3 py-2.5 text-sm text-fg-muted hover:border-brand-300">
           <Paperclip className="size-4" aria-hidden />
-          {file ? <span className="min-w-0 flex-1 truncate font-medium text-fg">{file.name}</span> : <span className="flex-1">Add a document for more context (optional): Word or PDF</span>}
+          {file ? <span className="min-w-0 flex-1 truncate font-medium text-fg">{file.name}</span> : <span className="flex-1">Add a document for more context (optional): Word or PDF. PaperAid uses its first 1,000 words.</span>}
           {file && (
             <button className="rounded p-0.5 hover:text-red-600" aria-label="Remove the document" onClick={(e) => { e.preventDefault(); setFile(null) }}>
               <X className="size-4" aria-hidden />

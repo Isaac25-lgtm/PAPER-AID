@@ -211,7 +211,11 @@ def test_a_change_request_can_bring_a_document_for_the_writer(works_client):
                        files={"file": ("notes.docx", buffer.getvalue(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")})
     assert sent.status_code == 200, sent.json()
     request = sent.json()["requests"][0]
-    assert request["contextName"] == "notes.docx" and "42 village health teams" in request["context"]
+    assert request["contextName"] == "notes.docx" and request["context"] == ""  # the text is in file storage, never the record
+    from app.runtime import get_runtime
+
+    stored = get_runtime().store.get_work(work["id"]).requests[0]
+    assert "42 village health teams" in get_runtime().files.get(stored.context_path).decode("utf-8")
     quoted = client.post(f"/api/works/{work['id']}/steps", headers=H, json={"step": "REVISE"}).json()
     assert client.post(f"/api/works/{work['id']}/steps/{quoted['job']['id']}/submit", headers=H, json={"quoteId": quoted["quote"]["id"]}).status_code == 200
     _settled(client, f"/api/works/{work['id']}", lambda w: len(w["documents"]) >= 2 or w["activeJob"] is None and "w_repair" in client.models.tasks)
@@ -475,3 +479,95 @@ def test_a_step_that_used_up_its_retries_never_says_it_will_keep_trying(works_cl
     client.post(f"/api/works/{work['id']}/start", headers=H)
     work = _settled(client, f"/api/works/{work['id']}", _done)
     assert work["autoFailure"] == UNAVAILABLE_FINAL and "keep trying" not in work["autoFailure"]
+
+
+# --- Codex audit of 9239dd0 -----------------------------------------------------------------------------------
+
+
+def test_a_start_refused_for_credits_leaves_nothing_started_and_nothing_reserved(works_client, monkeypatch):
+    """The balance changed between the check and the submission: nothing is marked started (the page
+    would wait for ever) and nothing is set aside, because both happen in the submission's transaction."""
+    from app.pricing import credits
+    from app.runtime import get_runtime
+    from app.works import service as works_service
+
+    client = works_client
+    work = _coursework(client)
+    monkeypatch.setattr(works_service, "check_credits", lambda *args, **kwargs: None)  # passed the check...
+    store = get_runtime().store
+    k = store.get_work(work["id"])
+    store.update_wallet(k.owner_uid, k.owner_email, lambda w: credits.reserve(w, "elsewhere", w.available, "Spent elsewhere"))  # ...then spent
+    refused = client.post(f"/api/works/{work['id']}/start", headers=H)
+    assert refused.status_code == 402, refused.json()
+    after = client.get(f"/api/works/{work['id']}", headers=H).json()
+    assert not after["auto"] and after["activeJob"] is None and after["jobs"] == []
+    assert list(store.get_wallet(k.owner_uid).reservations) == ["elsewhere"]
+
+
+def test_a_start_that_fails_to_submit_reserves_nothing(works_client, monkeypatch):
+    from app.core.errors import Conflict
+    from app.runtime import get_runtime
+    from app.works import service as works_service
+
+    client = works_client
+    work = _coursework(client)
+
+    def lost(*args, **kwargs):
+        raise Conflict("Your quote changed.", code="QUOTE_MISMATCH")
+
+    monkeypatch.setattr(works_service, "submit", lost)
+    assert client.post(f"/api/works/{work['id']}/start", headers=H).status_code == 409
+    k = get_runtime().store.get_work(work["id"])
+    assert not k.auto and get_runtime().store.get_wallet(k.owner_uid).reservations == {}
+
+
+def test_a_proposal_start_reserves_with_its_plan_in_one_transaction(client):
+    from app.runtime import get_runtime
+
+    pid = _create(client)["id"]
+    started = client.post(f"/api/projects/{pid}/start", headers=H, json={})
+    assert started.status_code == 200, started.json()
+    store = get_runtime().store
+    p = store.get_project(pid)
+    assert p.auto and p.jobs
+    wallet = store.get_wallet(p.owner_uid)
+    plan = store.get(p.jobs[0])
+    assert plan.selection.proposal == "PLAN" and plan.selection.bundled
+    assert all(key.startswith(f"project:{pid}:") for key in wallet.reservations)
+
+
+def test_reads_of_new_works_have_a_firm_daily_ceiling(works_client, monkeypatch):
+    """Counted atomically, whatever happens to the works (started ones included): at most twice the allowance."""
+    from app.runtime import get_runtime
+
+    client = works_client
+    monkeypatch.setattr(get_runtime().settings, "free_reads_per_day", 1)
+    codes = []
+    for _ in range(3):
+        work = _with_brief(client)
+        read = client.post(f"/api/works/{work['id']}/read", headers=H)
+        codes.append(read.status_code)
+        _settled(client, f"/api/works/{work['id']}", lambda w: w["activeJob"] is None)
+        if read.status_code == 200:
+            get_runtime().store.update_work(work["id"], lambda w: w.model_copy(update={"auto": True}))  # started: not "unstarted"
+    assert codes == [200, 200, 400]
+
+
+def test_a_context_document_is_kept_in_file_storage_and_removed_with_its_request(works_client):
+    from app.runtime import get_runtime
+
+    client = works_client
+    work = _coursework(client)
+    client.post(f"/api/works/{work['id']}/start", headers=H)
+    _settled(client, f"/api/works/{work['id']}", _done)
+    note = Document()
+    note.add_paragraph(" ".join(["evidence"] * 1500))
+    buffer = io.BytesIO()
+    note.save(buffer)
+    sent = client.post(f"/api/works/{work['id']}/requests/with-document", headers=H, data={"instruction": "Use my notes", "sections": ""},
+                       files={"file": ("notes.docx", buffer.getvalue(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}).json()
+    rt = get_runtime()
+    stored = rt.store.get_work(work["id"]).requests[0]
+    assert stored.context == "" and len(rt.files.get(stored.context_path).decode("utf-8").split()) == 1000  # the page says: its first 1,000 words
+    client.delete(f"/api/works/{work['id']}/requests/{sent['requests'][0]['id']}", headers=H)
+    assert not rt.files.exists(stored.context_path)

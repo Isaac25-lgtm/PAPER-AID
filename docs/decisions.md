@@ -404,3 +404,14 @@ Students never see, edit or approve a plan, and never see a price screen. Supers
 ### 2026-10-01 — Live reliability run: plans within the evidence, patience for provider outages
 
 Six real coursework jobs on the released one-Start flow: 4 delivered (Ready with warnings, 1,287–2,297 words), 2 stopped without charge at the plan, both because the final review found claims stronger than the confirmed evidence and two repairs did not clear them. `w-plan-v2`: claims in the position and briefs stay within the evidence's population, place, dates and strength (an unsettled point is something a section will examine), and a repair changes only what the critique raised. A rerun of three hit a Google (Gemini) outage (503); both questions that reached drafting had passed their plans, including one that had failed before. Stages now wait about ten minutes for an outage (`STAGE_MAX_ATTEMPTS` 6, backoff to five minutes; completed calls replay from the job's cache) and a step that used up its retries says it could not finish ("You were not charged. Please try again in a few minutes.") instead of "We'll keep trying".
+
+### 2026-10-02 — Codex's audit of 9239dd0
+
+1. **Page 1 keeps one work in line with the page.** Continue, pressed again, updates the saved work's details, removes files taken off the page, adds new ones once each and replaces a changed pasted call. The saved work's id is in the address (`?draft=`), so a reload, or "Change my documents" from page 2, reopens page 1 on that same work with its documents listed.
+2. **Start is one transaction.** The step's submission, marking the work or proposal started, and reserving the document's price happen together or not at all (`submit(..., reservation=)`, `submit_step(..., start=True)`). A balance that changes after the check, or a submission that fails, leaves nothing "starting" and nothing set aside. A proposal continuing after the sample-size tick records the pending step before reserving, so an interruption is finished by maintenance and the chapter holds its own price.
+3. **A document added for context is kept in file storage**, never in the work or project record, and removed with its request. The writer gets its first 1,000 words, and the change box says so before it is added.
+4. **A funding call that cannot be read can be replaced**: page 2 offers "Change my documents" beside "Try reading again".
+5. **Reads have a firm daily ceiling**: besides the friendly limit on works read but not started (`FREE_READS_PER_DAY`), an atomic daily counter of reads of new works refuses beyond twice that allowance, whatever happens to the works.
+6. **Prompts say the plan is internal**: `w-plan-v3` and `w-results-v2` no longer tell the model that the student edits and approves the plan or Results Model first.
+- **Release record**: `820f862` and `9239dd0` were deployed on 2026-10-01 without being pushed or logged. Both are now in the release log, and this release is pushed.
+
