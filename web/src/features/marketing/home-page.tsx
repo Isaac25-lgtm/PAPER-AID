@@ -32,12 +32,12 @@ export function HomePage() {
               Submit a paper that&rsquo;s <span className="text-brand-600">clear, correct</span> and properly formatted.
             </h1>
             <p className="mt-5 max-w-xl text-lg leading-relaxed text-fg-muted">
-              Upload your draft. PaperAid points out weak and formulaic passages, refines them without touching your citations, and applies academic
-              formatting — then gives you back a Word file you can review.
+              Start coursework, a research proposal or a funding proposal from your question or call, or bring your own draft to check and format.
+              Review it on screen, ask for changes, then download Word or PDF.
             </p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
               <ButtonLink to="/app/new" size="lg">
-                <FileUp className="size-5" aria-hidden /> Upload your paper
+                <FileUp className="size-5" aria-hidden /> Get started
               </ButtonLink>
               <ButtonLink to="/#how-it-works" size="lg" variant="secondary">
                 See how it works
@@ -51,7 +51,7 @@ export function HomePage() {
                 <ShieldCheck className="size-4 text-brand-600" aria-hidden /> Private, deleted after {config.retentionDays} days
               </li>
               <li className="flex items-center gap-2">
-                <Wallet className="size-4 text-brand-600" aria-hidden /> Pay only for the work your paper needs
+                <Wallet className="size-4 text-brand-600" aria-hidden /> Charged only for what is delivered
               </li>
             </ul>
           </div>
@@ -65,7 +65,7 @@ export function HomePage() {
             <div>
               <Eyebrow>What PaperAid does</Eyebrow>
               <h2 id="features-title" className="mt-4 text-3xl font-bold sm:text-4xl">
-                One upload. The work your paper needs.
+                From your question or draft to a finished document.
               </h2>
             </div>
             <ButtonLink to="/features" variant="ghost" className="self-start sm:self-auto">
@@ -83,9 +83,9 @@ export function HomePage() {
           <div className="max-w-2xl">
             <Eyebrow>How it works</Eyebrow>
             <h2 id="how-title" className="mt-4 text-3xl font-bold sm:text-4xl">
-              From draft to a better paper in four steps.
+              From start to finished document in four steps.
             </h2>
-            <p className="mt-3 text-fg-muted">No prompts, no chat. Hand over your paper, approve the estimate, and come back to a finished result.</p>
+            <p className="mt-3 text-fg-muted">No prompts, no chat. Tell us what you need, press Start, and come back to a finished result you can review and change.</p>
           </div>
           <ol className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {steps.map((step, i) => (
@@ -110,8 +110,8 @@ export function HomePage() {
               Your ideas stay yours.
             </h2>
             <p className="mt-4 leading-relaxed text-brand-100/90">
-              PaperAid improves how your paper reads and looks. It does not invent sources, change your findings or write your argument for you — and
-              every change is shown to you before you submit anything.
+              PaperAid never invents sources, statistics or participant details, and never changes your findings. What it writes is built from
+              sources it confirmed, and every change to your own paper is shown to you before you download it.
             </p>
             <p className="mt-6 rounded-xl bg-white/5 p-4 text-sm leading-relaxed text-brand-100/80 ring-1 ring-white/10">
               Our writing check is feedback on how your paper reads, not an AI detector. No detector — ours or anyone else&rsquo;s — can prove who
@@ -144,8 +144,8 @@ export function HomePage() {
                 Pay for the work your paper needs.
               </h2>
               <p className="mt-3 text-fg-muted">
-                No price list and no subscription. A short, clean essay costs little; a long thesis or proposal that needs more work costs more, and you
-                always see the estimate first.
+                No subscription. Each service has a fixed price in credits for your paper&rsquo;s length: a short essay costs little, a long thesis or
+                proposal costs more. Credits are reserved when you start and charged only for what is delivered.
               </p>
               <ButtonLink to="/pricing" variant="ghost" className="mt-4 -ml-4">
                 How pricing works <ArrowRight className="size-4" aria-hidden />

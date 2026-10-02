@@ -19,7 +19,7 @@ export const INVITE_ONLY_REASON = 'Open to invited testers while PaperAid is in 
  *  them: Redraft, Ask for changes, Source check and Finish live in Paper Check; university templates
  *  and LaTeX are finishing choices. `service` is whose availability the section follows. */
 export interface SectionInfo {
-  id: 'PAPER_CHECK' | 'PROPOSALS' | 'ACADEMIC_FORMAT'
+  id: 'PAPER_CHECK' | 'PROPOSALS' | 'ACADEMIC_FORMAT' | 'COURSEWORK' | 'FUNDING'
   service: ServiceId
   name: string
   short: string
@@ -53,11 +53,11 @@ export const SECTIONS: SectionInfo[] = [
     id: 'PROPOSALS',
     service: 'PROPOSAL',
     name: 'Research Proposals',
-    short: 'Plan, research and write a research proposal chapter by chapter, or review one you have written.',
+    short: 'A research proposal or concept paper written chapter by chapter from researched sources, or a review of one you have written.',
     icon: GraduationCap,
     accepts: 'Your topic and study details, or your proposal as DOCX or PDF',
-    youGet: ['A plan you edit and approve first', 'Chapters written from confirmed sources, revised from your supervisor\'s comments', 'The complete proposal in Word, PDF or LaTeX'],
-    untouched: ['Figures only you can supply: PaperAid asks for them', 'Your approved plan'],
+    youGet: ['Chapter One written as soon as you start, from sources PaperAid confirmed', 'Chapters Two and Three, and changes from your supervisor\'s comments or your own', 'The complete proposal in Word, PDF or LaTeX'],
+    untouched: ['Facts only you can give: population sizes, instruments and approvals are asked for, never invented'],
     to: '/app/projects',
   },
   {
@@ -125,7 +125,7 @@ export const SERVICES: Record<ServiceId, ServiceInfo> = {
   },
   PROPOSAL: {
     name: 'Research proposals',
-    short: 'Plan, research and write a research proposal chapter by chapter, or review one you have written.',
+    short: 'A research proposal or concept paper written chapter by chapter from researched sources, or a review of one you have written.',
     icon: GraduationCap,
     accepts: 'Your topic and study details, or your proposal as DOCX or PDF',
     youGet: ['A readiness checklist of what examiners look for', 'Every claim traced to a source PaperAid confirmed', 'A properly formatted Word file'],
@@ -133,10 +133,10 @@ export const SERVICES: Record<ServiceId, ServiceInfo> = {
   },
   CONCEPT_NOTE: {
     name: 'Concept notes',
-    short: 'A funding or project concept note planned with you, drafted and checked against the call.',
+    short: 'A funding or project concept note, written to the call and checked against everything it asks.',
     icon: Lightbulb,
     accepts: 'Your idea, plus the call or template as DOCX or PDF if you have one',
-    youGet: ['What PaperAid understood from the call, for you to confirm', 'A plan you edit and approve first', 'The concept note in Word, with its compliance report'],
+    youGet: ['What PaperAid found in the call, for you to confirm', 'Written as soon as you start, with every limit checked', 'The concept note in Word, with its compliance report'],
     untouched: ["Facts only you can give: budgets, dates and your organisation's track record are asked for, never invented"],
   },
   COURSEWORK: {
@@ -149,11 +149,11 @@ export const SERVICES: Record<ServiceId, ServiceInfo> = {
   },
   FUNDING_PROPOSAL: {
     name: 'Funding proposals',
-    short: 'A full funding proposal built on one Results Model, with the budget and tables checked by code.',
+    short: 'A full funding proposal with its logframe, workplan and budget, every table and sum consistent.',
     icon: HandCoins,
     accepts: 'The call and template as DOCX or PDF, plus your project details',
-    youGet: ['Eligibility and requirements read from the call', 'Logframe, workplan and M&E table from your Results Model', 'Every budget sum checked'],
-    untouched: ['Your figures: budget lines, targets and dates are yours, never invented'],
+    youGet: ['Eligibility and requirements read from the call', 'Logframe, workplan and M&E table that agree with each other', 'Every budget sum worked out for you'],
+    untouched: ['Your figures: budget lines, targets and dates are yours, never invented; any PaperAid cannot know are marked for you to fill in'],
   },
   LATEX: {
     name: 'LaTeX conversion',
@@ -164,6 +164,36 @@ export const SERVICES: Record<ServiceId, ServiceInfo> = {
     untouched: ['Your wording, citations and reference list'],
   },
 }
+
+/** What the public pages describe (owner request 2026-10-02: every section, for researchers and
+ *  students), in the New page's order. Availability badges come from the server, as for SECTIONS. */
+export const PUBLIC_SECTIONS: SectionInfo[] = [
+  {
+    id: 'COURSEWORK',
+    service: 'COURSEWORK',
+    name: 'Coursework',
+    short: 'Essays, reports, case studies, literature reviews and reflective work, written to your question and brief.',
+    icon: NotebookPen,
+    accepts: 'Your question, plus the brief and marking rubric as DOCX or PDF if you have them',
+    youGet: ['Every part of the question answered', 'Written from confirmed sources in your referencing style', "Each rubric criterion checked (PaperAid's assessment, not a grade)"],
+    untouched: ['Your own experience in reflective work: asked for, never invented', 'Quotations and figures you give'],
+    to: '/app/start/coursework',
+  },
+  SECTIONS[1],
+  {
+    id: 'FUNDING',
+    service: 'FUNDING_PROPOSAL',
+    name: 'Funding',
+    short: 'Concept notes and full funding proposals, written to the call and checked against everything it asks.',
+    icon: HandCoins,
+    accepts: 'The call or funder’s guidelines as DOCX or PDF (or pasted), plus your project idea',
+    youGet: ['Eligibility and requirements read from the call', 'Logframe, workplan and M&E table that agree with each other', 'Every budget sum worked out for you'],
+    untouched: ['Your figures: budget lines, targets and dates are yours, never invented; any PaperAid cannot know are marked for you to fill in'],
+    to: '/app/start/funding',
+  },
+  SECTIONS[0],
+  SECTIONS[2],
+]
 
 export const SERVICE_ORDER: ServiceId[] = ['AI_CHECK', 'REFINE', 'SOURCE_CHECK', 'FORMAT', 'TEMPLATE_FORMAT', 'REDRAFT', 'LATEX']
 

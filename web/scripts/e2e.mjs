@@ -53,7 +53,7 @@ try {
   await page.goto(base)
   await page.evaluate(() => localStorage.clear())
   await page.goto(base)
-  await page.getByRole('link', { name: 'Upload your paper' }).first().click()
+  await page.getByRole('main').getByRole('link', { name: 'Get started' }).first().click() // the hero's, not the header's sign-up link
   await page.waitForURL(/sign-in\?next=%2Fapp%2Fnew/)
   await page.getByLabel('Email').fill('demo@paperaid.app')
   await page.getByLabel('Password').fill('e2e-password')

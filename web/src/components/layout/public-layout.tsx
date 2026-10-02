@@ -121,7 +121,7 @@ function SiteFooter() {
           <ul className="mt-3 space-y-2 text-sm text-fg-muted">
             <li><Link to="/features" className="hover:text-fg">Features</Link></li>
             <li><Link to="/pricing" className="hover:text-fg">Pricing</Link></li>
-            <li><Link to="/app/new" className="hover:text-fg">Upload a paper</Link></li>
+            <li><Link to="/app/new" className="hover:text-fg">Get started</Link></li>
           </ul>
         </div>
         <div>

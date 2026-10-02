@@ -282,7 +282,7 @@ function Workspace({ project, onChange, onReload }: { project: Project; onChange
           {!state?.current ? (
             <Card className="mx-auto max-w-xl p-6 text-center">
               <p className="text-lg font-semibold">{NAMES[shown]} is not written yet</p>
-              <p className="mt-1 text-sm text-fg-muted">PaperAid writes it from your plan and confirmed sources, then checks every section.</p>
+              <p className="mt-1 text-sm text-fg-muted">PaperAid writes it from your study’s design and confirmed sources, then checks every section.</p>
               <Button className="mt-4" loading={busy} disabled={running} onClick={() => write(shown)}>
                 Write {NAMES[shown]}
               </Button>
@@ -332,7 +332,7 @@ function Workspace({ project, onChange, onReload }: { project: Project; onChange
           {next && written.has(shown) && !concept && (
             <Card className="p-5">
               <p className="text-base font-semibold">Next: {NAMES[next]}</p>
-              <p className="mt-1 text-sm text-fg-muted">Written from your plan and confirmed sources, in the same style.</p>
+              <p className="mt-1 text-sm text-fg-muted">Written from your study’s design and confirmed sources, in the same style.</p>
               <Button className="mt-3 w-full" loading={busy} disabled={running} onClick={() => write(next)}>
                 Continue to {NAMES[next]}
               </Button>

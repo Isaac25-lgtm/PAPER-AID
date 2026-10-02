@@ -89,7 +89,7 @@ export function ProjectsPage() {
             )
           }
         >
-          Start from your topic. PaperAid researches the evidence and drafts a plan for you to edit and approve, then writes each chapter from it.
+          Start from your topic. PaperAid researches the evidence and writes Chapter One, then each chapter when you ask.
         </EmptyState>
       ) : (
         <ul className="space-y-3">

@@ -4,7 +4,7 @@ import { Badge, Card, Eyebrow } from '../../components/ui/primitives'
 import { useData } from '../../lib/data'
 import { formatTokenNumber } from '../../lib/format'
 import type { ServiceId } from '../../lib/types'
-import { AVAILABILITY_BADGE, SECTIONS } from '../../lib/services'
+import { AVAILABILITY_BADGE, PUBLIC_SECTIONS } from '../../lib/services'
 import { useTitle } from '../../lib/use-title'
 import { FinalCta, PricingModel } from './sections'
 
@@ -25,12 +25,12 @@ export function FeaturesPage() {
   const { config } = useData()
   return (
     <>
-      <PageHero eyebrow="Features" title="Three sections, and exactly what each one changes.">
-        Check and finish a paper, write a research proposal, or format a finished paper. You always know what will be changed, what will be left alone and what you
+      <PageHero eyebrow="Features" title="What PaperAid does, and exactly what each service changes.">
+        Write coursework, a research proposal or a funding proposal, check and finish your own paper, or format a finished one. You always know what will be changed, what will be left alone and what you
         get back.
       </PageHero>
       <div className="mx-auto max-w-5xl space-y-6 px-4 py-14 sm:px-6">
-        {SECTIONS.map((s) => {
+        {PUBLIC_SECTIONS.map((s) => {
           const availability = config.availability[s.service]
           return (
             <Card key={s.id} className="p-6 sm:p-8">

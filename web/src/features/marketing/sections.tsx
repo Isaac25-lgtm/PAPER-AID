@@ -4,13 +4,13 @@ import { Link } from 'react-router'
 import { ButtonLink } from '../../components/ui/button'
 import { Badge } from '../../components/ui/primitives'
 import { useData } from '../../lib/data'
-import { AVAILABILITY_BADGE, SECTIONS } from '../../lib/services'
+import { AVAILABILITY_BADGE, PUBLIC_SECTIONS } from '../../lib/services'
 
 export function ServiceGrid() {
   const { config } = useData()
   return (
     <ul className="grid gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
-      {SECTIONS.map((s) => {
+      {PUBLIC_SECTIONS.map((s) => {
         const availability = config.availability[s.service]
         const soon = availability !== 'available'
         return (
@@ -87,10 +87,10 @@ export function FinalCta() {
         <div aria-hidden className="absolute -top-24 -right-24 size-72 rounded-full bg-brand-600/40 blur-3xl" />
         <div aria-hidden className="absolute -bottom-24 -left-24 size-72 rounded-full bg-brand-500/30 blur-3xl" />
         <h2 className="relative text-3xl font-bold text-white sm:text-4xl">Ready when your deadline is.</h2>
-        <p className="relative mx-auto mt-3 max-w-xl text-brand-100">Upload your draft and see exactly what PaperAid would change — before you commit to anything.</p>
+        <p className="relative mx-auto mt-3 max-w-xl text-brand-100">Tell us what you need and press Start. Review the result on screen, ask for changes, then download it.</p>
         <div className="relative mt-8 flex flex-col justify-center gap-3 sm:flex-row">
           <ButtonLink to="/app/new" size="lg" variant="inverse">
-            Upload your paper <ArrowRight className="size-4" aria-hidden />
+            Get started <ArrowRight className="size-4" aria-hidden />
           </ButtonLink>
           <Link to="/pricing" className="inline-flex h-12 items-center justify-center px-4 text-sm font-semibold text-white underline-offset-4 hover:underline">
             How pricing works

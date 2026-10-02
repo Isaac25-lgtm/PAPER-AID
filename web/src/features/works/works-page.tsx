@@ -20,7 +20,7 @@ const SECTION_TEXT: Record<Section, { title: string; description: string }> = {
   },
   FUNDING: {
     title: 'Funding',
-    description: 'Concept notes and funding proposals built from the call: what it requires, a plan you approve, and a draft checked against every rule.',
+    description: 'Concept notes and funding proposals written to the call: what it requires, read and quoted, and a draft checked against every rule.',
   },
 }
 
