@@ -571,3 +571,25 @@ def test_a_context_document_is_kept_in_file_storage_and_removed_with_its_request
     assert stored.context == "" and len(rt.files.get(stored.context_path).decode("utf-8").split()) == 1000  # the page says: its first 1,000 words
     client.delete(f"/api/works/{work['id']}/requests/{sent['requests'][0]['id']}", headers=H)
     assert not rt.files.exists(stored.context_path)
+
+
+def test_a_resumed_proposal_continues_once_and_reserves_nothing(client):
+    """Codex's second look at 9239dd0: after the sample-size tick, a second Start at the same moment is
+    refused (it never marks the step pending again or stops the chapter), and nothing is left reserved."""
+    from app.runtime import get_runtime
+    from tests.fake_models import PLAN as BASE
+
+    client.models.overrides["p_finalise"] = lambda payload: {**BASE, "sampleSize": {**BASE["sampleSize"], "margin": 7}} if "title" in payload["draft"] else payload["draft"]
+    project = _create(client)
+    client.post(f"/api/projects/{project['id']}/start", headers=H)
+    project = _settled(client, f"/api/projects/{project['id']}", lambda p: bool(p["autoFailure"]) or any(c["current"] for c in p["chapters"]), timeout=180)
+    if not project["plan"]["samplingAssumed"]:
+        pytest.skip("this plan assumed no sample-size settings")
+    first = client.post(f"/api/projects/{project['id']}/start", headers=H, json={"acceptSampling": True})
+    second = client.post(f"/api/projects/{project['id']}/start", headers=H, json={"acceptSampling": True})
+    assert first.status_code == 200 and second.status_code == 409 and second.json()["code"] == "STEP_RUNNING"
+    project = _settled(client, f"/api/projects/{project['id']}", lambda p: any(c["number"] == 1 and c["current"] for c in p["chapters"]) or bool(p["autoFailure"]), timeout=180)
+    assert not project["autoFailure"]
+    store = get_runtime().store
+    owner = store.get_project(project["id"]).owner_uid
+    assert store.get_wallet(owner) is None or store.get_wallet(owner).reservations == {}

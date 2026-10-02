@@ -27,6 +27,7 @@ page.on('console', (m) => {
 const step = (msg) => console.log(`✓ ${msg}`)
 const shot = (name) => page.screenshot({ path: `${out}/${name}.png`, fullPage: true })
 const LONG = { timeout: 240_000 }
+const DEV = { Authorization: 'Dev demo@paperaid.app' } // the browser-test backend's sign-in, for reading what was saved
 
 try {
   await page.goto(`${base}/sign-in`)
@@ -98,12 +99,15 @@ try {
   // Page 1 of a saved work (a reload, or back to change the documents) is that same work, never a second one.
   const fundingId = new URL(page.url()).searchParams.get('work')
   await page.goto(`${base}/app/start/funding?draft=${fundingId}`)
-  await page.getByText('The call (pasted)').waitFor()
+  await page.getByText('Your pasted call is saved. Paste the text again to replace it.').waitFor()
   if ((await page.getByLabel(/Project title/).inputValue()) !== 'Safer deliveries in Kamuli') throw new Error('page 1 lost the saved title')
+  await page.getByLabel(/Or paste the call/).fill('The Maternal Health Fund invites proposals from registered NGOs in Uganda for projects that reduce maternal deaths through community referral and emergency transport. Projects run for twelve months.')
   await page.getByRole('button', { name: 'Continue' }).click()
   await page.getByRole('heading', { name: 'A few details' }).waitFor(LONG)
   if (new URL(page.url()).searchParams.get('work') !== fundingId) throw new Error('page 1 made a second work')
-  step('funding: page 1 reopened continues the same work')
+  const calls = (await (await page.request.get(`${base}/api/works/${fundingId}`, { headers: DEV })).json()).sources.filter((s) => s.role === 'CALL')
+  if (calls.length !== 1) throw new Error(`a replaced pasted call left ${calls.length} calls`)
+  step('funding: page 1 reopened continues the same work, and a pasted call is replaced, not added')
   for (const [label, value] of [[/Your organisation: what it is/i, 'Kamuli Women Health Network, a registered NGO running maternal health projects since 2018'], [/Where will the work take place/i, 'Kamuli District, Uganda'], [/How much will you request/i, '50000'], [/How many months/i, '12']]) {
     const field = page.getByLabel(label).first()
     if ((await field.count()) && (await field.evaluate((e) => e.tagName)) !== 'SELECT') await field.fill(value)

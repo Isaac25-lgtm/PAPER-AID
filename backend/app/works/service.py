@@ -1036,8 +1036,9 @@ def auto_read(rt: Runtime, user: User, work_id: str) -> WorkView:
     since = utcnow() - timedelta(days=1)
     reads = [j for j in rt.store.list(user.uid, None, None, None, 100)[0] if j.work_id and j.selection.work == "READ" and j.created_at > since and j.status in state.SUBMITTED]
     unstarted = [j for j in reads if (w := rt.store.get_work(j.work_id)) is not None and not w.auto]
-    # Two limits (Codex audit of 9239dd0): the friendly one counts works read today but not started; the
-    # firm one is an atomic daily counter of reads of new works (retries of the same work are free), so
+    # Two limits (Codex audit of 9239dd0): the friendly one counts works read in the last 24 hours but not
+    # started; the firm one is an atomic counter of reads of new works per UTC day (a calendar day, not a
+    # rolling 24 hours; retries of the same work are free), so
     # several tabs at once or more than the newest jobs can never pass more than twice the allowance.
     first_read = not any((j := rt.store.get(job_id)) is not None and j.selection.work == "READ" for job_id in k.jobs)
     if len(unstarted) >= rt.settings.free_reads_per_day or (first_read and rt.store.hit(f"{user.uid}:read", 86400) > 2 * rt.settings.free_reads_per_day):
@@ -1116,6 +1117,9 @@ def continue_after_plan(rt: Runtime, work_id: str, plan_job: str) -> None:
         quoted = quote_step(rt, owner, work_id, "DRAFT", "", bundled=True)
         submit_step(rt, owner, work_id, quoted.job.id, quoted.quote.id)
     except AppError as exc:  # credits ran out meanwhile, the work changed, a blocking check: say why
+        current = rt.store.get_work(work_id)
+        if current is not None and step_running(rt, current):
+            return  # another continuation started it at the same moment (maintenance): nothing to stop
         log(logger, logging.WARNING, "auto draft did not start", workId=work_id, code=exc.code)
         stop(f"The draft could not start: {exc.message}")
 

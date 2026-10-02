@@ -76,6 +76,8 @@ const COVER: [string, string][] = [
   ['cover:due', 'Date'],
 ]
 
+const PASTED_CALL = 'The call (pasted)'
+
 interface Upload {
   file: File | null // null: saved before the page was reloaded (only its name is known here)
   name: string
@@ -130,6 +132,7 @@ function WorkPageOne({ kind, draftId, onSaved, onCreated }: { kind: WorkKind; dr
   const [description, setDescription] = useState('')
   const [proposal, setProposal] = useState('')
   const [pasted, setPasted] = useState('')
+  const [pastedKept, setPastedKept] = useState(false) // a pasted call saved earlier (its text is not shown again)
   const [uploads, setUploads] = useState<Upload[]>([])
   // The work Continue saved, and the pasted call it saved (Codex audits 2026-10-01 and of 9239dd0):
   // pressed again, Continue brings that same work in line with the page (details, files removed or
@@ -144,7 +147,7 @@ function WorkPageOne({ kind, draftId, onSaved, onCreated }: { kind: WorkKind; dr
     description: description.trim().length < 15 ? (coursework ? 'Paste your question to continue.' : 'Describe the problem in a sentence or two.') : null,
     title: !coursework && title.trim().length < 3 ? 'Give your project a short title.' : null,
     proposal: !coursework && proposal.trim().length < 15 ? 'Say what you propose to do, in a sentence or two.' : null,
-    call: needsCall && !uploads.some((u) => u.role === 'CALL') && pasted.trim().split(/\s+/).length < 10 ? 'Upload or paste the call or the funder’s guidelines.' : null,
+    call: needsCall && !pastedKept && !uploads.some((u) => u.role === 'CALL') && pasted.trim().split(/\s+/).length < 10 ? 'Upload or paste the call or the funder’s guidelines.' : null,
   }
   const ok = !problems.description && !problems.title && !problems.call && !problems.proposal
 
@@ -160,13 +163,17 @@ function WorkPageOne({ kind, draftId, onSaved, onCreated }: { kind: WorkKind; dr
       .then((w) => {
         if (!live || !w || w.auto) return
         if (w.activeJob) return onCreated(w) // it is being read: page 2 shows that
-        saved.current = { id: w.id, pasted: null }
+        // The call pasted earlier is the pasted call, not a file in the list (Codex's second look at
+        // 9239dd0): pasting again replaces it; leaving the box empty keeps it.
+        const earlier = w.sources.find((source) => source.role === 'CALL' && source.name === PASTED_CALL)
+        saved.current = { id: w.id, pasted: earlier ? { id: earlier.id, text: '' } : null }
+        setPastedKept(Boolean(earlier))
         setVariant(w.variant)
         if (w.mode) setMode(w.mode)
         setTitle(kind === 'COURSEWORK' ? '' : w.inputs.title)
         setDescription(w.inputs.description)
         setProposal(w.inputs.answers.intervention ?? '')
-        setUploads(w.sources.map((source) => ({ file: null, name: source.name, role: source.role, sourceId: source.id })))
+        setUploads(w.sources.filter((source) => source.id !== earlier?.id).map((source) => ({ file: null, name: source.name, role: source.role, sourceId: source.id })))
       })
       .finally(() => {
         if (live) setRestoring(false)
@@ -216,9 +223,10 @@ function WorkPageOne({ kind, draftId, onSaved, onCreated }: { kind: WorkKind; dr
       }
       if (text && !record.pasted) {
         const known = new Set(w.sources.map((source) => source.id))
-        w = await data.works.pasteSource(w.id, 'CALL', 'The call (pasted)', text)
+        w = await data.works.pasteSource(w.id, 'CALL', PASTED_CALL, text)
         record.pasted = { id: w.sources.find((source) => !known.has(source.id))?.id ?? '', text }
       }
+      setPastedKept(Boolean(record.pasted))
       if (w.needsRead) w = await data.works.read(w.id)
       onCreated(w)
     } catch (e) {
@@ -283,7 +291,8 @@ function WorkPageOne({ kind, draftId, onSaved, onCreated }: { kind: WorkKind; dr
               <FileDropzone compact label="The call or funder’s guidelines" hint="Word or PDF" accept=".docx,.pdf" onFile={add('CALL')} disabled={busy} />
               <FileDropzone compact label="Their template (optional)" hint="Word or PDF" accept=".docx,.pdf" onFile={add('TEMPLATE')} disabled={busy} />
             </div>
-            <TextArea label="Or paste the call’s text" rows={3} maxLength={60000} value={pasted} onChange={(e) => setPasted(e.target.value)} error={tried ? problems.call : null} />
+            <TextArea label="Or paste the call’s text" rows={3} maxLength={60000} value={pasted} onChange={(e) => setPasted(e.target.value)} error={tried ? problems.call : null}
+              hint={pastedKept && !pasted.trim() ? 'Your pasted call is saved. Paste the text again to replace it.' : undefined} />
             {MODES[kind].length > 0 && (
               <Select label="Length" value={mode} onChange={(e) => setMode(e.target.value)} hint="The call’s own limit always replaces this.">
                 {MODES[kind].map((m) => (

@@ -1069,8 +1069,7 @@ SAMPLING_CONSENT = "Standard sample-size settings (95% confidence, 5% margin, 50
 def start(rt: Runtime, user: User, project_id: str, accept_sampling: bool = False) -> ProjectView:
     """Start, or continue after a stop: plan (bundled) if there is no approved plan, otherwise write the
     first document."""
-    from app.pricing.credits import InsufficientCredits
-    from app.works.service import check_credits, reserve  # the same credit checks and reservation for every service
+    from app.works.service import check_credits  # the same credit checks for every service
 
     p = _owned(rt, user, project_id)
     _require_ai(rt, user)
@@ -1088,32 +1087,26 @@ def start(rt: Runtime, user: User, project_id: str, accept_sampling: bool = Fals
             return q
 
         p = _change(rt, user, project_id, consent)
-    key = f"project:{project_id}:{secrets.token_hex(4)}"  # this attempt's own reservation (see works)
     if p.plan is not None and p.plan_status != "APPROVED" and p.plan_review is not None and p.plan_review.outcome == "APPROVED" \
             and p.plan.sampling_assumed and p.sampling_consent and p.jobs:
         # Stopped only for the sample-size settings, now confirmed: continue from the plan already made.
-        # Pending first, then the reservation (Codex audit of 9239dd0): if this stops in between,
-        # maintenance continues and the chapter holds its own price; credits are never stranded.
+        # Nothing is reserved (Codex's second look at 9239dd0): the plan is done, so the chapter starts
+        # now and holds its own price in its own transaction. Only one Start marks it pending; a second
+        # one, or one after the chapter started, is refused, so it can never reserve or stop anything.
         plan_job = p.jobs[-1]
 
         def pending(q: Project) -> Project:
+            if q.auto_next == plan_job or q.plan_status == "APPROVED":
+                raise Conflict("PaperAid is already working on this.", code="STEP_RUNNING")
             q.auto, q.auto_failure, q.auto_next = True, "", plan_job
             return q
 
         _change(rt, user, project_id, pending)
-        try:
-            reserve(rt, user, key, price)
-        except InsufficientCredits:
-            def withdrawn(q: Project) -> Project:
-                q.auto_next = "" if q.auto_next == plan_job else q.auto_next
-                return q
-
-            _change(rt, user, project_id, withdrawn)
-            raise
         continue_after_plan(rt, project_id, plan_job)
         return view(rt, _owned(rt, user, project_id))
     step: Step = first if p.plan is not None and p.plan_status == "APPROVED" else "PLAN"
     # One transaction (see works): submitted, started and reserved together, or none of them.
+    key = f"project:{project_id}:{secrets.token_hex(4)}"  # this attempt's own reservation (see works)
     quoted = quote_step(rt, user, project_id, step, "", bundled=True)
     submit_step(rt, user, project_id, quoted.job.id, quoted.quote.id, start=True, reservation=(key, price) if step == "PLAN" else None)
     return view(rt, _owned(rt, user, project_id))
@@ -1165,6 +1158,9 @@ def continue_after_plan(rt: Runtime, project_id: str, plan_job: str) -> None:
         quoted = quote_step(rt, owner, project_id, "CONCEPT" if p.goal == "CONCEPT" else "CHAPTER_1", "", bundled=True)
         submit_step(rt, owner, project_id, quoted.job.id, quoted.quote.id)
     except AppError as exc:  # credits ran out meanwhile, a figure only the student can give: say why
+        current = rt.store.get_project(project_id)
+        if current is not None and step_running(rt, current):
+            return  # another continuation started it at the same moment (maintenance): nothing to stop
         log(logger, logging.WARNING, "auto chapter did not start", projectId=project_id, code=exc.code)
         stop(f"Your first chapter could not start: {exc.message}")
 
