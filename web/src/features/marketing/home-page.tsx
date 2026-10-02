@@ -27,7 +27,7 @@ export function HomePage() {
         <div aria-hidden className="absolute inset-x-0 top-0 -z-10 h-[40rem] bg-gradient-to-b from-brand-50/80 to-white" />
         <div className="mx-auto grid max-w-6xl items-center gap-12 px-4 pt-12 pb-16 sm:px-6 lg:grid-cols-[1fr_1.05fr] lg:gap-14 lg:pt-20 lg:pb-24">
           <div>
-            <Eyebrow>For university students</Eyebrow>
+            <Eyebrow>For researchers and students</Eyebrow>
             <h1 className="mt-5 text-[2.5rem] leading-[1.08] font-extrabold sm:text-5xl lg:text-[3.15rem]">
               Submit a paper that&rsquo;s <span className="text-brand-600">clear, correct</span> and properly formatted.
             </h1>
@@ -144,7 +144,7 @@ export function HomePage() {
                 Pay for the work your paper needs.
               </h2>
               <p className="mt-3 text-fg-muted">
-                No price list and no subscription. A short, clean essay costs little; a long dissertation that needs more work costs more, and you
+                No price list and no subscription. A short, clean essay costs little; a long thesis or proposal that needs more work costs more, and you
                 always see the estimate first.
               </p>
               <ButtonLink to="/pricing" variant="ghost" className="mt-4 -ml-4">

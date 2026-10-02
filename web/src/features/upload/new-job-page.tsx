@@ -460,7 +460,7 @@ function NewJobForm({ type }: { type: JobType | null }) {
             )}
             {!soon('TEMPLATE_FORMAT') && (
               <p className="mt-4 rounded-lg bg-surface-subtle p-3 text-sm text-fg-muted">
-                Have a university formatting guide? Choose <strong>University templates</strong> below and upload it there.
+                Have your institution’s formatting guide? Choose <strong>University templates</strong> below and upload it there.
               </p>
             )}
           </Step>

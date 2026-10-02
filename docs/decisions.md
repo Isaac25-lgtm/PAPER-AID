@@ -415,3 +415,7 @@ Six real coursework jobs on the released one-Start flow: 4 delivered (Ready with
 6. **Prompts say the plan is internal**: `w-plan-v3` and `w-results-v2` no longer tell the model that the student edits and approves the plan or Results Model first.
 - **Release record**: `820f862` and `9239dd0` were deployed on 2026-10-01 without being pushed or logged. Both are now in the release log, and this release is pushed.
 
+### 2026-10-02 — Owner: PaperAid is for researchers, not university students only
+
+Public wording addresses researchers and students: the home page says "For researchers and students", the link preview "Built for researchers and students", and guides are "your institution's guide" rather than "your university's". Service names (University templates) and the coursework service's own wording (brief, lecturer) are unchanged.
+

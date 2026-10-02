@@ -700,7 +700,7 @@ function ProposalStart({ concept }: { concept: boolean }) {
             <Input label="Programme (optional)" maxLength={150} value={inputs.programme} onChange={(e) => set({ programme: e.target.value })} placeholder="e.g. Master of Public Health" />
           </div>
           <Alert tone="info">
-            PaperAid writes to the standard structure (Uganda Christian University’s guide). If your university uses its own guide, you can add it from your proposal page afterwards.
+            PaperAid writes to the standard structure (Uganda Christian University’s guide). If your institution uses its own guide, you can add it from your proposal page afterwards.
           </Alert>
           <TextArea label="What you already have (optional)" rows={4} maxLength={4000} value={inputs.notes} onChange={(e) => set({ notes: e.target.value })}
             hint="A concept summary, your supervisor’s guidance, decisions already made." />

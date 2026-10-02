@@ -3,7 +3,7 @@
 The authoritative product spec is `PaperAid_Master_Product_Architecture_and_Implementation_Specification.md`. Most of its per-requirement "Implementation / Guardrails / Acceptance" paragraphs are repeated boilerplate. Read the section intros, the "Required outcomes" lists and Appendices A–K instead. Owner decisions that refine the spec are in `docs/decisions.md`. They win over the spec where the two differ.
 
 ## Product in one line
-Students upload a paper, choose a service, see a server-calculated quote, and later download a finished result. PaperAid is job-based, not a chatbot. Positioning: "paper-ready" (clarity, correct formatting, reviewable output). Never market it as beating AI detectors.
+Researchers and students (owner decision 2026-10-02: never university students only) upload a paper or start a piece of work, and later download a finished result. PaperAid is job-based, not a chatbot. Positioning: "paper-ready" (clarity, correct formatting, reviewable output). Never market it as beating AI detectors.
 
 ## Fixed architecture
 - React + TypeScript + Vite (`web/`, dev server on **port 5000**), hosted on Firebase Hosting.

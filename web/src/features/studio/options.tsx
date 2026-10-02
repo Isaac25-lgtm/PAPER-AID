@@ -306,7 +306,7 @@ export function JobOptions({ job, mode, initial }: { job: Job; mode: Mode; initi
           <div className="mt-2 grid gap-2">
             {mode !== 'format' && <OptionCard name="formatting" checked={selection.formatting === 'NONE'} onSelect={() => set({ formatting: 'NONE' })} title="Keep my layout" body="Leave the layout as it is." />}
             <OptionCard name="formatting" checked={selection.formatting === 'FORMAT'} onSelect={() => set({ formatting: 'FORMAT' })} title="APA, Harvard or another style" body="Headings, spacing, page numbers. Wording untouched." disabledReason={pdfReason} />
-            <OptionCard name="formatting" checked={selection.formatting === 'TEMPLATE_FORMAT'} onSelect={() => set({ formatting: 'TEMPLATE_FORMAT' })} title="My university's guide" body="Upload your department's formatting guide. PaperAid reads it with AI, so it is priced separately." badge={badgeFor('TEMPLATE_FORMAT')} disabledReason={reasonFor('TEMPLATE_FORMAT', pdfReason)} />
+            <OptionCard name="formatting" checked={selection.formatting === 'TEMPLATE_FORMAT'} onSelect={() => set({ formatting: 'TEMPLATE_FORMAT' })} title="My institution's guide" body="Upload your department's formatting guide. PaperAid reads it with AI, so it is priced separately." badge={badgeFor('TEMPLATE_FORMAT')} disabledReason={reasonFor('TEMPLATE_FORMAT', pdfReason)} />
           </div>
           {selection.formatting === 'FORMAT' && (
             <>

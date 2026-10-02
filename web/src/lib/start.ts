@@ -29,7 +29,7 @@ export const START_CHOICES: StartChoice[] = [
   },
   {
     id: 'proposal', service: 'PROPOSAL', group: 'Research proposals', name: 'Research proposal', icon: FilePen, to: '/app/start/proposal', action: 'Write Chapter One',
-    short: 'Chapters One to Three, written to your university’s guide.',
+    short: 'Chapters One to Three, written to your institution’s guide.',
     benefits: ['Chapter One from confirmed sources', 'A conceptual framework figure'],
   },
   {
@@ -55,7 +55,7 @@ export const START_CHOICES: StartChoice[] = [
   },
   {
     id: 'ACADEMIC_FORMAT', service: 'FORMAT', group: 'Your own paper', name: 'Academic formatting', icon: FileCheck2, to: '/app/new?service=ACADEMIC_FORMAT', action: 'Format my paper',
-    short: 'Your finished paper laid out in APA, Harvard or your university’s guide.',
+    short: 'Your finished paper laid out in APA, Harvard or your institution’s guide.',
     benefits: ['Headings, spacing and page numbers', 'Every word of your text kept'],
   },
 ]
