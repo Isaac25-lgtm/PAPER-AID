@@ -15,6 +15,9 @@ VERSION = "rules-v1"
 FILES = {"SHARED": "shared-v1", "CONCEPT_NOTE": "concept-note-v1", "COURSEWORK": "coursework-v1", "FUNDING_PROPOSAL": "funding-v1"}
 VALIDATORS_VERSION = "validators-v3"  # bumped whenever a validator's behaviour changes (v2, 2026-10-01: FP-048 compares the answered request; WARN results; v3: each indicator field on its own rule, the applicant's figures settled by the author)
 RENDER_PROFILE_VERSION = "render-v3"  # the Word layout the documents are exported with (v2, 2026-10-01: one shared layout with the final review; v3: cover details, marked gaps for missing figures)
+# How a call's required parts become sections (app.works.templates): v2, 2026-10-03, each part the call names
+# gets its own heading instead of one joined heading (live funding runs).
+TEMPLATES_VERSION = "templates-v2"
 
 
 @cache
@@ -40,6 +43,7 @@ def content_hashes() -> dict[str, str]:
     out = {f"rules:{name}": hashlib.sha256((DATA / f"{name}.json").read_bytes().replace(b"\r\n", b"\n")).hexdigest()[:16] for name in FILES.values()}
     out["validators"] = VALIDATORS_VERSION
     out["render"] = RENDER_PROFILE_VERSION
+    out["templates"] = TEMPLATES_VERSION
     return out
 
 

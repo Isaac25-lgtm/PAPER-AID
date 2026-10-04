@@ -47,6 +47,7 @@ class _Store(FirestoreJobStore):
         self._jobs = _Query(shapes)
         self._projects = _Query(shapes)
         self._works = _Query(shapes)
+        self._datalab = _Query(shapes)
 
     def delete_wallet(self, uid: str) -> None:
         pass
@@ -92,6 +93,7 @@ def shapes():
     service.cleanup_expired(rt)
     service.cleanup_expired_projects(rt)
     service.cleanup_expired_works(rt)
+    service.cleanup_expired_datalab(rt)
     return recorded
 
 
@@ -103,7 +105,7 @@ def test_every_sorted_job_query_has_an_index(shapes):
 
 
 def test_project_queries_need_no_composite_index(shapes):
-    """Projects and works are listed by owner and swept by expiry: one field each, unsorted, so
+    """Projects, works and Data Lab projects are listed by owner and swept by expiry: one field each, unsorted, so
     Firestore's automatic single-field indexes serve them."""
     assert (frozenset({"ownerUid"}), None) in shapes and (frozenset({"expiresAt"}), None) in shapes
 

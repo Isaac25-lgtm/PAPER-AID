@@ -9,6 +9,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.api.datalab import router as datalab_routes
 from app.api.projects import router as project_routes
 from app.api.routes import api, tasks
 from app.api.works import router as work_routes
@@ -55,6 +56,7 @@ def create_app() -> FastAPI:
         app.include_router(api)
         app.include_router(project_routes)
         app.include_router(work_routes)
+        app.include_router(datalab_routes)
     if role in ("worker", "all"):
         app.include_router(tasks)
 

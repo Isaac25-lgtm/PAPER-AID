@@ -8,7 +8,7 @@ import { AVAILABILITY_BADGE, PUBLIC_SECTIONS } from '../../lib/services'
 import { useTitle } from '../../lib/use-title'
 import { FinalCta, PricingModel } from './sections'
 
-function PageHero({ eyebrow, title, children }: { eyebrow: string; title: string; children: ReactNode }) {
+export function PageHero({ eyebrow, title, children }: { eyebrow: string; title: string; children: ReactNode }) {
   return (
     <section className="border-b border-line bg-gradient-to-b from-brand-50/70 to-white">
       <div className="mx-auto max-w-3xl px-4 py-14 text-center sm:px-6 sm:py-20">

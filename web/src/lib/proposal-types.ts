@@ -42,6 +42,8 @@ export interface TitlePage {
   regNumber: string
   supervisor: string
   submissionDate: string
+  /** The student's own institution, printed on the title page (null: a project from before this field). */
+  institution?: string | null
 }
 
 export interface SampleSize {
@@ -186,6 +188,8 @@ export interface Project {
   /** The institution the proposal is written for, what its guide left open, and the guide's file. */
   institution: string
   institutionNotes: string[]
+  /** Where the student's guide departs a lot from the standard guide, not yet answered. */
+  guideQuestions: { id: string; question: string; keep: string; standard: string }[]
   guideName: string | null
   /** The current profile was read from the current guide. */
   guideRead: boolean

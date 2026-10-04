@@ -146,15 +146,28 @@ def _name_required(sections: list[PlanSection], required: list[str], target: int
                 kept.discard(index)
                 left.remove(name)
     floor_each = round(target * REQUIRED_SHARE)  # every required part gets room to be written (real-model pilot 2026-09-30)
+    split: dict[int, list[PlanSection]] = {}
     for index, carried_names in carried.items():
-        heading = out[index].heading if index in kept else " and ".join(carried_names)
-        heading = (heading[0].upper() + heading[1:])[:200]
-        brief = out[index].brief if index in kept else f"{out[index].brief} The call asks for this under \"{heading}\"; write what that heading asks for."[:1500]
         section = out[index]
-        floor = floor_each * len(carried_names)
-        words = max(section.words, floor)
-        out[index] = section.model_copy(update={"heading": heading, "brief": brief, "locked": True, "required": True, "words": words,
-                                                "min_words": max(section.min_words, round(floor * 0.7)), "max_words": max(section.max_words, round(words * 1.5))})
+        if index in kept:  # an official template's own heading, kept as written
+            floor = floor_each * len(carried_names)
+            words = max(section.words, floor)
+            out[index] = section.model_copy(update={"locked": True, "required": True, "words": words,
+                                                    "min_words": max(section.min_words, round(floor * 0.7)), "max_words": max(section.max_words, round(words * 1.5))})
+            continue
+        # One heading for each part the call names (templates-v2, live funding runs 2026-10-03): joined into
+        # one locked heading, the call's own headings could not be seen, and no repair could separate them.
+        k = len(carried_names)
+        words = max(round(section.words / k), floor_each)
+        parts = []
+        for n, name in enumerate(carried_names):
+            heading = (name[0].upper() + name[1:])[:200]
+            brief = f"{section.brief} The call asks for this under \"{heading}\"; write what that heading asks for."[:1500]
+            parts.append(section.model_copy(update={"key": section.key if n == 0 else f"{section.key}_{n + 1}", "heading": heading, "brief": brief,
+                                                    "locked": True, "required": True, "words": words, "min_words": max(round(section.min_words / k), round(floor_each * 0.7)),
+                                                    "max_words": max(round(section.max_words / k), round(words * 1.5))}))
+        split[index] = parts
+    out = [part for n, s in enumerate(out) for part in split.get(n, [s])]
     for name in left:
         heading = (name[0].upper() + name[1:])[:200]
         each = max(100, round(target / max(1, len(out) + 1)))

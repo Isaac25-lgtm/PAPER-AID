@@ -33,3 +33,6 @@ backend/codex_verify_*/
 # Codex audit scratch folders (2026-09-28)
 backend/.codex_*/
 web/codex_*/
+
+# imported country boundaries (uploaded to Cloud Storage, never committed)
+backend/.boundaries/

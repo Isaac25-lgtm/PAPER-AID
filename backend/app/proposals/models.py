@@ -66,6 +66,10 @@ class TitlePage(Camel):
     reg_number: str = Field(default="", max_length=60)
     supervisor: str = Field(default="", max_length=160)
     submission_date: str = Field(default="", max_length=40)  # as it should be printed, e.g. "October 2026"
+    # The student's own institution, as printed (owner decision 2026-10-04: the default rulebook is "the
+    # standard guide", never a stand-in for the student's university). None: a project from before this
+    # field, which keeps printing what it printed.
+    institution: str | None = Field(default=None, max_length=160)
 
 
 class Variables(Camel):
@@ -317,6 +321,9 @@ class ProjectView(Camel):
     written: list[WrittenSection] = []  # the current chapters' sections (computed for the view)
     institution: str = ""  # the rulebook's institution (computed for the view)
     institution_notes: list[str] = []  # what the student's guide left open (computed for the view)
+    # Where the student's guide departs a lot from the standard guide and they haven't answered yet
+    # (computed for the view; owner decision 2026-10-04): id, question, and the two answers' wording.
+    guide_questions: list[dict[str, str]] = []
     guide_name: str | None = None  # the uploaded guide's file name (computed for the view)
     guide_read: bool = False  # the current profile was read from the current guide (computed for the view)
     profile_missing: bool = False  # the institution profile could not be loaded (computed for the view)
@@ -342,6 +349,7 @@ class Project(ProjectView):
     deleting: bool = False  # claimed for deletion (by the student, account deletion or expiry): nothing new may start
     guide: GuideFile | None = None
     profiles: list[str] = []  # institution profiles built for this project (deleted with it)
+    guide_answers: dict[str, dict[str, str]] = {}  # departure id → the student's answer (KEEP or STANDARD) and when
 
     @model_validator(mode="after")
     def _has_concept(self) -> "Project":

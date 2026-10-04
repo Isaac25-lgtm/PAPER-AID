@@ -11,6 +11,7 @@ import { Logo } from "../../components/layout/logo";
 import { Button } from "../../components/ui/button";
 import { Checkbox, Input } from "../../components/ui/field";
 import { Alert } from "../../components/ui/primitives";
+import { useData } from "../../lib/data";
 import { useTitle } from "../../lib/use-title";
 import { useAuth } from "./auth-context";
 
@@ -228,7 +229,12 @@ export function SignInPage() {
 export function SignUpPage() {
   useTitle("Create account");
   const { signUp } = useAuth();
-  const { error, busy, submit, next } = useAuthSubmit(signUp);
+  const data = useData();
+  const { error, busy, submit, next } = useAuthSubmit(async (email, password) => {
+    await signUp(email, password);
+    // The terms ticked below, recorded with the account; if this fails, PaperAid asks again before anything paid.
+    await data.acceptTerms(data.config.termsVersion).catch(() => undefined);
+  });
   const [consent, setConsent] = useState(false);
   const query = next ? `?next=${encodeURIComponent(next)}` : "";
   return (
@@ -277,7 +283,11 @@ export function SignUpPage() {
           onChange={(e) => setConsent(e.target.checked)}
           label={
             <>
-              I agree to the Terms and{" "}
+              I agree to the{" "}
+              <Link to="/terms" className="font-medium text-brand-700 underline">
+                Terms
+              </Link>{" "}
+              and{" "}
               <Link
                 to="/privacy"
                 className="font-medium text-brand-700 underline"

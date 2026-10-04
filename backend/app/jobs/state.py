@@ -1,7 +1,7 @@
 """The only place job status changes are decided. Everything else asks `transition()`."""
 
 from app.core.errors import Conflict
-from app.jobs.models import Job, JobEvent, JobStatus, utcnow
+from app.jobs.models import Job, JobEvent, JobStatus, Notice, utcnow
 
 S = JobStatus
 ALLOWED: dict[JobStatus, set[JobStatus]] = {
@@ -40,5 +40,7 @@ def transition(job: Job, target: JobStatus, event: str | None = None) -> Job:
     if target in TERMINAL:
         job.stage = None
         job.lease_until = None
+    if target in (S.COMPLETED, S.FAILED):  # the message it owes, recorded with the outcome itself
+        job.notice = Notice(key=f"{target.value}:{job.generation}", outcome="READY" if target == S.COMPLETED else "STOPPED")
     job.events.append(JobEvent(at=now, label=event or target.capitalize()))
     return job

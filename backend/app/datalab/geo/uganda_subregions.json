@@ -1,0 +1,1201 @@
+{
+  "name": "Uganda sub-regions (15) by 2020 district",
+  "source": "Uganda Bureau of Statistics (UBOS): uganda_parishes_cleaned_attached.shp (2016 parishes, F15Regions) and UGANDA_DISTRICT.json (2020)",
+  "method": "each district takes the sub-region covering at least 90% of its area (full shapes, EPSG:21036); others wait for the owner's confirmation",
+  "licence": "UBOS. PaperAid's owner states PaperAid may use these files in any way (2026-10-04).",
+  "subregions": [
+    "Acholi",
+    "Ankole",
+    "Bugisu–Sebei",
+    "Bukedi",
+    "Bunyoro",
+    "Busoga",
+    "Central I",
+    "Central II",
+    "Greater Kampala",
+    "Karamoja",
+    "Kigezi",
+    "Lango",
+    "Teso",
+    "Toro",
+    "West Nile"
+  ],
+  "districts": {
+    "ABIM": {
+      "subregion": "Karamoja",
+      "share": 0.9973,
+      "status": "ASSIGNED",
+      "shares": {
+        "Karamoja": 0.9973
+      }
+    },
+    "ADJUMANI": {
+      "subregion": "West Nile",
+      "share": 0.9991,
+      "status": "ASSIGNED",
+      "shares": {
+        "West Nile": 0.9991
+      }
+    },
+    "AGAGO": {
+      "subregion": "Acholi",
+      "share": 0.9999,
+      "status": "ASSIGNED",
+      "shares": {
+        "Acholi": 0.9999
+      }
+    },
+    "ALEBTONG": {
+      "subregion": "Lango",
+      "share": 0.998,
+      "status": "ASSIGNED",
+      "shares": {
+        "Lango": 0.998
+      }
+    },
+    "AMOLATAR": {
+      "subregion": "Lango",
+      "share": 0.9985,
+      "status": "ASSIGNED",
+      "shares": {
+        "Lango": 0.9985
+      }
+    },
+    "AMUDAT": {
+      "subregion": "Karamoja",
+      "share": 0.9997,
+      "status": "ASSIGNED",
+      "shares": {
+        "Karamoja": 0.9997
+      }
+    },
+    "AMURIA": {
+      "subregion": "Teso",
+      "share": 0.9994,
+      "status": "ASSIGNED",
+      "shares": {
+        "Teso": 0.9994
+      }
+    },
+    "AMURU": {
+      "subregion": "Acholi",
+      "share": 0.9989,
+      "status": "ASSIGNED",
+      "shares": {
+        "Acholi": 0.9989
+      }
+    },
+    "APAC": {
+      "subregion": "Lango",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Lango": 1.0
+      }
+    },
+    "ARUA": {
+      "subregion": "West Nile",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "West Nile": 1.0
+      }
+    },
+    "ARUA CITY": {
+      "subregion": "West Nile",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "West Nile": 1.0
+      }
+    },
+    "BUDAKA": {
+      "subregion": "Bukedi",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Bukedi": 1.0
+      }
+    },
+    "BUDUDA": {
+      "subregion": "Bugisu–Sebei",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Bugisu–Sebei": 1.0
+      }
+    },
+    "BUGIRI": {
+      "subregion": "Busoga",
+      "share": 0.9982,
+      "status": "ASSIGNED",
+      "shares": {
+        "Busoga": 0.9982
+      }
+    },
+    "BUGWERI": {
+      "subregion": "Busoga",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Busoga": 1.0
+      }
+    },
+    "BUHWEJU": {
+      "subregion": "Ankole",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Ankole": 1.0
+      }
+    },
+    "BUIKWE": {
+      "subregion": "Central II",
+      "share": 0.9977,
+      "status": "ASSIGNED",
+      "shares": {
+        "Central II": 0.9977
+      }
+    },
+    "BUKEDEA": {
+      "subregion": "Teso",
+      "share": 0.9992,
+      "status": "ASSIGNED",
+      "shares": {
+        "Teso": 0.9992
+      }
+    },
+    "BUKOMANSIMBI": {
+      "subregion": "Central I",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Central I": 1.0
+      }
+    },
+    "BUKWO": {
+      "subregion": "Bugisu–Sebei",
+      "share": 0.9999,
+      "status": "ASSIGNED",
+      "shares": {
+        "Bugisu–Sebei": 0.9999
+      }
+    },
+    "BULAMBULI": {
+      "subregion": "Bugisu–Sebei",
+      "share": 0.9997,
+      "status": "ASSIGNED",
+      "shares": {
+        "Bugisu–Sebei": 0.9997
+      }
+    },
+    "BULIISA": {
+      "subregion": "Bunyoro",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Bunyoro": 1.0
+      }
+    },
+    "BUNDIBUGYO": {
+      "subregion": "Toro",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Toro": 1.0
+      }
+    },
+    "BUNYANGABU": {
+      "subregion": "Toro",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Toro": 1.0
+      }
+    },
+    "BUSHENYI": {
+      "subregion": "Ankole",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Ankole": 1.0
+      }
+    },
+    "BUSIA": {
+      "subregion": "Bukedi",
+      "share": 0.9995,
+      "status": "ASSIGNED",
+      "shares": {
+        "Bukedi": 0.9995
+      }
+    },
+    "BUTALEJA": {
+      "subregion": "Bukedi",
+      "share": 0.999,
+      "status": "ASSIGNED",
+      "shares": {
+        "Bukedi": 0.999
+      }
+    },
+    "BUTAMBALA": {
+      "subregion": "Central I",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Central I": 1.0
+      }
+    },
+    "BUTEBO": {
+      "subregion": "Bukedi",
+      "share": 0.9997,
+      "status": "ASSIGNED",
+      "shares": {
+        "Bukedi": 0.9997
+      }
+    },
+    "BUVUMA": {
+      "subregion": "Central II",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Central II": 1.0
+      }
+    },
+    "BUYENDE": {
+      "subregion": "Busoga",
+      "share": 0.9796,
+      "status": "ASSIGNED",
+      "shares": {
+        "Busoga": 0.9796,
+        "Teso": 0.0184
+      }
+    },
+    "DOKOLO": {
+      "subregion": "Lango",
+      "share": 0.9999,
+      "status": "ASSIGNED",
+      "shares": {
+        "Lango": 0.9999
+      }
+    },
+    "FORT PORTAL CITY": {
+      "subregion": "Toro",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Toro": 1.0
+      }
+    },
+    "GOMBA": {
+      "subregion": "Central I",
+      "share": 0.9998,
+      "status": "ASSIGNED",
+      "shares": {
+        "Central I": 0.9998
+      }
+    },
+    "GULU": {
+      "subregion": "Acholi",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Acholi": 1.0
+      }
+    },
+    "GULU CITY": {
+      "subregion": "Acholi",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Acholi": 1.0
+      }
+    },
+    "HOIMA": {
+      "subregion": "Bunyoro",
+      "share": 0.9997,
+      "status": "ASSIGNED",
+      "shares": {
+        "Bunyoro": 0.9997
+      }
+    },
+    "HOIMA CITY": {
+      "subregion": "Bunyoro",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Bunyoro": 1.0
+      }
+    },
+    "IBANDA": {
+      "subregion": "Ankole",
+      "share": 0.9989,
+      "status": "ASSIGNED",
+      "shares": {
+        "Ankole": 0.9989
+      }
+    },
+    "IGANGA": {
+      "subregion": "Busoga",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Busoga": 1.0
+      }
+    },
+    "ISINGIRO": {
+      "subregion": "Ankole",
+      "share": 0.9999,
+      "status": "ASSIGNED",
+      "shares": {
+        "Ankole": 0.9999
+      }
+    },
+    "JINJA": {
+      "subregion": "Busoga",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Busoga": 1.0
+      }
+    },
+    "JINJA CITY": {
+      "subregion": "Busoga",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Busoga": 1.0
+      }
+    },
+    "KAABONG": {
+      "subregion": "Karamoja",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Karamoja": 1.0
+      }
+    },
+    "KABALE": {
+      "subregion": "Kigezi",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Kigezi": 1.0
+      }
+    },
+    "KABAROLE": {
+      "subregion": "Toro",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Toro": 1.0
+      }
+    },
+    "KABERAMAIDO": {
+      "subregion": "Teso",
+      "share": 0.9938,
+      "status": "ASSIGNED",
+      "shares": {
+        "Teso": 0.9938
+      }
+    },
+    "KAGADI": {
+      "subregion": "Bunyoro",
+      "share": 0.9999,
+      "status": "ASSIGNED",
+      "shares": {
+        "Bunyoro": 0.9999
+      }
+    },
+    "KAKUMIRO": {
+      "subregion": "Bunyoro",
+      "share": 0.9993,
+      "status": "ASSIGNED",
+      "shares": {
+        "Bunyoro": 0.9993
+      }
+    },
+    "KALAKI": {
+      "subregion": "Teso",
+      "share": 0.9997,
+      "status": "ASSIGNED",
+      "shares": {
+        "Teso": 0.9997
+      }
+    },
+    "KALANGALA": {
+      "subregion": "Central I",
+      "share": 0.8563,
+      "status": "CONFIRMED",
+      "shares": {
+        "Central I": 0.8563,
+        "Greater Kampala": 0.1437
+      },
+      "confirmed": "PaperAid's owner, 2026-10-04 (the sub-region covering most of it)"
+    },
+    "KALIRO": {
+      "subregion": "Busoga",
+      "share": 0.9998,
+      "status": "ASSIGNED",
+      "shares": {
+        "Busoga": 0.9998
+      }
+    },
+    "KALUNGU": {
+      "subregion": "Central I",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Central I": 1.0
+      }
+    },
+    "KAMPALA": {
+      "subregion": "Greater Kampala",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Greater Kampala": 1.0
+      }
+    },
+    "KAMULI": {
+      "subregion": "Busoga",
+      "share": 0.9899,
+      "status": "ASSIGNED",
+      "shares": {
+        "Busoga": 0.9899,
+        "Central II": 0.0101
+      }
+    },
+    "KAMWENGE": {
+      "subregion": "Toro",
+      "share": 0.9997,
+      "status": "ASSIGNED",
+      "shares": {
+        "Toro": 0.9997
+      }
+    },
+    "KANUNGU": {
+      "subregion": "Kigezi",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Kigezi": 1.0
+      }
+    },
+    "KAPCHORWA": {
+      "subregion": "Bugisu–Sebei",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Bugisu–Sebei": 1.0
+      }
+    },
+    "KAPELEBYONG": {
+      "subregion": "Teso",
+      "share": 0.9973,
+      "status": "ASSIGNED",
+      "shares": {
+        "Teso": 0.9973
+      }
+    },
+    "KARENGA": {
+      "subregion": "Karamoja",
+      "share": 0.9993,
+      "status": "ASSIGNED",
+      "shares": {
+        "Karamoja": 0.9993
+      }
+    },
+    "KASESE": {
+      "subregion": "Toro",
+      "share": 0.9998,
+      "status": "ASSIGNED",
+      "shares": {
+        "Toro": 0.9998
+      }
+    },
+    "KASSANDA": {
+      "subregion": "Central II",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Central II": 1.0
+      }
+    },
+    "KATAKWI": {
+      "subregion": "Teso",
+      "share": 0.9988,
+      "status": "ASSIGNED",
+      "shares": {
+        "Teso": 0.9988
+      }
+    },
+    "KAYUNGA": {
+      "subregion": "Central II",
+      "share": 0.9946,
+      "status": "ASSIGNED",
+      "shares": {
+        "Central II": 0.9946,
+        "Busoga": 0.0054
+      }
+    },
+    "KAZO": {
+      "subregion": "Ankole",
+      "share": 0.9999,
+      "status": "ASSIGNED",
+      "shares": {
+        "Ankole": 0.9999
+      }
+    },
+    "KIBAALE": {
+      "subregion": "Bunyoro",
+      "share": 0.9995,
+      "status": "ASSIGNED",
+      "shares": {
+        "Bunyoro": 0.9995
+      }
+    },
+    "KIBOGA": {
+      "subregion": "Central II",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Central II": 1.0
+      }
+    },
+    "KIBUKU": {
+      "subregion": "Bukedi",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Bukedi": 1.0
+      }
+    },
+    "KIKUUBE": {
+      "subregion": "Bunyoro",
+      "share": 0.9997,
+      "status": "ASSIGNED",
+      "shares": {
+        "Bunyoro": 0.9997
+      }
+    },
+    "KIRUHURA": {
+      "subregion": "Ankole",
+      "share": 0.9998,
+      "status": "ASSIGNED",
+      "shares": {
+        "Ankole": 0.9998
+      }
+    },
+    "KIRYANDONGO": {
+      "subregion": "Bunyoro",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Bunyoro": 1.0
+      }
+    },
+    "KISORO": {
+      "subregion": "Kigezi",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Kigezi": 1.0
+      }
+    },
+    "KITAGWENDA": {
+      "subregion": "Toro",
+      "share": 0.9975,
+      "status": "ASSIGNED",
+      "shares": {
+        "Toro": 0.9975
+      }
+    },
+    "KITGUM": {
+      "subregion": "Acholi",
+      "share": 0.9975,
+      "status": "ASSIGNED",
+      "shares": {
+        "Acholi": 0.9975
+      }
+    },
+    "KOBOKO": {
+      "subregion": "West Nile",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "West Nile": 1.0
+      }
+    },
+    "KOLE": {
+      "subregion": "Lango",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Lango": 1.0
+      }
+    },
+    "KOTIDO": {
+      "subregion": "Karamoja",
+      "share": 0.9996,
+      "status": "ASSIGNED",
+      "shares": {
+        "Karamoja": 0.9996
+      }
+    },
+    "KUMI": {
+      "subregion": "Teso",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Teso": 1.0
+      }
+    },
+    "KWANIA": {
+      "subregion": "Lango",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Lango": 1.0
+      }
+    },
+    "KWEEN": {
+      "subregion": "Bugisu–Sebei",
+      "share": 0.9988,
+      "status": "ASSIGNED",
+      "shares": {
+        "Bugisu–Sebei": 0.9988
+      }
+    },
+    "KYANKWANZI": {
+      "subregion": "Central II",
+      "share": 0.9994,
+      "status": "ASSIGNED",
+      "shares": {
+        "Central II": 0.9994
+      }
+    },
+    "KYEGEGWA": {
+      "subregion": "Toro",
+      "share": 0.9996,
+      "status": "ASSIGNED",
+      "shares": {
+        "Toro": 0.9996
+      }
+    },
+    "KYENJOJO": {
+      "subregion": "Toro",
+      "share": 0.9993,
+      "status": "ASSIGNED",
+      "shares": {
+        "Toro": 0.9993
+      }
+    },
+    "KYOTERA": {
+      "subregion": "Central I",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Central I": 1.0
+      }
+    },
+    "LAMWO": {
+      "subregion": "Acholi",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Acholi": 1.0
+      }
+    },
+    "LIRA": {
+      "subregion": "Lango",
+      "share": 0.9965,
+      "status": "ASSIGNED",
+      "shares": {
+        "Lango": 0.9965
+      }
+    },
+    "LIRA CITY": {
+      "subregion": "Lango",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Lango": 1.0
+      }
+    },
+    "LUUKA": {
+      "subregion": "Busoga",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Busoga": 1.0
+      }
+    },
+    "LUWEERO": {
+      "subregion": "Central II",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Central II": 1.0
+      }
+    },
+    "LWENGO": {
+      "subregion": "Central I",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Central I": 1.0
+      }
+    },
+    "LYANTONDE": {
+      "subregion": "Central I",
+      "share": 0.9993,
+      "status": "ASSIGNED",
+      "shares": {
+        "Central I": 0.9993
+      }
+    },
+    "MADI-OKOLLO": {
+      "subregion": "West Nile",
+      "share": 0.9999,
+      "status": "ASSIGNED",
+      "shares": {
+        "West Nile": 0.9999
+      }
+    },
+    "MANAFWA": {
+      "subregion": "Bugisu–Sebei",
+      "share": 0.9998,
+      "status": "ASSIGNED",
+      "shares": {
+        "Bugisu–Sebei": 0.9998
+      }
+    },
+    "MARACHA": {
+      "subregion": "West Nile",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "West Nile": 1.0
+      }
+    },
+    "MASAKA": {
+      "subregion": "Central I",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Central I": 1.0
+      }
+    },
+    "MASAKA CITY": {
+      "subregion": "Central I",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Central I": 1.0
+      }
+    },
+    "MASINDI": {
+      "subregion": "Bunyoro",
+      "share": 0.9997,
+      "status": "ASSIGNED",
+      "shares": {
+        "Bunyoro": 0.9997
+      }
+    },
+    "MAYUGE": {
+      "subregion": "Busoga",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Busoga": 1.0
+      }
+    },
+    "MBALE": {
+      "subregion": "Bugisu–Sebei",
+      "share": 0.9964,
+      "status": "ASSIGNED",
+      "shares": {
+        "Bugisu–Sebei": 0.9964
+      }
+    },
+    "MBALE CITY": {
+      "subregion": "Bugisu–Sebei",
+      "share": 0.9997,
+      "status": "ASSIGNED",
+      "shares": {
+        "Bugisu–Sebei": 0.9997
+      }
+    },
+    "MBARARA": {
+      "subregion": "Ankole",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Ankole": 1.0
+      }
+    },
+    "MBARARA CITY": {
+      "subregion": "Ankole",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Ankole": 1.0
+      }
+    },
+    "MITOOMA": {
+      "subregion": "Ankole",
+      "share": 0.9989,
+      "status": "ASSIGNED",
+      "shares": {
+        "Ankole": 0.9989
+      }
+    },
+    "MITYANA": {
+      "subregion": "Central II",
+      "share": 0.9996,
+      "status": "ASSIGNED",
+      "shares": {
+        "Central II": 0.9996
+      }
+    },
+    "MOROTO": {
+      "subregion": "Karamoja",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Karamoja": 1.0
+      }
+    },
+    "MOYO": {
+      "subregion": "West Nile",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "West Nile": 1.0
+      }
+    },
+    "MPIGI": {
+      "subregion": "Central I",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Central I": 1.0
+      }
+    },
+    "MUBENDE": {
+      "subregion": "Central II",
+      "share": 0.9991,
+      "status": "ASSIGNED",
+      "shares": {
+        "Central II": 0.9991
+      }
+    },
+    "MUKONO": {
+      "subregion": "Greater Kampala",
+      "share": 0.9997,
+      "status": "ASSIGNED",
+      "shares": {
+        "Greater Kampala": 0.9997
+      }
+    },
+    "NABILATUK": {
+      "subregion": "Karamoja",
+      "share": 0.9999,
+      "status": "ASSIGNED",
+      "shares": {
+        "Karamoja": 0.9999
+      }
+    },
+    "NAKAPIRIPIRIT": {
+      "subregion": "Karamoja",
+      "share": 0.9999,
+      "status": "ASSIGNED",
+      "shares": {
+        "Karamoja": 0.9999
+      }
+    },
+    "NAKASEKE": {
+      "subregion": "Central II",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Central II": 1.0
+      }
+    },
+    "NAKASONGOLA": {
+      "subregion": "Central II",
+      "share": 0.9992,
+      "status": "ASSIGNED",
+      "shares": {
+        "Central II": 0.9992
+      }
+    },
+    "NAMAYINGO": {
+      "subregion": "Busoga",
+      "share": 0.9993,
+      "status": "ASSIGNED",
+      "shares": {
+        "Busoga": 0.9993
+      }
+    },
+    "NAMISINDWA": {
+      "subregion": "Bugisu–Sebei",
+      "share": 0.9996,
+      "status": "ASSIGNED",
+      "shares": {
+        "Bugisu–Sebei": 0.9996
+      }
+    },
+    "NAMUTUMBA": {
+      "subregion": "Busoga",
+      "share": 0.9994,
+      "status": "ASSIGNED",
+      "shares": {
+        "Busoga": 0.9994
+      }
+    },
+    "NAPAK": {
+      "subregion": "Karamoja",
+      "share": 0.9862,
+      "status": "ASSIGNED",
+      "shares": {
+        "Karamoja": 0.9862,
+        "Lango": 0.013
+      }
+    },
+    "NEBBI": {
+      "subregion": "West Nile",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "West Nile": 1.0
+      }
+    },
+    "NGORA": {
+      "subregion": "Teso",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Teso": 1.0
+      }
+    },
+    "NTOROKO": {
+      "subregion": "Toro",
+      "share": 0.9999,
+      "status": "ASSIGNED",
+      "shares": {
+        "Toro": 0.9999
+      }
+    },
+    "NTUNGAMO": {
+      "subregion": "Ankole",
+      "share": 0.9999,
+      "status": "ASSIGNED",
+      "shares": {
+        "Ankole": 0.9999
+      }
+    },
+    "NWOYA": {
+      "subregion": "Acholi",
+      "share": 0.9999,
+      "status": "ASSIGNED",
+      "shares": {
+        "Acholi": 0.9999
+      }
+    },
+    "OBONGI": {
+      "subregion": "West Nile",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "West Nile": 1.0
+      }
+    },
+    "OMORO": {
+      "subregion": "Acholi",
+      "share": 0.9897,
+      "status": "ASSIGNED",
+      "shares": {
+        "Acholi": 0.9897,
+        "Lango": 0.0103
+      }
+    },
+    "OTUKE": {
+      "subregion": "Lango",
+      "share": 0.9964,
+      "status": "ASSIGNED",
+      "shares": {
+        "Lango": 0.9964
+      }
+    },
+    "OYAM": {
+      "subregion": "Lango",
+      "share": 0.9998,
+      "status": "ASSIGNED",
+      "shares": {
+        "Lango": 0.9998
+      }
+    },
+    "PADER": {
+      "subregion": "Acholi",
+      "share": 0.9999,
+      "status": "ASSIGNED",
+      "shares": {
+        "Acholi": 0.9999
+      }
+    },
+    "PAKWACH": {
+      "subregion": "West Nile",
+      "share": 0.9997,
+      "status": "ASSIGNED",
+      "shares": {
+        "West Nile": 0.9997
+      }
+    },
+    "PALLISA": {
+      "subregion": "Bukedi",
+      "share": 0.9993,
+      "status": "ASSIGNED",
+      "shares": {
+        "Bukedi": 0.9993
+      }
+    },
+    "RAKAI": {
+      "subregion": "Central I",
+      "share": 0.9999,
+      "status": "ASSIGNED",
+      "shares": {
+        "Central I": 0.9999
+      }
+    },
+    "RUBANDA": {
+      "subregion": "Kigezi",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Kigezi": 1.0
+      }
+    },
+    "RUBIRIZI": {
+      "subregion": "Ankole",
+      "share": 0.9993,
+      "status": "ASSIGNED",
+      "shares": {
+        "Ankole": 0.9993
+      }
+    },
+    "RUKIGA": {
+      "subregion": "Kigezi",
+      "share": 0.9984,
+      "status": "ASSIGNED",
+      "shares": {
+        "Kigezi": 0.9984
+      }
+    },
+    "RUKUNGIRI": {
+      "subregion": "Kigezi",
+      "share": 0.999,
+      "status": "ASSIGNED",
+      "shares": {
+        "Kigezi": 0.999
+      }
+    },
+    "RWAMPARA": {
+      "subregion": "Ankole",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Ankole": 1.0
+      }
+    },
+    "SERERE": {
+      "subregion": "Teso",
+      "share": 0.9683,
+      "status": "ASSIGNED",
+      "shares": {
+        "Teso": 0.9683,
+        "Busoga": 0.0317
+      }
+    },
+    "SHEEMA": {
+      "subregion": "Ankole",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Ankole": 1.0
+      }
+    },
+    "SIRONKO": {
+      "subregion": "Bugisu–Sebei",
+      "share": 0.9987,
+      "status": "ASSIGNED",
+      "shares": {
+        "Bugisu–Sebei": 0.9987
+      }
+    },
+    "SOROTI": {
+      "subregion": "Teso",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Teso": 1.0
+      }
+    },
+    "SOROTI CITY": {
+      "subregion": "Teso",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Teso": 1.0
+      }
+    },
+    "SSEMBABULE": {
+      "subregion": "Central I",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Central I": 1.0
+      }
+    },
+    "TEREGO": {
+      "subregion": "West Nile",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "West Nile": 1.0
+      }
+    },
+    "TORORO": {
+      "subregion": "Bukedi",
+      "share": 0.9992,
+      "status": "ASSIGNED",
+      "shares": {
+        "Bukedi": 0.9992
+      }
+    },
+    "WAKISO": {
+      "subregion": "Greater Kampala",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "Greater Kampala": 1.0
+      }
+    },
+    "YUMBE": {
+      "subregion": "West Nile",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "West Nile": 1.0
+      }
+    },
+    "ZOMBO": {
+      "subregion": "West Nile",
+      "share": 1.0,
+      "status": "ASSIGNED",
+      "shares": {
+        "West Nile": 1.0
+      }
+    }
+  }
+}

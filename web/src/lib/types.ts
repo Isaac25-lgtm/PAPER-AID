@@ -2,7 +2,7 @@
 // generated from its Pydantic models; until then this file mirrors that plan.
 import type { Level, ProposalReview } from './proposal-types'
 
-export type ServiceId = 'AI_CHECK' | 'REFINE' | 'FORMAT' | 'TEMPLATE_FORMAT' | 'REDRAFT' | 'LATEX' | 'SOURCE_CHECK' | 'PROPOSAL' | 'CONCEPT_NOTE' | 'COURSEWORK' | 'FUNDING_PROPOSAL'
+export type ServiceId = 'AI_CHECK' | 'REFINE' | 'FORMAT' | 'TEMPLATE_FORMAT' | 'REDRAFT' | 'LATEX' | 'SOURCE_CHECK' | 'PROPOSAL' | 'CONCEPT_NOTE' | 'COURSEWORK' | 'FUNDING_PROPOSAL' | 'DATALAB'
 /** soon = not built yet; not_configured = the server's AI keys are not set; invite_only = testing is
  *  limited to invited testers and this visitor isn't one (or isn't signed in). */
 export type Availability = 'available' | 'soon' | 'not_configured' | 'invite_only'
@@ -426,6 +426,8 @@ export interface AdminSummary {
 }
 
 export interface PublicConfig {
+  /** The terms people accept; a new version is asked for again before the next paid step or upload. */
+  termsVersion: string
   paymentsEnabled: boolean
   availability: Record<ServiceId, Availability>
   /** Off = testing mode: nothing needs a balance and nothing is charged; prices are still shown. */

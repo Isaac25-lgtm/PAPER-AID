@@ -1,10 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { Button } from '../../components/ui/button'
-import { Input } from '../../components/ui/field'
+import { Checkbox, Input } from '../../components/ui/field'
 import { Dialog } from '../../components/ui/overlays'
 import { Alert, Card, PageHeader } from '../../components/ui/primitives'
-import { DataError, useData } from '../../lib/data'
+import { DataError, useData, type Notifications } from '../../lib/data'
 import { useTitle } from '../../lib/use-title'
 import { useAuth } from '../auth/auth-context'
 
@@ -48,6 +48,8 @@ export function SettingsPage() {
             </div>
           </form>
         </Card>
+
+        <NotificationsCard />
 
         <Card className="p-6">
           <h2 className="text-base font-semibold">Your files</h2>
@@ -110,5 +112,88 @@ export function SettingsPage() {
         )}
       </Dialog>
     </div>
+  )
+}
+
+/** "Your work is ready" messages. Shown only when PaperAid can send email or texts. */
+function NotificationsCard() {
+  const data = useData()
+  const [choice, setChoice] = useState<Notifications | null>(null)
+  const [phone, setPhone] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  useEffect(() => {
+    data
+      .notifications()
+      .then((n) => (setChoice(n), setPhone(n.phone)))
+      .catch((e: unknown) => setError(e instanceof DataError ? e.message : 'Could not load your message settings.'))
+  }, [data])
+
+  if (error && !choice) return null // the rest of the page works without this card
+  if (!choice || !(choice.available.email || choice.available.sms)) return null
+
+  async function save(next: Partial<Omit<Notifications, 'available'>>) {
+    setSaving(true)
+    setError(null)
+    setSaved(false)
+    try {
+      const n = await data.setNotifications(next)
+      setChoice(n)
+      setPhone(n.phone)
+      setSaved(true)
+    } catch (e) {
+      setError(e instanceof DataError ? e.message : 'Could not save. Try again.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Card className="p-6">
+      <h2 className="text-base font-semibold">Messages</h2>
+      <p className="mt-2 text-sm text-fg-muted">We tell you when your work is ready, or if it stops. Messages never include your text.</p>
+      <div className="mt-4 space-y-4">
+        {choice.available.email && (
+          <Checkbox label="Email me" checked={choice.notifyEmail} disabled={saving} onChange={(e) => save({ notifyEmail: e.target.checked })} />
+        )}
+        {choice.available.sms && (
+          <>
+            <form
+              className="flex flex-wrap items-end gap-3"
+              onSubmit={(e) => {
+                e.preventDefault()
+                save({ phone: phone.trim() })
+              }}
+            >
+              <Input
+                label="Phone number"
+                className="min-w-0 flex-1"
+                type="tel"
+                value={phone}
+                placeholder="+256 7XX XXX XXX"
+                autoComplete="tel"
+                onChange={(e) => (setPhone(e.target.value), setSaved(false))}
+              />
+              <Button type="submit" variant="secondary" loading={saving} disabled={phone.trim() === choice.phone}>
+                Save number
+              </Button>
+            </form>
+            <Checkbox
+              label="Text me"
+              checked={choice.notifySms}
+              disabled={saving || !choice.phone}
+              onChange={(e) => save({ notifySms: e.target.checked })}
+            />
+          </>
+        )}
+        {saved && (
+          <p role="status" className="text-sm text-brand-700">
+            Saved
+          </p>
+        )}
+        {error && <Alert tone="danger">{error}</Alert>}
+      </div>
+    </Card>
   )
 }

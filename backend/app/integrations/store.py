@@ -9,13 +9,14 @@ import json
 import threading
 import time
 from collections.abc import Callable
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
 from pydantic import ValidationError
 
 from app.core.errors import PermanentStageError
+from app.datalab.models import DataProject
 from app.jobs.models import Job, JobStatus, LedgerEntry, Wallet
 from app.proposals.models import Project
 from app.works.models import Work
@@ -29,6 +30,9 @@ TripleMutator = Callable[[Job, Wallet, Project | None], tuple[Job, Wallet, Proje
 WorkMutator = Callable[[Work], Work | None]
 # A work step's job, its owner's wallet and its work, changed as one unit.
 WorkTripleMutator = Callable[[Job, Wallet, Work | None], tuple[Job, Wallet, Work] | None]
+DataMutator = Callable[[DataProject], DataProject | None]
+# A Data Lab report's job, its owner's wallet and its project, changed as one unit (like a work step).
+DataTripleMutator = Callable[[Job, Wallet, DataProject | None], tuple[Job, Wallet, DataProject] | None]
 
 
 class JobStore(Protocol):
@@ -42,6 +46,10 @@ class JobStore(Protocol):
     ) -> tuple[list[Job], str | None]: ...
     def count_active(self, owner_uid: str) -> int: ...
     def hit(self, key: str, window_sec: int) -> int: ...
+    # The first caller to claim a key keeps it: returns the value stored for it (theirs, or the earlier
+    # caller's). Atomic: two callers can never both get their own value back (the daily canary).
+    def claim_once(self, key: str, value: str) -> str: ...
+    def pending_notice_ids(self, limit: int) -> list[str]: ...  # jobs whose "ready" or "stopped" message is still to be sent
     def get_flag(self, name: str, default: bool) -> bool: ...
     def set_flag(self, name: str, value: bool) -> None: ...
     def get_wallet(self, uid: str) -> Wallet | None: ...
@@ -72,6 +80,15 @@ class JobStore(Protocol):
     def expired_work_ids(self, before: datetime) -> list[str]: ...
     def delete_work(self, work_id: str) -> None: ...
     def pending_works(self) -> list[Work]: ...  # one-Start works whose plan's next step is still to happen
+    # Data Lab projects (owner decision 2026-10-03): their own collection, the same guarantees
+    def create_datalab_if_open(self, project: DataProject) -> bool: ...
+    def get_datalab(self, project_id: str) -> DataProject | None: ...
+    def update_datalab(self, project_id: str, mutate: DataMutator) -> DataProject | None: ...
+    def update_job_wallet_and_datalab(self, job_id: str, project_id: str, mutate: DataTripleMutator) -> tuple[Job, Wallet, DataProject] | None: ...
+    def list_datalab(self, owner_uid: str) -> list[DataProject]: ...
+    def expired_datalab_ids(self, before: datetime) -> list[str]: ...
+    def all_datalab_ids(self) -> list[str]: ...
+    def delete_datalab(self, project_id: str) -> None: ...
 
 
 # Firestore stores at most 1 MiB per document. Job records are kept well under that (long change
@@ -128,6 +145,8 @@ class LocalJobStore:
         self._projects.mkdir(parents=True, exist_ok=True)
         self._works = root / "works"
         self._works.mkdir(parents=True, exist_ok=True)
+        self._datalab = root / "datalab"
+        self._datalab.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._hits: dict[str, list[float]] = {}
         with self._lock:
@@ -144,6 +163,8 @@ class LocalJobStore:
             self._write_project(Project.model_validate(pending["project"]))
         if pending.get("work"):
             self._write_work(Work.model_validate(pending["work"]))
+        if pending.get("datalab"):
+            self._write_datalab(DataProject.model_validate(pending["datalab"]))
         self._journal.unlink()
 
     def _path(self, job_id: str) -> Path:
@@ -219,6 +240,18 @@ class LocalJobStore:
             recent.append(now)
             self._hits[key] = recent
             return len(recent)
+
+    def claim_once(self, key: str, value: str) -> str:
+        with self._lock:
+            path = self._flags_path.with_name("claims.json")
+            claims = json.loads(path.read_text()) if path.exists() else {}
+            if key not in claims:
+                claims[key] = value
+                path.write_text(json.dumps(claims))
+            return str(claims[key])
+
+    def pending_notice_ids(self, limit: int) -> list[str]:
+        return [j.id for j in self._all() if j.notice is not None and j.notice.pending][:limit]
 
     def get_flag(self, name: str, default: bool) -> bool:
         with self._lock:
@@ -485,6 +518,73 @@ class LocalJobStore:
         with self._lock:
             self._work_path(work_id).unlink(missing_ok=True)
 
+    # Data Lab projects: one file each, like works
+    def _datalab_path(self, project_id: str) -> Path:
+        if not project_id.replace("_", "").isalnum():
+            raise ValueError("invalid project id")
+        return self._datalab / f"{project_id}.json"
+
+    def _write_datalab(self, project: DataProject) -> None:
+        self._datalab.mkdir(parents=True, exist_ok=True)
+        tmp = self._datalab_path(project.id).with_suffix(".tmp")
+        tmp.write_text(_dump(project), encoding="utf-8")
+        tmp.replace(self._datalab_path(project.id))
+
+    def _all_datalab(self) -> list[DataProject]:
+        with self._lock:
+            return [DataProject.model_validate_json(p.read_text(encoding="utf-8")) for p in self._datalab.glob("*.json")]
+
+    def create_datalab_if_open(self, project: DataProject) -> bool:
+        with self._lock:
+            wallet = self.get_wallet(project.owner_uid)
+            if wallet is not None and wallet.closing:
+                return False
+            self._write_datalab(project)
+            return True
+
+    def get_datalab(self, project_id: str) -> DataProject | None:
+        path = self._datalab_path(project_id)
+        with self._lock:
+            return DataProject.model_validate_json(path.read_text(encoding="utf-8")) if path.exists() else None
+
+    def update_datalab(self, project_id: str, mutate: DataMutator) -> DataProject | None:
+        with self._lock:
+            project = self.get_datalab(project_id)
+            if project is None:
+                return None
+            result = mutate(project)
+            if result is not None:
+                self._write_datalab(result)
+            return result
+
+    def update_job_wallet_and_datalab(self, job_id: str, project_id: str, mutate: DataTripleMutator) -> tuple[Job, Wallet, DataProject] | None:
+        with self._lock:
+            job = self.get(job_id)
+            if job is None:
+                return None
+            wallet = self.get_wallet(job.owner_uid) or Wallet(uid=job.owner_uid, email=job.owner_email)
+            result = mutate(job, wallet, self.get_datalab(project_id))
+            if result is not None:
+                tmp = self._journal.with_suffix(".tmp")
+                triple = {"job": json.loads(_dump(result[0])), "wallet": json.loads(result[1].model_dump_json(by_alias=True)), "datalab": json.loads(_dump(result[2]))}
+                tmp.write_text(json.dumps(triple), encoding="utf-8")
+                tmp.replace(self._journal)
+                self._recover()
+            return result
+
+    def list_datalab(self, owner_uid: str) -> list[DataProject]:
+        return sorted((p for p in self._all_datalab() if p.owner_uid == owner_uid), key=lambda p: p.updated_at, reverse=True)
+
+    def expired_datalab_ids(self, before: datetime) -> list[str]:
+        return [p.id for p in sorted((p for p in self._all_datalab() if p.expires_at < before), key=lambda p: (p.expires_at, p.id))]
+
+    def all_datalab_ids(self) -> list[str]:
+        return [p.id for p in self._all_datalab()]
+
+    def delete_datalab(self, project_id: str) -> None:
+        with self._lock:
+            self._datalab_path(project_id).unlink(missing_ok=True)
+
 
 class FirestoreJobStore:
     """Production store: jobs/{jobId} documents, transactions for every update."""
@@ -498,6 +598,7 @@ class FirestoreJobStore:
         self._wallets = self._db.collection("wallets")
         self._projects = self._db.collection("projects")
         self._works = self._db.collection("works")
+        self._datalab = self._db.collection("datalab")
 
     def create(self, job: Job) -> None:
         self._jobs.document(job.id).create(json.loads(_dump(job)))
@@ -566,6 +667,19 @@ class FirestoreJobStore:
         ref = self._db.collection("rateLimits").document(f"{key}:{bucket}".replace("/", "_"))
         ref.set({"count": self._fs.Increment(1), "expiresAt": datetime.fromtimestamp((bucket + 2) * window_sec)}, merge=True)
         return int(ref.get().to_dict().get("count", 1))
+
+    def claim_once(self, key: str, value: str) -> str:
+        from google.api_core.exceptions import AlreadyExists
+
+        ref = self._db.collection("claims").document(key.replace("/", "_"))
+        try:
+            ref.create({"value": value, "at": datetime.now(UTC)})  # create() fails if the document exists: one winner
+            return value
+        except AlreadyExists:
+            return str((ref.get().to_dict() or {}).get("value", ""))
+
+    def pending_notice_ids(self, limit: int) -> list[str]:
+        return [d.id for d in self._jobs.where(filter=self._fs.FieldFilter("notice.pending", "==", True)).select([]).limit(limit).stream()]
 
     def get_flag(self, name: str, default: bool) -> bool:
         snap = self._db.collection("config").document("runtime").get()
@@ -821,3 +935,75 @@ class FirestoreJobStore:
 
     def delete_work(self, work_id: str) -> None:
         self._works.document(work_id).delete()
+
+    def create_datalab_if_open(self, project: DataProject) -> bool:
+        wallet_ref, ref = self._wallets.document(project.owner_uid), self._datalab.document(project.id)
+
+        @self._fs.transactional
+        def run(transaction) -> bool:
+            snap = wallet_ref.get(transaction=transaction)
+            if snap.exists and Wallet.model_validate(snap.to_dict()).closing:
+                return False
+            transaction.create(ref, json.loads(_dump(project)))
+            return True
+
+        return run(self._db.transaction())
+
+    def get_datalab(self, project_id: str) -> DataProject | None:
+        snap = self._datalab.document(project_id).get()
+        return DataProject.model_validate(snap.to_dict()) if snap.exists else None
+
+    def update_datalab(self, project_id: str, mutate: DataMutator) -> DataProject | None:
+        ref = self._datalab.document(project_id)
+
+        @self._fs.transactional
+        def run(transaction) -> DataProject | None:
+            snap = ref.get(transaction=transaction)
+            if not snap.exists:
+                return None
+            result = mutate(DataProject.model_validate(snap.to_dict()))
+            if result is not None:
+                transaction.set(ref, json.loads(_dump(result)))
+            return result
+
+        return run(self._db.transaction())
+
+    def update_job_wallet_and_datalab(self, job_id: str, project_id: str, mutate: DataTripleMutator) -> tuple[Job, Wallet, DataProject] | None:
+        job_ref, project_ref = self._jobs.document(job_id), self._datalab.document(project_id)
+
+        @self._fs.transactional
+        def run(transaction) -> tuple[Job, Wallet, DataProject] | None:
+            job_snap = job_ref.get(transaction=transaction)
+            if not job_snap.exists:
+                return None
+            job = Job.model_validate(job_snap.to_dict())
+            wallet_ref = self._wallets.document(job.owner_uid)
+            wallet_snap = wallet_ref.get(transaction=transaction)  # every read before any write
+            project_snap = project_ref.get(transaction=transaction)
+            wallet = Wallet.model_validate(wallet_snap.to_dict()) if wallet_snap.exists else Wallet(uid=job.owner_uid, email=job.owner_email)
+            project = DataProject.model_validate(project_snap.to_dict()) if project_snap.exists else None
+            seen = {e.id for e in wallet.entries}
+            result = mutate(job, wallet, project)
+            if result is not None:
+                transaction.set(job_ref, json.loads(_dump(result[0])))
+                transaction.set(wallet_ref, json.loads(result[1].model_dump_json(by_alias=True)))
+                transaction.set(project_ref, json.loads(_dump(result[2])))
+                for entry in _new_entries(seen, result[1]):
+                    transaction.set(wallet_ref.collection("ledger").document(entry.id), _entry_json(entry))
+            return result
+
+        return run(self._db.transaction())
+
+    def list_datalab(self, owner_uid: str) -> list[DataProject]:
+        docs = self._datalab.where(filter=self._fs.FieldFilter("ownerUid", "==", owner_uid)).stream()
+        return sorted((DataProject.model_validate(d.to_dict()) for d in docs), key=lambda p: p.updated_at, reverse=True)
+
+    def expired_datalab_ids(self, before: datetime) -> list[str]:
+        iso = before.isoformat().replace("+00:00", "Z")
+        return [d.id for d in self._datalab.where(filter=self._fs.FieldFilter("expiresAt", "<", iso)).select([]).stream()]
+
+    def all_datalab_ids(self) -> list[str]:
+        return [d.id for d in self._datalab.select([]).stream()]
+
+    def delete_datalab(self, project_id: str) -> None:
+        self._datalab.document(project_id).delete()

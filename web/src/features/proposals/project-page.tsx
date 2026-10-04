@@ -479,6 +479,20 @@ function InstitutionCard({ project, running, onStarted, onChanged }: { project: 
           )}
         </p>
       </div>
+      {custom && project.guideQuestions.length > 0 && (
+        <div className="space-y-3 rounded-xl border border-amber-200 bg-amber-50/60 p-4">
+          <p className="text-sm font-medium text-fg">Your guide differs from the standard guide here. Please confirm each point:</p>
+          {project.guideQuestions.map((q) => (
+            <div key={q.id} className="space-y-2">
+              <p className="text-sm text-fg">{q.question}</p>
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" variant="secondary" disabled={busy || running} onClick={() => run(() => data.projects.answerGuide(project.id, q.id, 'KEEP'))}>{q.keep}</Button>
+                <Button size="sm" variant="secondary" disabled={busy || running || written} onClick={() => run(() => data.projects.answerGuide(project.id, q.id, 'STANDARD'))}>{q.standard}</Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
       {custom && project.institutionNotes.length > 0 && (
         <Alert tone="info" title="Check these with your supervisor">
           <ul className="list-disc pl-5">

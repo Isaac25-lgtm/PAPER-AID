@@ -196,4 +196,72 @@ def build(answer: dict[str, Any], guide_name: str) -> dict[str, Any]:
         "rules": rules or copy.deepcopy(default["rules"]),
         "chapters": chapters,
         "vetting": {"source": source, "note": "", "questions": questions},
-    }
+    } | {"departures": departures({"chapters": chapters, "objectives": counts, "levels": levels, "formatting": formatting})}
+
+
+# --- where a guide departs a lot from the standard guide (owner decision 2026-10-04) ------------------------------
+# Each is put to the student, who confirms it ("as my guide says") or takes the standard guide's version instead.
+# The sections a proposal normally can't do without: (chapter, the standard guide's key, words that find it in a heading)
+CORE = [(1, "problem", ("problem",)), (1, "objectives", ("objective",)), (2, "empirical", ("literature", "review", "empirical", "related stud")),
+        (3, "sampling", ("sampl",)), (3, "instruments", ("instrument", "data collection", "tool")), (3, "analysis", ("analys",)), (3, "ethics", ("ethic",))]
+CHAPTER_WORDS = {1: "One", 2: "Two", 3: "Three"}
+
+
+def departures(book: dict[str, Any]) -> list[dict[str, str]]:
+    default = rulebook.load(rulebook.DEFAULT)
+    out = []
+    by_number = {c["number"]: c for c in book["chapters"]}
+    for number, key, words in CORE:
+        chapter = by_number.get(number)
+        text = " ".join([chapter["title"], *(s["heading"] for s in chapter["sections"])]).lower() if chapter else ""
+        if not any(w in text for w in words):
+            standard = next(s for s in default["chapters"][number - 1]["sections"] if s["key"] == key)
+            out.append({"id": f"section:{number}:{key}", "question": f"Your guide has no \"{standard['heading']}\" section in Chapter {CHAPTER_WORDS[number]}. Leave it out?",
+                        "keep": "Leave it out, as my guide says", "standard": f"Add \"{standard['heading']}\" as the standard guide has it"})
+    low, high = int(book["objectives"]["min"]), int(book["objectives"]["max"])
+    if high < 2 or low > 6:
+        d = default["objectives"]
+        out.append({"id": "objectives", "question": f"Your guide asks for {low} to {high} specific objectives (the standard guide: {d['min']} to {d['max']}). Is that right?",
+                    "keep": "Yes, as my guide says", "standard": f"Use {d['min']} to {d['max']}, as the standard guide has it"})
+    for level, entry in book["levels"].items():
+        lo, hi = entry["pages"]
+        dlo, dhi = default["levels"][level]["pages"]
+        if hi < dlo / 2 or lo > dhi * 2:
+            out.append({"id": f"pages:{level}", "question": f"Your guide asks for {lo} to {hi} pages for a {entry['label']} proposal (the standard guide: {dlo} to {dhi}). "
+                        "Is that right?", "keep": "Yes, as my guide says", "standard": f"Use {dlo} to {dhi} pages, as the standard guide has it"})
+    fmt = book["formatting"]
+    if not 10 <= float(fmt.get("size_pt", 12)) <= 14 or not 1 <= float(fmt.get("line_spacing", 1.5)) <= 2.5:
+        d = default["formatting"]
+        out.append({"id": "formatting", "question": f"Your guide asks for {fmt.get('size_pt')} pt text with {fmt.get('line_spacing')} line spacing, which is unusual. Is that right?",
+                    "keep": "Yes, as my guide says", "standard": f"Use {d['size_pt']:g} pt and {d['line_spacing']:g} spacing, as the standard guide has it"})
+    return out
+
+
+def with_standard(book: dict[str, Any], departure_id: str) -> dict[str, Any]:
+    """A new profile (profiles never change once saved) taking the standard guide's version of one point."""
+    default = rulebook.load(rulebook.DEFAULT)
+    new = copy.deepcopy(book)
+    new["id"] = f"custom-{secrets.token_hex(6)}"
+    new["based_on"] = book["id"]
+    kind, _, rest = departure_id.partition(":")
+    if kind == "section":
+        number, key = rest.split(":")
+        standard = copy.deepcopy(next(s for s in default["chapters"][int(number) - 1]["sections"] if s["key"] == key))
+        chapter = next(c for c in new["chapters"] if c["number"] == int(number))
+        share = float(standard.get("share", 0.05))
+        total = sum(float(s["share"]) for s in chapter["sections"]) or 1.0
+        for s in chapter["sections"]:  # the others keep their proportions and leave room for it
+            s["share"] = round(float(s["share"]) * (1 - share) / total, 4)
+        while any(s["key"] == standard["key"] for s in chapter["sections"]):
+            standard["key"] += "x"
+        chapter["sections"].append(standard | {"share": round(share, 4), "source": "the standard guide (the student chose it)"})
+    elif kind == "objectives":
+        new["objectives"] = new["questions"] = copy.deepcopy(default["objectives"])
+    elif kind == "pages":
+        new["levels"][rest] = copy.deepcopy(default["levels"][rest])
+    elif kind == "formatting":
+        new["formatting"] = copy.deepcopy(default["formatting"])
+    else:
+        raise ValueError(f"unknown departure {departure_id}")
+    new["departures"] = departures(new)
+    return new

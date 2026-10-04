@@ -1,7 +1,7 @@
 import { clsx } from 'clsx'
-import { Check, Wrench } from 'lucide-react'
+import { ChartColumn, Check, Wrench } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
-import { Link, useParams, useSearchParams } from 'react-router'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/field'
 import { Alert, Card, Skeleton } from '../../components/ui/primitives'
@@ -89,6 +89,34 @@ export function ProjectPage() {
 
 /** The complete proposal: what it still needs, each with its action here (Codex audit 2026-10-01: the
  *  download must not be promised while the server would refuse it). */
+/** Chapter Four (owner decision 2026-10-03): once the data is collected, it is analysed by objective in Data Lab. */
+function ChapterFourCard({ projectId }: { projectId: string }) {
+  const data = useData()
+  const navigate = useNavigate()
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  return (
+    <Card className="space-y-2 p-4">
+      <p className="flex items-center gap-2 text-sm font-semibold text-fg"><ChartColumn className="size-4 text-brand-700" aria-hidden /> Chapter Four: your results</p>
+      <p className="text-sm text-fg-muted">When your data is collected, upload it. PaperAid analyses it by your objectives and writes Chapter Four, every number calculated by code.</p>
+      <Button variant="secondary" className="w-full" loading={busy}
+        onClick={async () => {
+          setBusy(true)
+          setError(null)
+          try {
+            navigate(`/app/datalab/${(await data.datalab.forProposal(projectId)).id}`)
+          } catch (e) {
+            setError(e instanceof DataError ? e.message : 'That did not work. Try again.')
+            setBusy(false)
+          }
+        }}>
+        Analyse my data
+      </Button>
+      <ErrorNote text={error} />
+    </Card>
+  )
+}
+
 function FinishCard({ project, onChange, onDownload }: { project: Project; onChange: (p: Project) => void; onDownload: () => void }) {
   const data = useData()
   const [supervisor, setSupervisor] = useState(project.titlePage.supervisor)
@@ -373,6 +401,7 @@ function Workspace({ project, onChange, onReload }: { project: Project; onChange
             </Card>
           )}
           {!next && !concept && <FinishCard project={project} onChange={onChange} onDownload={() => data.projects.download(project.id, true, `${stem}.docx`).catch(failed)} />}
+          {!next && !concept && data.config.availability.DATALAB === 'available' && <ChapterFourCard projectId={project.id} />}
         </aside>
       </div>
     </>

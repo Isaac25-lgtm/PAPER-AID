@@ -1,0 +1,10 @@
+{
+  "name": "Uganda subcounties, 2021 (2,181)",
+  "source": "Uganda Bureau of Statistics (UBOS): Uganda-Subcounties-2021.shp",
+  "year": 2021,
+  "sourceSha256": "87f790c382ac311e2410c0ff6437189e41d3af572bd4604314339f1f0cc3c98e",
+  "features": 2181,
+  "crs": "EPSG:4326 (WGS 84)",
+  "simplified": "pieces of one subcounty joined; the feature with no name or shape dropped; invalid shapes repaired; LUWERO and NAMUTUNMBA spelled as in the district layer; outlines simplified to about 100 m",
+  "licence": "UBOS. PaperAid's owner states PaperAid may use these files in any way (2026-10-04)."
+}

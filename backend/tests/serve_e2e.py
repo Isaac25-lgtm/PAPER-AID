@@ -28,6 +28,7 @@ def main() -> None:
             "GEMINI_API_KEY": "gm-e2e",
             # Every work service on, with test prices, so the browser journeys can run them.
             "WORKS_ENABLED": '["CONCEPT_NOTE","COURSEWORK","FUNDING_PROPOSAL"]', "WORKS_PUBLIC": "true",
+            "DATALAB_ENABLED": "true",
             "MODEL_PRICES": '{"fake:gpt-6-sol":[0,0,0],"fake:gpt-6-luna":[0,0,0],"fake:claude-sonnet-5-5":[0,0,0],"fake:claude-opus-5-5":[0,0,0],"fake:gemini-3.8-flash":[0,0,0]}',
             "ADMIN_EMAILS": '["demo@paperaid.app"]',
             "ENV": "local",
@@ -40,7 +41,8 @@ def main() -> None:
 
     # Test prices for the work services, in the browser-test backend only (the product has none until the owner sets them).
     work_tokens = {"WORK_READ": 1, "CN_PLAN": 2, "CN_BRIEF": 3, "CN_STANDARD": 4, "CN_EXTENDED": 6, "CW_PLAN": 2, "CW_1500": 4, "CW_3000": 6, "CW_5000": 8, "CW_8000": 11,
-                   "FP_PLAN": 3, "FP_COMPACT": 8, "FP_STANDARD": 12, "FP_COMPREHENSIVE": 18, "WORK_REVISE": 2}
+                   "FP_PLAN": 3, "FP_COMPACT": 8, "FP_STANDARD": 12, "FP_COMPREHENSIVE": 18, "WORK_REVISE": 2,
+                   "DL_SMALL": 3, "DL_STANDARD": 5, "DL_LARGE": 8}
     os.environ["FIXED_TOKENS"] = json.dumps({**Settings(_env_file=None).fixed_tokens, **work_tokens})
     get_settings.cache_clear()
     from app.ai import costs, orchestration
@@ -60,7 +62,17 @@ def main() -> None:
     fetch.crossref_search = lambda text, rows=3: [dict(r) for r in models.crossref_found]
     fetch.openalex_retracted = lambda doi: doi in models.retracted
     fetch.resolve_doi = lambda url: models.dois.get(url, fetch.doi_in(url))
-    uvicorn.run(create_app(), host="127.0.0.1", port=int(os.environ.get("PAPERAID_E2E_PORT", "8000")))
+    app = create_app()
+    # The journeys' signed-in accounts have accepted the current terms (the sign-up journey accepts them itself).
+    import hashlib
+
+    from app.runtime import get_runtime
+
+    rt = get_runtime()
+    for email in ("demo@paperaid.app", "someone.else@example.com"):
+        uid = "u_" + hashlib.sha256(email.encode()).hexdigest()[:20]
+        rt.store.update_wallet(uid, email, lambda w: w.model_copy(update={"terms_version": rt.settings.terms_version}))
+    uvicorn.run(app, host="127.0.0.1", port=int(os.environ.get("PAPERAID_E2E_PORT", "8000")))
 
 
 if __name__ == "__main__":

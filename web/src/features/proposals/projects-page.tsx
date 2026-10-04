@@ -213,6 +213,8 @@ export function DetailsForm({
           <Input label="Registration number" value={page.regNumber} maxLength={60} onChange={(e) => setPage({ ...page, regNumber: e.target.value })} />
           <Input label="Proposed supervisor" value={page.supervisor} maxLength={160} onChange={(e) => setPage({ ...page, supervisor: e.target.value })} />
           <Input label="Submission date" value={page.submissionDate} maxLength={40} onChange={(e) => setPage({ ...page, submissionDate: e.target.value })} placeholder="e.g. October 2026" />
+          <Input label="Your institution" value={page.institution ?? ''} maxLength={160} onChange={(e) => setPage({ ...page, institution: e.target.value })}
+            hint="As it should appear on the title page." />
         </div>
         <Select
           label="Citation style"

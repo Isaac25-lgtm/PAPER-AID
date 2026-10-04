@@ -91,6 +91,17 @@ def _centered(doc, text: str, bold: bool = False, caps: bool = False, space_afte
     run.bold = bold
 
 
+def institution_of(project: Project, book: dict) -> str:
+    """The institution on the title page: the student's own; else the one in the guide they uploaded;
+    else, for a project from before the field existed, what it always printed; else none."""
+    page = project.title_page.institution
+    if page:
+        return page.strip()
+    if book.get("custom") or page is None:
+        return str(book.get("institution", ""))
+    return ""
+
+
 def _title_page(doc, project: Project, draft: bool) -> None:
     plan, page, inputs = project.plan, project.title_page, project.inputs
     book = rulebook.load(project.rulebook)
@@ -102,7 +113,8 @@ def _title_page(doc, project: Project, draft: bool) -> None:
     faculty = f" TO THE {inputs.faculty.upper()}" if inputs.faculty.strip() else ""
     programme = inputs.programme.upper() if inputs.programme.strip() else level.upper()
     _centered(doc, "")
-    _centered(doc, f"A RESEARCH PROPOSAL SUBMITTED{faculty} IN PARTIAL FULFILMENT OF THE REQUIREMENTS FOR THE AWARD OF THE {programme} OF {book['institution'].upper()}")
+    _centered(doc, f"A RESEARCH PROPOSAL SUBMITTED{faculty} IN PARTIAL FULFILMENT OF THE REQUIREMENTS FOR THE AWARD OF THE {programme}"
+              + (f" OF {institution_of(project, book).upper()}" if institution_of(project, book) else ""))
     _centered(doc, "")
     if page.supervisor.strip():
         _centered(doc, f"Supervisor: {page.supervisor}")

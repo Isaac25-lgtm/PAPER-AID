@@ -749,6 +749,7 @@ def test_testing_mode_runs_every_service_without_credits(client, monkeypatch):
     _priced_models(client, monkeypatch)
     headers = {"Authorization": "Dev colleague@example.com"}  # no credits at all
     assert client.get("/api/config").json()["creditsEnabled"] is False
+    assert client.post("/api/me/terms", headers=headers, json={"version": client.get("/api/config").json()["termsVersion"]}).status_code == 204
     job_id, quote = start_job(client, headers=headers)
     assert quote["amount"] > 0 and quote["paid"] == 0  # the price is still shown
     client.post(f"/api/jobs/{job_id}/submit", headers=headers, json={"quoteId": quote["id"]})

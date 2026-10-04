@@ -641,7 +641,7 @@ function ProposalStart({ concept }: { concept: boolean }) {
     topic: '', level: 'MASTERS', programme: '', faculty: '', studyArea: '', population: '', studyType: null, notes: '',
     populationSize: null, populationSource: '', expectedParticipants: null,
   })
-  const [cover, setCover] = useState<TitlePage>({ studentName: '', regNumber: '', supervisor: '', submissionDate: '' })
+  const [cover, setCover] = useState<TitlePage>({ studentName: '', regNumber: '', supervisor: '', submissionDate: '', institution: '' })
   const [citation, setCitation] = useState<CitationStyle>('APA6')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -709,7 +709,7 @@ function ProposalStart({ concept }: { concept: boolean }) {
             <Input label="Programme (optional)" maxLength={150} value={inputs.programme} onChange={(e) => set({ programme: e.target.value })} placeholder="e.g. Master of Public Health" />
           </div>
           <Alert tone="info">
-            PaperAid writes to the standard structure (Uganda Christian University’s guide). If your institution uses its own guide, you can add it from your proposal page afterwards.
+            PaperAid writes to the standard guide’s structure. If your institution uses its own guide, you can add it from your proposal page afterwards.
           </Alert>
           <TextArea label="What you already have (optional)" rows={4} maxLength={4000} value={inputs.notes} onChange={(e) => set({ notes: e.target.value })}
             hint="A concept summary, your supervisor’s guidance, decisions already made." />
@@ -766,6 +766,8 @@ function ProposalStart({ concept }: { concept: boolean }) {
             <Input label="Your name" required maxLength={120} value={cover.studentName} onChange={(e) => setCover({ ...cover, studentName: e.target.value })} error={tried ? pageTwo.name : null} />
             <Input label="Registration number" required maxLength={60} value={cover.regNumber} onChange={(e) => setCover({ ...cover, regNumber: e.target.value })} error={tried ? pageTwo.reg : null} />
             <Input label="Faculty or school" required maxLength={150} value={inputs.faculty} onChange={(e) => set({ faculty: e.target.value })} error={tried ? pageTwo.faculty : null} />
+            <Input label="Your institution" maxLength={160} value={cover.institution ?? ''} onChange={(e) => setCover({ ...cover, institution: e.target.value })}
+              hint="As it should appear on the title page." />
             <Input label="Supervisor" maxLength={160} value={cover.supervisor} onChange={(e) => setCover({ ...cover, supervisor: e.target.value })}
               hint="Can wait: the complete proposal needs it." />
             <Input label="Submission date" maxLength={40} value={cover.submissionDate} onChange={(e) => setCover({ ...cover, submissionDate: e.target.value })} placeholder="e.g. October 2026"

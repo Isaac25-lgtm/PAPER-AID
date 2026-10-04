@@ -26,7 +26,7 @@ from app.core.logging import log
 from app.documents.intake import inspect_upload
 from app.jobs import state
 from app.jobs.models import Camel, Job, JobEvent, JobStatus, JobView, Quote, ReadinessItem, ServiceSelection, utcnow
-from app.jobs.service import ACCOUNT_CLOSING, User, _erase_work, _rate_limit, availability, step_running, submit
+from app.jobs.service import ACCOUNT_CLOSING, User, _erase_work, _rate_limit, availability, require_terms, resumable, resume_step, step_running, submit
 from app.latex.convert import convert as to_latex
 from app.latex.package import compile_pdf
 from app.pricing import credits
@@ -1053,6 +1053,7 @@ def start(rt: Runtime, user: User, work_id: str) -> WorkView:
     Pressed again after a stop, it continues from where it stopped (the draft, if the plan was made)."""
     k = _owned(rt, user, work_id)
     _require(rt, user, k.kind)
+    require_terms(rt, user)
     if step_running(rt, k):
         raise Conflict("PaperAid is already working on this.", code="STEP_RUNNING")
     if any(s.id not in set(k.read_sources) for s in k.sources):
@@ -1063,6 +1064,13 @@ def start(rt: Runtime, user: User, work_id: str) -> WorkView:
     if spec.gate != "PASS":
         raise AppError(("Answer the questions marked Required first. " + " ".join(spec.blockers)).strip(), code="QUESTIONS_OPEN")
     check_credits(rt, user, k.kind, _document_price(rt, spec))
+    last = rt.store.get(k.jobs[-1]) if k.jobs else None
+    if k.auto and last is not None and last.selection.work in ("PLAN", "DRAFT") and resumable(rt, last):
+        # Stopped for a temporary reason (an outage): resume that step where it stopped, keeping what it
+        # had finished (Codex roadmap item 1); a plan step reserves the document's price again.
+        reservation = (f"work:{work_id}:{secrets.token_hex(4)}", _document_price(rt, spec)) if last.selection.work == "PLAN" else None
+        if resume_step(rt, user, last.id, reservation):
+            return view(rt, _owned(rt, user, work_id))
     if k.spec_status != "CONFIRMED":
         confirm_spec(rt, user, work_id, k.spec_version)
         k = _owned(rt, user, work_id)
@@ -1100,6 +1108,9 @@ def continue_after_plan(rt: Runtime, work_id: str, plan_job: str) -> None:
             return w
 
         _change(rt, owner, work_id, apply)
+        from app import notify
+
+        notify.stopped(rt, plan_job)  # recorded on the plan's job and delivered like any other message
 
     if not approved:
         objections = [o for d in decisions if d is not None and d.outcome != "APPROVED" for o in d.objections]

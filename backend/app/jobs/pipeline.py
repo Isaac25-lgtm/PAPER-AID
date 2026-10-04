@@ -1250,6 +1250,13 @@ def work_stage(stage: Stage):
 
 
 def run_step(rt: Runtime, job_id: str) -> None:
+    """One queued task: a job's next stage, or a piece of Data Lab data work (`dop_` ids, Codex audit
+    finding 13: the worker, not the public API, reads files and runs analyses)."""
+    if job_id.startswith("dop_"):
+        from app.datalab.service import run_op
+
+        run_op(rt, job_id)
+        return
     token = job_id_var.set(job_id)
     try:
         _run_step(rt, job_id)
@@ -1290,7 +1297,11 @@ def _run_step(rt: Runtime, job_id: str) -> None:
 
     started = utcnow()
     ctx = StageContext(rt, job)
-    if job.selection.work != "NONE":
+    if job.selection.datalab != "NONE":
+        from app.datalab import pipeline as datalab_pipeline  # Data Lab imports the job service, which the worker's module must not import first
+
+        run = datalab_pipeline.STAGES[stage]
+    elif job.selection.work != "NONE":
         run = work_stage(stage)
     elif job.selection.proposal == "REVIEW":
         run = proposal_review.STAGES.get(stage) or STAGES[stage]
@@ -1326,8 +1337,11 @@ def _run_step(rt: Runtime, job_id: str) -> None:
 
     result = rt.store.update_job_and_wallet(job_id, complete)
     if result is None:
+        _notify(rt, job_id)  # a step that completed itself (a work, proposal or Data Lab publication)
         return
     job = result[0]
+    if job.status == JobStatus.COMPLETED:
+        _notify(rt, job_id)
     log(logger, logging.INFO, "stage complete", stage=stage.value, durationMs=int((utcnow() - started).total_seconds() * 1000))
     if job.status == JobStatus.PROCESSING:
         rt.queue.enqueue(job_id, task_name(job))
@@ -1358,6 +1372,16 @@ def _finish(rt: Runtime, job_id: str) -> None:
         return j, w
 
     rt.store.update_job_and_wallet(job_id, done)
+    _notify(rt, job_id)
+
+
+def _notify(rt: Runtime, job_id: str) -> None:
+    """Tell the person their work is ready, or that it stopped (app.notify sends each outcome once)."""
+    from app import notify
+
+    job = rt.store.get(job_id)
+    if job is not None:
+        notify.after_job(rt, job)
 
 
 def _handle_failure(rt: Runtime, job_id: str, stage: Stage, code: str, message: str, detail: str, retryable: bool) -> None:
@@ -1389,6 +1413,8 @@ def _handle_failure(rt: Runtime, job_id: str, stage: Stage, code: str, message: 
     if job and retry_again:
         delay = min(300, 10 * 2**job.attempts)
         rt.queue.enqueue(job_id, task_name(job, f"-a{job.attempts}"), delay_sec=delay)
+    elif job is not None:
+        _notify(rt, job_id)
 
 
 def _set(j: Job, **fields: Any) -> Job:

@@ -159,10 +159,10 @@ STEPS: dict[str, Step] = {
     "w_extract": Step("ANALYST", Stage.RESEARCHING, "p-extract-v1", 4000),
     "w_search": Step("ANALYST", Stage.RESEARCHING, "p-search-v1", 4000),
     "w_verify": Step("INTEGRITY", Stage.RESEARCHING, "verify-v1", 6000),
-    "w_plan": Step("WRITER", Stage.PLANNING, "w-plan-v3", 12000),  # v2: claims within the evidence, a repair changes only what was raised; v3: says the plan is internal (Codex audit of 9239dd0)
-    "w_plan_review": Step("EVALUATOR", Stage.PLANNING, "w-plan-review-v1", 6000),
-    "w_results": Step("WRITER", Stage.PLANNING, "w-results-v2", 16000),  # v2: says the Results Model is internal (Codex audit of 9239dd0)
-    "w_results_review": Step("EVALUATOR", Stage.PLANNING, "w-results-review-v1", 8000),
+    "w_plan": Step("WRITER", Stage.PLANNING, "w-plan-v4", 12000),  # v2: claims within the evidence, a repair changes only what was raised; v3: says the plan is internal (Codex audit of 9239dd0); v4: the applicant's own facts never asserted either way, no page claims (live funding runs 2026-10-03)
+    "w_plan_review": Step("EVALUATOR", Stage.PLANNING, "w-plan-review-v2", 6000),  # v2: blocking issues apart from suggestions; a repair is checked against the earlier issues (live funding runs 2026-10-03)
+    "w_results": Step("WRITER", Stage.PLANNING, "w-results-v3", 16000),  # v2: says the Results Model is internal (Codex audit of 9239dd0); v3: measurement rules (live funding runs 2026-10-03)
+    "w_results_review": Step("EVALUATOR", Stage.PLANNING, "w-results-review-v2", 8000),  # v2: blocking issues apart from suggestions; a repair is checked against the earlier issues
     "w_draft": Step("WRITER", Stage.DRAFTING, "w-draft-v1", 16000),
     "w_integrity": Step("INTEGRITY", Stage.AUDITING, "w-integrity-v1", 6000),
     "w_evaluate": Step("EVALUATOR", Stage.AUDITING, "w-evaluate-v1", 8000),
@@ -170,6 +170,11 @@ STEPS: dict[str, Step] = {
     "w_adjudicate": Step("ADJUDICATOR", Stage.AUDITING, "w-adjudicate-v1", 4000),
     "w_final": Step("EVALUATOR", Stage.AUDITING, "w-final-v2", 8000),  # v2: the exact deliverable, every verdict required (Sol with one final reviewer)
     "w_compress": Step("WRITER", Stage.AUDITING, "w-compress-v1", 12000),
+    # Data Lab reports (owner decision 2026-10-03): code computes every number; the writer interprets
+    # the results through number tokens, and the one final reviewer (Sol) approves the exact narrative.
+    "d_report": Step("WRITER", Stage.DRAFTING, "d-report-v1", 16000),
+    "d_report_review": Step("EVALUATOR", Stage.AUDITING, "d-report-review-v2", 8000),
+    "d_chapter4": Step("WRITER", Stage.DRAFTING, "d-chapter4-v2", 16000),  # Chapter Four of a research proposal, by objective
 }
 
 
@@ -182,7 +187,7 @@ DRAFTING_TASKS = {"critique", "refine", "repair", "redraft", "redraft_fix", "ver
 # Sonnet, so Sol never approves wording it finalised itself (owner decision 2026-09-30) ...
 FINALISED_BY_DRAFTER = {"p_finalise", "p_profile_finalise", "spec_finalise"}
 # ... and these works reviews are Sol's final decisions instead of the evaluator's.
-FINAL_REVIEW_TASKS = {"w_plan_review", "w_results_review", "w_final"}
+FINAL_REVIEW_TASKS = {"w_plan_review", "w_results_review", "w_final", "d_report_review"}
 REVIEW_REPAIRS = 2  # targeted repairs after a final-review objection, each reviewed again (owner decision 2026-09-30)
 FINAL_PART_WORDS = 7000  # the most one works final-review call reads; a longer deliverable is reviewed in parts
 
@@ -249,6 +254,8 @@ def check_content(engine: Engine | None) -> None:
         return
     now = content_now()
     changed = sorted(k for k, v in engine.content.items() if now.get(k) != v)
+    if "validators" in engine.content and "templates" not in engine.content:
+        changed.append("templates")  # a works step priced before section layouts were versioned (templates-v2)
     if changed:
         raise PermanentStageError("ENGINE_CHANGED", "PaperAid was updated after this step was priced. Nothing was charged; please start it again.",
                                   "content changed: " + ", ".join(changed)[:300])

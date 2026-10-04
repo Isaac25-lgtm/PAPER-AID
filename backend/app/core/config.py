@@ -76,6 +76,33 @@ class Settings(BaseSettings):
     # While false, the work services are open only to the invited testers and admins, even when the
     # tester list is empty: the pilot fails closed (Codex audit 2026-09-30, second round).
     works_public: bool = False
+    # Data Lab (owner decision 2026-10-03): switched on here once its tier prices (DL_SMALL, DL_STANDARD,
+    # DL_LARGE) are set; open to testers and admins like the work services while `works_public` is off.
+    # Processing limits are measured, not promised: raised only from measured runs.
+    datalab_enabled: bool = False
+    datalab_max_rows: int = 200_000
+    datalab_max_columns: int = 300
+    datalab_max_cells: int = 6_000_000
+    datalab_max_expanded_bytes: int = 120 * 1024 * 1024  # what an .xlsx may unpack to
+    datalab_analyses_per_hour: int = 120  # computed by code, never billed: a fair-use limit
+    datalab_report_cap_usd: float = 6.0
+    # "Your work is ready" messages (owner roadmap 2026-10-03): off until the keys are set in Secret Manager.
+    app_url: str = "http://localhost:5000"  # links in messages
+    sendgrid_api_key: str = ""
+    notify_from: str = ""  # a sender address SendGrid has verified
+    africastalking_username: str = ""
+    africastalking_api_key: str = ""
+    sms_sender: str = ""  # an approved sender ID, or empty for the shared one
+    # The daily canary (owner roadmap 2026-10-03): a writing check on a fixed paper from a dedicated
+    # account, paid from that account's credits. Off until the account is set up.
+    # The terms people accept (owner decision 2026-10-04): a new version is asked for again before the
+    # next paid step or Data Lab upload. The lawyer's wording replaces the plain one under a new version.
+    terms_version: str = "2026-10-04"
+    canary_enabled: bool = False
+    canary_uid: str = ""
+    canary_email: str = ""
+    canary_budget_usd: float = 0.5  # a run whose quote allows more AI spend than this is not started
+    alert_email: str = ""  # where the canary's alerts go (email needs the SendGrid settings)
     # Rendered page counts with LibreOffice in the worker (Workstream H). Off: page limits are
     # estimated from words and shown as "Needs review".
     render_pages: bool = False

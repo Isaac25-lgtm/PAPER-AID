@@ -24,8 +24,8 @@ def executable() -> str | None:
     return shutil.which("soffice") or shutil.which("libreoffice")
 
 
-def page_count(docx: bytes) -> float | None:
-    """The document's pages, or None when it could not be rendered (the check then stays "Needs review")."""
+def to_pdf(docx: bytes) -> bytes | None:
+    """The Word file as a PDF, laid out by LibreOffice (headless, offline), or None when it can't be."""
     exe = executable()
     if exe is None:
         return None
@@ -46,10 +46,18 @@ def page_count(docx: bytes) -> float | None:
         if run.returncode != 0 or not pdf.exists():
             log(logger, logging.WARNING, "page render failed", code=run.returncode)
             return None
-        try:
-            return float(len(PdfReader(io.BytesIO(pdf.read_bytes())).pages))
-        except PdfReadError:
-            return None
+        return pdf.read_bytes()
+
+
+def page_count(docx: bytes) -> float | None:
+    """The document's pages, or None when it could not be rendered (the check then stays "Needs review")."""
+    pdf = to_pdf(docx)
+    if pdf is None:
+        return None
+    try:
+        return float(len(PdfReader(io.BytesIO(pdf)).pages))
+    except PdfReadError:
+        return None
 
 
 def self_check() -> int:

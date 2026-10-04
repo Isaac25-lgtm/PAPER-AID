@@ -27,12 +27,12 @@ from app.documents.intake import inspect_upload
 from app.formatting.guideline import MAX_GUIDE_WORDS
 from app.jobs import state
 from app.jobs.models import Job, JobEvent, JobStatus, JobView, Quote, QuoteLine, ReadinessItem, ServiceSelection, utcnow
-from app.jobs.service import ACCOUNT_CLOSING, User, _erase_project, _rate_limit, availability, current_engine, step_running, submit
+from app.jobs.service import ACCOUNT_CLOSING, User, _erase_project, _rate_limit, availability, current_engine, require_terms, step_running, submit
 from app.latex.convert import convert as to_latex
 from app.latex.package import compile_pdf
 from app.latex.package import project as latex_project
 from app.pricing.quote import bound_quote, fixed_price, proposal_usd, with_margin
-from app.proposals import decisions, evidence, feedback, framework, rulebook, sampling
+from app.proposals import decisions, evidence, feedback, framework, profile, rulebook, sampling
 from app.proposals import export as proposal_export
 from app.proposals.models import (
     Acknowledgment,
@@ -140,7 +140,9 @@ def view(rt: Runtime, p: Project) -> ProjectView:
         out.active_job = p.active_job if step_running(rt, p) else None
         return out
     out.blockers = proposal_export.final_blockers(p, docs)
-    out.institution, out.institution_notes = book["institution"], list(book.get("unclear", []))
+    out.institution = book["institution"] if book.get("custom") else "Standard guide"  # the default is "the standard guide" (owner decision 2026-10-04)
+    out.guide_questions = open_guide_questions(p, book)
+    out.institution_notes = list(book.get("unclear", []))
     out.guide_name = p.guide.name if p.guide else None
     out.guide_read = p.guide is not None and book.get("guide_sha256") == p.guide.sha256
     if p.plan is not None:
@@ -171,6 +173,8 @@ def create(rt: Runtime, user: User, inputs: ProposalInputs, title_page: TitlePag
     _require_ai(rt, user)
     _rate_limit(rt, user, "project", rt.settings.quotes_per_hour)
     now = utcnow()
+    if title_page.institution is None:  # a new project prints only the institution the student gives
+        title_page = title_page.model_copy(update={"institution": ""})
     project = Project(
         id=f"prj_{secrets.token_hex(6)}",
         owner_uid=user.uid,
@@ -193,6 +197,40 @@ def create(rt: Runtime, user: User, inputs: ProposalInputs, title_page: TitlePag
 
 def list_mine(rt: Runtime, user: User) -> list[ProjectView]:
     return [view(rt, p) for p in rt.store.list_projects(user.uid) if not p.deleting]
+
+
+def open_guide_questions(p: Project, book: dict) -> list[dict[str, str]]:
+    """The points where the student's guide departs a lot from the standard guide, not yet answered."""
+    if not book.get("custom"):
+        return []
+    return [d for d in book.get("departures", []) if d["id"] not in p.guide_answers]
+
+
+def answer_guide(rt: Runtime, user: User, project_id: str, departure_id: str, answer: Literal["KEEP", "STANDARD"]) -> ProjectView:
+    """The student confirms a point where their guide departs from the standard guide, or takes the
+    standard guide's version of it (a new profile: saved profiles never change)."""
+    p = _owned(rt, user, project_id)
+    book = rulebook.load(p.rulebook)
+    if departure_id not in {d["id"] for d in open_guide_questions(p, book)}:
+        raise Conflict("That question was already answered. Reload to see the latest.", code="ALREADY_ANSWERED")
+    new_id = ""
+    if answer == "STANDARD":
+        if any(c.versions for c in p.chapters):
+            raise Conflict("Chapters are already written to your guide's structure, so it can't change now.", code="CHAPTERS_WRITTEN")
+        new = profile.with_standard(book, departure_id)
+        rt.files.put(rulebook.stored_path(new["id"]), json.dumps(new).encode(), "application/json")
+        new_id = new["id"]
+
+    def apply(q: Project) -> Project:
+        if q.rulebook != book["id"] or step_running(rt, q):
+            raise Conflict("Your proposal changed meanwhile. Reload it and answer again.", code="PROJECT_CHANGED")
+        q.guide_answers[departure_id] = {"answer": answer, "at": utcnow().isoformat()}
+        if new_id:
+            q.rulebook = new_id
+            q.profiles = list(dict.fromkeys([*q.profiles, new_id]))
+        return q
+
+    return view(rt, _change(rt, user, project_id, apply))
 
 
 def get(rt: Runtime, user: User, project_id: str) -> ProjectView:
@@ -1071,7 +1109,11 @@ def start(rt: Runtime, user: User, project_id: str, accept_sampling: bool = Fals
     first document."""
     from app.works.service import check_credits  # the same credit checks for every service
 
+    require_terms(rt, user)
     p = _owned(rt, user, project_id)
+    if open_guide_questions(p, rulebook.load(p.rulebook)):
+        raise AppError("Your guide differs from the standard guide in a few places. Answer the questions about them on your proposal's page first.",
+                       code="GUIDE_QUESTIONS")
     _require_ai(rt, user)
     if step_running(rt, p):
         raise Conflict("PaperAid is already working on this.", code="STEP_RUNNING")
@@ -1080,6 +1122,14 @@ def start(rt: Runtime, user: User, project_id: str, accept_sampling: bool = Fals
     if rt.settings.pricing_mode == "fixed":
         price = fixed_price(rt.settings, "PLAN", None) + fixed_price(rt.settings, "CONCEPT" if first == "CONCEPT" else "CHAPTER_1", None)
     check_credits(rt, user, "CONCEPT_PAPER" if p.goal == "CONCEPT" else "PROPOSAL", price)
+    from app.jobs.service import resumable, resume_step
+
+    last = rt.store.get(p.jobs[-1]) if p.jobs else None
+    if p.auto and last is not None and last.selection.proposal in ("PLAN", "CHAPTER_1", "CONCEPT") and resumable(rt, last):
+        # Stopped for a temporary reason: resume that step where it stopped (see app.works.service.start).
+        reservation = (f"project:{project_id}:{secrets.token_hex(4)}", price) if last.selection.proposal == "PLAN" else None
+        if resume_step(rt, user, last.id, reservation):
+            return view(rt, _owned(rt, user, project_id))
 
     if accept_sampling and not p.sampling_consent:
         def consent(q: Project) -> Project:
@@ -1131,6 +1181,9 @@ def continue_after_plan(rt: Runtime, project_id: str, plan_job: str) -> None:
             return q
 
         _change(rt, owner, project_id, apply)
+        from app import notify
+
+        notify.stopped(rt, plan_job)  # recorded on the plan's job and delivered like any other message
 
     approved = (p.plan is not None and p.plan_review is not None and p.plan_review.outcome == "APPROVED"
                 and not rulebook.plan_problems(p.rulebook, p.plan))

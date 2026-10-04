@@ -1,0 +1,23 @@
+{
+  "note": "One rule set for columns that may identify people or places, read by the server (app.datalab.engine.profile) and by the browser before a CSV is uploaded (owner decision 2026-10-04). Patterns are written so Python and JavaScript read them alike. A keyword counts when only non-letters touch it, so gps_lat, hh_phone and Latitude2 are recognised. A name column of a place or an organisation (district_name, school name) is not personal; a village name is.",
+  "headers": {
+    "PERSONAL": "(^|[^a-z])(name|names|surname|first ?name|last ?name|full ?name|phone|telephone|tel|mobile|contact|e-?mail|email ?address|nin|national ?id|passport|address|village ?name|date ?of ?birth|dob|birth ?date|id ?number|patient ?name|respondent ?name)($|[^a-z])",
+    "LOCATION": "(^|[^a-z])(lat|latitude|lon|lng|long|longitude|gps|coordinates?)($|[^a-z])"
+  },
+  "values": {
+    "EMAIL": "^[^@\\s]+@[^@\\s]+\\.[a-z]{2,}$",
+    "PHONE": "^(\\+?256|0)7\\d{8}$",
+    "NIN": "^C[MF][A-Z0-9]{12}$"
+  },
+  "share": 0.5,
+  "labels": {
+    "PERSONAL": "may identify people",
+    "LOCATION": "exact locations",
+    "EMAIL": "email addresses",
+    "PHONE": "phone numbers",
+    "NIN": "national ID numbers"
+  },
+  "except": {
+    "PERSONAL": "(^|[^a-z])(district|sub ?county|county|parish|region|sub ?region|country|school|facility|health ?facility|hospital|clinic|organi[sz]ation|company|crop|product|item)($|[^a-z])"
+  }
+}

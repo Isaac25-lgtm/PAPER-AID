@@ -1,0 +1,65 @@
+{
+  "note": "Boundary layers for Data Lab maps (owner decision 2026-10-04). Uganda's UBOS layers ship with PaperAid and are open; other countries are imported by scripts/import_boundaries.py from pinned, licence-checked releases and are FROZEN until the owner clears the country after legal advice, by a reviewed change to this file. Each analysis records the layer's hash, so an old map can be redrawn from the same file.",
+  "layers": [
+    {
+      "iso3": "UGA",
+      "level": "DISTRICT",
+      "levelName": "Districts",
+      "source": "Uganda Bureau of Statistics (UBOS)",
+      "year": "2020",
+      "licence": "UBOS: PaperAid's owner states PaperAid may use these files in any way (2026-10-04)",
+      "path": "app/datalab/geo/uganda_districts_2020.geojson",
+      "status": "AVAILABLE"
+    },
+    {
+      "iso3": "UGA",
+      "level": "SUBCOUNTY",
+      "levelName": "Subcounties",
+      "source": "Uganda Bureau of Statistics (UBOS)",
+      "year": "2021",
+      "licence": "UBOS: PaperAid's owner states PaperAid may use these files in any way (2026-10-04)",
+      "path": "app/datalab/geo/uganda_subcounties_2021.geojson",
+      "status": "AVAILABLE"
+    },
+    {
+      "iso3": "KEN",
+      "level": "ADM1",
+      "levelName": "Counties",
+      "source": "geoBoundaries gbOpen (RCMRD GeoPortal, Africa GeoPortal)",
+      "release": "9469f09",
+      "year": "2020",
+      "licence": "Public Domain",
+      "attribution": "geoBoundaries (Runfola et al.); RCMRD GeoPortal, Africa GeoPortal",
+      "units": 47,
+      "repaired": 0,
+      "nameField": "area",
+      "codeField": "code",
+      "sha256": "502c252daeaaa3f2a1f800be512b2326b0f0dd95ea7eade49b2a1b7290fbcde1",
+      "fullSha256": "0dac5853192aaff5051405dae5748b693658e4f99b8b4af8c7c83544addcd415",
+      "path": "boundaries/KEN/ADM1/502c252daeaaa3f2.geojson",
+      "fullPath": "boundaries/KEN/ADM1/0dac5853192aaff5.full.geojson",
+      "status": "FROZEN",
+      "frozenReason": "DATA_PROTECTION"
+    },
+    {
+      "iso3": "RWA",
+      "level": "ADM2",
+      "levelName": "Districts",
+      "source": "geoBoundaries gbOpen (Open Data Rwanda)",
+      "release": "9469f09",
+      "year": "2012",
+      "licence": "Creative Commons Attribution 4.0 International (CC BY 4.0)",
+      "attribution": "geoBoundaries (Runfola et al.); Open Data Rwanda",
+      "units": 30,
+      "repaired": 0,
+      "nameField": "area",
+      "codeField": "code",
+      "sha256": "f7453ca910a168414c47c50893ca641166d7c5d8bf8e4111cb6b1c0978ff6015",
+      "fullSha256": "3da4c88cc35c67acec18aaf397b1443ecfc6763883a2282924d5491c47fed5e6",
+      "path": "boundaries/RWA/ADM2/f7453ca910a16841.geojson",
+      "fullPath": "boundaries/RWA/ADM2/3da4c88cc35c67ac.full.geojson",
+      "status": "FROZEN",
+      "frozenReason": "DATA_PROTECTION"
+    }
+  ]
+}

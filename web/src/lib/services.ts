@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { BookCheck, Braces, FileCheck2, GraduationCap, HandCoins, Lightbulb, NotebookPen, PenLine, Search, Shuffle } from 'lucide-react'
+import { BookCheck, Braces, ChartColumn, FileCheck2, GraduationCap, HandCoins, Lightbulb, NotebookPen, PenLine, Search, Shuffle } from 'lucide-react'
 import type { Availability, FindingCategory, JobStatus, ReasonCode, ServiceId, Stage, WritingStyle } from './types'
 
 interface ServiceInfo {
@@ -19,7 +19,7 @@ export const INVITE_ONLY_REASON = 'Open to invited testers while PaperAid is in 
  *  them: Redraft, Ask for changes, Source check and Finish live in Paper Check; university templates
  *  and LaTeX are finishing choices. `service` is whose availability the section follows. */
 export interface SectionInfo {
-  id: 'PAPER_CHECK' | 'PROPOSALS' | 'ACADEMIC_FORMAT' | 'COURSEWORK' | 'FUNDING'
+  id: 'PAPER_CHECK' | 'PROPOSALS' | 'ACADEMIC_FORMAT' | 'COURSEWORK' | 'FUNDING' | 'DATALAB'
   service: ServiceId
   name: string
   short: string
@@ -155,6 +155,14 @@ export const SERVICES: Record<ServiceId, ServiceInfo> = {
     youGet: ['Eligibility and requirements read from the call', 'Logframe, workplan and M&E table that agree with each other', 'Every budget sum worked out for you'],
     untouched: ['Your figures: budget lines, targets and dates are yours, never invented; any PaperAid cannot know are marked for you to fill in'],
   },
+  DATALAB: {
+    name: 'Data Lab',
+    short: 'Your dataset checked, analysed and written up as an analysis report, every number calculated by code.',
+    icon: ChartColumn,
+    accepts: 'CSV or Excel (.xlsx)',
+    youGet: ['Data checks and cleaning you confirm', 'Analyses with effect sizes and confidence intervals', 'An analysis report in Word and PDF, and an Excel workbook'],
+    untouched: ['Your original file: every change makes a new version', 'Columns that may identify people: left out by default'],
+  },
   LATEX: {
     name: 'LaTeX conversion',
     short: 'Convert your paper into a clean, compilable LaTeX project.',
@@ -190,6 +198,18 @@ export const PUBLIC_SECTIONS: SectionInfo[] = [
     youGet: ['Eligibility and requirements read from the call', 'Logframe, workplan and M&E table that agree with each other', 'Every budget sum worked out for you'],
     untouched: ['Your figures: budget lines, targets and dates are yours, never invented; any PaperAid cannot know are marked for you to fill in'],
     to: '/app/start/funding',
+  },
+  {
+    id: 'DATALAB',
+    service: 'DATALAB',
+    name: 'Data Lab',
+    short: 'Upload a dataset: PaperAid checks it, runs the analyses you choose and writes up an analysis report, every number calculated by code.',
+    icon: ChartColumn,
+    accepts: 'CSV or Excel (.xlsx)',
+    youGet: ['Data checks and cleaning you confirm, each change kept as a new version', 'Analyses with effect sizes, confidence intervals and how each was calculated',
+      'An analysis report in Word and PDF, and an Excel workbook with real charts'],
+    untouched: ['Your original file: never changed', 'Columns that may identify people: left out by default, and small counts never shown'],
+    to: '/app/datalab',
   },
   SECTIONS[0],
   SECTIONS[2],

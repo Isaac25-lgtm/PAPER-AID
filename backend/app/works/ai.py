@@ -60,7 +60,8 @@ PLAN_SCHEMA = _obj(
         "notes": _STRS,
     }
 )
-REVIEW_PLAN_SCHEMA = _obj({"verdict": _enum("PASS", "REPAIR"), "rules": RULE_VERDICTS, "issues": _STRS})
+# "suggestions" (w-plan-review-v2, w-results-review-v2): what would make it stronger, never blocking.
+REVIEW_PLAN_SCHEMA = _obj({"verdict": _enum("PASS", "REPAIR"), "rules": RULE_VERDICTS, "issues": _STRS, "suggestions": _STRS})
 RESULTS_SCHEMA = _obj(
     {
         "goal": _obj({"id": _S, "statement": _S}),
@@ -76,7 +77,8 @@ RESULTS_SCHEMA = _obj(
     }
 )
 REVIEW_RESULTS_SCHEMA = _obj(
-    {"rules": RULE_VERDICTS, "classified": _list(_obj({"id": _S, "statedAs": _S, "reads": _enum("goal", "outcome", "output", "activity"), "note": _S})), "issues": _STRS}
+    {"rules": RULE_VERDICTS, "classified": _list(_obj({"id": _S, "statedAs": _S, "reads": _enum("goal", "outcome", "output", "activity"), "note": _S})), "issues": _STRS,
+     "suggestions": _STRS}
 )
 INTEGRITY_SCHEMA = _obj({"results": _list(_obj({"key": _S, "meaningKept": {"type": "boolean"}, "invented": _STRS, "lockedChanged": _STRS, "note": _S}))})
 EVALUATE_SCHEMA = _obj(
@@ -130,6 +132,7 @@ class PlanReview(BaseModel):
     verdict: Literal["PASS", "REPAIR"]
     rules: list[RuleVerdict]
     issues: list[str]
+    suggestions: list[str] = []
 
 
 class ResultsAnswer(BaseModel):
@@ -147,6 +150,7 @@ class ResultsReview(BaseModel):
     rules: list[RuleVerdict]
     classified: list[Classified]
     issues: list[str]
+    suggestions: list[str] = []
 
 
 class Integrity(BaseModel):

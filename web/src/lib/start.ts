@@ -1,14 +1,14 @@
 import type { LucideIcon } from 'lucide-react'
-import { FileCheck2, FilePen, HandCoins, Lightbulb, NotebookPen, Search } from 'lucide-react'
+import { ChartColumn, FileCheck2, FilePen, HandCoins, Lightbulb, NotebookPen, Search } from 'lucide-react'
 import type { PublicConfig, ServiceId } from './types'
 
 /** What a student can start, in the order PaperAid offers it (owner decision 2026-10-01: coursework,
  *  the flagship, first). Writing services start with one Start (`/app/start/...`); Paper Check and
  *  Academic Formatting keep their own upload pages. Names say what PaperAid does, never how. */
 export interface StartChoice {
-  id: StartType | 'PAPER_CHECK' | 'ACADEMIC_FORMAT'
+  id: StartType | 'PAPER_CHECK' | 'ACADEMIC_FORMAT' | 'DATALAB'
   service: ServiceId // whose availability applies
-  group: 'Coursework' | 'Research proposals' | 'Funding' | 'Your own paper'
+  group: 'Coursework' | 'Research proposals' | 'Funding' | 'Data analysis' | 'Your own paper'
   name: string
   short: string
   benefits: string[]
@@ -46,6 +46,11 @@ export const START_CHOICES: StartChoice[] = [
     id: 'funding', service: 'FUNDING_PROPOSAL', group: 'Funding', name: 'Funding proposal', icon: HandCoins, to: '/app/start/funding', action: 'Write my proposal',
     short: 'A full proposal with logframe, workplan and budget tables.',
     benefits: ['Tables built from your figures', 'Every budget sum worked out for you'],
+  },
+  {
+    id: 'DATALAB', service: 'DATALAB', group: 'Data analysis', name: 'Data Lab', icon: ChartColumn, to: '/app/datalab', action: 'Analyse my data',
+    short: 'Your dataset checked, analysed and written up, every number calculated by code.',
+    benefits: ['Cleaning you confirm, nothing changed silently', 'An analysis report and an Excel workbook'],
   },
   {
     id: 'PAPER_CHECK', service: 'AI_CHECK', group: 'Your own paper', name: 'Paper Check', icon: Search, to: '/app/new?service=PAPER_CHECK', action: 'Check my paper',

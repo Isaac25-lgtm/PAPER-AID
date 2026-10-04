@@ -593,3 +593,60 @@ def test_a_resumed_proposal_continues_once_and_reserves_nothing(client):
     store = get_runtime().store
     owner = store.get_project(project["id"]).owner_uid
     assert store.get_wallet(owner) is None or store.get_wallet(owner).reservations == {}
+
+
+# --- resume from the last good step (Codex roadmap item 1, 2026-10-03) ------------------------------------------
+
+
+def test_start_after_an_outage_resumes_the_stopped_draft_where_it_stopped(works_client, monkeypatch):
+    """A draft that stopped on a provider outage is resumed, not restarted: the same job, its finished
+    stages kept (the plan and research are not redone), and the document is delivered."""
+    from app.ai.providers import UNAVAILABLE
+    from app.core.errors import RetryableStageError
+    from app.runtime import get_runtime
+
+    client = works_client
+    monkeypatch.setattr(get_runtime().settings, "stage_max_attempts", 1)
+    outage = {"on": True}
+    real = client.models.overrides.get("w_draft")
+
+    def draft(payload):
+        if outage["on"]:
+            raise RetryableStageError("PROVIDER_UNAVAILABLE", UNAVAILABLE, "google 503")
+        from tests import fake_works
+
+        return real(payload) if real else fake_works.answer("w_draft", payload)
+
+    client.models.overrides["w_draft"] = draft
+    work = _coursework(client)
+    client.post(f"/api/works/{work['id']}/start", headers=H)
+    work = _settled(client, f"/api/works/{work['id']}", _done)
+    assert work["autoFailure"] and not work["documents"]
+    store = get_runtime().store
+    stopped = store.get(work["jobs"][-1])
+    assert stopped.selection.work == "DRAFT" and stopped.status == "FAILED" and stopped.failure.retryable
+    finished_before = list(stopped.completed_stages)
+    plans_before = client.models.tasks.count("w_plan")
+    outage["on"] = False
+    assert client.post(f"/api/works/{work['id']}/start", headers=H).status_code == 200
+    work = _settled(client, f"/api/works/{work['id']}", _done)
+    assert work["documents"] and not work["autoFailure"]
+    assert work["jobs"][-1] == stopped.id  # the same step, resumed
+    resumed = store.get(stopped.id)
+    assert resumed.status == "COMPLETED" and any(a.action == "Resumed by the student" for a in resumed.admin_actions)
+    assert all(s in resumed.completed_stages for s in finished_before)
+    assert client.models.tasks.count("w_plan") == plans_before  # the plan was not made again
+
+
+def test_a_failure_that_is_not_temporary_starts_afresh(works_client):
+    client = works_client
+    client.models.overrides["w_plan_review"] = lambda payload: {"verdict": "REPAIR", "rules": [{"rule": r["rule"], "status": "PASS", "note": "Met."} for r in payload.get("rules", [])],
+                                                                "issues": ["The plan does not answer the question."], "suggestions": []}
+    work = _coursework(client)
+    client.post(f"/api/works/{work['id']}/start", headers=H)
+    work = _settled(client, f"/api/works/{work['id']}", _done)
+    first = work["jobs"][-1]
+    client.models.overrides.pop("w_plan_review")
+    client.post(f"/api/works/{work['id']}/start", headers=H)
+    work = _settled(client, f"/api/works/{work['id']}", _done)
+    assert work["documents"] and work["jobs"][-1] != first and len(work["jobs"]) >= 3  # a new plan and its draft, never the unapproved plan resumed

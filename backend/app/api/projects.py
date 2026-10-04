@@ -88,6 +88,17 @@ def get(project_id: str, user: User = Depends(current_user), rt: Runtime = Depen
     return projects.get(rt, user, project_id)
 
 
+class GuideAnswer(Camel):
+    id: str = Field(max_length=80)
+    answer: Literal["KEEP", "STANDARD"]
+
+
+@router.post("/{project_id}/guide-answers", response_model=ProjectView)
+def answer_guide(project_id: str, body: GuideAnswer, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> ProjectView:
+    """Where the student's guide departs a lot from the standard guide: keep it, or take the standard version."""
+    return projects.answer_guide(rt, user, project_id, body.id, body.answer)
+
+
 @router.post("/{project_id}/details", response_model=ProjectView)
 def details(project_id: str, body: Details, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> ProjectView:
     return projects.update_details(rt, user, project_id, body.inputs, body.title_page, body.citation)

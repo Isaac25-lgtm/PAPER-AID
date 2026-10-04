@@ -10,7 +10,20 @@ from app.api.public import student_json
 from app.core.auth import current_user, optional_user, require_admin
 from app.core.errors import AppError, Forbidden
 from app.jobs import service, workspace
-from app.jobs.models import AdminJob, AdminSummary, Camel, FileMeta, ImageMeta, JobView, Page, QuoteResponse, ServiceSelection, WalletSummary, WalletView
+from app.jobs.models import (
+    AdminJob,
+    AdminSummary,
+    Camel,
+    FileMeta,
+    ImageMeta,
+    JobView,
+    Page,
+    QuoteResponse,
+    ServiceSelection,
+    Wallet,
+    WalletSummary,
+    WalletView,
+)
 from app.jobs.pipeline import run_step
 from app.jobs.service import User
 from app.runtime import Runtime, get_runtime
@@ -38,6 +51,64 @@ def config(rt: Runtime = Depends(get_runtime), user: User | None = Depends(optio
 @api.get("/me")
 def me(user: User = Depends(current_user)) -> dict:
     return {"uid": user.uid, "email": user.email, "isAdmin": user.is_admin}
+
+
+class NotificationChoice(Camel):
+    notify_email: bool | None = None
+    notify_sms: bool | None = None
+    phone: str | None = Field(default=None, max_length=20)
+
+
+def _notifications(rt: Runtime, user: User) -> dict:
+    from app import notify
+
+    wallet = rt.store.get_wallet(user.uid)
+    return {"available": notify.channels(rt), "notifyEmail": wallet.notify_email if wallet else True, "notifySms": wallet.notify_sms if wallet else False,
+            "phone": wallet.phone if wallet else ""}
+
+
+class TermsAcceptance(Camel):
+    version: str = Field(max_length=40)
+
+
+@api.post("/me/terms", status_code=204)
+def accept_terms(body: TermsAcceptance, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> Response:
+    """The person accepted the current terms (at sign-up, or when asked again): recorded with the time."""
+    service.accept_terms(rt, user, body.version)
+    return Response(status_code=204)
+
+
+@api.get("/me/notifications")
+def get_notifications(user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> dict:
+    """"Your work is ready" messages (owner roadmap 2026-10-03): which channels exist and the person's choices."""
+    return _notifications(rt, user)
+
+
+@api.post("/me/notifications")
+def set_notifications(body: NotificationChoice, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> dict:
+    import re
+
+    phone = None if body.phone is None else re.sub(r"[\s-]", "", body.phone)
+    if phone and not re.fullmatch(r"\+\d{9,15}", phone):
+        raise AppError("Enter the phone number with its country code, for example +256 7XX XXX XXX.", code="INVALID_PHONE")
+    if body.notify_sms and not (phone or (rt.store.get_wallet(user.uid) or Wallet(uid=user.uid, email=user.email)).phone):
+        raise AppError("Add a phone number for text messages first.", code="NO_PHONE")
+
+    def apply(w: Wallet) -> Wallet:
+        if w.closing:
+            return w
+        if body.notify_email is not None:
+            w.notify_email = body.notify_email
+        if phone is not None:
+            w.phone = phone
+            if not phone:
+                w.notify_sms = False  # no number, no texts
+        if body.notify_sms is not None:
+            w.notify_sms = body.notify_sms and bool(w.phone)
+        return w
+
+    rt.store.update_wallet(user.uid, user.email, apply)
+    return _notifications(rt, user)
 
 
 @api.delete("/me", status_code=204)
@@ -202,6 +273,14 @@ def admin_summary(_: User = Depends(require_admin), rt: Runtime = Depends(get_ru
     return service.admin_summary(rt)
 
 
+@api.get("/admin/reliability")
+def admin_reliability(days: int = Query(30, ge=1, le=365), _: User = Depends(require_admin), rt: Runtime = Depends(get_runtime)) -> Response:
+    """Completion, stops, time and money per service (owner roadmap 2026-10-03): numbers and codes only."""
+    from app.jobs import reliability
+
+    return JSONResponse(reliability.report(rt, days).model_dump(mode="json", by_alias=True), headers={"Cache-Control": "no-store"})
+
+
 @api.get("/admin/jobs", response_model=Page[AdminJob])
 def admin_jobs(
     status: str | None = None,
@@ -285,7 +364,17 @@ def task_run_step(job_id: str = Body(..., embed=True, alias="jobId"), rt: Runtim
 
 @tasks.post("/reconcile", dependencies=[Depends(_require_task_caller)])
 def task_reconcile(rt: Runtime = Depends(get_runtime)) -> dict:
-    return {"requeued": service.reconcile(rt)}
+    from app import notify
+
+    return {"requeued": service.reconcile(rt), "messages": notify.sweep(rt)}
+
+
+@tasks.post("/canary", dependencies=[Depends(_require_task_caller)])
+def task_canary(rerun: bool = Query(False), rt: Runtime = Depends(get_runtime)) -> dict:
+    """The scheduler's daily call; `?rerun=true` is a deliberate extra run (never a scheduler retry)."""
+    from app.jobs import canary
+
+    return canary.run(rt, rerun)
 
 
 @tasks.post("/cleanup", dependencies=[Depends(_require_task_caller)])
@@ -294,6 +383,8 @@ def task_cleanup(rt: Runtime = Depends(get_runtime)) -> dict:
         "expired": service.cleanup_expired(rt),
         "projectsExpired": service.cleanup_expired_projects(rt),
         "worksExpired": service.cleanup_expired_works(rt),
+        "datalabExpired": service.cleanup_expired_datalab(rt),
+        "datalabOrphans": service.sweep_datalab_files(rt),
         "projectsMigrated": service.migrate_legacy_project_files(rt),
         "ledgersBackfilled": service.backfill_ledgers(rt),
     }

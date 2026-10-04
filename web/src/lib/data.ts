@@ -17,8 +17,16 @@ import type {
   Wallet,
   WalletSummary,
 } from './types'
+import type { AnalysisResult, AnalysisSpec, DataPreview, DataProject, IdentifierRules, Places, ReportDocument, UploadChoice, VariableKind } from './datalab-types'
 import type { ChapterView, CitationStyle, Comparison, EvidenceItem, FeedbackStatus, Project, ProposalInputs, ProposalPlan, Rulebook, SampleSize, StepId, StepQuote, TitlePage } from './proposal-types'
 import type { Budget, ResultsModel, SourceRole, Work, WorkCitation, WorkDocumentView, WorkInputs, WorkKind, WorkPlan, WorkStep, WorkStepQuote } from './work-types'
+
+export interface Notifications {
+  available: { email: boolean; sms: boolean }
+  notifyEmail: boolean
+  notifySms: boolean
+  phone: string
+}
 
 export interface JobQuery {
   cursor?: string | null
@@ -32,6 +40,7 @@ export class DataError extends Error {
   constructor(
     message: string,
     readonly status?: number,
+    readonly code?: string,
   ) {
     super(message)
   }
@@ -63,6 +72,11 @@ export interface DataSource {
   deleteJob(jobId: string): Promise<void>
   download(jobId: string, outputId: string, fileName: string): Promise<void>
   deleteAccount(): Promise<void>
+  /** The person accepted these terms (at sign-up, or when asked again). */
+  acceptTerms(version: string): Promise<void>
+  /** "Your work is ready" messages: which channels exist and the account's choices. */
+  notifications(): Promise<Notifications>
+  setNotifications(choice: Partial<Omit<Notifications, 'available'>>): Promise<Notifications>
   /** The review workspace. */
   workspace: {
     document(jobId: string): Promise<JobDocument>
@@ -84,6 +98,8 @@ export interface DataSource {
     /** A concept-note project becomes a full proposal (nothing starts by itself). */
     continueToFull(id: string): Promise<Project>
     updateDetails(id: string, inputs: ProposalInputs, titlePage: TitlePage, citation: CitationStyle): Promise<Project>
+    /** Keep the guide's version of a point where it departs from the standard guide, or take the standard one. */
+    answerGuide(id: string, departureId: string, answer: 'KEEP' | 'STANDARD'): Promise<Project>
     /** `baseVersion` is the plan version the edit started from; a stale edit is refused (409). */
     savePlan(id: string, plan: ProposalPlan, baseVersion: number): Promise<Project>
     approvePlan(id: string, baseVersion: number, acknowledge?: string[]): Promise<Project>
@@ -156,8 +172,45 @@ export interface DataSource {
     downloadPdf(id: string, fileName: string, version?: number): Promise<void>
     remove(id: string): Promise<void>
   }
+  /** Data Lab (owner decision 2026-10-03): datasets analysed by code, written up as an analysis report. */
+  datalab: {
+    list(): Promise<DataProject[]>
+    get(id: string): Promise<DataProject | null>
+    create(title: string, purpose: string): Promise<DataProject>
+    update(id: string, change: { title?: string; purpose?: string; alpha?: number; threshold?: number }): Promise<DataProject>
+    upload(id: string, file: File, choice: UploadChoice): Promise<DataProject>
+    countries(): Promise<{ iso3: string; name: string; available: boolean }[]>
+    identifierRules(): Promise<IdentifierRules>
+    chooseSheet(id: string, name: string): Promise<DataProject>
+    preview(id: string, offset?: number): Promise<DataPreview>
+    editVariable(id: string, name: string, edit: { label?: string; kind?: VariableKind; excluded?: boolean; survey?: 'DESIGN' | 'NOT_DESIGN' }): Promise<DataProject>
+    decide(id: string, stepId: string, accept: boolean): Promise<DataProject>
+    undo(id: string): Promise<DataProject>
+    /** Checked at once, run by the worker: follow the project's `op` to the result. */
+    analyse(id: string, spec: AnalysisSpec): Promise<DataProject>
+    setObjective(id: string, analysisId: string, objective: number | null): Promise<DataProject>
+    /** Uganda's regions and sub-regions, for the map step. */
+    places(): Promise<Places>
+    analysis(id: string, analysisId: string): Promise<AnalysisResult>
+    chartUrl(id: string, analysisId: string): Promise<string>
+    removeAnalysis(id: string, analysisId: string): Promise<DataProject>
+    /** `missingOk`: Chapter Four objectives the researcher confirmed have no analysis. */
+    startReport(id: string, analyses?: string[], missingOk?: number[]): Promise<void>
+    report(id: string, version?: number): Promise<ReportDocument>
+    downloadReport(id: string, fileName: string, version?: number): Promise<void>
+    downloadReportPdf(id: string, fileName: string, version?: number): Promise<void>
+    downloadWorkbook(id: string, fileName: string): Promise<void>
+    /** The researcher's own cleaned data (individual records): made by the worker, then downloaded. */
+    makeCleaned(id: string): Promise<DataProject>
+    downloadCleaned(id: string, fileName: string): Promise<void>
+    remove(id: string): Promise<void>
+    /** Chapter Four: the Data Lab project for a research proposal's data (created on first use). */
+    forProposal(proposalId: string): Promise<DataProject>
+  }
   admin: {
     summary(): Promise<AdminSummary>
+    /** Reliability by service (owner roadmap 2026-10-03): numbers and codes only. */
+    reliability(days: number): Promise<import('../features/admin/reliability-page').Reliability>
     listJobs(query: JobQuery): Promise<Page<AdminJob>>
     getJob(jobId: string): Promise<AdminJob | null>
     retryJob(jobId: string): Promise<void>

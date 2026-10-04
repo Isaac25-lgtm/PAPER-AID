@@ -1,0 +1,9 @@
+{
+  "note": "Released map layers never change: a new build writes a new file name (tests/test_datalab_engine.py checks these hashes).",
+  "files": {
+    "uganda_districts_2020.geojson": "dcf63eb9ab2b33c0452718f5396dd9da557396794f8bf4de166c83d7a29b5710",
+    "uganda_subcounties_2021.geojson": "b7c56e0e8cfdfc0b79990095eb85f49c178e6b46abb5baedf26d875b1d8d2907",
+    "uganda_water_dcw.geojson": "bdd0ea5ace0d218702f751b9d1ca9831aa4c3793436a15d14f594317c04b69dd",
+    "uganda_subregions.json": "5eed811b9d76a401e5fc11348dc08ba746dbbf77a2eb981b6843fd8fca53fc68"
+  }
+}

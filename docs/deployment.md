@@ -110,19 +110,25 @@ Downloads need no bucket CORS setup. The API returns a 10-minute signed link, an
 
 ## 6. Scheduled maintenance
 
-Two scheduled jobs call the worker:
+Three scheduled jobs call the worker:
 
 - **reconcile**, every 5 minutes: re-queues any job that lost its task.
 - **cleanup**, daily: deletes files past the retention period.
+- **canary**, daily: runs a writing check on a short fixed paper from a dedicated account and alerts when the previous run did not finish cleanly. It does nothing until `CANARY_ENABLED=true`, `CANARY_UID` and `CANARY_EMAIL` (an ordinary account with credits, listed as a tester while the tester list is in use) are set; `CANARY_BUDGET_USD` caps each run and `ALERT_EMAIL` receives alerts when SendGrid is set up.
 
 ```bash
-for JOB in "reconcile:*/5 * * * *" "cleanup:0 3 * * *"; do
+for JOB in "reconcile:*/5 * * * *" "cleanup:0 3 * * *" "canary:0 6 * * *"; do
   NAME=${JOB%%:*}; CRON=${JOB#*:}
   gcloud scheduler jobs create http paperaid-$NAME --location europe-west1 --schedule "$CRON" \
     --uri "$WORKER_URL/tasks/$NAME" --http-method POST \
     --oidc-service-account-email paperaid-tasks@PROJECT.iam.gserviceaccount.com --oidc-token-audience "$WORKER_URL"
 done
 ```
+
+Messages to people ("your work is ready", "it stopped") stay off until their keys are in Secret Manager and on both services (the API reads them to offer the choices, the worker sends):
+`SENDGRID_API_KEY` with `NOTIFY_FROM` (a sender SendGrid has verified) for email, `AFRICASTALKING_USERNAME` with
+`AFRICASTALKING_API_KEY` (and `SMS_SENDER` once a sender ID is approved) for SMS, and `APP_URL` for the links. Without them
+the settings page offers no message choices.
 
 ## 7. Firebase: sign-in, App Check, website
 
@@ -251,4 +257,5 @@ still queued then fail with a refund; every record stays readable; nothing else 
 - API 5xx rate above 2% for 5 minutes.
 - Log entries with `message="stage failed"` and `willRetry=false`, more than 3 in 15 minutes.
 - Cloud Tasks queue depth above 20 for 15 minutes.
+- Any log entry with `message="alert"` (the daily canary: the last run failed, finished with warnings, is stuck, or could not start).
 - A billing budget alert on the project, and monthly spend limits set in the Anthropic and OpenAI consoles.

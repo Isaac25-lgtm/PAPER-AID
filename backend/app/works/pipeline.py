@@ -414,10 +414,11 @@ def _plan_decision(review: "PlanReview | None", plan_rules: list[dict[str, Any]]
         return ReviewDecision(outcome="NOT_REVIEWED", reason="REVIEW_UNAVAILABLE", objections=[NOT_COMPLETE.format(", ".join(missing))])
     failed = [f"{r.rule}: {r.note}" for r in review.rules if r.status == "FAIL"]
     objections = [*review.issues, *failed, *problems]
+    suggestions = list(dict.fromkeys(review.suggestions))[:20]
     if review.verdict == "PASS" and not objections:
-        return ReviewDecision(outcome="APPROVED")
+        return ReviewDecision(outcome="APPROVED", suggestions=suggestions)
     return ReviewDecision(outcome="OBJECTIONS", reason="CODE_RULE" if problems and not review.issues and not failed else "REVIEW_OBJECTION",
-                          objections=list(dict.fromkeys(objections or ["Not approved, without a stated reason."]))[:20])
+                          objections=list(dict.fromkeys(objections or ["Not approved, without a stated reason."]))[:20], suggestions=suggestions)
 
 
 def _final_plan(runner: WorkRunner, payload: dict[str, Any], plan: WorkPlan, skeleton: list[PlanSection], spec: ResolvedSpec,
@@ -428,7 +429,10 @@ def _final_plan(runner: WorkRunner, payload: dict[str, Any], plan: WorkPlan, ske
     decision = ReviewDecision(outcome="NOT_REVIEWED", reason="REVIEW_UNAVAILABLE")
     for round_ in range(REVIEW_REPAIRS + 1):
         problems = _plan_problems(plan, spec)
-        review = runner.final_review_plan({**payload, "plan": plan.model_dump(by_alias=True), "rules": plan_rules, "paperaidChecks": problems})
+        # After a repair the reviewer first checks its earlier blocking issues (w-plan-review-v2), so the
+        # review settles instead of starting over each round (live funding runs 2026-10-03).
+        earlier = {"previousIssues": decision.objections} if round_ else {}
+        review = runner.final_review_plan({**payload, "plan": plan.model_dump(by_alias=True), "rules": plan_rules, "paperaidChecks": problems, **earlier})
         decision = _plan_decision(review, plan_rules, problems, "SPEND_CAP" if runner.budget_reached else "REVIEW_UNAVAILABLE")
         if decision.outcome != "OBJECTIONS" or round_ == REVIEW_REPAIRS or runner.budget_reached:
             break  # approved, or not reviewed (a repair cannot supply a missing verdict), or out of rounds
@@ -471,9 +475,10 @@ def _results_decision(checked: "ResultsReview | None", model: ResultsModel, rule
     failed = [f"{r.rule}: {r.note}" for r in checked.rules if r.status == "FAIL"]
     misread = [f"{i} is a {level} but reads as a {seen[i].reads}: {seen[i].note}" for i, level in levels.items() if seen[i].reads != level]
     objections = [*checked.issues, *failed, *misread, *problems]
+    suggestions = list(dict.fromkeys(checked.suggestions))[:20]
     if not objections:
-        return ReviewDecision(outcome="APPROVED")
-    return ReviewDecision(outcome="OBJECTIONS", reason="CODE_RULE" if problems and len(problems) == len(objections) else "REVIEW_OBJECTION",
+        return ReviewDecision(outcome="APPROVED", suggestions=suggestions)
+    return ReviewDecision(outcome="OBJECTIONS", suggestions=suggestions, reason="CODE_RULE" if problems and len(problems) == len(objections) else "REVIEW_OBJECTION",
                           objections=list(dict.fromkeys(objections))[:20])
 
 
@@ -484,7 +489,8 @@ def _final_results(runner: WorkRunner, payload: dict[str, Any], model: ResultsMo
     decision = ReviewDecision(outcome="NOT_REVIEWED", reason="REVIEW_UNAVAILABLE")
     for round_ in range(REVIEW_REPAIRS + 1):
         problems = _results_problems(model, lines, spec)
-        checked = runner.final_review_results({**payload, "results": model.model_dump(by_alias=True), "rules": rules})
+        earlier = {"previousIssues": decision.objections} if round_ else {}  # see _final_plan
+        checked = runner.final_review_results({**payload, "results": model.model_dump(by_alias=True), "rules": rules, **earlier})
         decision = _results_decision(checked, model, rules, "SPEND_CAP" if runner.budget_reached else "REVIEW_UNAVAILABLE", problems)
         if decision.outcome != "OBJECTIONS" or round_ == REVIEW_REPAIRS or runner.budget_reached:
             break

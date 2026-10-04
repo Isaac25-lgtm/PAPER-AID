@@ -124,6 +124,26 @@ class FakeModels:
         task = {"w_extract": "p_extract", "w_search": "p_search", "w_verify": "verify"}.get(task, task)
         if task.startswith("w_"):
             return fake_works.answer(task, payload)
+        if task == "d_report":  # a narrative that uses only the tokens it was given, with no digits of its own
+            findings = []
+            for item in payload["analyses"]:
+                token = item["tokens"][0]["token"] if item["tokens"] else ""
+                findings.append({"id": item["id"], "paragraphs": [f"This analysis gave {token}, and the table below shows the full result with its interval."
+                                                                  if token else "The table below shows the full result of this analysis with its notes."]})
+            general = {t["token"].split(":")[1].rstrip("⟧"): t["token"] for t in payload["generalTokens"]}
+            return {"summary": [f"PaperAid analysed {general['records']} records and reports {general['analyses']} analyses of the questions asked."],
+                    "findings": findings, "keyFindings": ["The tables give each result with its interval and the records it used."],
+                    "limitations": ["The data are observational, so the analyses can show associations between the variables only."],
+                    "conclusions": ["The findings describe this dataset and the records it holds, and go no further."]}
+        if task == "d_chapter4":
+            findings = [{"id": item["id"], "paragraphs": [f"As the table below shows, the result for this question was {item['tokens'][0]['token']} overall."
+                                                          if item["tokens"] else "The table below shows the result for this question and its notes."]}
+                        for item in payload["analyses"]]
+            return {"introduction": ["This chapter presents the results of the study, organised by its specific objectives."], "findings": findings,
+                    "summary": ["The results are summarised here by objective, ready for the discussion in Chapter Five."]}
+        if task == "d_report_review":
+            return {"verdict": "PASS", "rules": [{"rule": r, "status": "PASS", "note": "Met."} for r in payload.get("rules", ["R1", "R2", "R3", "R4", "R5", "R6"])],
+                    "issues": [], "suggestions": []}
         if task in ("p_plan_review", "p_plan_review_peer", "p_profile_review", "p_profile_review_peer"):
             return {"approved": True, "issues": []}
         if task == "analyse":  # confirms the signals and explicitly reviews every passage

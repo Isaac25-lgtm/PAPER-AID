@@ -3,6 +3,7 @@ import { clsx } from 'clsx'
 import { ChevronDown, FolderOpen, LayoutDashboard, LogOut, Menu as MenuIcon, Plus, Settings, ShieldCheck, Wallet } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router'
+import { TermsDialog } from '../../features/account/terms'
 import { useAuth } from '../../features/auth/auth-context'
 import { useData } from '../../lib/data'
 import { formatTokenNumber } from '../../lib/format'
@@ -184,6 +185,7 @@ export function AppLayout() {
       <main id="main" className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6 sm:py-8">
         <Outlet />
       </main>
+      <TermsDialog />
     </div>
   )
 }

@@ -1,7 +1,8 @@
 // DataSource backed by the PaperAid API. Identity comes from `getAuthHeader`, which the auth layer
 // supplies (a Firebase ID token in production, a local developer identity when running locally).
-import { DataError, type DataSource, type JobQuery } from './data'
+import { DataError, type DataSource, type JobQuery, type Notifications } from './data'
 import type { ChapterView, Comparison, EvidenceItem, Project, Rulebook, StepQuote } from './proposal-types'
+import type { AnalysisResult, DataPreview, DataProject, IdentifierRules, Places, ReportDocument } from './datalab-types'
 import type { Work, WorkDocumentView, WorkStepQuote } from './work-types'
 import type { AdminJob, AdminSummary, FileMeta, ImageMeta, Job, JobDocument, LedgerEntry, Page, PublicConfig, QuoteResponse, Wallet, WalletSummary } from './types'
 
@@ -50,21 +51,27 @@ export function createApiSource({ config, getAuthHeaders }: Options): DataSource
     }
     if (res.status === 204) return undefined as T
     const body = await res.json().catch(() => null)
-    if (!res.ok) throw new DataError((body as { message?: string } | null)?.message ?? 'Something went wrong. Please try again.', res.status)
+    if (!res.ok) {
+      const { message, code } = (body ?? {}) as { message?: string; code?: string }
+      if (code === 'TERMS_REQUIRED') window.dispatchEvent(new CustomEvent('paperaid:terms')) // the terms dialog asks, then the person tries again
+      throw new DataError(message ?? 'Something went wrong. Please try again.', res.status, code)
+    }
     return body as T
   }
 
   /** A Word file built on request: fetched with the student's credentials and saved by the browser. */
+  /** `fileName` without an extension takes it from the file's type (the cleaned data is Excel, or CSV when large). */
   async function saveFile(path: string, fileName: string): Promise<void> {
     const res = await fetch(path, { headers: await getAuthHeaders() })
     if (!res.ok) {
       const body = (await res.json().catch(() => null)) as { message?: string } | null
       throw new DataError(body?.message ?? 'The document could not be prepared.', res.status)
     }
+    const typed = /\.[a-z0-9]{2,4}$/i.test(fileName) ? fileName : fileName + ((res.headers.get('content-type') ?? '').includes('csv') ? '.csv' : '.xlsx')
     const url = URL.createObjectURL(await res.blob())
     const link = document.createElement('a')
     link.href = url
-    link.download = fileName
+    link.download = typed
     document.body.appendChild(link)
     link.click()
     link.remove()
@@ -180,6 +187,9 @@ export function createApiSource({ config, getAuthHeaders }: Options): DataSource
     deleteJob: (jobId) => request<void>(`/api/jobs/${jobId}`, { method: 'DELETE' }),
 
     deleteAccount: () => request<void>('/api/me', { method: 'DELETE' }),
+    acceptTerms: (version) => request<void>('/api/me/terms', { method: 'POST', body: JSON.stringify({ version }) }),
+    notifications: () => request<Notifications>('/api/me/notifications'),
+    setNotifications: (choice) => request<Notifications>('/api/me/notifications', { method: 'POST', body: JSON.stringify(choice) }),
 
     async download(jobId, outputId, fileName) {
       const res = await fetch(`/api/jobs/${jobId}/outputs/${outputId}`, { headers: await getAuthHeaders() })
@@ -222,6 +232,8 @@ export function createApiSource({ config, getAuthHeaders }: Options): DataSource
         }),
       create: (inputs, titlePage, citation, goal = 'FULL') => request<Project>('/api/projects', { method: 'POST', body: JSON.stringify({ inputs, titlePage, citation, goal }) }),
       continueToFull: (id) => request<Project>(`/api/projects/${id}/continue`, { method: 'POST' }),
+      answerGuide: (id, departureId, answer) =>
+        request<Project>(`/api/projects/${id}/guide-answers`, { method: 'POST', body: JSON.stringify({ id: departureId, answer }) }),
       updateDetails: (id, inputs, titlePage, citation) =>
         request<Project>(`/api/projects/${id}/details`, { method: 'POST', body: JSON.stringify({ inputs, titlePage, citation }) }),
       savePlan: (id, plan, baseVersion) => request<Project>(`/api/projects/${id}/plan`, { method: 'POST', body: JSON.stringify({ plan, baseVersion }) }),
@@ -311,8 +323,54 @@ export function createApiSource({ config, getAuthHeaders }: Options): DataSource
       remove: (id) => request<void>(`/api/works/${id}`, { method: 'DELETE' }),
     },
 
+    datalab: {
+      list: () => request<DataProject[]>('/api/datalab'),
+      get: (id) =>
+        request<DataProject>(`/api/datalab/${encodeURIComponent(id)}`).catch((err: unknown) => {
+          if (err instanceof DataError && err.status === 404) return null
+          throw err
+        }),
+      create: (title, purpose) => request<DataProject>('/api/datalab', { method: 'POST', body: JSON.stringify({ title, purpose }) }),
+      update: (id, change) => request<DataProject>(`/api/datalab/${id}/details`, { method: 'POST', body: JSON.stringify(change) }),
+      upload(id, file, choice) {
+        const form = new FormData()
+        form.append('file', file)
+        form.append('country', choice.country)
+        form.append('consent', String(choice.consent))
+        form.append('removed', JSON.stringify(choice.removed))
+        return request<DataProject>(`/api/datalab/${id}/dataset`, { method: 'POST', body: form })
+      },
+      countries: () => request<{ iso3: string; name: string; available: boolean }[]>('/api/datalab/countries'),
+      identifierRules: () => request<IdentifierRules>('/api/datalab/identifier-rules'),
+      chooseSheet: (id, name) => request<DataProject>(`/api/datalab/${id}/sheet`, { method: 'POST', body: JSON.stringify({ name }) }),
+      preview: (id, offset = 0) => request<DataPreview>(`/api/datalab/${id}/preview${query({ offset: offset ? String(offset) : null })}`),
+      editVariable: (id, name, edit) =>
+        request<DataProject>(`/api/datalab/${id}/variables/${encodeURIComponent(name)}`, { method: 'POST', body: JSON.stringify(edit) }),
+      decide: (id, stepId, accept) => request<DataProject>(`/api/datalab/${id}/cleaning/${stepId}`, { method: 'POST', body: JSON.stringify({ accept }) }),
+      undo: (id) => request<DataProject>(`/api/datalab/${id}/undo`, { method: 'POST' }),
+      analyse: (id, spec) => request<DataProject>(`/api/datalab/${id}/analyses`, { method: 'POST', body: JSON.stringify(spec) }),
+      places: () => request<Places>('/api/datalab/places'),
+      setObjective: (id, analysisId, objective) =>
+        request<DataProject>(`/api/datalab/${id}/analyses/${analysisId}/objective`, { method: 'POST', body: JSON.stringify({ objective }) }),
+      analysis: (id, analysisId) => request<AnalysisResult>(`/api/datalab/${id}/analyses/${analysisId}`),
+      chartUrl: async (id, analysisId) => URL.createObjectURL(await blob(`/api/datalab/${id}/analyses/${analysisId}/chart.png`)),
+      removeAnalysis: (id, analysisId) => request<DataProject>(`/api/datalab/${id}/analyses/${analysisId}`, { method: 'DELETE' }),
+      startReport: async (id, analyses = [], missingOk = []) => {
+        await request<Job>(`/api/datalab/${id}/report`, { method: 'POST', body: JSON.stringify({ analyses, missingOk }) })
+      },
+      report: (id, version) => request<ReportDocument>(`/api/datalab/${id}/report${query({ version: version ? String(version) : null })}`),
+      downloadReport: (id, fileName, version) => saveFile(`/api/datalab/${id}/report/export${query({ version: version ? String(version) : null })}`, fileName),
+      downloadReportPdf: (id, fileName, version) => saveFile(`/api/datalab/${id}/report/export.pdf${query({ version: version ? String(version) : null })}`, fileName),
+      downloadWorkbook: (id, fileName) => saveFile(`/api/datalab/${id}/workbook`, fileName),
+      makeCleaned: (id) => request<DataProject>(`/api/datalab/${id}/cleaned`, { method: 'POST' }),
+      downloadCleaned: (id, fileName) => saveFile(`/api/datalab/${id}/cleaned`, fileName),
+      remove: (id) => request<void>(`/api/datalab/${id}`, { method: 'DELETE' }),
+      forProposal: (proposalId) => request<DataProject>(`/api/datalab/for-proposal/${proposalId}`, { method: 'POST' }),
+    },
+
     admin: {
       summary: () => request<AdminSummary>('/api/admin/summary'),
+      reliability: (days) => request<import('../features/admin/reliability-page').Reliability>(`/api/admin/reliability?days=${days}`),
       listJobs: (q) =>
         request<Page<AdminJob>>(`/api/admin/jobs${query({ status: q.status, service: q.service, search: q.search, cursor: q.cursor, limit: q.limit })}`),
       getJob: (jobId) => request<AdminJob>(`/api/admin/jobs/${jobId}`).catch(() => null),

@@ -87,7 +87,14 @@ def grant(email: str, amount: int) -> None:
     from app.runtime import get_runtime
 
     uid = "u_" + hashlib.sha256(email.encode()).hexdigest()[:20]
-    get_runtime().store.update_wallet(uid, email, lambda w: credits.top_up(w, amount, "Test credits"))
+    rt = get_runtime()
+
+    def top_up(w):
+        w = credits.top_up(w, amount, "Test credits")
+        w.terms_version = rt.settings.terms_version  # test accounts have accepted the current terms
+        return w
+
+    rt.store.update_wallet(uid, email, top_up)
 
 
 def _app_client(tmp_path, monkeypatch):

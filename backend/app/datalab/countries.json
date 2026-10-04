@@ -1,0 +1,26 @@
+{
+  "note": "Where Data Lab data may come from (owner decision 2026-10-04). Fail closed: only a country marked AVAILABLE is open; every other one, and any country not listed (OTHER), is frozen until the owner clears it after legal advice, by a reviewed change to this file.",
+  "countries": [
+    {"iso3": "UGA", "name": "Uganda", "status": "AVAILABLE"},
+    {"iso3": "KEN", "name": "Kenya", "status": "FROZEN"},
+    {"iso3": "TZA", "name": "Tanzania", "status": "FROZEN"},
+    {"iso3": "RWA", "name": "Rwanda", "status": "FROZEN"},
+    {"iso3": "BDI", "name": "Burundi", "status": "FROZEN"},
+    {"iso3": "SSD", "name": "South Sudan", "status": "FROZEN"},
+    {"iso3": "COD", "name": "Democratic Republic of the Congo", "status": "FROZEN"},
+    {"iso3": "ETH", "name": "Ethiopia", "status": "FROZEN"},
+    {"iso3": "SOM", "name": "Somalia", "status": "FROZEN"},
+    {"iso3": "SDN", "name": "Sudan", "status": "FROZEN"},
+    {"iso3": "MWI", "name": "Malawi", "status": "FROZEN"},
+    {"iso3": "ZMB", "name": "Zambia", "status": "FROZEN"},
+    {"iso3": "ZWE", "name": "Zimbabwe", "status": "FROZEN"},
+    {"iso3": "MOZ", "name": "Mozambique", "status": "FROZEN"},
+    {"iso3": "NGA", "name": "Nigeria", "status": "FROZEN"},
+    {"iso3": "GHA", "name": "Ghana", "status": "FROZEN"},
+    {"iso3": "CMR", "name": "Cameroon", "status": "FROZEN"},
+    {"iso3": "ZAF", "name": "South Africa", "status": "FROZEN"},
+    {"iso3": "GBR", "name": "United Kingdom", "status": "FROZEN"},
+    {"iso3": "USA", "name": "United States", "status": "FROZEN"},
+    {"iso3": "IND", "name": "India", "status": "FROZEN"}
+  ]
+}

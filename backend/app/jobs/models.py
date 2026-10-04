@@ -31,6 +31,7 @@ class ServiceId(StrEnum):
     CONCEPT_NOTE = "CONCEPT_NOTE"  # funding and project concept notes
     COURSEWORK = "COURSEWORK"
     FUNDING_PROPOSAL = "FUNDING_PROPOSAL"
+    DATALAB = "DATALAB"  # Data Lab (owner decision 2026-10-03)
 
 
 WORK_SERVICES = (ServiceId.CONCEPT_NOTE, ServiceId.COURSEWORK, ServiceId.FUNDING_PROPOSAL)
@@ -116,6 +117,9 @@ class ServiceSelection(Camel):
     # and plan steps on their own; the first document's price includes the plan, and a document that
     # is not delivered returns everything. Older releases ignore it.
     bundled: bool = False
+    # A Data Lab analysis report (owner decision 2026-10-03), priced by its tier (DL_SMALL ...).
+    datalab: Literal["NONE", "REPORT"] = "NONE"
+    datalab_band: str = ""
 
     def services(self) -> list[ServiceId]:
         ids = []
@@ -131,6 +135,8 @@ class ServiceSelection(Camel):
             ids.append(ServiceId.PROPOSAL)
         if self.work != "NONE" and self.work_kind != "NONE":
             ids.append(ServiceId(self.work_kind))
+        if self.datalab != "NONE":
+            ids.append(ServiceId.DATALAB)
         return ids
 
 
@@ -307,6 +313,15 @@ class Wallet(Camel):
     updated_at: datetime = Field(default_factory=utcnow)
     grant_ops: list[str] = []  # every manual grant's operation id, kept for good (not trimmed like entries)
     closing: bool = False  # the account is being deleted: nothing new may start or move credits
+    # "Your work is ready" messages (owner roadmap 2026-10-03): the account's own choices, kept with the
+    # one per-account record; a phone number only with the person's consent, removed with the account.
+    notify_email: bool = True
+    notify_sms: bool = False
+    phone: str = ""
+    # The terms the person accepted, and when (owner decision 2026-10-04): required before a paid step or a
+    # Data Lab upload; a newer version is asked for again.
+    terms_version: str = ""
+    terms_accepted_at: datetime | None = None
     ledger_backfilled: bool = False  # entries from before the complete history was kept were copied into it
     # Credits reserved for a document started with one Start (owner decision 2026-10-01; Codex audit):
     # "work:<id>" or "project:<id>" → amount, held from Start until the document's own step holds it,
@@ -550,6 +565,20 @@ class StoredOutput(OutputFile):
     content_type: str
 
 
+class Notice(Camel):
+    """The "your work is ready" or "it stopped" message a job owes its owner (Codex audit, finding 11).
+    Recorded in the same transaction as the outcome (`state.transition`), so a crash can't lose it;
+    each channel's delivery is recorded, and a failed send is tried again a few times."""
+
+    key: str  # the outcome it is for: COMPLETED:<generation>, FAILED:<generation> or STOPPED:<generation>
+    outcome: Literal["READY", "STOPPED"]
+    pending: bool = True
+    channels: dict[str, str] = {}  # channel → SENT or FAILED
+    attempts: int = 0
+    next_at: datetime | None = None
+    lease_until: datetime | None = None  # one sender at a time
+
+
 class JobFailure(Camel):
     code: str
     user_message: str
@@ -620,6 +649,7 @@ class JobView(Camel):
     fix_notes: dict[str, list[str]] = {}  # "Fix selected": the AI Check's findings on each chosen passage
     project_id: str | None = None  # a step of a proposal project: its result is saved to the project
     work_id: str | None = None  # a step of a work (concept note, coursework, funding proposal)
+    datalab_id: str | None = None  # a Data Lab report: its result is saved to the Data Lab project
     outputs: list[OutputFile] = []
     failure: JobFailure | None = None
     created_at: datetime = Field(default_factory=utcnow)
@@ -658,6 +688,7 @@ class Job(JobView):
     # Share of a service actually delivered, recorded by the pipeline where it is not all-or-nothing
     # (service key → 0..1); settlement charges each fixed-price line by it (Codex audit 56c4f83 H05).
     delivery: dict[str, float] = {}
+    notice: Notice | None = None
 
     def view(self) -> JobView:
         return JobView.model_validate(self.model_dump())

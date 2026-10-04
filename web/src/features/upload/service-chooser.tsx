@@ -150,7 +150,7 @@ export function ServiceChooser() {
       benefits: ['What a supervisor is likely to raise', 'A readiness checklist and a Word report'], action: 'Review my proposal', icon: FileSearch,
       to: `/app/new?service=${review.id}`, service: review.service }] : []),
   ].filter((c) => config.availability[c.service] && config.availability[c.service] !== 'soon')
-  const groups = ['Coursework', 'Research proposals', 'Funding', 'Your own paper'].map((g) => ({ title: g, cards: cards.filter((c) => c.group === g) })).filter((g) => g.cards.length)
+  const groups = ['Coursework', 'Research proposals', 'Funding', 'Data analysis', 'Your own paper'].map((g) => ({ title: g, cards: cards.filter((c) => c.group === g) })).filter((g) => g.cards.length)
   return (
     <>
       <div className="mb-8 rounded-3xl bg-gradient-to-br from-brand-50 via-white to-brand-50/60 px-6 py-7 ring-1 ring-brand-100 sm:px-8">

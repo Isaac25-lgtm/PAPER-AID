@@ -1,9 +1,10 @@
-import { ArrowRight, FilePen, FolderOpen, HandCoins, Lightbulb, NotebookPen } from 'lucide-react'
+import { ArrowRight, ChartColumn, FilePen, FolderOpen, HandCoins, Lightbulb, NotebookPen } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router'
 import { ButtonLink } from '../../components/ui/button'
 import { Alert, Card, EmptyState, Skeleton } from '../../components/ui/primitives'
 import { DataError, useData } from '../../lib/data'
+import type { DataProject } from '../../lib/datalab-types'
 import { formatTokenNumber } from '../../lib/format'
 import type { Project } from '../../lib/proposal-types'
 import { startChoices } from '../../lib/start'
@@ -63,6 +64,19 @@ function projectItem(p: Project): Item {
   return { key: p.id, title: p.plan?.title ?? p.inputs.topic, kind: 'Research proposal', icon: FilePen, updated: p.updatedAt, to: `/app/projects/${p.id}`, status }
 }
 
+function dataItem(p: DataProject): Item {
+  const status: WorkspaceStatus = p.activeJob
+    ? { label: 'Writing…', tone: 'running' }
+    : p.reports.length
+      ? { label: 'Report ready', tone: 'ready' }
+      : p.pending.length || p.survey === 'ASK'
+        ? { label: 'Needs your input', tone: 'input' }
+        : p.analyses.length
+          ? { label: `${p.analyses.length} analys${p.analyses.length === 1 ? 'is' : 'es'}`, tone: 'idle' }
+          : { label: p.source ? 'Not analysed yet' : 'No data yet', tone: 'idle' }
+  return { key: p.id, title: p.title, kind: 'Data Lab', icon: ChartColumn, updated: p.updatedAt, to: `/app/datalab/${p.id}`, status }
+}
+
 function useYourWork() {
   const data = useData()
   const [items, setItems] = useState<Item[] | null>(null)
@@ -70,10 +84,10 @@ function useYourWork() {
   useEffect(() => {
     let alive = true
     const load = () =>
-      Promise.all([data.works.list().catch(() => [] as Work[]), data.projects.list().catch(() => [] as Project[])])
-        .then(([works, projects]) => {
+      Promise.all([data.works.list().catch(() => [] as Work[]), data.projects.list().catch(() => [] as Project[]), data.datalab.list().catch(() => [] as DataProject[])])
+        .then(([works, projects, datasets]) => {
           if (!alive) return
-          setItems([...works.map(workItem), ...projects.map(projectItem)].sort((a, b) => b.updated.localeCompare(a.updated)))
+          setItems([...works.map(workItem), ...projects.map(projectItem), ...datasets.map(dataItem)].sort((a, b) => b.updated.localeCompare(a.updated)))
         })
         .catch((e: unknown) => alive && setError(e instanceof DataError ? e.message : 'We could not load your work.'))
     load()

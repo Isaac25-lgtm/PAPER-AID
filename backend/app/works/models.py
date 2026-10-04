@@ -453,6 +453,10 @@ class ReviewDecision(Camel):
     reason: str = ""  # REVIEW_OBJECTION, REVIEW_UNAVAILABLE, SPEND_CAP or CODE_RULE
     objections: list[str] = []
     version: int = 0  # the plan or Results Model version it was given for
+    # What would make it stronger without blocking it (live funding runs 2026-10-03: every improvement
+    # counted as an objection, so the review never settled). Kept for admins and diagnosis, never repaired for: they
+    # name internal parts (indicator ids) the student does not see.
+    suggestions: list[str] = []
 
 
 class WorkAcknowledgment(Camel):

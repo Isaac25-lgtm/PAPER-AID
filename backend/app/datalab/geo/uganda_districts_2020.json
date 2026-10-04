@@ -1,0 +1,16 @@
+{
+  "name": "Uganda districts, 2020 (146)",
+  "source": "Uganda Bureau of Statistics (UBOS): UGANDA_DISTRICT.json",
+  "sourceSha256": "5a6024f5438cf38bbf1ea822ed4bc1d900005288585bd55294b29d730d7027b8",
+  "features": 146,
+  "crs": "EPSG:4326 (WGS 84)",
+  "regions": {
+    "1": "Central",
+    "2": "Eastern",
+    "3": "Northern",
+    "4": "Western"
+  },
+  "simplified": "outlines simplified to about 100 m; Kabale's invalid shape repaired",
+  "licence": "UBOS. PaperAid's owner states PaperAid may use these files in any way (2026-10-04).",
+  "year": 2020
+}

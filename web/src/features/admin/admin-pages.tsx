@@ -76,6 +76,9 @@ export function AdminOverviewPage() {
         actions={
           summary && (
             <div className="flex gap-2">
+              <ButtonLink to="/admin/reliability" variant="secondary" size="sm">
+                Reliability
+              </ButtonLink>
               <ButtonLink to="/admin/credits" variant="secondary" size="sm">
                 <WalletIcon className="size-4" aria-hidden /> Credits
               </ButtonLink>
