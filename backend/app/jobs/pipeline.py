@@ -71,7 +71,7 @@ LEASE = timedelta(minutes=25)
 # which replays finished calls from the response cache. Keeps every delivery inside the lease
 # and the 30-minute task deadline, however many batches a long paper needs.
 STAGE_WORK_LIMIT = timedelta(minutes=20)
-GENERIC_FAILURE = "Something went wrong while processing your paper. Our team has been notified."
+GENERIC_FAILURE = "Something went wrong while processing your paper. PaperAid recorded the problem so it can be fixed."
 ESTIMATE_FAILURE = "We couldn't estimate this paper right now. Your credits were returned; please try again shortly."
 REFINE_STAGES = (Stage.PLANNING, Stage.REFINING, Stage.REDRAFTING, Stage.AUDITING)
 
@@ -596,6 +596,9 @@ def _run_estimate_task(rt: Runtime, job_id: str) -> None:
             rt.queue.enqueue(job_id, f"{job_id}-e{run_id}-h{len(released.events)}")
         return
     except StageError as exc:
+        from app import notify
+
+        notify.provider_problem(rt, exc.code, exc.detail)
         _estimate_failed(rt, job_id, run_id, exc.code, exc.user_message, exc.detail, exc.retryable)
         return
     except Exception as exc:  # unexpected: classify as retryable so a transient bug can recover
@@ -1316,10 +1319,9 @@ def _run_step(rt: Runtime, job_id: str) -> None:
         _continue_later(rt, job_id, stage)
         return
     except StageError as exc:
-        if exc.code == "PROVIDER_CONFIG":  # a key or a provider balance the owner must fix: they are told at once, once a day
-            from app import notify
+        from app import notify
 
-            notify.alert(rt, "AI provider can't be used", f"{exc.detail}. Jobs stop and are refunded until it is fixed.", f"provider:{utcnow():%Y-%m-%d}:{exc.detail}")
+        notify.provider_problem(rt, exc.code, exc.detail)  # a key or a provider balance the owner must fix
         _handle_failure(rt, job_id, stage, exc.code, exc.user_message, exc.detail, exc.retryable)
         return
     except Exception as exc:  # unexpected: classify as retryable so a transient bug can recover

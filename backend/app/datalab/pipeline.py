@@ -162,24 +162,82 @@ def _rendered(section: ReportSection, written: set[str] | None = None) -> dict[s
             "figure": bool(section.chart), "notes": section.notes}
 
 
-def _words(entry: dict[str, Any]) -> int:
-    return len(json.dumps(entry).split())
+def _words(entry: Any) -> int:
+    return len(json.dumps(entry, ensure_ascii=False).split())
 
 
-def document_parts(document: ReportDocument, written: set[str] | None = None) -> tuple[list[list[dict[str, Any]]], list[dict[str, Any]]]:
-    """The document in bounded parts (every section and appendix, in order) and the manifest of the whole."""
-    entries = [_rendered(s, written) for s in document.sections + document.appendices]
-    parts: list[list[dict[str, Any]]] = [[]]
-    words = 0
-    for entry in entries:
-        size = _words(entry)
-        if parts[-1] and words + size > FINAL_PART_WORDS:
-            parts.append([])
-            words = 0
-        parts[-1].append(entry)
-        words += size
-    manifest = [{"key": e["key"], "heading": e["heading"], "part": n} for n, part in enumerate(parts, start=1) for e in part]
+def split_rendered(entry: dict[str, Any], limit: int) -> list[dict[str, Any]]:
+    """A rendered section longer than `limit` words in consecutive pieces within it: paragraphs and bullets
+    cut at sentence ends, tables by rows with their columns repeated (Codex audit 2026-10-04, finding 7:
+    one 20,000-word section was a single review part)."""
+    from app.works.pipeline import _chunks
+
+    if _words(entry) <= limit:
+        return [entry]
+    shell = {k: v for k, v in entry.items() if k not in ("paragraphs", "bullets", "tables", "notes")}
+    room = max(60, limit - _words(shell) - 12)
+    pieces: list[dict[str, Any]] = [{"paragraphs": [], "bullets": [], "tables": [], "notes": []}]
+
+    def add(kind: str, item: Any) -> None:
+        if _words(pieces[-1]) > 8 and _words(pieces[-1]) + _words(item) > room:
+            pieces.append({"paragraphs": [], "bullets": [], "tables": [], "notes": []})
+        pieces[-1][kind].append(item)
+
+    def text_items(kind: str) -> None:
+        for item in entry.get(kind, []):
+            text = item["text"] if isinstance(item, dict) else item
+            for chunk in _chunks(text, max(20, room // 2)):
+                add(kind, {**item, "text": chunk} if isinstance(item, dict) else chunk)
+
+    text_items("paragraphs")
+    text_items("bullets")
+    for table in entry.get("tables", []):
+        head = {k: v for k, v in table.items() if k != "rows"}
+        rows: list[list[str]] = []
+        for row in table["rows"]:
+            cells = [_chunks(c, max(10, room // (2 * max(1, len(row))))) for c in row]  # a cell longer than a piece continues on further rows
+            for i in range(max(len(c) for c in cells)):
+                rows.append([c[i] if i < len(c) else "" for c in cells])
+        part = {**head, "rows": []}
+        for row in rows:
+            if part["rows"] and _words(part) + _words(row) > room:
+                add("tables", part)
+                part = {**head, "title": f"{head.get('title', '')} (continued)", "rows": []}
+            part["rows"].append(row)
+        add("tables", part)
+    for note in entry.get("notes", []):
+        for chunk in _chunks(note, max(20, room // 2)):
+            add("notes", chunk)
+    return [{**shell, "heading": entry["heading"] if n == 0 else f"{entry['heading']} (continued, piece {n + 1} of {len(pieces)})", **piece}
+            for n, piece in enumerate(pieces)]
+
+
+def bounded_parts(entries: list[dict[str, Any]], repeated: Any) -> tuple[list[list[dict[str, Any]]], list[dict[str, Any]]]:
+    """Sections in review parts of at most FINAL_PART_WORDS each, counting what every part repeats (the
+    inputs and the manifest); the manifest names the part each section is in."""
+    bound = max(800, FINAL_PART_WORDS - _words(repeated) - 12 * len(entries))
+    for _ in range(6):  # the manifest grows as long sections are split: settle the bound until every request fits
+        parts: list[list[dict[str, Any]]] = [[]]
+        words = 0
+        for entry in entries:
+            for piece in split_rendered(entry, bound):
+                size = _words(piece)
+                if parts[-1] and words + size > bound:
+                    parts.append([])
+                    words = 0
+                parts[-1].append(piece)
+                words += size
+        manifest = [{"key": e["key"], "heading": e["heading"], "part": n} for n, part in enumerate(parts, start=1) for e in part]
+        over = max(_words(part) for part in parts) + _words(repeated) + _words(manifest) - FINAL_PART_WORDS
+        if over <= 0 or bound <= 800:
+            break
+        bound = max(800, bound - over - 50)
     return parts, manifest
+
+
+def document_parts(document: ReportDocument, written: set[str] | None = None, repeated: Any = None) -> tuple[list[list[dict[str, Any]]], list[dict[str, Any]]]:
+    """The document in bounded parts (every section and appendix, in order) and the manifest of the whole."""
+    return bounded_parts([_rendered(s, written) for s in document.sections + document.appendices], repeated or {})
 
 
 def _dataset(inp: ReportInput) -> dict[str, Any]:
@@ -202,12 +260,13 @@ def _review(runner: DataRunner, inp: ReportInput, document: ReportDocument, anal
     """Sol's review of the exact document, part by part. A rule passes only with an explicit PASS in
     every part; any missing verdict, cut-off or unaffordable part: None (not reviewed)."""
     rules = RULES[inp.mode]
-    parts, manifest = document_parts(document, written)
     base: dict[str, Any] = {"mode": inp.mode, "significanceLevel": inp.alpha, "dataset": _dataset(inp), "analyses": analyses, "rules": rules,
-                            "manifest": manifest, **({"previousIssues": previous} if previous else {})}
+                            **({"previousIssues": previous} if previous else {})}
     if inp.mode == "CHAPTER_FOUR":
         base["objectives"] = [{"number": n, "objective": text} for n, text in enumerate(inp.objectives, start=1)]
         base["chapterThree"] = [p.model_dump() for p in inp.chapter_three]
+    parts, manifest = document_parts(document, written, base)
+    base["manifest"] = manifest
     verdicts: dict[str, RuleVerdict] = {}
     issues: list[str] = []
     suggestions: list[str] = []

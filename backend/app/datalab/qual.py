@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any
 import xlsxwriter
 from pydantic import BaseModel
 
-from app.ai.orchestration import FINAL_PART_WORDS, REVIEW_REPAIRS, AIRunner, check_content
+from app.ai.orchestration import REVIEW_REPAIRS, AIRunner, check_content
 from app.core.errors import PermanentStageError, RetryableStageError
 from app.datalab import report
 from app.datalab.models import Cell, DataProject, ReportVersion, ResultTable
@@ -54,37 +54,108 @@ CHANGED = "Your transcripts changed while the analysis was being written, so it 
 
 _S, _STRS = {"type": "string"}, {"type": "array", "items": {"type": "string"}}
 CODE_SCHEMA = _obj({"codes": _list(_obj({"code": _S, "description": _S, "quotes": _list(_obj({"document": _S, "text": _S}))}))})
-THEMES_SCHEMA = _obj({"themes": _list(_obj({"name": _S, "definition": _S, "codes": _STRS, "paragraphs": _STRS})), "summary": _STRS, "limitations": _STRS})
+THEMES_SCHEMA = _obj({"themes": _list(_obj({"name": _S, "definition": _S, "codes": _STRS, "paragraphs": _STRS})), "summary": _STRS, "limitations": _STRS,
+                      "withheld": _STRS})
 REVIEW_SCHEMA = _obj({"verdict": _enum("PASS", "REPAIR"), "rules": RULE_VERDICTS, "issues": _STRS, "suggestions": _STRS})
 
 
 # --- preparing a transcript (before it is stored) -----------------------------------------------------------
 
-IDENTIFIERS = (
-    (re.compile(r"[^@\s]+@[^@\s]+\.[a-z]{2,}", re.I), "[email]"),
-    (re.compile(r"(\+?256|\b0)7\d{8}\b"), "[phone]"),
-    (re.compile(r"\bC[MF][A-Z0-9]{12}\b", re.I), "[ID number]"),
-)
+EMAIL = re.compile(r"[^@\s]+@[^@\s]+\.[a-z]{2,}", re.I)
+NATIONAL_ID = re.compile(r"\bC[MF][A-Z0-9]{12}\b", re.I)
+# A phone number in any common layout: +256 772 123 456, 0772 123456, 0772-123-456, (0772) 123 456,
+# 256772123456. Only a run that starts as a phone number does (+, 00, 0 or 256) and has 9 to 13 digits,
+# so years, dates and figures stay (Codex audit 2026-10-04, finding 1: spaced numbers got through).
+PHONE_RUN = re.compile(r"(?<![\w+])(?:\+|\(\+?)?\d[\d\s().\-]{6,20}\d(?!\w)")
+NAME_WORDS = re.compile(r"[^\W\d_][\w'’.-]*")
+
+
+def _phone(match: re.Match[str]) -> str:
+    run = match.group()
+    digits = re.sub(r"\D", "", run)
+    starts = run.lstrip("(").startswith(("+", "0")) or digits.startswith("256")
+    return "[phone]" if starts and 9 <= len(digits) <= 13 else run
+
+
+def _identifiers(text: str) -> tuple[str, int]:
+    count = 0
+    text, n = EMAIL.subn("[email]", text)
+    count += n
+    text, n = NATIONAL_ID.subn("[ID number]", text)
+    count += n
+    replaced = PHONE_RUN.sub(_phone, text)
+    count += replaced.count("[phone]") - text.count("[phone]")
+    return replaced, count
+
+
+def _name_pattern(name: str) -> re.Pattern[str]:
+    # whole words, any case, a possessive ("Agnes's", "Agnes’") included in the match
+    return re.compile(rf"(?<!\w){re.escape(name.strip())}(?:['’]s?)?(?!\w)", re.I)
+
+
+def check_replacements(replacements: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """The researcher's name = code pairs, refused when a code would itself identify someone: empty, too
+    long, containing a listed name, or an email, phone or ID number (Codex audit 2026-10-04, finding 1)."""
+    from app.core.errors import AppError
+
+    pairs = [(" ".join(n.split()), " ".join(c.split())) for n, c in replacements if n.strip()]
+    for name, code in pairs:
+        if len(name) < 2:
+            raise AppError(f"\"{name}\" is too short to replace safely: list the full name.", code="INVALID_REPLACEMENT")
+        if not code or len(code) > 40:
+            raise AppError(f"Give \"{name}\" a short code of up to 40 characters, such as Participant A.", code="INVALID_REPLACEMENT")
+        name_words = {w.lower() for other, _ in pairs for w in NAME_WORDS.findall(other) if len(w) >= 3}
+        if name_words & {w.lower() for w in NAME_WORDS.findall(code)} or _identifiers(code)[1]:  # "Agnes A." still names Agnes
+            raise AppError(f"The code for \"{name}\" would itself identify someone. Use a code such as Participant A.", code="INVALID_REPLACEMENT")
+    return pairs
 
 
 def pseudonymise(text: str, replacements: list[tuple[str, str]]) -> tuple[str, int]:
-    """The text with each listed name replaced by its code (whole words, any case) and every email
-    address, phone number and national ID number by a marker; and how many replacements were made."""
+    """The text with each listed name replaced by its code (whole words, any case, possessives too) and
+    every email address, phone number and national ID number by a marker; and how many replacements."""
     count = 0
     for name, code in sorted(replacements, key=lambda r: -len(r[0])):  # longer names first: "Agnes Akello" before "Agnes"
         if not name.strip():
             continue
-        text, n = re.subn(rf"(?<!\w){re.escape(name.strip())}(?!\w)", code.strip() or "[name]", text, flags=re.I)
+        text, n = _name_pattern(name).subn(code.strip() or "[name]", text)
         count += n
-    for pattern, marker in IDENTIFIERS:
-        text, n = pattern.subn(marker, text)
-        count += n
-    return text, count
+    text, n = _identifiers(text)
+    return text, count + n
 
 
-def _norm(text: str) -> str:
-    text = text.replace("“", '"').replace("”", '"').replace("‘", "'").replace("’", "'")
-    return " ".join(text.split()).lower()
+def leaks(text: str, names: list[str]) -> bool:
+    """Whether a listed name, email, phone or ID number is still in the text: checked again before anything
+    is stored or sent to a model."""
+    return any(_name_pattern(n).search(text) for n in names if n.strip()) or _identifiers(text)[1] > 0
+
+
+def clean(text: str) -> str:
+    """Identifiers removed from text bound for a model (transcripts stored before the wider patterns)."""
+    return _identifiers(text)[0]
+
+
+def _locate(quote: str, source: str) -> str | None:
+    """The quote as it stands in its transcript: found ignoring case, typographic quotes and spacing, and
+    returned with the transcript's own characters, never the model's (Codex audit 2026-10-04, finding 8)."""
+    fold = {"“": '"', "”": '"', "‘": "'", "’": "'"}
+    chars: list[str] = []
+    where: list[int] = []
+    space = False
+    for i, ch in enumerate(source):
+        if ch.isspace():
+            space = bool(chars)
+            continue
+        if space:
+            chars.append(" ")
+            where.append(i)
+            space = False
+        chars.append(fold.get(ch, ch).lower())
+        where.append(i)
+    needle = " ".join("".join(fold.get(c, c) for c in quote).lower().split())
+    at = "".join(chars).find(needle)
+    if not needle or at < 0:
+        return None
+    return " ".join(source[where[at]:where[at + len(needle) - 1] + 1].split())
 
 
 # --- the frozen input and the model calls ------------------------------------------------------------------------
@@ -131,6 +202,7 @@ class Themes(BaseModel):
     themes: list[_Theme]
     summary: list[str]
     limitations: list[str]
+    withheld: list[str] = []  # quotes the writer leaves out because they would identify a participant
 
 
 class Review(BaseModel):
@@ -180,7 +252,7 @@ def _texts(ctx: "StageContext", inp: QualInput) -> dict[str, str]:
         data = ctx.rt.files.get(doc.path)
         if hashlib.sha256(data).hexdigest() != doc.sha256:
             raise PermanentStageError("DATA_CHANGED", CHANGED, f"transcript {doc.id} changed")
-        out[doc.id] = data.decode("utf-8")
+        out[doc.id] = clean(data.decode("utf-8"))
     return out
 
 
@@ -188,7 +260,9 @@ def _batches(inp: QualInput, texts: dict[str, str]) -> list[list[dict[str, str]]
     """Transcripts packed into calls of at most BATCH_WORDS; a longer transcript in parts, split between paragraphs."""
     pieces: list[dict[str, str]] = []
     for doc in inp.documents:
-        paragraphs = [p for p in texts[doc.id].split("\n") if p.strip()]
+        from app.works.pipeline import _chunks
+
+        paragraphs = [c for p in texts[doc.id].split("\n") if p.strip() for c in _chunks(p, BATCH_WORDS)]  # one long paragraph is cut too
         part: list[str] = []
         words = 0
         for p in paragraphs:
@@ -218,14 +292,14 @@ def _batches(inp: QualInput, texts: dict[str, str]) -> list[list[dict[str, str]]
 def verified_quotes(coded: Coded, batch: list[dict[str, str]], texts: dict[str, str]) -> tuple[list[dict[str, Any]], int]:
     """Each code with only its quotes found word for word in their own transcript; and how many were dropped."""
     ids = {piece["id"] for piece in batch}
-    normal = {doc_id: _norm(texts[doc_id]) for doc_id in ids}
     out, dropped = [], 0
     for code in coded.codes:
         kept = []
         for q in code.quotes:
             words = len(q.text.split())
-            if q.document in ids and QUOTE_WORDS[0] <= words <= QUOTE_WORDS[1] and _norm(q.text) in normal[q.document]:
-                kept.append({"document": q.document, "text": " ".join(q.text.split())})
+            found = _locate(q.text, texts[q.document]) if q.document in ids and QUOTE_WORDS[0] <= words <= QUOTE_WORDS[1] else None
+            if found:
+                kept.append({"document": q.document, "text": found})
             else:
                 dropped += 1
         if kept and code.code.strip():
@@ -249,6 +323,15 @@ def merge_codes(found: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict
             if seen[ident] not in entry["quotes"]:
                 entry["quotes"].append(seen[ident])
     return list(by_name.values()), quotes
+
+
+def withhold(draft: dict[str, Any], codes: list[dict[str, Any]], quotes: dict[int, dict[str, str]]) -> tuple[list[dict[str, Any]], dict[int, dict[str, str]]]:
+    """The codes and quotes without those the writer withheld (a quote that would identify a participant):
+    a withheld quote is in neither the report nor the codebook, and a code left without quotes goes too."""
+    out = {int(n) for ref in draft.get("withheld", []) for n in re.findall(r"\d+", str(ref))}
+    kept = {n: q for n, q in quotes.items() if n not in out}
+    trimmed = [{**c, "quotes": [n for n in c["quotes"] if n in kept]} for c in codes]
+    return [c for c in trimmed if c["quotes"]], kept
 
 
 def problems(draft: dict[str, Any], codes: list[dict[str, Any]], quotes: dict[int, dict[str, str]]) -> list[str]:
@@ -313,7 +396,7 @@ def stage_drafting(ctx: "StageContext") -> None:
     draft = runner.themes(payload)
     rounds = [{"round": 0, "problems": []}]
     for round_ in range(1, REVIEW_REPAIRS + 2):
-        found_problems = problems(draft, codes, quotes)
+        found_problems = problems(draft, *withhold(draft, codes, quotes))
         rounds[-1]["problems"] = found_problems
         if not found_problems:
             break
@@ -369,27 +452,36 @@ def assemble(inp: QualInput, draft: dict[str, Any], codes: list[dict[str, Any]],
     codebook = ResultTable(title="Codebook", columns=["Code", "Description", "Theme", "Transcripts", "Quotes"], rows=[
         [Cell(text=c["code"]), Cell(text=c["description"]), Cell(text=theme_of.get(c["code"].lower(), "Not in a theme")),
          Cell(text=str(len({quotes[n]["document"] for n in c["quotes"]}))), Cell(text=str(len(c["quotes"])))] for c in codes])
-    appendices = [ReportSection(key="appendix_codebook", heading="Appendix A. Codebook", tables=[codebook])]
+    rows = workbook_rows(inp, draft, codes, quotes)["Quotes"][1]
+    quoted = ResultTable(title="Quotations", columns=["Ref", "Quote", "Transcript", "Code"], rows=[[Cell(text=str(c)) for c in r] for r in rows])
+    appendices = [ReportSection(key="appendix_codebook", heading="Appendix A. Codebook", tables=[codebook]),
+                  ReportSection(key="appendix_quotes", heading="Appendix B. Quotations", tables=[quoted],
+                                paragraphs=["Every quotation in the codebook, as it stands in its transcript."])]
     document = ReportDocument(title=inp.title or "Qualitative analysis", subtitle=f"Qualitative analysis · {utcnow():%d %B %Y}", sections=sections, appendices=appendices)
     document.words = sum(len(p.split()) for s in sections for p in s.paragraphs)
     return document
 
 
-def codebook_workbook(inp: QualInput, draft: dict[str, Any], codes: list[dict[str, Any]], quotes: dict[int, dict[str, str]]) -> bytes:
+def workbook_rows(inp: QualInput, draft: dict[str, Any], codes: list[dict[str, Any]], quotes: dict[int, dict[str, str]]) -> dict[str, Any]:
+    """The codebook workbook's sheets as rows: the same rows the report's appendices show the reviewer."""
     labels = {d.id: d.label for d in inp.documents}
     theme_of = {c.lower(): t.get("name", "") for t in draft.get("themes", []) for c in t.get("codes", [])}
-    buffer = io.BytesIO()
-    book = xlsxwriter.Workbook(buffer, {"in_memory": True, "strings_to_formulas": False, "strings_to_urls": False})
-    head = book.add_format({"bold": True, "font_color": "white", "bg_color": "#0F633E", "border": 1})
-    wrap = book.add_format({"text_wrap": True, "valign": "top", "border": 1})
-    sheets = {
+    return {
         "Themes": (["Theme", "Definition", "Codes", "Transcripts"],
                    [[t.get("name", ""), t.get("definition", ""), "; ".join(t.get("codes", [])), len(_in_documents(t, codes, quotes))] for t in draft.get("themes", [])]),
         "Codebook": (["Code", "Description", "Theme", "Transcripts", "Quotes"],
                      [[c["code"], c["description"], theme_of.get(c["code"].lower(), ""), len({quotes[n]["document"] for n in c["quotes"]}), len(c["quotes"])] for c in codes]),
-        "Quotes": (["Quote", "Transcript", "Code"],
-                   [[quotes[n]["text"], labels[quotes[n]["document"]], c["code"]] for c in codes for n in c["quotes"]]),
+        "Quotes": (["Ref", "Quote", "Transcript", "Code"],
+                   [[f"Q{n}", quotes[n]["text"], labels[quotes[n]["document"]], c["code"]] for c in codes for n in c["quotes"]]),
     }
+
+
+def codebook_workbook(sheets: dict[str, Any]) -> bytes:
+    """The workbook from approved rows only (Codex audit 2026-10-04, finding 2: it held quotes no review saw)."""
+    buffer = io.BytesIO()
+    book = xlsxwriter.Workbook(buffer, {"in_memory": True, "strings_to_formulas": False, "strings_to_urls": False})
+    head = book.add_format({"bold": True, "font_color": "white", "bg_color": "#0F633E", "border": 1})
+    wrap = book.add_format({"text_wrap": True, "valign": "top", "border": 1})
     for name, (columns, rows) in sheets.items():
         ws = book.add_worksheet(name)
         ws.write_row(0, 0, columns, head)
@@ -406,26 +498,13 @@ def codebook_workbook(inp: QualInput, draft: dict[str, Any], codes: list[dict[st
 # --- AUDITING ---------------------------------------------------------------------------------------------------
 
 
-def _parts(document: ReportDocument) -> tuple[list[list[dict[str, Any]]], list[dict[str, Any]]]:
-    from app.datalab.pipeline import _rendered
-
-    entries = [_rendered(s) for s in document.sections + document.appendices]
-    parts: list[list[dict[str, Any]]] = [[]]
-    words = 0
-    for entry in entries:
-        size = len(json.dumps(entry).split())
-        if parts[-1] and words + size > FINAL_PART_WORDS:
-            parts.append([])
-            words = 0
-        parts[-1].append(entry)
-        words += size
-    return parts, [{"key": e["key"], "heading": e["heading"], "part": n} for n, part in enumerate(parts, start=1) for e in part]
-
-
 def _review(runner: QualRunner, inp: QualInput, document: ReportDocument, codes: list[dict[str, Any]], previous: list[str]) -> Review | None:
-    parts, manifest = _parts(document)
-    base = {"question": inp.question, "codes": [{"code": c["code"], "description": c["description"], "quotes": len(c["quotes"])} for c in codes],
-            "rules": RULES, "manifest": manifest, **({"previousIssues": previous} if previous else {})}
+    from app.datalab.pipeline import document_parts
+
+    base: dict[str, Any] = {"question": inp.question, "codes": [{"code": c["code"], "description": c["description"], "quotes": len(c["quotes"])} for c in codes],
+                            "rules": RULES, **({"previousIssues": previous} if previous else {})}
+    parts, manifest = document_parts(document, None, base)  # long sections and the quotations appendix split within the bound
+    base["manifest"] = manifest
     verdicts: dict[str, RuleVerdict] = {}
     issues: list[str] = []
     suggestions: list[str] = []
@@ -457,8 +536,9 @@ def stage_auditing(ctx: "StageContext") -> None:
     seen: list[dict[str, Any]] = []
     previous: list[str] = []
     for round_ in range(REVIEW_REPAIRS + 1):
-        document = assemble(inp, draft, codes, quotes)
-        review = _review(runner, inp, document, codes, previous)
+        shipped_codes, shipped = withhold(draft, codes, quotes)
+        document = assemble(inp, draft, shipped_codes, shipped)
+        review = _review(runner, inp, document, shipped_codes, previous)
         if review is None:
             ctx.put_json("qual_review.json", seen)
             raise PermanentStageError("DOCUMENT_NOT_APPROVED", NOT_FINISHED, "final review not completed (missing verdict, cut off or spend cap)")
@@ -467,15 +547,17 @@ def stage_auditing(ctx: "StageContext") -> None:
         objections = list(dict.fromkeys([*review.issues, *not_passed]))
         if review.verdict == "PASS" and not objections:
             data = document.model_dump(mode="json", by_alias=True)
+            sheets = workbook_rows(inp, draft, shipped_codes, shipped)
             ctx.put_json("qual_review.json", seen)
-            ctx.put_json("qual_approved.json", {"draft": draft, "document": data, "sha": hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()})
+            ctx.put_json("qual_approved.json", {"draft": draft, "document": data, "workbook": sheets,
+                                                "sha": hashlib.sha256(json.dumps([data, sheets], sort_keys=True).encode()).hexdigest()})
             return
         if round_ == REVIEW_REPAIRS or runner.budget_reached:
             break
         repaired = runner.themes({**payload, "draft": draft, "critique": objections})
-        if problems(repaired, codes, quotes):
-            repaired = runner.themes({**payload, "draft": repaired, "critique": problems(repaired, codes, quotes)})
-            if problems(repaired, codes, quotes):
+        if problems(repaired, *withhold(repaired, codes, quotes)):
+            repaired = runner.themes({**payload, "draft": repaired, "critique": problems(repaired, *withhold(repaired, codes, quotes))})
+            if problems(repaired, *withhold(repaired, codes, quotes)):
                 break
         draft, previous = repaired, objections
     ctx.put_json("qual_review.json", seen)
@@ -489,11 +571,10 @@ def stage_auditing(ctx: "StageContext") -> None:
 def stage_exporting(ctx: "StageContext") -> None:
     inp = _input(ctx)
     approved = ctx.get_json("qual_approved.json")
-    data = approved["document"]
-    if hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest() != approved["sha"]:
+    data, sheets = approved["document"], approved["workbook"]
+    if hashlib.sha256(json.dumps([data, sheets], sort_keys=True).encode()).hexdigest() != approved["sha"]:
         raise PermanentStageError("DOCUMENT_NOT_APPROVED", NOT_FINISHED, "approved document does not match its hash")
     document = ReportDocument.model_validate(data)
-    _, codes, quotes = _saved(ctx)
     project = ctx.rt.store.get_datalab(inp.project_id)
     if project is None or project.deleting:
         raise PermanentStageError("DATALAB_DELETED", "This project was deleted before the analysis was finished, so nothing was charged.", "project gone at export")
@@ -504,7 +585,7 @@ def stage_exporting(ctx: "StageContext") -> None:
     prefix = f"{project.storage_prefix()}/reports/{job_id}"
     files.put(prefix + ".json", document.model_dump_json(by_alias=True).encode(), "application/json")
     files.put(prefix + ".docx", report.to_docx(document, lambda path: None), DOCX)
-    files.put(prefix + ".xlsx", codebook_workbook(inp, approved["draft"], codes, quotes), XLSX)
+    files.put(prefix + ".xlsx", codebook_workbook(sheets), XLSX)
     gone = False
 
     def finish(j: Job, w: Wallet, p: DataProject | None) -> tuple[Job, Wallet, DataProject] | None:

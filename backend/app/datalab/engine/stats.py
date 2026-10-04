@@ -41,6 +41,7 @@ class Context:
         self.available = len(frame) if available is None else available
         self.population = population
         self.notes = notes or []
+        self.used: pd.Index | None = None  # the rows the analysis actually used: its filter's, less those with a missing value or no place
 
 
 def software() -> list[str]:
@@ -112,6 +113,7 @@ def _complete(ctx: Context, names: list[str]) -> tuple[pd.DataFrame, list[str]]:
         n = int(ctx.frame[name].isna().sum())
         if n:
             left_out.append(f"{disclosure.few(n, ctx.threshold).capitalize()} records have no value for \"{ctx.variables[name].title()}\".")
+    ctx.used = frame.index[keep]
     return frame[keep], left_out
 
 
@@ -212,6 +214,9 @@ def _describe_categories(ctx: Context, spec: AnalysisSpec, var: Variable, x: pd.
         return _not_estimable(ctx, spec, title, f"Fewer than {ctx.threshold} records have a value for \"{var.title()}\", too few to show without identifying people.",
                               n, left_out)
     hidden = list(disclosure.protect(np.array(values), ctx.threshold, row_totals=True, column_totals=False).cells[0])
+    # hidden categories after the shown ones, by name: in the most-common-first order a hidden row's place would hint at its count
+    keep = sorted(range(len(order)), key=lambda i: (bool(hidden[i]), order[i] if hidden[i] else "", i))
+    order, values, hidden = [order[i] for i in keep], [values[i] for i in keep], [hidden[i] for i in keep]
     rows, stats = [], {"n": n}
     for i, (level, count) in enumerate(zip(order, values, strict=True)):
         low, high = wilson(count, n)

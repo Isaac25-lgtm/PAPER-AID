@@ -446,7 +446,9 @@ function ReportStep({ project, busy, act, reload }: { project: DataProject; busy
   const data = useData()
   const current = project.analyses.filter((a) => !a.stale && a.status !== 'NOT_ESTIMABLE')
   const outOfDate = project.analyses.filter((a) => a.stale).length
-  const [chosen, setChosen] = useState<string[]>(current.map((a) => a.id))
+  const [picked, setChosen] = useState<string[]>(current.map((a) => a.id))
+  // only analyses that still exist and are current: a removed or out-of-date one drops out of the choice (Codex audit 2026-10-04)
+  const chosen = picked.filter((id) => current.some((a) => a.id === id))
   // On one page the report form is open while analyses are run: each new one starts ticked.
   const seen = useRef(new Set(current.map((a) => a.id)))
   const fresh = current.filter((a) => !seen.current.has(a.id)).map((a) => a.id)

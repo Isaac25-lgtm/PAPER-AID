@@ -159,7 +159,7 @@ def answer(task: str, payload: dict[str, Any]) -> dict[str, Any]:
         model = payload["results"]
         labelled = [("goal", model["goal"])] + [("outcome", o) for o in model["outcomes"]] + [("output", o) for o in model["outputs"]]
         return {"rules": [{"rule": r["rule"], "status": "PASS", "note": "Met."} for r in payload.get("rules", [])],
-                "classified": [{"id": item["id"], "statedAs": level, "reads": level, "note": ""} for level, item in labelled], "issues": []}
+                "classified": [{"id": item["id"], "statedAs": level, "reads": level, "note": ""} for level, item in labelled], "issues": [], "reversed": []}
     if task == "w_draft":
         return draft(payload)
     if task == "w_integrity":

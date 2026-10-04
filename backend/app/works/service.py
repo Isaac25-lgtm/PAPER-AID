@@ -1188,6 +1188,12 @@ def apply_figures(rt: Runtime, user: User, work_id: str) -> WorkView:
     affected = {r["id"] for r in library.rules_for(spec.kind) if r["check"].get("validator", "").startswith(FIGURE_VALIDATORS)} | compliance.STUDENT_FIGURES
     fresh = {i.id: i for i in compliance.report(context, ("DRAFT", "FINAL", "PLAN")) if i.id in affected}
     items = [fresh.get(i.id, i) for i in doc.readiness] + [i for rid, i in fresh.items() if rid not in {x.id for x in doc.readiness}]
+    # PaperAid judged target plausibility before these figures existed: with new figures that judgement no longer
+    # stands, so it is the applicant's to check, never shown as approved (Codex audit 2026-10-04).
+    items = [i.model_copy(update={"status": "NEEDS_REVIEW", "basis": "AUTHOR", "reason": "STUDENT_INFO_MISSING",
+                                  "action": compliance.ACTIONS["STUDENT_INFO_MISSING"], "note": "Your figures were added after PaperAid's review: check each target is realistic against its baseline, "
+                                          "the time and the budget."})
+             if i.id in compliance.FIGURE_JUDGED else i for i in items]
     updated.readiness = items
     updated.status = compliance.overall(items, spec.exploratory)  # type: ignore[assignment]
     data = export.build(updated, spec, k.results, k.budget, library_items, tokens, draft=updated.status == "NOT_READY")

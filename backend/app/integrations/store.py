@@ -125,7 +125,7 @@ def _dump(job: Job | Project | Work) -> str:
     data = job.model_dump_json(by_alias=True)
     size = len(data.encode("utf-8"))
     if size > MAX_RECORD_BYTES:
-        raise PermanentStageError("RECORD_TOO_LARGE", "This job's results were too large to save. Our team has been notified.", f"job record {size} bytes")
+        raise PermanentStageError("RECORD_TOO_LARGE", "This job's results were too large to save. PaperAid recorded the problem so it can be fixed.", f"job record {size} bytes")
     return data
 
 

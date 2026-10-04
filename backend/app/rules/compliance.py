@@ -15,6 +15,9 @@ AUTHOR_VALIDATORS = {"eligibility.thresholds", "eligibility.evaluated", "gate.co
 # requested): settled by the AUTHOR, so a draft started with one Start marks them for the student
 # instead of stopping or failing (owner decision 2026-10-01). PaperAid's own fields stay CODE.
 STUDENT_FIGURES = {"FP-026", "FP-027", "FP-039", "FP-040", "FP-041", "FP-042", "FP-043", "FP-045", "FP-046", "FP-047", "FP-048", "CN-022"}
+# Rules judged on the applicant's figures (whether targets are plausible against baselines, time and means):
+# not applicable while the figures are gaps, and to be checked again by the applicant once they add them.
+FIGURE_JUDGED = {"FP-028"}
 
 
 PAGE_VALIDATORS = {"limits.rendered_pages", "limits.hard_max"}

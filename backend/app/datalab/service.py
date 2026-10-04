@@ -437,13 +437,14 @@ def run_op(rt: Runtime, op_id: str) -> None:
     """The worker's side: claim the work, do it, and keep its result only if the project is still
     as the work found it. Files it wrote are removed when the result isn't kept."""
     project_id = op_id[len("dop_"):].rsplit("_", 1)[0]
+    attempt = secrets.token_hex(8)
 
     def claim(q: DataProject) -> DataProject | None:
         if q.deleting or q.op is None or q.op.id != op_id or q.op.status in ("DONE", "FAILED"):
             return None
         if q.op.status == "RUNNING" and not _expired(q.op):
             return None  # another delivery of the same task is doing it
-        q.op.status, q.op.lease_until = "RUNNING", utcnow() + OP_LEASE
+        q.op.status, q.op.lease_until, q.op.attempt = "RUNNING", utcnow() + OP_LEASE, attempt
         return q
 
     p = rt.store.update_datalab(project_id, claim) if _valid_id(project_id) else None
@@ -454,18 +455,18 @@ def run_op(rt: Runtime, op_id: str) -> None:
     try:
         commit, result = HANDLERS[op.kind](rt, p, op, written)
     except AppError as exc:
-        _end_op(rt, project_id, op_id, written, exc.message, exc.code)
+        _end_op(rt, project_id, op, attempt, written, exc.message, exc.code)
         return
     except Exception as exc:  # the worker boundary: an unexpected failure ends this piece of work, the project stays as it was
         log(logger, logging.ERROR, "data work failed", projectId=project_id, kind=op.kind, error=type(exc).__name__)
-        _end_op(rt, project_id, op_id, written, STOPPED, "OP_FAILED")
+        _end_op(rt, project_id, op, attempt, written, STOPPED, "OP_FAILED")
         return
     obsolete: list[str] = []
     refusal: list[AppError] = []
 
     def keep(q: DataProject) -> DataProject | None:
-        if q.deleting or q.op is None or q.op.id != op_id or q.op.status != "RUNNING":
-            return None
+        if q.deleting or q.op is None or q.op.id != op_id or q.op.status != "RUNNING" or q.op.attempt != attempt:
+            return None  # a later claim owns it now: this attempt's result is not kept
         try:
             obsolete[:] = commit(q)
             q.op.status, q.op.result, q.op.lease_until = "DONE", result, None
@@ -477,24 +478,28 @@ def run_op(rt: Runtime, op_id: str) -> None:
 
     if rt.store.update_datalab(project_id, keep) is None:
         reason = refusal[0] if refusal else AppError(DATA_CHANGED, code="DATA_CHANGED")
-        _end_op(rt, project_id, op_id, written, reason.message, reason.code)
+        _end_op(rt, project_id, op, attempt, written, reason.message, reason.code)
         return
     for path in obsolete:  # only now that the record no longer names them
         rt.files.delete(path)
     log(logger, logging.INFO, "data work done", projectId=project_id, kind=op.kind)
 
 
-def _end_op(rt: Runtime, project_id: str, op_id: str, written: list[str], message: str, code: str) -> None:
-    for path in written:
-        rt.files.delete(path)
-
+def _end_op(rt: Runtime, project_id: str, op: DataOp, attempt: str, written: list[str], message: str, code: str) -> None:
+    """The attempt failed: its own files go, and the operation is marked failed only while this attempt still
+    owns it. A superseded attempt never changes the status the winning one recorded, nor deletes the upload
+    they share (Codex audit 2026-10-04, finding 6)."""
     def fail(q: DataProject) -> DataProject | None:
-        if q.op is None or q.op.id != op_id:
+        if q.op is None or q.op.id != op.id or q.op.status != "RUNNING" or q.op.attempt != attempt:
             return None
         q.op.status, q.op.error, q.op.code, q.op.lease_until = "FAILED", message, code, None
         return q
 
-    rt.store.update_datalab(project_id, fail)
+    owned = rt.store.update_datalab(project_id, fail) is not None
+    shared = {op.params.get("path")} if not owned else set()
+    for path in written:
+        if path not in shared:
+            rt.files.delete(path)
 
 
 def _op_load(rt: Runtime, p: DataProject, op: DataOp, written: list[str]) -> tuple[Commit, str]:
@@ -529,7 +534,7 @@ def _op_load(rt: Runtime, p: DataProject, op: DataOp, written: list[str]) -> tup
         if not replacing and (q.source is None or q.source.sha256 != params["sha"]):
             raise AppError(DATA_CHANGED, code="DATA_CHANGED")
         obsolete = [v.path for v in q.versions] + [v.profile for v in q.versions if v.profile] + _step_files(q.steps)
-        obsolete += [path for a in q.analyses for path in (a.path, a.path.removesuffix(".json") + ".png")]
+        obsolete += [path for a in q.analyses for path in (a.path, a.path.removesuffix(".json") + ".png", a.path.removesuffix(".json") + ".rows")]
         if q.cleaned is not None:
             obsolete.append(q.cleaned.path)
         if replacing and q.source is not None and q.source.path != source.path:
@@ -623,6 +628,9 @@ def _op_analyse(rt: Runtime, p: DataProject, op: DataOp, written: list[str]) -> 
         result.chart = base + ".png"
     rt.files.put(base + ".json", result.model_dump_json(by_alias=True).encode(), "application/json")
     written.append(base + ".json")
+    used = whole.index.isin(ctx.used if ctx.used is not None else frame.index)
+    rt.files.put(base + ".rows", _pack(used), "application/octet-stream")
+    written.append(base + ".rows")
     spec_sha = _spec_sha(spec)
     fingerprint = _fingerprint(p, by_name, spec.kind, spec.names(), spec_sha)
     version = p.current
@@ -635,10 +643,26 @@ def _op_analyse(rt: Runtime, p: DataProject, op: DataOp, written: list[str]) -> 
         objective = spec.objective if spec.objective is not None and spec.objective <= len(q.objectives) else None
         q.analyses.append(AnalysisRef(id=result.id, kind=spec.kind, title=result.title, status=result.status, version=version, path=base + ".json",
                                       objective=objective, objective_sha=_sha(q.objectives[objective - 1]) if objective else "", variables=spec.names(),
-                                      spec_sha=spec_sha, fingerprint=fingerprint))
+                                      spec_sha=spec_sha, fingerprint=fingerprint, rows=base + ".rows"))
         return []
 
     return commit, result.id
+
+
+def _pack(used) -> bytes:
+    import zlib
+
+    import numpy as np
+
+    return zlib.compress(np.packbits(np.asarray(used, dtype=bool)).tobytes())
+
+
+def _unpack(data: bytes, n: int):
+    import zlib
+
+    import numpy as np
+
+    return pd.Series(np.unpackbits(np.frombuffer(zlib.decompress(data), dtype=np.uint8))[:n].astype(bool))
 
 
 def _op_cleaned(rt: Runtime, p: DataProject, op: DataOp, written: list[str]) -> tuple[Commit, str]:
@@ -1017,6 +1041,7 @@ def remove_analysis(rt: Runtime, user: User, project_id: str, analysis_id: str) 
     for ref in removed:
         rt.files.delete(ref.path)
         rt.files.delete(ref.path.removesuffix(".json") + ".png")
+        rt.files.delete(ref.path.removesuffix(".json") + ".rows")
     return view(rt, updated, user)
 
 
@@ -1122,6 +1147,10 @@ def start_report(rt: Runtime, user: User, project_id: str, analysis_ids: list[st
     variables = variables_of(rt, p)
     _check_survey(p, variables)
     stale = _stale_ids(rt, p, {v.name: v for v in variables})
+    unknown = [a for a in dict.fromkeys(analysis_ids) if a not in {x.id for x in p.analyses}]
+    if unknown:  # never written silently without them (Codex audit 2026-10-04, finding 12)
+        raise AppError(f"{len(unknown)} of the analyses you chose {'was' if len(unknown) == 1 else 'were'} removed. Reload the page and choose again.",
+                       code="UNKNOWN_ANALYSES")
     chosen = [a for a in p.analyses if (a.id in analysis_ids if analysis_ids else a.id not in stale) and a.status != "NOT_ESTIMABLE"]
     if not chosen:
         raise AppError("Run at least one analysis on the current data first.", code="NO_ANALYSES")
@@ -1226,10 +1255,17 @@ def still_current(rt: Runtime, inp: ReportInput) -> str:
 
 def _released_together(rt: Runtime, p: DataProject, results: list[AnalysisResult], variables: list[Variable]) -> None:
     """Results that go out together (a report, the report workbook) are checked as a set: two whose
-    records differ by only a few would reveal those few by subtraction (Codex, on the plan)."""
-    if not any(r.spec.filters for r in results):
-        return
-    filters.overlaps(_frame(rt, p), {r.id: r.spec.filters for r in results}, {r.id: r.title for r in results}, {v.name: v for v in variables}, p.threshold)
+    records differ by only a few would reveal those few by subtraction. The rows compared are the rows
+    each analysis used, after missing values and unmatched places were left out (Codex audit 2026-10-04,
+    finding 4: a mean over 100 people and a comparison over 99 gave away the hundredth person's score)."""
+    frame = _frame(rt, p)
+    refs = {a.id: a for a in p.analyses}
+    used = {}
+    for r in results:
+        ref = refs.get(r.id)
+        if ref is not None and ref.rows and rt.files.exists(ref.rows):
+            used[r.id] = _unpack(rt.files.get(ref.rows), len(frame)).set_axis(frame.index)
+    filters.overlaps(frame, {r.id: r.spec.filters for r in results}, {r.id: r.title for r in results}, {v.name: v for v in variables}, p.threshold, used)
 
 
 def _refresh_objectives(p: DataProject, objectives: list[str]) -> DataProject:
@@ -1359,24 +1395,35 @@ def add_document(rt: Runtime, user: User, project_id: str, label: str, filename:
         raise Conflict(REPORT_RUNNING, code="STEP_RUNNING")
     if len(data) > rt.settings.max_upload_bytes:
         raise AppError(f"This file is larger than {rt.settings.max_upload_bytes // (1024 * 1024)} MB.", code="DATA_TOO_LARGE")
-    text, replaced = qual.pseudonymise(_document_text(filename, data, rt) if filename else data.decode("utf-8"), replacements[:200])
+    pairs = qual.check_replacements(replacements[:200])
+    text, replaced = qual.pseudonymise(_document_text(filename, data, rt) if filename else data.decode("utf-8"), pairs)
+    # the label and the file name are pseudonymised too: either can carry a participant's name (Codex audit 2026-10-04, finding 1)
+    shown, n_label = qual.pseudonymise(" ".join(label.split())[:80], pairs)
+    name, _ = qual.pseudonymise(PurePosixPath(filename).name[:120] if filename else "", pairs)
+    if any(qual.leaks(t, [n for n, _ in pairs]) for t in (text, shown, name)):  # checked again before anything is stored
+        raise AppError("PaperAid couldn't remove every listed name from this transcript. Check the names and try again.", code="NOT_ANONYMISED")
     words = len(text.split())
     if words < 20:
         raise AppError("There isn't enough text here to analyse.", code="NO_TEXT")
-    if len(p.documents) >= rt.settings.datalab_qual_max_documents:
-        raise AppError(f"A project holds up to {rt.settings.datalab_qual_max_documents} transcripts.", code="TOO_MANY_DOCUMENTS")
-    if sum(d.words for d in p.documents) + words > rt.settings.datalab_qual_max_words:
-        raise AppError(f"All transcripts together can hold up to {rt.settings.datalab_qual_max_words:,} words.", code="DOCUMENT_TOO_LONG")
+    max_docs, max_words = rt.settings.datalab_qual_max_documents, rt.settings.datalab_qual_max_words
+
+    def within_limits(documents: list[QualDocument]) -> None:
+        if len(documents) >= max_docs:
+            raise AppError(f"A project holds up to {max_docs} transcripts.", code="TOO_MANY_DOCUMENTS")
+        if sum(d.words for d in documents) + words > max_words:
+            raise AppError(f"All transcripts together can hold up to {max_words:,} words.", code="DOCUMENT_TOO_LONG")
+
+    within_limits(p.documents)
     body = text.encode("utf-8")
     path = _new_path(p, "documents", ".txt")
     rt.files.put(path, body, "text/plain; charset=utf-8")
-    document = QualDocument(id=f"doc_{secrets.token_hex(4)}", label=" ".join(label.split())[:80] or f"Transcript {len(p.documents) + 1}",
-                            name=PurePosixPath(filename).name[:120] if filename else "", path=path, sha256=hashlib.sha256(body).hexdigest(), words=words,
-                            replaced=replaced)
+    document = QualDocument(id=f"doc_{secrets.token_hex(4)}", label=shown or f"Transcript {len(p.documents) + 1}", name=name, path=path,
+                            sha256=hashlib.sha256(body).hexdigest(), words=words, replaced=replaced + n_label)
 
     def apply(q: DataProject) -> DataProject:
         if step_running(rt, q):
             raise Conflict(REPORT_RUNNING, code="STEP_RUNNING")
+        within_limits(q.documents)  # checked again in the transaction: a concurrent upload can't pass the limits (finding 9)
         if any(d.label.lower() == document.label.lower() for d in q.documents):
             raise AppError(f"A transcript is already called \"{document.label}\". Give this one another name.", code="DUPLICATE_LABEL")
         q.documents.append(document)

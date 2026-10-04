@@ -577,6 +577,7 @@ class Notice(Camel):
     attempts: int = 0
     next_at: datetime | None = None
     lease_until: datetime | None = None  # one sender at a time
+    sender: str = ""  # the claim that holds the lease: only it records what it sent (Codex audit 2026-10-04, finding 11)
 
 
 class JobFailure(Camel):

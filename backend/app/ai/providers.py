@@ -13,7 +13,8 @@ from app.core.errors import PermanentStageError, RetryableStageError
 UNAVAILABLE = "Processing was delayed by a temporary service problem. We'll keep trying."
 # Said once the retries are used up: never "we'll keep trying" on a step that has stopped (live 2026-10-01).
 UNAVAILABLE_FINAL = "A service PaperAid relies on was unavailable for too long, so this could not finish. You were not charged. Please try again in a few minutes."
-MISCONFIGURED = "PaperAid couldn't reach its AI service. Our team has been notified — you don't need to upload again."
+# Says only what happened: an alert is raised, but no one is known to have read it (Codex audit 2026-10-04, finding 13).
+MISCONFIGURED = "PaperAid's AI service isn't available right now, so this stopped. You don't need to upload again: please try again later."
 AI_NOT_CONFIGURED = "AI not configured. This job could not run."
 
 

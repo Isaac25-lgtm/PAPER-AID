@@ -209,6 +209,7 @@ class AnalysisRef(Camel):
     # the disclosure threshold, the survey answers, the rules): a different fingerprint now means the
     # result is out of date (Codex audit, finding 4).
     fingerprint: str = ""
+    rows: str = ""  # the rows it used, as a compressed bitmap in file storage ("" for analyses from before 2026-10-05)
     created_at: datetime = Field(default_factory=utcnow)
 
 
@@ -251,6 +252,7 @@ class DataOp(Camel):
     result: str = ""  # an analysis id, or a file path
     created_at: datetime = Field(default_factory=utcnow)
     lease_until: datetime | None = None
+    attempt: str = ""  # the claim that owns it: only that worker may finish it (Codex audit 2026-10-04, finding 6)
 
 
 class Export(Camel):

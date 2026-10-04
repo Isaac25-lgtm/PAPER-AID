@@ -117,12 +117,17 @@ def apply(frame: pd.DataFrame, filters: list[Filter], variables: dict[str, Varia
     return frame[keep].reset_index(drop=True), [n for n in notes if n], words
 
 
-def overlaps(frame: pd.DataFrame, populations: dict[str, list[Filter]], titles: dict[str, str], variables: dict[str, Variable], threshold: int) -> None:
+def overlaps(frame: pd.DataFrame, populations: dict[str, list[Filter]], titles: dict[str, str], variables: dict[str, Variable], threshold: int,
+             used: dict[str, pd.Series] | None = None) -> None:
     """Results released together are checked as a set: two whose records differ by only a few (but
-    some) would reveal those few by subtraction, so the release is refused with the pair named."""
+    some) would reveal those few by subtraction, so the release is refused with the pair named. `used`:
+    the rows each analysis actually used, where recorded; otherwise its filter's rows."""
     masks = {}
     for analysis_id, filters in populations.items():
-        masks[analysis_id] = mask(frame, filters, variables)[0] if filters else pd.Series(True, index=frame.index)
+        if used and analysis_id in used:
+            masks[analysis_id] = used[analysis_id]
+        else:
+            masks[analysis_id] = mask(frame, filters, variables)[0] if filters else pd.Series(True, index=frame.index)
     ids = list(masks)
     for i, a in enumerate(ids):
         for b in ids[i + 1:]:

@@ -280,6 +280,7 @@ def run(ctx: Context, spec: AnalysisSpec) -> tuple[AnalysisResult, bytes | None]
         else:
             group = subregion_of() if spec.level == "SUBREGION" else _region_of()
             focus = focus[focus["area"].isin({group.get(d) for d in chosen})]
+    ctx.used = data.index  # after unmatched places and other regions were left out
     placed = pd.to_numeric(data[total_var.name], errors="coerce").sum() if totals else len(data)  # area totals count what they hold, not their rows
     if placed < ctx.threshold:
         result = _empty(ctx, spec, title, f"Fewer than {ctx.threshold} records can be placed on the map, too few to show without identifying people.", left_out)
@@ -312,16 +313,23 @@ def run(ctx: Context, spec: AnalysisSpec) -> tuple[AnalysisResult, bytes | None]
         values = grouped[value_var.name].mean() if measure == "MEAN" and value_var is not None else counts.astype(float)
     guard = disclosure.protect([int(c) for c in counts], ctx.threshold, row_totals=True, column_totals=False)
     hidden = dict(zip(counts.index, (bool(h) for h in guard.cells[0]), strict=True))
+    if populations is not None:
+        # a small denominator identifies people as surely as a small count (Codex audit 2026-10-04, finding 3): the
+        # populations are protected the same way, and an area is hidden (count, population and rate) when either is.
+        # Hiding more entries only widens what anyone could work out, so both protections still hold.
+        shield = disclosure.protect([round(float(v)) for v in populations], ctx.threshold, row_totals=True, column_totals=False)
+        hidden = {a: hidden[a] or bool(h) for a, h in zip(counts.index, shield.cells[0], strict=True)}
     shown = {a: float(values[a]) for a in values.index if not hidden[a]}
 
     table_rows = []
     stats: dict[str, float] = {"n": float(counts.sum()) if totals else float(len(data)), "areas": float(len(counts)), "areas_shown": float(len(shown))}
-    for a in sorted(values.index, key=lambda x: (-values[x], x)):
+    # shown areas by value, hidden ones after them by name: a hidden row's place in the order would hint at its value
+    for a in sorted(values.index, key=lambda x: (hidden[x], -values[x] if not hidden[x] else 0, x)):
         n = int(counts[a])
         count_cell = Cell(text=disclosure.HIDDEN, count=True, suppressed=True) if hidden[a] else Cell(text=f"{n:,}", value=n, count=True)
         row = [Cell(text=area_label(spec.level, a)), count_cell]
         if populations is not None:
-            row += [Cell(text=f"{float(populations[a]):,.0f}", value=float(populations[a])),
+            row += [Cell(text=disclosure.HIDDEN, count=True, suppressed=True) if hidden[a] else Cell(text=f"{float(populations[a]):,.0f}", value=float(populations[a]), count=True),
                     Cell(text=disclosure.HIDDEN, suppressed=True) if hidden[a] else Cell(text=f"{values[a]:,.2f}", value=float(values[a]))]
         elif measure == "MEAN":
             row.append(Cell(text=disclosure.HIDDEN, suppressed=True) if hidden[a] else Cell(text=f"{values[a]:,.2f}", value=float(values[a])))
@@ -359,8 +367,11 @@ def run(ctx: Context, spec: AnalysisSpec) -> tuple[AnalysisResult, bytes | None]
         method = (f"{total_var.title()} per 1,000 {denominator_var.title()}" if populations is not None else f"Total of {total_var.title()}") + f" per {singular.lower()}"
     else:
         method = f"Mean of {value_var.title()} per {singular.lower()}" if measure == "MEAN" and value_var else f"Count of records per {singular.lower()}"
+    if totals:  # the rows are areas' totals: the rows used are the rows, the total is said apart (Codex audit 2026-10-04, finding 10)
+        coding.append(f"Each row holds one area's total; together the rows used hold {int(counts.sum()):,} in \"{total_var.title()}\"."
+                      if not any(hidden.values()) else f"Each row holds one area's total of \"{total_var.title()}\".")
     record = _record(ctx, spec, method + ", shown as a choropleth map in five quantile classes", f"A map shows how the measure varies across {plural}.",
-                     int(stats["n"]), left_out, coding)
+                     len(data), left_out, coding)
     result = AnalysisResult(id=f"an_{secrets.token_hex(4)}", spec=spec, status="VALID_WITH_WARNINGS" if warnings else "VALID", title=title, tables=[table],
                             statistics=stats, sentences=sentences, warnings=warnings, record=record, matches=suggested, unmatched=unmatched)
     labelled(ctx, result)

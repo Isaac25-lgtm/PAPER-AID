@@ -10,6 +10,7 @@ pending, so neither a crash nor a provider outage loses it. One sender at a time
 channel already sent is never sent again. A failure to send never affects the work itself."""
 
 import logging
+import secrets
 from datetime import timedelta
 from typing import Literal
 
@@ -85,31 +86,35 @@ def _message(rt: Runtime, job: Job, outcome: Outcome) -> tuple[str, str]:
 
 
 def deliver(rt: Runtime, job_id: str) -> None:
-    """Send what the job still owes, if anything, recording each channel's result."""
+    """Send what the job still owes, if anything, recording each channel's result. What is still owed and
+    whether its retry time has come are decided inside the claim, from the record as it stands then, and
+    only the claim holding the lease records the results (Codex audit 2026-10-04, finding 11: two
+    overlapping calls sent the same email twice)."""
     job = rt.store.get(job_id)
     if job is None or job.notice is None or not job.notice.pending:
         return
-    now = utcnow()
-    if job.notice.next_at is not None and job.notice.next_at > now:
-        return
     targets = _targets(rt, job)
     key = job.notice.key
-    wanted = {ch: to for ch, to in targets.items() if job.notice.channels.get(ch) != "SENT"}
+    sender = secrets.token_hex(8)
+    wanted: dict[str, str] = {}
 
     def claim(j: Job) -> Job | None:
         n = j.notice
-        if n is None or n.key != key or not n.pending or (n.lease_until is not None and n.lease_until > now):
+        now = utcnow()
+        if n is None or n.key != key or not n.pending or (n.lease_until is not None and n.lease_until > now) or (n.next_at is not None and n.next_at > now):
             return None
+        wanted.clear()
+        wanted.update({ch: to for ch, to in targets.items() if n.channels.get(ch) != "SENT"})
         if not wanted:  # nothing (more) to send: done
             n.pending = False
             return j
-        n.lease_until = now + LEASE
+        n.lease_until, n.sender = now + LEASE, sender
         return j
 
     claimed = rt.store.update(job_id, claim)
-    if claimed is None or not wanted:
+    if claimed is None or claimed.notice is None or not wanted:
         return
-    subject, line = _message(rt, job, job.notice.outcome)
+    subject, line = _message(rt, claimed, claimed.notice.outcome)
     settings_link = rt.settings.app_url.rstrip("/") + "/app/settings"
     results = {}
     for channel, to in wanted.items():
@@ -120,12 +125,12 @@ def deliver(rt: Runtime, job_id: str) -> None:
 
     def record(j: Job) -> Job | None:
         n = j.notice
-        if n is None or n.key != key:
+        if n is None or n.key != key or n.sender != sender:
             return None
         for channel, ok in results.items():
             n.channels[channel] = "SENT" if ok else "FAILED"
         n.attempts += 1
-        n.lease_until = None
+        n.lease_until, n.sender = None, ""
         done = all(n.channels.get(ch) == "SENT" for ch in targets)
         if done or n.attempts >= ATTEMPTS:
             n.pending = False
@@ -166,10 +171,18 @@ def sweep(rt: Runtime, limit: int = 200) -> int:
     return len(ids)
 
 
+def provider_problem(rt: Runtime, code: str, detail: str) -> None:
+    """A key or a provider balance the owner must fix, from any paid path (a job's step or an estimate):
+    one alert a day per problem (Codex audit 2026-10-04, finding 13: estimates raised none)."""
+    if code == "PROVIDER_CONFIG":
+        alert(rt, "AI provider can't be used", f"{detail}. Jobs and estimates stop and are refunded until it is fixed.", f"provider:{utcnow():%Y-%m-%d}:{detail}")
+
+
 def alert(rt: Runtime, subject: str, text: str, key: str) -> None:
     """An operations alert for the owner (the daily canary): always logged at ERROR (Cloud Monitoring
     alerts on it), and emailed to `alert_email` when email is set up, once per key. IDs and codes only."""
-    if rt.store.claim_once(f"alert:{key}", "sent") != "sent":
+    token = secrets.token_hex(8)
+    if rt.store.claim_once(f"alert:{key}", token) != token:  # a constant value let every caller through (Codex audit 2026-10-04)
         return
     log(logger, logging.ERROR, "alert", subject=subject, detail=text)
     if channels(rt)["email"] and rt.settings.alert_email:

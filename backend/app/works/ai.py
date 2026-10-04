@@ -7,7 +7,7 @@ malformed answers never accepted. Schemas are strict: every field required, noth
 from collections.abc import Callable
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from app.ai.orchestration import _VERIFY, AIRunner, VerifyItem, _Verify
 from app.ai.providers import UNAVAILABLE, ModelResult
@@ -76,9 +76,13 @@ RESULTS_SCHEMA = _obj(
         "budgetLines": _list(_obj({"category": _S, "description": _S, "unit": _S, "activityIds": _STRS, "support": {"type": "boolean"}, "role": _S})),
     }
 )
+LEVELS = _enum("goal", "outcome", "output", "activity")
+# w-results-review-v3 (Codex audit 2026-10-04): issues name their rule and statements, and a reversed
+# classification of unchanged wording carries its reason.
 REVIEW_RESULTS_SCHEMA = _obj(
-    {"rules": RULE_VERDICTS, "classified": _list(_obj({"id": _S, "statedAs": _S, "reads": _enum("goal", "outcome", "output", "activity"), "note": _S})), "issues": _STRS,
-     "suggestions": _STRS}
+    {"rules": RULE_VERDICTS, "classified": _list(_obj({"id": _S, "statedAs": _S, "reads": LEVELS, "note": _S})),
+     "issues": _list(_obj({"rule": _S, "ids": _STRS, "text": _S})), "suggestions": _STRS,
+     "reversed": _list(_obj({"id": _S, "before": LEVELS, "now": LEVELS, "reason": _S}))}
 )
 INTEGRITY_SCHEMA = _obj({"results": _list(_obj({"key": _S, "meaningKept": {"type": "boolean"}, "invented": _STRS, "lockedChanged": _STRS, "note": _S}))})
 EVALUATE_SCHEMA = _obj(
@@ -146,11 +150,34 @@ class Classified(BaseModel):
     note: str
 
 
+class Issue(BaseModel):
+    rule: str = ""
+    ids: list[str] = []
+    text: str
+
+
+class Reversal(BaseModel):
+    id: str
+    before: str
+    now: str
+    reason: str
+
+
 class ResultsReview(BaseModel):
     rules: list[RuleVerdict]
     classified: list[Classified]
-    issues: list[str]
+    issues: list[Issue]
     suggestions: list[str] = []
+    reversed: list[Reversal] = []
+
+    @field_validator("issues", mode="before")
+    @classmethod
+    def _plain(cls, value: Any) -> Any:  # an earlier engine's issues are plain text
+        return [{"text": v} if isinstance(v, str) else v for v in value or []]
+
+    @property
+    def texts(self) -> list[str]:
+        return [i.text for i in self.issues]
 
 
 class Integrity(BaseModel):
