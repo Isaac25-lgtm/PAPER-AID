@@ -80,7 +80,7 @@ function AuthShell({
   const [params] = useSearchParams();
   const [googleError, setGoogleError] = useState<string | null>(null);
   return (
-    <div className="flex min-h-dvh flex-col bg-gradient-to-b from-brand-50 to-surface-subtle">
+    <div className="flex min-h-dvh flex-col bg-white">
       <header className="mx-auto flex h-16 w-full max-w-6xl items-center px-4 sm:px-6">
         <Logo />
       </header>
@@ -89,8 +89,8 @@ function AuthShell({
         className="flex flex-1 items-start justify-center px-4 pt-6 pb-16 sm:pt-12"
       >
         <div className="w-full max-w-md">
-          <div className="rounded-2xl border border-line bg-white p-6 shadow-raised sm:p-8">
-            <h1 className="text-2xl font-bold">{title}</h1>
+          <div className="p-2 sm:p-4">
+            <h1 className="text-2xl font-medium">{title}</h1>
             <p className="mt-1.5 text-sm text-fg-muted">{subtitle}</p>
             {mode === "firebase" && (
               <>

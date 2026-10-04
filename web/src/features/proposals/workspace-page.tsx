@@ -306,7 +306,7 @@ function Workspace({ project, onChange, onReload }: { project: Project; onChange
         </div>
       )}
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_23rem]">
-        <div className="min-w-0 rounded-2xl bg-[#eef1ef] p-3 sm:p-6">
+        <div className="min-w-0">
           {!state?.current ? (
             <Card className="mx-auto max-w-xl p-6 text-center">
               <p className="text-lg font-semibold">{NAMES[shown]} is not written yet</p>
@@ -319,11 +319,11 @@ function Workspace({ project, onChange, onReload }: { project: Project; onChange
             <Skeleton className="mx-auto h-[36rem] max-w-[52rem] rounded-sm" />
           ) : (
             <Paper>
-              <p className="text-center text-[17px] font-bold uppercase">{shown === CONCEPT ? 'Concept paper' : `Chapter ${['', 'One', 'Two', 'Three'][shown]}`}</p>
-              <p className="text-center text-[17px] font-bold uppercase">{chapter.title}</p>
+              <p className="text-center text-[17px] font-semibold uppercase">{shown === CONCEPT ? 'Concept paper' : `Chapter ${['', 'One', 'Two', 'Three'][shown]}`}</p>
+              <p className="text-center text-[17px] font-semibold uppercase">{chapter.title}</p>
               {chapter.sections.map((s) => (
                 <section key={s.key} className="mt-6">
-                  <h2 className="text-[16px] font-bold">
+                  <h2 className="text-[16px] font-semibold">
                     {s.number} {s.heading}
                   </h2>
                   {s.paragraphs.map((p, i) => (
@@ -331,7 +331,7 @@ function Workspace({ project, onChange, onReload }: { project: Project; onChange
                   ))}
                   {s.key === 'framework' && figure && (
                     <figure className="my-5">
-                      <figcaption className="mb-2 text-sm font-bold">Figure {shown === CONCEPT ? '1' : '1.1'}: Conceptual framework</figcaption>
+                      <figcaption className="mb-2 text-sm font-semibold">Figure {shown === CONCEPT ? '1' : '1.1'}: Conceptual framework</figcaption>
                       <img src={figure} alt={project.framework} className="w-full rounded border border-[#ddd]" />
                       <p className="mt-1.5 text-xs"><i>Note.</i> Arrows show the associations this study will examine; they do not imply proven causes.</p>
                     </figure>
@@ -341,7 +341,7 @@ function Workspace({ project, onChange, onReload }: { project: Project; onChange
               ))}
               {chapter.references.length > 0 && (
                 <section className="mt-8">
-                  <h2 className="text-[16px] font-bold">References</h2>
+                  <h2 className="text-[16px] font-semibold">References</h2>
                   <ul className="mt-2 space-y-1.5">
                     {chapter.references.map((r) => (
                       <li key={r} className="pl-8 -indent-8">

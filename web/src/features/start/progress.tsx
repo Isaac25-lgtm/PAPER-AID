@@ -64,7 +64,7 @@ export function StartProgress({ jobId, phase, title, estimate, onDone }: { jobId
   const at = position(job, phase)
   return (
     <Card className="mx-auto max-w-2xl p-6 sm:p-8">
-      <h1 className="text-xl font-bold text-fg sm:text-2xl">{title}</h1>
+      <h1 className="text-xl font-medium text-fg sm:text-2xl">{title}</h1>
       <ol className="mt-6 space-y-3" aria-live="polite">
         {STEPS.map((step, i) => {
           const done = i < at
@@ -119,7 +119,7 @@ export function StoppedCard({ message, onRetry, busy, error, title = "We couldn'
 }) {
   return (
     <Card className="mx-auto max-w-2xl p-6 sm:p-8">
-      <h1 className="text-xl font-bold text-fg">{title}</h1>
+      <h1 className="text-xl font-semibold text-fg">{title}</h1>
       <p className="mt-2 text-sm text-fg-muted">{message}</p>
       {error && (
         <Alert tone="warning" className="mt-4">

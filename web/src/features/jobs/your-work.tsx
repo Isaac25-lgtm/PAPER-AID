@@ -5,12 +5,10 @@ import { ButtonLink } from '../../components/ui/button'
 import { Alert, Card, EmptyState, Skeleton } from '../../components/ui/primitives'
 import { DataError, useData } from '../../lib/data'
 import type { DataProject } from '../../lib/datalab-types'
-import { formatTokenNumber } from '../../lib/format'
 import type { Project } from '../../lib/proposal-types'
 import { startChoices } from '../../lib/start'
 import type { Job } from '../../lib/types'
 import { useTitle } from '../../lib/use-title'
-import { useWallet } from '../../lib/use-wallet'
 import type { Work } from '../../lib/work-types'
 import { useAuth } from '../auth/auth-context'
 import { KIND_LABELS } from '../works/shared'
@@ -104,7 +102,7 @@ function ItemRow({ item }: { item: Item }) {
   return (
     <li>
       <Link to={item.to} className="group flex items-center gap-4 rounded-xl px-3 py-3.5 transition-colors hover:bg-surface-subtle focus-visible:outline-2 focus-visible:outline-brand-600 sm:px-4">
-        <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-brand-50 text-brand-700">
+        <div className="grid size-10 shrink-0 place-items-center rounded-lg border border-line text-fg-muted">
           <item.icon className="size-5" aria-hidden />
         </div>
         <div className="min-w-0 flex-1">
@@ -141,7 +139,6 @@ export function DashboardPage() {
   useTitle('Dashboard')
   const { user } = useAuth()
   const data = useData()
-  const { wallet } = useWallet()
   const { items, error } = useYourWork()
   const papers = useJobList({ limit: 4 })
   const paperJobs = papers.jobs.filter((j: Job) => !j.projectId && !j.services.some((s) => ['COURSEWORK', 'CONCEPT_NOTE', 'FUNDING_PROPOSAL', 'PROPOSAL'].includes(s)))
@@ -152,19 +149,12 @@ export function DashboardPage() {
     <>
       <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-fg sm:text-3xl">
+          <h1 className="text-2xl font-medium tracking-tight text-fg sm:text-3xl">
             {greeting()}
             {firstName ? `, ${firstName}` : ''}
           </h1>
           <p className="mt-1 text-sm text-fg-muted">Pick up your work, or start something new.</p>
         </div>
-        {data.config.creditsEnabled && wallet && (
-          <Link to="/app/credits" className="rounded-xl border border-line bg-white px-4 py-2.5 text-sm shadow-card hover:border-brand-300">
-            <span className="text-fg-muted">Your credits </span>
-            <span className="font-bold text-fg">{formatTokenNumber(wallet.available)}</span>
-            {wallet.held > 0 && <span className="text-xs text-fg-muted"> · {formatTokenNumber(wallet.held)} reserved</span>}
-          </Link>
-        )}
       </div>
 
       <section aria-labelledby="your-work" className="mb-10">
@@ -203,7 +193,7 @@ export function DashboardPage() {
           {choices.slice(0, 4).map((c) => (
             <Link key={c.id} to={c.to}
               className="group flex flex-col rounded-2xl border border-line-strong/60 bg-white p-4 shadow-card transition hover:-translate-y-0.5 hover:border-brand-400 focus-visible:outline-2 focus-visible:outline-brand-600">
-              <span className="grid size-9 place-items-center rounded-lg bg-brand-50 text-brand-700">
+              <span className="grid size-9 place-items-center rounded-lg border border-line text-fg-muted">
                 <c.icon className="size-5" aria-hidden />
               </span>
               <span className="mt-3 text-sm font-semibold text-fg">{c.name}</span>
@@ -247,7 +237,7 @@ export function YourWorkPage() {
     <>
       <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-fg sm:text-3xl">Your work</h1>
+          <h1 className="text-2xl font-medium tracking-tight text-fg sm:text-3xl">Your work</h1>
           <p className="mt-1 text-sm text-fg-muted">Everything you have started, with where it is. Open one to read, change or download it.</p>
         </div>
         <Link to="/app/history" className="text-sm font-semibold text-brand-700 hover:underline">

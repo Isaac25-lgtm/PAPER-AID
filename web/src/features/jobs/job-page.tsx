@@ -56,7 +56,7 @@ export function JobPage() {
       </Link>
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <h1 className="text-xl font-bold break-words sm:text-2xl">{jobTitle(job)}</h1>
+          <h1 className="text-xl font-medium break-words sm:text-2xl">{jobTitle(job)}</h1>
           <p className="mt-1 text-sm text-fg-muted">
             {draft ? `Uploaded ${formatDateTime(job.createdAt)} · nothing has run yet` : `${serviceNames(job)} · Submitted ${formatDateTime(job.createdAt)}`}
           </p>

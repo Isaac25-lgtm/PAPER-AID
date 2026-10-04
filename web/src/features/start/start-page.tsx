@@ -41,7 +41,7 @@ function Shell({ title, step, children }: { title: string; step?: 1 | 2; childre
         <ArrowLeft className="size-4" aria-hidden /> All services
       </Link>
       <div className="mb-5 flex items-end justify-between gap-4">
-        <h1 className="text-2xl font-bold tracking-tight text-fg sm:text-3xl">{title}</h1>
+        <h1 className="text-2xl font-medium tracking-tight text-fg sm:text-3xl">{title}</h1>
         {step && <p className="shrink-0 text-sm font-medium text-fg-subtle">Step {step} of 2</p>}
       </div>
       {children}

@@ -92,7 +92,7 @@ export function QualWorkspace({ initial }: { initial: DataProject }) {
       <header className="flex flex-wrap items-start gap-3">
         <div className="min-w-0 flex-1">
           <p className="text-xs font-semibold tracking-wide text-brand-700 uppercase"><Link to="/app/datalab" className="hover:underline">Data Lab · Qualitative</Link></p>
-          <h1 className="text-2xl font-bold text-fg">{project.title}</h1>
+          <h1 className="text-2xl font-medium text-fg">{project.title}</h1>
           <p className="text-sm text-fg-muted">{project.purpose || 'No research question yet.'}</p>
         </div>
         <Button variant="ghost" size="sm" disabled={busy || running}

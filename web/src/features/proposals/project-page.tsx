@@ -211,7 +211,7 @@ function ChapterPanel({ project, number, running, onStarted, onChanged }: { proj
         ) : (
           <Card className="p-5 sm:p-8">
             {!concept && <p className="text-center text-xs font-semibold tracking-wide text-fg-subtle uppercase">Chapter {number}</p>}
-            <h2 className="text-center text-xl font-bold">{chapter.title}</h2>
+            <h2 className="text-center text-xl font-semibold">{chapter.title}</h2>
             <p className="mt-1 text-center text-xs text-fg-subtle">{chapter.words.toLocaleString()} words · written from plan version {chapter.planVersion}</p>
             {chapter.sections.map((s) => (
               <section key={s.number} className="mt-6">

@@ -20,7 +20,7 @@ function Tile({ label, value, tone }: { label: string; value: string; tone?: 'da
   return (
     <Card className="p-4">
       <p className="text-xs font-medium text-fg-subtle">{label}</p>
-      <p className={clsx('mt-1 text-2xl font-bold tracking-tight', tone === 'danger' ? 'text-red-600' : 'text-fg')}>{value}</p>
+      <p className={clsx('mt-1 text-2xl font-medium tracking-tight', tone === 'danger' ? 'text-red-600' : 'text-fg')}>{value}</p>
     </Card>
   )
 }
@@ -249,7 +249,7 @@ export function AdminJobPage() {
       </Link>
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="font-mono text-xl font-bold">{job.id}</h1>
+          <h1 className="font-mono text-xl font-semibold">{job.id}</h1>
           <p className="mt-1 text-sm text-fg-muted">
             {detail.ownerEmail} · {serviceNames(job)} · {job.source ? `${job.source.wordCount.toLocaleString('en')} words` : 'no paper yet'}
           </p>

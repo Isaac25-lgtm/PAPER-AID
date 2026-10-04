@@ -227,16 +227,13 @@ export function HeroPreview() {
 
   return (
     <div className="relative" aria-hidden>
-      <div className="absolute -inset-6 -z-10 rounded-[2.5rem] bg-gradient-to-br from-brand-100/80 via-brand-50/40 to-transparent blur-2xl" />
       <div
         ref={stageRef}
-        className={clsx('relative overflow-hidden rounded-2xl border border-line bg-white shadow-raised transition-opacity duration-700', scene.fading && 'opacity-40')}
+        className={clsx('relative overflow-hidden rounded-lg bg-white shadow-[0_12px_24px_-8px_rgb(16_24_40/0.08),0_0_0_1px_rgb(16_24_40/0.06)] transition-opacity duration-700', scene.fading && 'opacity-40')}
       >
         <div className="flex items-center gap-3 border-b border-line px-4 py-3">
           <LogoMark className="size-6" />
-          <span className="text-sm font-bold">
-            Paper<span className="text-brand-600">Aid</span>
-          </span>
+          <span className="text-sm font-semibold">PaperAid</span>
           <div className="ml-4 hidden gap-4 text-xs font-medium text-fg-subtle sm:flex">
             {['Review', 'Changes', 'Format'].map((tab) => {
               const active = tab === (scene.formatted ? 'Format' : 'Review')
@@ -281,7 +278,7 @@ export function HeroPreview() {
           <div className="hidden bg-surface-subtle/60 p-5 sm:block">
             <div className="flex items-center justify-between">
               <p className="text-xs font-semibold">{scene.scanning ? 'Reading your paper…' : 'Suggestions'}</p>
-              <span className={clsx('rounded-full px-1.5 text-[10px] font-bold text-white transition-colors', remaining ? 'bg-brand-700' : 'bg-brand-500')}>{remaining}</span>
+              <span className={clsx('rounded-full px-1.5 text-[10px] font-semibold text-white transition-colors', remaining ? 'bg-brand-700' : 'bg-brand-500')}>{remaining}</span>
             </div>
             <ul className="mt-3 space-y-2">
               {SUGGESTIONS.map((s, i) => {

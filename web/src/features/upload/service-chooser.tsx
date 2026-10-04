@@ -153,21 +153,18 @@ export function ServiceChooser() {
   const groups = ['Coursework', 'Research proposals', 'Funding', 'Data analysis', 'Your own paper'].map((g) => ({ title: g, cards: cards.filter((c) => c.group === g) })).filter((g) => g.cards.length)
   return (
     <>
-      <div className="mb-8 rounded-3xl bg-gradient-to-br from-brand-50 via-white to-brand-50/60 px-6 py-7 ring-1 ring-brand-100 sm:px-8">
-        <p className="text-xs font-semibold tracking-[0.18em] text-brand-700 uppercase">Get started</p>
-        <h1 className="mt-1.5 text-2xl font-bold tracking-tight text-fg sm:text-3xl">
-          What would you like <span className="text-brand-700">PaperAid</span> to do?
-        </h1>
+      <div className="mb-10">
+        <h1 className="text-2xl font-medium tracking-tight text-fg sm:text-[28px]">What would you like PaperAid to do?</h1>
         <p className="mt-2 max-w-2xl text-sm text-fg-muted sm:text-base">Choose what you need. Answer a few questions, then PaperAid gets to work and opens the finished document.</p>
         <div className="mt-4 flex flex-wrap gap-2 text-xs font-medium text-fg-muted">
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1 ring-1 ring-line"><ShieldCheck className="size-3.5 text-brand-700" aria-hidden /> Your work stays private</span>
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1 ring-1 ring-line"><BookCheck className="size-3.5 text-brand-700" aria-hidden /> Only sources PaperAid confirmed</span>
+          <span className="inline-flex items-center gap-1.5"><ShieldCheck className="size-3.5 text-fg-subtle" aria-hidden /> Your work stays private</span>
+          <span className="inline-flex items-center gap-1.5"><BookCheck className="size-3.5 text-fg-subtle" aria-hidden /> Only sources PaperAid confirmed</span>
         </div>
       </div>
       <div className="space-y-8">
         {groups.map((group) => (
           <section key={group.title} aria-labelledby={`group-${group.title}`}>
-            <h2 id={`group-${group.title}`} className="mb-3 text-lg font-semibold text-fg">
+            <h2 id={`group-${group.title}`} className="mb-3 text-[13px] font-semibold tracking-[0.08em] text-fg-subtle uppercase">
               {group.title}
             </h2>
             <ul className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -175,9 +172,9 @@ export function ServiceChooser() {
                 const availability = config.availability[card.service]
                 const reason = availability === 'invite_only' ? INVITE_ONLY_REASON : availability === 'not_configured' ? NOT_CONFIGURED_REASON : null
                 const body = (
-                  <div className={clsx('flex h-full flex-col rounded-2xl border bg-white p-5 shadow-card transition', reason ? 'border-line opacity-75' : 'border-line-strong/70 group-hover:-translate-y-0.5 group-hover:border-brand-500 group-hover:shadow-raised')}>
+                  <div className={clsx('flex h-full flex-col rounded-2xl border bg-white p-5 transition-colors duration-200', reason ? 'border-line opacity-75' : 'border-line group-hover:border-line-strong group-hover:bg-surface-subtle')}>
                     <div className="flex items-start gap-3">
-                      <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-700 ring-1 ring-brand-100">
+                      <span className="grid size-9 shrink-0 place-items-center rounded-lg border border-line text-fg-muted">
                         <card.icon className="size-5" aria-hidden />
                       </span>
                       <div className="min-w-0">
@@ -190,7 +187,7 @@ export function ServiceChooser() {
                     <ul className="mt-4 space-y-1.5">
                       {card.benefits.slice(0, 2).map((item) => (
                         <li key={item} className="flex gap-2 text-sm text-fg-muted">
-                          <Check className="mt-0.5 size-4 shrink-0 text-brand-600" aria-hidden /> {item}
+                          <Check className="mt-0.5 size-4 shrink-0 text-fg-subtle" aria-hidden /> {item}
                         </li>
                       ))}
                     </ul>
@@ -201,7 +198,7 @@ export function ServiceChooser() {
                     ))}
                     {!reason && (
                       <span className="mt-auto pt-5">
-                        <span className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-brand-700 px-4 text-sm font-semibold text-white group-hover:bg-brand-800">
+                        <span className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-700">
                           {card.action} <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" aria-hidden />
                         </span>
                       </span>

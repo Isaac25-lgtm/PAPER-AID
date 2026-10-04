@@ -173,13 +173,13 @@ function Workspace({ work, onChange, onReload }: { work: Work; onChange: (w: Wor
     <>
       <WorkspaceHeader title={doc.title} meta={meta} status={status} onWord={() => download(false)} onPdf={() => download(true)} />
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_23rem]">
-        <div className="min-w-0 rounded-2xl bg-[#eef1ef] p-3 sm:p-6">
+        <div className="min-w-0">
           <Paper>
-            <h1 className="text-center text-xl leading-snug font-bold">{doc.title}</h1>
+            <h1 className="text-center text-xl leading-snug font-semibold">{doc.title}</h1>
             {doc.exploratory && <p className="mt-2 text-center text-sm italic">Exploratory draft: not every eligibility criterion is met.</p>}
             {doc.sections.map((s) => (
               <section key={s.key} className="mt-7">
-                <h2 className="text-[17px] font-bold">{s.heading}</h2>
+                <h2 className="text-[17px] font-semibold">{s.heading}</h2>
                 {s.paragraphs.map((p, i) => (
                   <Para key={i} text={p} changed={doc.revised.includes(s.key)} />
                 ))}
@@ -192,7 +192,7 @@ function Workspace({ work, onChange, onReload }: { work: Work; onChange: (w: Wor
             ))}
             {doc.references.length > 0 && (
               <section className="mt-8">
-                <h2 className="text-[17px] font-bold">References</h2>
+                <h2 className="text-[17px] font-semibold">References</h2>
                 <ul className="mt-2 space-y-1.5">
                   {doc.references.map((r) => (
                     <li key={r} className="pl-8 -indent-8">

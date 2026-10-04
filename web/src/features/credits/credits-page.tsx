@@ -74,7 +74,7 @@ export function CreditsPage() {
             <WalletIcon className="size-4 text-brand-600" aria-hidden /> Available
           </p>
           {wallet ? (
-            <p className="mt-2 flex flex-wrap items-baseline gap-x-3 text-4xl font-bold tracking-tight">
+            <p className="mt-2 flex flex-wrap items-baseline gap-x-3 text-4xl font-medium tracking-tight">
               {formatTokens(wallet.available)}
             </p>
           ) : (

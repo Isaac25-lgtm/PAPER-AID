@@ -10,10 +10,10 @@ import { FinalCta, PricingModel } from './sections'
 
 export function PageHero({ eyebrow, title, children }: { eyebrow: string; title: string; children: ReactNode }) {
   return (
-    <section className="border-b border-line bg-gradient-to-b from-brand-50/70 to-white">
+    <section className="border-b border-line bg-white">
       <div className="mx-auto max-w-3xl px-4 py-14 text-center sm:px-6 sm:py-20">
         <Eyebrow>{eyebrow}</Eyebrow>
-        <h1 className="mt-5 text-4xl font-extrabold sm:text-5xl">{title}</h1>
+        <h1 className="mt-5 text-4xl font-medium sm:text-5xl">{title}</h1>
         <p className="mx-auto mt-4 max-w-2xl text-lg text-fg-muted">{children}</p>
       </div>
     </section>
@@ -37,12 +37,12 @@ export function FeaturesPage() {
               <div className="flex flex-col gap-6 md:flex-row">
                 <div className="md:w-72 md:shrink-0">
                   <div className="flex items-center gap-3">
-                    <div className="grid size-11 place-items-center rounded-xl bg-brand-50 text-brand-700">
+                    <div className="grid size-10 place-items-center rounded-lg border border-line text-brand-600">
                       <s.icon className="size-5" aria-hidden />
                     </div>
                     {availability !== 'available' && <Badge>{AVAILABILITY_BADGE[availability]}</Badge>}
                   </div>
-                  <h2 className="mt-4 text-xl font-bold">{s.name}</h2>
+                  <h2 className="mt-4 text-xl font-semibold">{s.name}</h2>
                   <p className="mt-2 text-sm text-fg-muted">{s.short}</p>
                   <p className="mt-4 text-xs text-fg-subtle">Accepts: {s.accepts}</p>
                 </div>
@@ -73,7 +73,7 @@ export function FeaturesPage() {
           )
         })}
         <section id="what-we-never-do" className="scroll-mt-24 rounded-2xl bg-brand-950 p-6 text-white sm:p-8">
-          <h2 className="text-xl font-bold text-white">What PaperAid never does</h2>
+          <h2 className="text-xl font-semibold text-white">What PaperAid never does</h2>
           <ul className="mt-4 grid gap-3 text-sm text-brand-100/90 sm:grid-cols-2">
             {[
               'Invent citations, sources, statistics or participant details',
@@ -180,14 +180,14 @@ export function PricingPage() {
         <PricingModel />
         <div className="mt-14 grid gap-10 lg:grid-cols-2">
           <div>
-            <h2 className="text-2xl font-bold">Prices</h2>
+            <h2 className="text-2xl font-medium">Prices</h2>
             <p className="mt-2 text-sm text-fg-muted">
               For a paper of up to {config.pricing.bandPages} pages. Each further {config.pricing.bandPages} pages adds {Math.round(config.pricing.bandStep * 100)}% of the price.
             </p>
             <PriceTable />
           </div>
           <div>
-            <h2 className="text-2xl font-bold">Questions</h2>
+            <h2 className="text-2xl font-medium">Questions</h2>
             <dl className="mt-5 space-y-5">
               {FAQ.map((f) => (
                 <div key={f.q}>

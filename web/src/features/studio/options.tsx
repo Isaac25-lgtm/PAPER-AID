@@ -389,7 +389,7 @@ export function JobOptions({ job, mode, initial }: { job: Job; mode: Mode; initi
             </dl>
             <p className="mt-2 flex items-baseline justify-between border-t border-line pt-2">
               <span className="text-sm font-semibold">Price</span>
-              <span className="text-xl font-bold">{formatTokens(pricing.quote.amount)}</span>
+              <span className="text-xl font-semibold">{formatTokens(pricing.quote.amount)}</span>
             </p>
             {!charging && <p className="mt-1 text-xs font-semibold text-brand-800">Not charged while PaperAid is in testing.</p>}
             {shortOfCredit && wallet && (

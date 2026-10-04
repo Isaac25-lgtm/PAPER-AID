@@ -67,7 +67,7 @@ export function FileDropzone({ label, hint, accept, onFile, compact, disabled }:
 export function FileChip({ name, meta, progress, onRemove }: { name: string; meta?: string; progress?: number; onRemove?: () => void }) {
   return (
     <div className="flex items-center gap-3 rounded-xl border border-line bg-white p-3 shadow-card">
-      <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-brand-50 text-brand-700">
+      <div className="grid size-10 shrink-0 place-items-center rounded-lg border border-line text-fg-muted">
         <FileText className="size-5" aria-hidden />
       </div>
       <div className="min-w-0 flex-1">

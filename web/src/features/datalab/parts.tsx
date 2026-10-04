@@ -207,7 +207,7 @@ export function ReportView({ projectId, report }: { projectId: string; report: R
   return (
     <article className="space-y-5 rounded-2xl border border-line bg-white p-6 shadow-card sm:p-8">
       <header>
-        <h2 className="text-2xl font-bold text-brand-800">{report.title}</h2>
+        <h2 className="text-2xl font-medium text-brand-800">{report.title}</h2>
         <p className="text-sm text-fg-muted">{report.subtitle}</p>
       </header>
       {report.sections.map((s) => {

@@ -181,7 +181,7 @@ export function DownloadList({ jobId, outputs, expiresAt }: { jobId: string; out
     <div className="space-y-2.5">
       {outputs.map((o) => (
         <div key={o.id} className="flex items-center gap-3 rounded-xl border border-line bg-white p-3">
-          <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-brand-50 text-brand-700">
+          <div className="grid size-10 shrink-0 place-items-center rounded-lg border border-line text-fg-muted">
             <FileText className="size-5" aria-hidden />
           </div>
           <div className="min-w-0 flex-1">

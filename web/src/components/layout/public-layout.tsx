@@ -8,7 +8,7 @@ import { Drawer } from '../ui/overlays'
 import { Logo, LogoMark } from './logo'
 
 const NAV = [
-  { to: '/features', label: 'Features' },
+  { to: '/features', label: 'Product' },
   { to: '/#how-it-works', label: 'How it works' },
   { to: '/pricing', label: 'Pricing' },
   { to: '/privacy', label: 'Privacy' },
@@ -54,11 +54,11 @@ export function PublicLayout() {
       </a>
       <header
         className={clsx(
-          'sticky top-0 z-40 border-b bg-white/85 backdrop-blur-md transition-colors',
+          'sticky top-0 z-40 border-b bg-white/95 backdrop-blur-xl transition-colors',
           scrolled ? 'border-line' : 'border-transparent',
         )}
       >
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-6 px-4 sm:px-6">
+        <div className="mx-auto flex h-[72px] max-w-[65rem] items-center justify-between gap-6 px-4 sm:px-6 lg:px-0">
           <Logo />
           <nav aria-label="Main" className="hidden items-center gap-1 md:flex">
             {NAV.map((item) => (
@@ -67,8 +67,8 @@ export function PublicLayout() {
                 to={item.to}
                 className={({ isActive }) =>
                   clsx(
-                    'rounded-md px-3 py-2 text-sm font-medium transition-colors hover:text-fg',
-                    isActive && !item.to.includes('#') ? 'text-brand-700' : 'text-fg-muted',
+                    'rounded-lg px-3 py-1 text-[15px] tracking-[-0.01em] transition-colors hover:bg-surface-muted hover:text-fg',
+                    isActive && !item.to.includes('#') ? 'text-fg' : 'text-fg-muted',
                   )
                 }
               >
@@ -105,35 +105,35 @@ export function PublicLayout() {
 
 function SiteFooter() {
   return (
-    <footer className="border-t border-line bg-surface-subtle">
-      <div className="mx-auto grid max-w-6xl gap-10 px-4 py-12 sm:px-6 md:grid-cols-[1.4fr_1fr_1fr]">
+    <footer className="bg-[#030712] text-[#98a1ae]">
+      <div className="mx-auto grid max-w-[65rem] gap-12 px-4 py-16 sm:px-6 md:grid-cols-[1.6fr_1fr_1fr] lg:px-0">
         <div>
           <div className="flex items-center gap-2.5">
             <LogoMark className="size-7" />
-            <span className="text-lg font-bold">
-              Paper<span className="text-brand-600">Aid</span>
-            </span>
+            <span className="text-lg font-semibold text-white">PaperAid</span>
           </div>
-          <p className="mt-3 max-w-xs text-sm text-fg-muted">Clear, correct, properly formatted papers — with your citations, data and voice left intact.</p>
+          <p className="mt-3 max-w-xs text-[15px] text-[#d1d5dc]">From first idea to finished paper, for researchers and students.</p>
+          <Link to="/app/new" className="mt-5 inline-flex h-9 items-center rounded-lg bg-brand-600 px-4 text-sm font-medium text-white hover:bg-brand-500">Get started</Link>
         </div>
         <div>
-          <h2 className="text-sm font-semibold">Product</h2>
-          <ul className="mt-3 space-y-2 text-sm text-fg-muted">
-            <li><Link to="/features" className="hover:text-fg">Features</Link></li>
-            <li><Link to="/pricing" className="hover:text-fg">Pricing</Link></li>
-            <li><Link to="/app/new" className="hover:text-fg">Get started</Link></li>
+          <h2 className="text-[15px] font-semibold text-white">Product</h2>
+          <ul className="mt-4 space-y-2.5 text-[15px]">
+            <li><Link to="/features" className="hover:text-white">What PaperAid does</Link></li>
+            <li><Link to="/#how-it-works" className="hover:text-white">How it works</Link></li>
+            <li><Link to="/pricing" className="hover:text-white">Pricing</Link></li>
           </ul>
         </div>
         <div>
-          <h2 className="text-sm font-semibold">Trust</h2>
-          <ul className="mt-3 space-y-2 text-sm text-fg-muted">
-            <li><Link to="/privacy" className="hover:text-fg">Privacy</Link></li>
-            <li><Link to="/features#what-we-never-do" className="hover:text-fg">What we never change</Link></li>
+          <h2 className="text-[15px] font-semibold text-white">Trust</h2>
+          <ul className="mt-4 space-y-2.5 text-[15px]">
+            <li><Link to="/privacy" className="hover:text-white">Privacy</Link></li>
+            <li><Link to="/terms" className="hover:text-white">Terms</Link></li>
+            <li><Link to="/features#what-we-never-do" className="hover:text-white">What we never change</Link></li>
           </ul>
         </div>
       </div>
-      <div className="border-t border-line">
-        <p className="mx-auto max-w-6xl px-4 py-5 text-xs text-fg-subtle sm:px-6">
+      <div className="border-t border-white/10">
+        <p className="mx-auto max-w-[65rem] px-4 py-6 text-[13px] sm:px-6 lg:px-0">
           © 2026 PaperAid. PaperAid gives feedback on how writing reads; it does not detect AI, and no detector can prove who wrote a text. PaperAid is
           not affiliated with any detection service.
         </p>

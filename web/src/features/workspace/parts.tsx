@@ -53,7 +53,7 @@ export function WorkspaceHeader({ title, meta, status, onWord, onPdf, extra }: {
         <Link to="/app/work" className="text-sm font-medium text-fg-muted hover:text-fg">
           ← Your work
         </Link>
-        <h1 className="mt-1 text-xl leading-snug font-bold tracking-tight text-fg sm:text-2xl">{title}</h1>
+        <h1 className="mt-1 text-xl leading-snug font-medium tracking-tight text-fg sm:text-2xl">{title}</h1>
         <div className="mt-1.5 flex flex-wrap items-center gap-2 text-sm text-fg-muted">
           <span>{meta}</span>
           {status && <StatusChip status={status} />}
@@ -76,7 +76,7 @@ export function WorkspaceHeader({ title, meta, status, onWord, onPdf, extra }: {
 export function Paper({ children }: { children: ReactNode }) {
   return (
     <article
-      className="mx-auto w-full max-w-[52rem] rounded-sm bg-white px-6 py-10 text-[15px] leading-[1.75] text-[#111] shadow-raised ring-1 ring-line sm:px-14 sm:py-14"
+      className="mx-auto w-full max-w-[48rem] bg-white px-1 py-4 text-[16px] leading-[1.8] text-[#111] sm:px-4"
       style={{ fontFamily: "'Times New Roman', Times, 'Liberation Serif', serif" }}
     >
       {children}
@@ -88,12 +88,12 @@ export function DocTable({ caption, rows }: { caption: string; rows: string[][] 
   if (rows.length < 2) return null
   return (
     <figure className="my-5 overflow-x-auto">
-      <figcaption className="mb-1.5 text-sm font-bold">{caption}</figcaption>
+      <figcaption className="mb-1.5 text-sm font-semibold">{caption}</figcaption>
       <table className="w-full border-collapse text-[13px] leading-snug">
         <thead>
           <tr>
             {rows[0].map((c, i) => (
-              <th key={i} className="border border-[#999] bg-[#eef5f0] px-2 py-1.5 text-left font-bold">
+              <th key={i} className="border border-[#999] bg-[#f3f4f6] px-2 py-1.5 text-left font-semibold">
                 {c}
               </th>
             ))}

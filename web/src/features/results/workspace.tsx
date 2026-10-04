@@ -488,7 +488,7 @@ function WritingCard({ job }: { job: Job }) {
   return (
     <Card className="p-4">
       <p className="text-xs font-semibold tracking-wide text-fg-subtle uppercase">Writing patterns</p>
-      <p className="mt-1 text-2xl font-bold tracking-tight">
+      <p className="mt-1 text-2xl font-medium tracking-tight">
         {marked} passage{marked === 1 ? '' : 's'} marked
       </p>
       <p className="mt-1 text-xs leading-relaxed text-fg-muted">
@@ -528,8 +528,8 @@ function ScoreCard({ job, percent, percentAfter }: { job: Job; percent: number |
       </div>
       <div className="mt-1 flex items-baseline gap-2">
         {after && <span className="text-lg font-semibold text-fg-subtle line-through decoration-1">{a.coverageComplete === false ? 'Check incomplete' : percent != null ? `${percent}%` : a.band ? label(a.band) : 'Writing feedback'}</span>}
-        <span className={clsx('font-bold tracking-tight', complete ? 'text-4xl' : 'text-2xl')}>{!complete ? 'Check incomplete' : shown != null ? `${shown}%` : label(now.band)}</span>
-        {complete && <span className={clsx('ml-auto rounded-lg px-2.5 py-1 text-xs font-bold ring-1 ring-inset', BAND_STYLE[now.band])}>{label(now.band)}</span>}
+        <span className={clsx('font-medium tracking-tight', complete ? 'text-4xl' : 'text-2xl')}>{!complete ? 'Check incomplete' : shown != null ? `${shown}%` : label(now.band)}</span>
+        {complete && <span className={clsx('ml-auto rounded-lg px-2.5 py-1 text-xs font-semibold ring-1 ring-inset', BAND_STYLE[now.band])}>{label(now.band)}</span>}
       </div>
       {shown != null && (
         <div className="mt-2 h-2 overflow-hidden rounded-full bg-surface-muted" aria-hidden>

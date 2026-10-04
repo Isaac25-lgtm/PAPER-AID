@@ -137,7 +137,7 @@ export function DataLabWorkspace() {
           <p className="text-xs font-semibold tracking-wide text-brand-700 uppercase">
             {project.proposalId ? <Link to={`/app/projects/${project.proposalId}`} className="hover:underline">Research proposal · Chapter Four</Link> : 'Data Lab'}
           </p>
-          <h1 className="text-2xl font-bold text-fg">{project.title}</h1>
+          <h1 className="text-2xl font-medium text-fg">{project.title}</h1>
           {project.source && (
             <p className="text-sm text-fg-muted">
               {project.source.name}

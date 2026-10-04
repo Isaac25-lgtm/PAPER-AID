@@ -106,7 +106,7 @@ function Step({ n, title, description, children, disabled }: { n: number; title:
   return (
     <section className={clsx('rounded-2xl border border-line bg-white p-5 shadow-card sm:p-6', disabled && 'opacity-60')} aria-disabled={disabled}>
       <div className="mb-5 flex items-start gap-3">
-        <span className="grid size-7 shrink-0 place-items-center rounded-full bg-brand-700 text-sm font-bold text-white">{n}</span>
+        <span className="grid size-7 shrink-0 place-items-center rounded-full bg-brand-700 text-sm font-semibold text-white">{n}</span>
         <div>
           <h2 className="text-base font-semibold">{title}</h2>
           {description && <p className="mt-0.5 text-sm text-fg-muted">{description}</p>}
@@ -754,7 +754,7 @@ function NewJobForm({ type }: { type: JobType | null }) {
                   <div className="mt-4 flex items-baseline justify-between border-t border-line pt-4">
                     <span className="text-sm font-semibold">{fixedPrice ? 'Price' : charging ? 'Most you’ll pay' : 'Most it would cost'}</span>
                     <span className="text-right">
-                      <span className="block text-2xl font-bold tracking-tight">{formatTokens(pricing.quote.amount)}</span>
+                      <span className="block text-2xl font-medium tracking-tight">{formatTokens(pricing.quote.amount)}</span>
                     </span>
                   </div>
                   {selection.writing === 'REDRAFT' && pricing.estimate?.intervention != null && (

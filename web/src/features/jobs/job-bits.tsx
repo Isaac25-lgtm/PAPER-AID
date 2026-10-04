@@ -50,7 +50,7 @@ export function JobRow({ job }: { job: Job }) {
         to={jobLink(job)}
         className="group flex items-center gap-4 rounded-xl px-3 py-3.5 transition-colors hover:bg-surface-subtle sm:px-4"
       >
-        <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-brand-50 text-brand-700">
+        <div className="grid size-10 shrink-0 place-items-center rounded-lg border border-line text-fg-muted">
           <FileText className="size-5" aria-hidden />
         </div>
         <div className="min-w-0 flex-1">
