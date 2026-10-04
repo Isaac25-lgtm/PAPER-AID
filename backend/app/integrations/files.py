@@ -31,7 +31,10 @@ class LocalFileStore:
         self._root.mkdir(parents=True, exist_ok=True)
 
     def _full(self, path: str) -> Path:
-        full = (self._root / _safe(path)).resolve()
+        # `_safe` already refuses "..", "." and backslashes, so the joined path stays under the root. It isn't
+        # resolved again: on Windows, resolving a file that is being written can return another form of its path
+        # and fail this check (seen in the browser journeys, 2026-10-04).
+        full = self._root / _safe(path)
         if self._root not in full.parents:
             raise ValueError("path escapes storage root")
         return full

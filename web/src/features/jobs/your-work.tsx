@@ -101,12 +101,10 @@ function useYourWork() {
 function ItemRow({ item }: { item: Item }) {
   return (
     <li>
-      <Link to={item.to} className="group flex items-center gap-4 rounded-xl px-3 py-3.5 transition-colors hover:bg-surface-subtle focus-visible:outline-2 focus-visible:outline-brand-600 sm:px-4">
-        <div className="grid size-10 shrink-0 place-items-center rounded-lg border border-line text-fg-muted">
-          <item.icon className="size-5" aria-hidden />
-        </div>
+      <Link to={item.to} className="group flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-surface-subtle focus-visible:outline-2 focus-visible:outline-brand-600">
+        <item.icon className="size-[18px] shrink-0 text-fg-subtle" aria-hidden />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold text-fg group-hover:text-brand-800">{item.title}</p>
+          <p className="truncate text-sm font-medium text-fg group-hover:text-brand-700">{item.title}</p>
           <p className="mt-0.5 truncate text-xs text-fg-subtle">
             {item.kind} · {new Date(item.updated).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
           </p>
@@ -119,7 +117,7 @@ function ItemRow({ item }: { item: Item }) {
 
 function ItemList({ items, limit }: { items: Item[]; limit?: number }) {
   return (
-    <Card className="p-1.5">
+    <Card className="p-1">
       <ul className="divide-y divide-line">
         {(limit ? items.slice(0, limit) : items).map((item) => (
           <ItemRow key={item.key} item={item} />
@@ -134,7 +132,9 @@ function greeting() {
   return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'
 }
 
-/** The dashboard (owner decision 2026-10-01): the student's work first, starting something new second. */
+const RECENT = 4  // the dashboard shows the latest work only; the rest is under Your work (owner, 2026-10-04)
+
+/** The dashboard (redesign 2026-10-04, after Jenni's home): a greeting, a row to start something, then the latest work. */
 export function DashboardPage() {
   useTitle('Dashboard')
   const { user } = useAuth()
@@ -147,24 +147,35 @@ export function DashboardPage() {
 
   return (
     <>
-      <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-medium tracking-tight text-fg sm:text-3xl">
-            {greeting()}
-            {firstName ? `, ${firstName}` : ''}
-          </h1>
-          <p className="mt-1 text-sm text-fg-muted">Pick up your work, or start something new.</p>
-        </div>
-      </div>
+      <h1 className="text-2xl font-medium tracking-tight text-fg sm:text-[28px]">
+        {greeting()}
+        {firstName ? `, ${firstName}` : ''}
+      </h1>
+      <p className="mt-1 text-[15px] text-fg-muted">What are you working on?</p>
 
-      <section aria-labelledby="your-work" className="mb-10">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 id="your-work" className="text-lg font-semibold">
-            Your work
+      <section aria-labelledby="start-new" className="mt-6">
+        <h2 id="start-new" className="sr-only">Start something new</h2>
+        <div className="flex flex-wrap gap-2">
+          {choices.map((c) => (
+            <Link key={c.id} to={c.to}
+              className="inline-flex h-9 items-center gap-2 rounded-lg border border-line bg-white px-3 text-sm font-medium text-fg shadow-[0_1px_2px_rgb(16_24_40/0.04)] transition-colors hover:border-line-strong hover:bg-surface-subtle focus-visible:outline-2 focus-visible:outline-brand-600">
+              <c.icon className="size-4 text-fg-subtle" aria-hidden /> {c.name}
+            </Link>
+          ))}
+          <Link to="/app/new" className="inline-flex h-9 items-center gap-1 px-2 text-sm font-medium text-brand-700 hover:underline">
+            Every service <ArrowRight className="size-3.5" aria-hidden />
+          </Link>
+        </div>
+      </section>
+
+      <section aria-labelledby="your-work" className="mt-10">
+        <div className="mb-2 flex items-center justify-between">
+          <h2 id="your-work" className="text-[15px] font-medium text-fg">
+            Continue working
           </h2>
-          {items && items.length > 6 && (
-            <Link to="/app/work" className="text-sm font-semibold text-brand-700 hover:underline">
-              See all
+          {items && items.length > RECENT && (
+            <Link to="/app/work" className="text-sm font-medium text-brand-700 hover:underline">
+              See all {items.length}
             </Link>
           )}
         </div>
@@ -172,7 +183,7 @@ export function DashboardPage() {
         {items === null && !error ? (
           <Skeleton className="h-40 rounded-2xl" />
         ) : items && items.length ? (
-          <ItemList items={items} limit={6} />
+          <ItemList items={items} limit={RECENT} />
         ) : (
           <EmptyState icon={<FolderOpen className="size-5" />} title="Nothing here yet" action={choices[0] && <ButtonLink to={choices[0].to}>{choices[0].action}</ButtonLink>}>
             Start your first piece of work. It will appear here, with its status, whenever you come back.
@@ -180,36 +191,10 @@ export function DashboardPage() {
         )}
       </section>
 
-      <section aria-labelledby="start-new">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 id="start-new" className="text-lg font-semibold">
-            Start something new
-          </h2>
-          <Link to="/app/new" className="text-sm font-semibold text-brand-700 hover:underline">
-            Every service
-          </Link>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {choices.slice(0, 4).map((c) => (
-            <Link key={c.id} to={c.to}
-              className="group flex flex-col rounded-2xl border border-line-strong/60 bg-white p-4 shadow-card transition hover:-translate-y-0.5 hover:border-brand-400 focus-visible:outline-2 focus-visible:outline-brand-600">
-              <span className="grid size-9 place-items-center rounded-lg border border-line text-fg-muted">
-                <c.icon className="size-5" aria-hidden />
-              </span>
-              <span className="mt-3 text-sm font-semibold text-fg">{c.name}</span>
-              <span className="mt-1 flex-1 text-xs text-fg-muted">{c.short}</span>
-              <span className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-brand-700">
-                {c.action} <ArrowRight className="size-3.5 transition-transform group-hover:translate-x-0.5" aria-hidden />
-              </span>
-            </Link>
-          ))}
-        </div>
-      </section>
-
       {paperJobs.length > 0 && (
         <section aria-labelledby="papers" className="mt-10">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 id="papers" className="text-lg font-semibold">
+          <div className="mb-2 flex items-center justify-between">
+            <h2 id="papers" className="text-[15px] font-medium text-fg">
               Paper checks and formatting
             </h2>
             <Link to="/app/history" className="text-sm font-semibold text-brand-700 hover:underline">

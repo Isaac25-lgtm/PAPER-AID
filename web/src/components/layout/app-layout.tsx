@@ -145,7 +145,7 @@ export function AppLayout() {
       </div>
 
       <div className="flex min-h-dvh flex-col lg:pl-[248px]">
-        <header className="sticky top-0 z-20 border-b border-line bg-white/90 backdrop-blur">
+        <header className={clsx('sticky top-0 z-20 border-b border-line bg-white/90 backdrop-blur', !config.creditsEnabled && 'lg:hidden')}>
           <div className="flex h-14 items-center gap-3 px-4 sm:px-6">
             <button className="-ml-1 rounded-lg p-2 text-fg-muted hover:bg-surface-muted lg:hidden" onClick={() => setMenuOpen(true)} aria-label="Open menu">
               <MenuIcon className="size-5" />

@@ -111,7 +111,7 @@ const FAQ = [
   { q: 'Do credits expire?', a: 'No. Credits stay in your account until you use them. They can’t be exchanged for cash.' },
   {
     q: 'Can I buy credits now?',
-    a: 'Not yet. Buying credits opens when mobile-money payments launch. Until then, beta jobs run without charge.',
+    a: 'Not yet. Buying credits opens soon. Until then, testing runs without charge.',
   },
   {
     q: 'Do I need an account?',
@@ -173,8 +173,7 @@ export function PricingPage() {
   return (
     <>
       <PageHero eyebrow="Pricing" title="Simple prices in credits.">
-        No subscription. Buy credits; the credits for a job are reserved when you start it, and you pay only for what is delivered. One credit is UGX{' '}
-        {config.ugxPerToken.toLocaleString('en')}.
+        No subscription. You pay in PaperAid credits: the credits for a job are reserved when you start it, and you pay only for what is delivered.
       </PageHero>
       <div className="mx-auto max-w-6xl px-4 py-14 sm:px-6">
         <PricingModel />

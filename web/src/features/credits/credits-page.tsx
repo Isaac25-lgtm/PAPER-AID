@@ -1,11 +1,11 @@
 import { clsx } from 'clsx'
-import { ArrowDownLeft, ArrowUpRight, Lock, Smartphone, Wallet as WalletIcon } from 'lucide-react'
+import { ArrowDownLeft, ArrowUpRight, Lock, Wallet as WalletIcon } from 'lucide-react'
 import { useState } from 'react'
 import { Link } from 'react-router'
 import { Button } from '../../components/ui/button'
 import { Alert, Badge, Card, EmptyState, PageHeader, Skeleton } from '../../components/ui/primitives'
 import { DataError, useData } from '../../lib/data'
-import { formatDateTime, formatTokens, formatUGX } from '../../lib/format'
+import { formatDateTime, formatTokens } from '../../lib/format'
 import type { LedgerEntry } from '../../lib/types'
 import { useTitle } from '../../lib/use-title'
 import { useWallet } from '../../lib/use-wallet'
@@ -88,10 +88,10 @@ export function CreditsPage() {
         </Card>
         <Card className="p-5">
           <p className="flex items-center gap-2 text-sm font-semibold">
-            <Smartphone className="size-4 text-brand-600" aria-hidden /> Buy credits
+            <WalletIcon className="size-4 text-brand-600" aria-hidden /> Buy credits
           </p>
           <p className="mt-2 text-sm leading-relaxed text-fg-muted">
-            Buying credits with mobile money opens soon, from {formatTokens(config.minTopUpUgx)} ({formatUGX(config.minTopUpUgx)}). One credit is {formatUGX(config.ugxPerToken)}.
+            Buying credits opens soon, from {formatTokens(config.minTopUpUgx)}.
           </p>
           <p className="mt-3 text-xs text-fg-subtle">Until then, PaperAid adds credits for you. Credits can&rsquo;t be exchanged for cash.</p>
         </Card>

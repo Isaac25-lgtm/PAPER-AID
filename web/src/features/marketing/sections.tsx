@@ -60,7 +60,7 @@ export function ServiceGrid() {
 
 // How PaperAid is paid for: fixed prices in credits by paper length (owner decisions 2026-09-28 and 2026-10-01).
 const PRICING_STEPS = [
-  { title: 'Credits', body: 'You pay with credits, from 10 credits (UGX 10,000). Credits never expire. While PaperAid is in testing, nothing is charged.' },
+  { title: 'Credits', body: 'You pay with PaperAid credits, used across every service. Credits never expire. While PaperAid is in testing, nothing is charged.' },
   { title: 'Fixed prices by length', body: 'Every service has a fixed price in credits for your paper’s length. Credits are reserved when you start and charged only for what is delivered.' },
   { title: 'Pay only for what you get', body: 'If part of a job can’t be delivered, you pay only for the part that was. A job that fails costs nothing.' },
 ]
@@ -79,7 +79,7 @@ export function PricingModel() {
         ))}
       </ol>
       {!config.paymentsEnabled && (
-        <p className="mt-5 text-sm text-fg-subtle">Payments aren’t live yet. Top-ups open when mobile-money payments launch; until then, beta jobs run without charge.</p>
+        <p className="mt-5 text-sm text-fg-subtle">Buying credits opens soon; until then, testing runs without charge.</p>
       )}
     </div>
   )

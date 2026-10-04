@@ -1,4 +1,4 @@
-import { ArrowRight, Ban, BookCheck, ChartColumn, ChevronDown, FilePen, HandCoins, Lock, NotebookPen, Search, ShieldCheck, Trash2 } from 'lucide-react'
+import { ArrowRight, Ban, BookCheck, ChartColumn, ChevronDown, FilePen, HandCoins, Lock, MapPinned, NotebookPen, Search, ShieldCheck, Trash2 } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { ButtonLink } from '../../components/ui/button'
 import { Eyebrow } from '../../components/ui/primitives'
@@ -46,10 +46,11 @@ export function HomePage() {
       <section className="px-4 pb-16 sm:px-6" aria-label="Sections">
         <ul className="mx-auto flex max-w-4xl flex-wrap items-center justify-center gap-x-8 gap-y-3 text-[15px] text-fg-subtle">
           {[
+            { icon: FilePen, label: 'Academic research' },
             { icon: NotebookPen, label: 'Coursework' },
-            { icon: FilePen, label: 'Research proposals' },
             { icon: HandCoins, label: 'Funding' },
             { icon: ChartColumn, label: 'Data analysis' },
+            { icon: MapPinned, label: 'Geospatial analysis' },
             { icon: Search, label: 'Your own paper' },
           ].map((s) => (
             <li key={s.label} className="flex items-center gap-2">
@@ -57,6 +58,39 @@ export function HomePage() {
             </li>
           ))}
         </ul>
+      </section>
+
+
+      <section className="px-4 py-20 sm:px-6 sm:py-28" aria-labelledby="features-title">
+        <div className="mx-auto max-w-[65rem]">
+          <Reveal>
+            <Eyebrow>What PaperAid does</Eyebrow>
+            <h2 id="features-title" className="mt-3 text-[2rem] leading-[1.15] tracking-[-0.025em] sm:text-[2.5rem]">Built for serious academic work</h2>
+            <p className="mt-3 max-w-2xl text-lg leading-relaxed text-fg-muted">Not a chatbot. Tell PaperAid what you need, press Start, and come back to a document you can review, change and download.</p>
+          </Reveal>
+          <div className="mt-16 space-y-24">
+            <Feature eyebrow="Academic research and coursework" title="Your research from proposal to results, and coursework to your brief"
+              body={['A concept paper, then the proposal (Chapters One to Three) written to your institution’s guide; then your data analysed and Chapter Four, the results, written objective by objective. Coursework written to your question and brief.',
+                'Every reference is a source PaperAid found and confirmed, in your referencing style. Nothing is cited that it couldn’t check.']}
+              visual={<DocVisual />} />
+            <Feature eyebrow="Data analysis" title="Analyse your data without leaving your work" flip
+              body={['Describe, compare, relate and correlate, filtered by any variable, with effect sizes and confidence intervals. Themes from interviews and focus groups, every quote checked word for word against its transcript.',
+                'Small counts are never shown, and every number is calculated by code, never by a model.']}
+              visual={<DataVisual />} />
+            <Feature eyebrow="Geospatial analysis" title="See where it happens, on official maps"
+              body={['Map your records, totals or rates by district, subcounty, sub-region or region, on official boundaries. Zoom to one region or the districts you choose, with their neighbours for context.',
+                'Every map comes with its table, and areas with too few records to show safely are hidden.']}
+              visual={<MapVisual />} />
+            <Feature eyebrow="Funding concept notes and proposals" title="From concept note to full proposal, answering everything the call asks" flip
+              body={['A concept note for a call or a funder, and the full funding proposal, written to the call. The logframe, workplan and M&E table come from one results model, so they always agree.',
+                'Every budget sum is worked out for you. Figures only you can give are marked for you to fill in, never invented.']}
+              visual={<ChecklistVisual />} />
+            <Feature eyebrow="Your own paper" title="Check, redraft and format the paper you wrote"
+              body={['Writing feedback that marks generic or repetitive passages with reasons, a redraft in your own voice when you want one, and formatting in APA, Harvard or your institution’s guide.',
+                'Your citations, quotations and numbers are kept exactly as they are.']}
+              visual={<ReviewVisual />} />
+          </div>
+        </div>
       </section>
 
       <section id="how-it-works" className="scroll-mt-20 bg-surface-subtle px-4 py-20 sm:px-6 sm:py-24" aria-labelledby="how-title">
@@ -74,34 +108,6 @@ export function HomePage() {
               </Reveal>
             ))}
           </ol>
-        </div>
-      </section>
-
-      <section className="px-4 py-20 sm:px-6 sm:py-28" aria-labelledby="features-title">
-        <div className="mx-auto max-w-[65rem]">
-          <Reveal>
-            <Eyebrow>What PaperAid does</Eyebrow>
-            <h2 id="features-title" className="mt-3 text-[2rem] leading-[1.15] tracking-[-0.025em] sm:text-[2.5rem]">Built for serious academic work</h2>
-            <p className="mt-3 max-w-2xl text-lg leading-relaxed text-fg-muted">Not a chatbot. Tell PaperAid what you need, press Start, and come back to a document you can review, change and download.</p>
-          </Reveal>
-          <div className="mt-16 space-y-24">
-            <Feature eyebrow="Coursework and proposals" title="Written to your brief, from sources it confirmed"
-              body={['Coursework, research proposals (Chapters One to Three) and concept papers, written to your question and your institution’s guide.',
-                'Every reference is a source PaperAid found and confirmed, in your referencing style. Nothing is cited that it couldn’t check.']}
-              visual={<DocVisual />} />
-            <Feature eyebrow="Data Lab" title="Analyse your data without leaving your work" flip
-              body={['Describe, compare, relate and correlate, filtered by any variable, with effect sizes and confidence intervals. Maps of Uganda by district, subcounty, sub-region or region. Themes from interviews, every quote checked word for word.',
-                'Small counts are never shown, and every number is calculated by code, never by a model.']}
-              visual={<DataVisual />} />
-            <Feature eyebrow="Funding" title="Proposals that answer everything the call asks"
-              body={['Concept notes and full funding proposals, written to the call. The logframe, workplan and M&E table come from one results model, so they always agree.',
-                'Every budget sum is worked out for you. Figures only you can give are marked for you to fill in, never invented.']}
-              visual={<ChecklistVisual />} />
-            <Feature eyebrow="Your own paper" title="Check, redraft and format the paper you wrote" flip
-              body={['Writing feedback that marks generic or repetitive passages with reasons, a redraft in your own voice when you want one, and formatting in APA, Harvard or your institution’s guide.',
-                'Your citations, quotations and numbers are kept exactly as they are.']}
-              visual={<ReviewVisual />} />
-          </div>
         </div>
       </section>
 
@@ -180,7 +186,7 @@ export function HomePage() {
               ['Where do the sources come from?', 'PaperAid searches for sources and cites only those it could confirm. A claim it can’t trace to a confirmed source is left out or marked for you.'],
               ['Is my work private?', `Your files are private to your account and deleted automatically after ${config.retentionDays} days. You can delete them sooner at any time.`],
               ['How are the numbers in my data analysis worked out?', 'By code, never by a model: PaperAid’s statistics engine calculates every number, and the writing explains them. Counts small enough to identify someone are hidden.'],
-              ['What does it cost?', 'Each service has a fixed price in credits for your document’s length. Credits are reserved when you start and charged only for what is delivered; a job that fails costs nothing.'],
+              ['What does it cost?', 'You pay in PaperAid credits. Each service has a fixed price in credits for your document’s length, reserved when you start and charged only for what is delivered; a job that fails costs nothing.'],
             ].map(([q, a]) => (
               <details key={q} className="group rounded-lg border border-line bg-white shadow-[0_1px_12px_2px_rgb(10_0_31/0.04)]">
                 <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-5 text-lg text-fg [&::-webkit-details-marker]:hidden">
@@ -265,6 +271,22 @@ function DataVisual() {
           <div key={k} className="rounded border border-line px-2 py-1.5"><p className="text-fg-subtle">{k}</p><p className="font-medium text-fg">{v}</p></div>
         ))}
       </div>
+    </Window>
+  )
+}
+
+function MapVisual() {
+  return (
+    <Window title="Map · example data">
+      <div className="grid grid-cols-[1fr_auto] items-end gap-4">
+        <img src="/uganda-example-map.svg" alt="" className="mx-auto max-h-64 w-auto" loading="lazy" />
+        <div className="space-y-1 pb-2 text-[10px] text-fg-subtle">
+          {['#3f4be3', '#5562ef', '#7886f7', '#a3affc', '#c9d0fe', '#e3e7ff'].map((c, i) => (
+            <p key={c} className="flex items-center gap-1.5"><span className="size-2.5 rounded-sm" style={{ background: c }} /> {i === 0 ? 'Highest' : i === 5 ? 'Lowest' : ''}</p>
+          ))}
+        </div>
+      </div>
+      <p className="mt-2 text-[11px] text-fg-subtle">Uganda by district (UBOS boundaries). Shading is illustrative.</p>
     </Window>
   )
 }
