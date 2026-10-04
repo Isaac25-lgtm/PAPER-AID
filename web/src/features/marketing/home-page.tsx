@@ -1,10 +1,11 @@
-import { ArrowRight, Ban, BookCheck, ChartColumn, ChevronDown, FilePen, HandCoins, Lock, MapPinned, NotebookPen, Search, ShieldCheck, Trash2 } from 'lucide-react'
+import { ArrowRight, Ban, ChartColumn, ChevronDown, FilePen, HandCoins, Lock, MapPinned, NotebookPen, Search, ShieldCheck, Trash2 } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { ButtonLink } from '../../components/ui/button'
 import { Eyebrow } from '../../components/ui/primitives'
 import { useData } from '../../lib/data'
 import { useTitle } from '../../lib/use-title'
 import { HeroPreview } from './hero-preview'
+import { DataLive, FundingLive, MapLive, PaperLive, ResearchLive } from './live-visuals'
 import { FinalCta, PricingModel, Reveal } from './sections'
 
 /** The public home page (redesign 2026-10-04): Jenni's calm structure with PaperAid's own content. Every
@@ -72,23 +73,23 @@ export function HomePage() {
             <Feature eyebrow="Academic research and coursework" title="Your research from proposal to results, and coursework to your brief"
               body={['A concept paper, then the proposal (Chapters One to Three) written to your institution’s guide; then your data analysed and Chapter Four, the results, written objective by objective. Coursework written to your question and brief.',
                 'Every reference is a source PaperAid found and confirmed, in your referencing style. Nothing is cited that it couldn’t check.']}
-              visual={<DocVisual />} />
+              visual={<ResearchLive />} />
             <Feature eyebrow="Data analysis" title="Analyse your data without leaving your work" flip
               body={['Describe, compare, relate and correlate, filtered by any variable, with effect sizes and confidence intervals. Themes from interviews and focus groups, every quote checked word for word against its transcript.',
                 'Small counts are never shown, and every number is calculated by code, never by a model.']}
-              visual={<DataVisual />} />
+              visual={<DataLive />} />
             <Feature eyebrow="Geospatial analysis" title="See where it happens, on official maps"
               body={['Map your records, totals or rates by district, subcounty, sub-region or region, on official boundaries. Zoom to one region or the districts you choose, with their neighbours for context.',
                 'Every map comes with its table, and areas with too few records to show safely are hidden.']}
-              visual={<MapVisual />} />
+              visual={<MapLive />} />
             <Feature eyebrow="Funding concept notes and proposals" title="From concept note to full proposal, answering everything the call asks" flip
               body={['A concept note for a call or a funder, and the full funding proposal, written to the call. The logframe, workplan and M&E table come from one results model, so they always agree.',
                 'Every budget sum is worked out for you. Figures only you can give are marked for you to fill in, never invented.']}
-              visual={<ChecklistVisual />} />
+              visual={<FundingLive />} />
             <Feature eyebrow="Your own paper" title="Check, redraft and format the paper you wrote"
               body={['Writing feedback that marks generic or repetitive passages with reasons, a redraft in your own voice when you want one, and formatting in APA, Harvard or your institution’s guide.',
                 'Your citations, quotations and numbers are kept exactly as they are.']}
-              visual={<ReviewVisual />} />
+              visual={<PaperLive />} />
           </div>
         </div>
       </section>
@@ -219,101 +220,5 @@ function Feature({ eyebrow, title, body, visual, flip = false }: { eyebrow: stri
         <div className="rounded-lg border border-line bg-surface-muted p-5 sm:p-8" aria-hidden>{visual}</div>
       </Reveal>
     </div>
-  )
-}
-
-/* Illustrations built from the product's own elements, with placeholder lines for text: they show the
-   shape of the work, never a real student's document or results. */
-function Window({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <div className="overflow-hidden rounded-md bg-white shadow-[0_1px_3px_rgb(0_0_0/0.06)]">
-      <div className="flex items-center gap-1.5 border-b border-line bg-surface-subtle px-3 py-2">
-        <span className="size-2 rounded-full bg-[#ff6159]" /><span className="size-2 rounded-full bg-[#ffbd2e]" /><span className="size-2 rounded-full bg-[#28c840]" />
-        <span className="ml-2 text-[11px] font-medium text-fg-muted">{title}</span>
-      </div>
-      <div className="p-4">{children}</div>
-    </div>
-  )
-}
-
-function Lines({ widths }: { widths: number[] }) {
-  return (
-    <div className="space-y-2">
-      {widths.map((w, i) => <div key={i} className="h-2 rounded-full bg-surface-muted" style={{ width: `${w}%` }} />)}
-    </div>
-  )
-}
-
-function DocVisual() {
-  return (
-    <Window title="Chapter One">
-      <p className="text-[13px] font-semibold text-fg">1.1 Background to the study</p>
-      <div className="mt-3"><Lines widths={[96, 90, 94, 60]} /></div>
-      <p className="mt-4 flex flex-wrap items-center gap-1.5 text-[11px] text-fg-muted">
-        <span className="rounded bg-brand-50 px-1.5 py-0.5 text-brand-700">(Author, 2023)</span>
-        <span className="flex items-center gap-1"><BookCheck className="size-3.5 text-emerald-600" /> Source confirmed</span>
-      </p>
-      <div className="mt-3"><Lines widths={[92, 88, 70]} /></div>
-    </Window>
-  )
-}
-
-function DataVisual() {
-  const bars = [62, 88, 45, 74, 30]
-  return (
-    <Window title="Data Lab · example data">
-      <p className="text-[12px] font-medium text-fg">Score by group</p>
-      <div className="mt-4 flex h-28 items-end gap-3 border-b border-line px-2">
-        {bars.map((h, i) => <div key={i} className="flex-1 rounded-t-sm bg-brand-500/80" style={{ height: `${h}%` }} />)}
-      </div>
-      <div className="mt-3 grid grid-cols-3 gap-2 text-[11px]">
-        {[['Groups', '5'], ['95% CI', 'shown'], ['Small counts', 'hidden']].map(([k, v]) => (
-          <div key={k} className="rounded border border-line px-2 py-1.5"><p className="text-fg-subtle">{k}</p><p className="font-medium text-fg">{v}</p></div>
-        ))}
-      </div>
-    </Window>
-  )
-}
-
-function MapVisual() {
-  return (
-    <Window title="Map · example data">
-      <div className="grid grid-cols-[1fr_auto] items-end gap-4">
-        <img src="/uganda-example-map.svg" alt="" className="mx-auto max-h-64 w-auto" loading="lazy" />
-        <div className="space-y-1 pb-2 text-[10px] text-fg-subtle">
-          {['#3f4be3', '#5562ef', '#7886f7', '#a3affc', '#c9d0fe', '#e3e7ff'].map((c, i) => (
-            <p key={c} className="flex items-center gap-1.5"><span className="size-2.5 rounded-sm" style={{ background: c }} /> {i === 0 ? 'Highest' : i === 5 ? 'Lowest' : ''}</p>
-          ))}
-        </div>
-      </div>
-      <p className="mt-2 text-[11px] text-fg-subtle">Uganda by district (UBOS boundaries). Shading is illustrative.</p>
-    </Window>
-  )
-}
-
-function ChecklistVisual() {
-  return (
-    <Window title="What the call asks">
-      <ul className="space-y-2.5 text-[12px]">
-        {[['Problem statement', true], ['Results framework with indicators', true], ['Workplan and M&E plan', true], ['Budget (sums worked out)', true], ['Your baseline figures', false]].map(([item, done]) => (
-          <li key={String(item)} className="flex items-center justify-between rounded border border-line px-3 py-2">
-            <span className="flex items-center gap-2 text-fg"><span className={`size-1.5 rounded-full ${done ? 'bg-emerald-500' : 'bg-amber-400'}`} /> {item}</span>
-            <span className={done ? 'text-emerald-600' : 'text-amber-600'}>{done ? 'Met' : 'For you to add'}</span>
-          </li>
-        ))}
-      </ul>
-    </Window>
-  )
-}
-
-function ReviewVisual() {
-  return (
-    <Window title="Writing feedback">
-      <div className="space-y-2">
-        <div className="rounded border border-amber-200 bg-amber-50/70 p-2.5"><p className="text-[11px] font-medium text-amber-800">Generic phrasing</p><div className="mt-2"><Lines widths={[90, 72]} /></div></div>
-        <div className="rounded border border-line p-2.5"><Lines widths={[94, 88, 64]} /></div>
-        <div className="rounded border border-violet-200 bg-violet-50/70 p-2.5"><p className="text-[11px] font-medium text-violet-800">Repetitive structure</p><div className="mt-2"><Lines widths={[86, 58]} /></div></div>
-      </div>
-    </Window>
   )
 }

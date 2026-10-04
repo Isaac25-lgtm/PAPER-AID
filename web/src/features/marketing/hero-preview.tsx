@@ -51,10 +51,45 @@ const SUGGESTIONS: Suggestion[] = [
   { title: 'Heading levels', body: 'Two headings typed as bold text.', dot: 'bg-brand-500', mark: '', open: '' },
 ]
 
-const ORIGINAL = [
-  'Social media has become a significant part of students’ lives in recent years.',
-  'However, it can also be a distraction',
-  'excessive use leads to poor grades',
+// Each loop reviews another short introduction (owner 2026-10-04: social media, health, data science and
+// other STEM). The citations are real papers; the rewrites only change phrasing, never the claims.
+interface Topic {
+  title: string
+  segments: [string, string, string] // the generic opener, the stock transition, the vague claim
+  between: [string, string]
+  cite: string
+  proposals: [string, string]
+}
+
+const TOPICS: Topic[] = [
+  {
+    title: 'Students’ use of social media',
+    segments: ['Social media has become a significant part of students’ lives in recent years.', 'However, it can also be a distraction', 'excessive use leads to poor grades'],
+    between: ['It offers channels for class updates and shared notes.', 'and may affect performance. Studies have shown that'],
+    cite: '(Kirschner & Karpinski, 2010)',
+    proposals: ['Social media is now part of students’ daily routine.', 'The same apps also pull attention away from study'],
+  },
+  {
+    title: 'Bed-net use and malaria in children',
+    segments: ['Malaria is a very important health problem in many communities today.', 'However, it is also important to note that bed nets', 'use falls when nets are old or torn'],
+    between: ['Most cases are in rural districts.', 'remain underused. Studies have shown that'],
+    cite: '(Pulford et al., 2011)',
+    proposals: ['Malaria remains a leading cause of illness in young children.', 'Bed nets, though effective,'],
+  },
+  {
+    title: 'Machine learning in hospital care',
+    segments: ['Machine learning has become a very powerful tool in many different fields.', 'However, it is worth noting that models', 'performance drops when the data shift'],
+    between: ['Hospitals now use it to predict readmissions.', 'can fail on new patients. Research has shown that'],
+    cite: '(Finlayson et al., 2021)',
+    proposals: ['Machine learning now supports decisions in many fields.', 'Yet models'],
+  },
+  {
+    title: 'Drought and smallholder yields',
+    segments: ['Climate change is a very big issue that affects everything around us.', 'However, it should be noted that small farms', 'yields fall as droughts lengthen'],
+    between: ['Rainfall in East Africa is now harder to predict.', 'feel it first. Evidence has shown that'],
+    cite: '(Lobell et al., 2011)',
+    proposals: ['Climate change is reshaping the conditions farmers depend on.', 'Small farms, in particular,'],
+  },
 ]
 
 interface Cursor {
@@ -95,6 +130,8 @@ export function HeroPreview() {
   const [scene, setScene] = useState<Scene>(reduced ? FINAL : START)
   const [visible, setVisible] = useState(false)
   const [cycle, setCycle] = useState(0)
+  const topic = TOPICS[cycle % TOPICS.length]
+  const proposal = (i: number) => (i < 2 ? topic.proposals[i] : SUGGESTIONS[i].proposal ?? '')
 
   // Only animate while the preview is on screen.
   useEffect(() => {
@@ -143,7 +180,7 @@ export function HeroPreview() {
       at(start + 1500, () => moveTo(() => actionRefs.current[i]))
       at(start + 2200, () => press(() => ({ open: null, typing: i, typed: 0 })))
       at(start + 2600, () => moveTo(() => segmentRefs.current[i])) // watch the rewrite type in
-      return start + 2200 + ((SUGGESTIONS[i].proposal ?? '').length + 12) * TYPE_MS
+      return start + 2200 + (TOPICS[cycle % TOPICS.length].proposals[i].length + 12) * TYPE_MS
     }
 
     at(0, () => setScene({ ...START, cursor: parkCursor() }))
@@ -170,7 +207,7 @@ export function HeroPreview() {
   useEffect(() => {
     if (scene.typing === null) return
     const i = scene.typing
-    const text = SUGGESTIONS[i].proposal ?? ''
+    const text = proposal(i)
     if (scene.typed >= text.length) {
       const t = window.setTimeout(
         () =>
@@ -185,7 +222,7 @@ export function HeroPreview() {
     }
     const t = window.setTimeout(() => setScene((s) => ({ ...s, typed: s.typed + 1 })), TYPE_MS)
     return () => window.clearTimeout(t)
-  }, [scene.typing, scene.typed])
+  }, [scene.typing, scene.typed]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const resolved = (i: number) => (i < 3 ? scene.done[i] : scene.formatted)
   const remaining = SUGGESTIONS.filter((_, i) => i < scene.found && !resolved(i)).length
@@ -194,7 +231,7 @@ export function HeroPreview() {
     const s = SUGGESTIONS[i]
     const rewriting = scene.typing === i
     if (i < 2 && (rewriting || scene.done[i])) {
-      const text = s.proposal ?? ''
+      const text = proposal(i)
       return (
         <span
           ref={(el) => {
@@ -220,7 +257,7 @@ export function HeroPreview() {
           scene.open === i && 'ring-2 ring-offset-1 ring-brand-400',
         )}
       >
-        {ORIGINAL[i]}
+        {topic.segments[i]}
       </mark>
     )
   }
@@ -255,9 +292,10 @@ export function HeroPreview() {
             {scene.scanning && (
               <div className="pointer-events-none absolute inset-x-0 top-0 h-16 animate-[paperaid-scan_1.7s_ease-in-out_infinite] bg-gradient-to-b from-transparent via-brand-200/50 to-transparent" />
             )}
-            <p className="text-[11px] font-semibold tracking-wide text-fg-subtle uppercase">{scene.formatted ? '1. Introduction' : 'Introduction'}</p>
+            <p className="text-[13px] font-semibold text-fg">{topic.title}</p>
+            <p className="mt-2 text-[11px] font-semibold tracking-wide text-fg-subtle uppercase">{scene.formatted ? '1. Introduction' : 'Introduction'}</p>
             <p className="mt-2 font-serif text-[0.92rem] leading-[1.8] text-fg-muted">
-              {segment(0)} It offers channels for class updates and shared notes. {segment(1)} and may affect performance. Studies have shown that{' '}
+              {segment(0)} {topic.between[0]} {segment(1)} {topic.between[1]}{' '}
               {segment(2)}{' '}
               <span
                 className={clsx(
@@ -266,7 +304,7 @@ export function HeroPreview() {
                 )}
               >
                 <Lock className="size-2.5" />
-                (Kirschner &amp; Karpinski, 2010)
+                {topic.cite}
               </span>
               .
             </p>
@@ -313,7 +351,7 @@ export function HeroPreview() {
                     <p className="mt-0.5 pl-3.5 text-[11px] text-fg-muted">{s.body}</p>
                     {isOpen && (
                       <div className="mt-2 pl-3.5">
-                        {s.proposal && <p className="font-serif text-[11px] leading-snug text-fg">&ldquo;{s.proposal}&rdquo;</p>}
+                        {i < 2 && <p className="font-serif text-[11px] leading-snug text-fg">&ldquo;{proposal(i)}&rdquo;</p>}
                         {s.note && <p className="text-[11px] leading-snug text-fg">{s.note}</p>}
                         <span
                           ref={(el) => {

@@ -68,6 +68,18 @@
   }
 }
 
+/* A live illustration's new content fading in. */
+@keyframes fadein {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 /* The hero preview's "reading your paper" sweep. */
 @keyframes paperaid-scan {
   from {
