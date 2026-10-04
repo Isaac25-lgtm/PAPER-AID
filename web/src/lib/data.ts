@@ -17,7 +17,7 @@ import type {
   Wallet,
   WalletSummary,
 } from './types'
-import type { AnalysisResult, AnalysisSpec, DataPreview, DataProject, IdentifierRules, Places, ReportDocument, UploadChoice, VariableKind } from './datalab-types'
+import type { AnalysisResult, AnalysisSpec, DataPreview, DataProject, IdentifierRules, Places, ReportDocument, TranscriptChoice, UploadChoice, VariableKind } from './datalab-types'
 import type { ChapterView, CitationStyle, Comparison, EvidenceItem, FeedbackStatus, Project, ProposalInputs, ProposalPlan, Rulebook, SampleSize, StepId, StepQuote, TitlePage } from './proposal-types'
 import type { Budget, ResultsModel, SourceRole, Work, WorkCitation, WorkDocumentView, WorkInputs, WorkKind, WorkPlan, WorkStep, WorkStepQuote } from './work-types'
 
@@ -176,7 +176,13 @@ export interface DataSource {
   datalab: {
     list(): Promise<DataProject[]>
     get(id: string): Promise<DataProject | null>
-    create(title: string, purpose: string): Promise<DataProject>
+    create(title: string, purpose: string, kind?: 'QUANT' | 'QUAL'): Promise<DataProject>
+    /** Qualitative: a transcript file, or pasted text, kept after the names listed are replaced. */
+    addDocument(id: string, file: File, choice: TranscriptChoice): Promise<DataProject>
+    addText(id: string, text: string, choice: TranscriptChoice): Promise<DataProject>
+    removeDocument(id: string, documentId: string): Promise<DataProject>
+    startThemes(id: string): Promise<void>
+    downloadCodebook(id: string, fileName: string, version?: number): Promise<void>
     update(id: string, change: { title?: string; purpose?: string; alpha?: number; threshold?: number }): Promise<DataProject>
     upload(id: string, file: File, choice: UploadChoice): Promise<DataProject>
     countries(): Promise<{ iso3: string; name: string; available: boolean }[]>

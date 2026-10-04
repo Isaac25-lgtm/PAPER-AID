@@ -330,7 +330,22 @@ export function createApiSource({ config, getAuthHeaders }: Options): DataSource
           if (err instanceof DataError && err.status === 404) return null
           throw err
         }),
-      create: (title, purpose) => request<DataProject>('/api/datalab', { method: 'POST', body: JSON.stringify({ title, purpose }) }),
+      create: (title, purpose, kind = 'QUANT') => request<DataProject>('/api/datalab', { method: 'POST', body: JSON.stringify({ title, purpose, kind }) }),
+      addDocument(id, file, choice) {
+        const form = new FormData()
+        form.append('file', file)
+        form.append('label', choice.label)
+        form.append('consent', String(choice.consent))
+        form.append('country', choice.country)
+        form.append('replace', JSON.stringify(choice.replace))
+        return request<DataProject>(`/api/datalab/${id}/documents`, { method: 'POST', body: form })
+      },
+      addText: (id, text, choice) => request<DataProject>(`/api/datalab/${id}/documents/text`, { method: 'POST', body: JSON.stringify({ ...choice, text }) }),
+      removeDocument: (id, documentId) => request<DataProject>(`/api/datalab/${id}/documents/${documentId}`, { method: 'DELETE' }),
+      startThemes: async (id) => {
+        await request<Job>(`/api/datalab/${id}/themes`, { method: 'POST' })
+      },
+      downloadCodebook: (id, fileName, version) => saveFile(`/api/datalab/${id}/report/codebook${query({ version: version ? String(version) : null })}`, fileName),
       update: (id, change) => request<DataProject>(`/api/datalab/${id}/details`, { method: 'POST', body: JSON.stringify(change) }),
       upload(id, file, choice) {
         const form = new FormData()

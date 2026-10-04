@@ -86,6 +86,9 @@ class Settings(BaseSettings):
     datalab_max_expanded_bytes: int = 120 * 1024 * 1024  # what an .xlsx may unpack to
     datalab_analyses_per_hour: int = 120  # computed by code, never billed: a fair-use limit
     datalab_report_cap_usd: float = 6.0
+    datalab_qual_cap_usd: float = 8.0  # a qualitative analysis's most AI spend
+    datalab_qual_max_documents: int = 40
+    datalab_qual_max_words: int = 150_000  # all transcripts together
     # "Your work is ready" messages (owner roadmap 2026-10-03): off until the keys are set in Secret Manager.
     app_url: str = "http://localhost:5000"  # links in messages
     sendgrid_api_key: str = ""

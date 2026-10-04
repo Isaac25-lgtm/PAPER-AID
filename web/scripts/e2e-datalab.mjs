@@ -1,7 +1,8 @@
 // Data Lab (owner decision 2026-10-03) in the browser, against the local stack: web on :5000 and the
 // browser-test backend on :8000 (cd backend && .venv/Scripts/python -m tests.serve_e2e), whose AI roles
-// are test stand-ins. A dataset is uploaded and profiled, a change is confirmed and one declined, two
-// analyses are run, the analysis report is written and downloaded, and the workbook is downloaded.
+// are test stand-ins. On one page: a dataset is uploaded and profiled, a change is confirmed and one
+// declined, analyses and maps are run, the analysis report is written and downloaded, and the workbook
+// is downloaded. Then a qualitative project: transcripts with names replaced, themes, report and codebook.
 // Usage: node scripts/e2e-datalab.mjs [screenshotDir]
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -50,9 +51,10 @@ try {
 
   await page.goto(`${base}/app/new`)
   await page.getByRole('heading', { name: 'Data analysis', exact: true }).waitFor()
+  await page.getByRole('link', { name: /Map my data/ }).waitFor()
+  await page.getByRole('link', { name: /Find the themes/ }).waitFor()
   await page.getByRole('link', { name: /Analyse my data/ }).click()
-  await page.waitForURL(/\/app\/datalab$/)
-  await page.getByRole('button', { name: /New analysis/ }).first().click()
+  await page.waitForURL(/\/app\/datalab\?new=QUANT$/)
   await page.getByLabel('Name of this analysis').fill('Exam results by sex')
   await page.getByLabel(/What do you want to find out/).fill('Do exam scores differ between female and male students?')
   await page.getByRole('button', { name: 'Continue' }).click()
@@ -73,13 +75,11 @@ try {
   await page.getByRole('button', { name: 'Upload', exact: true }).click()
   await page.getByRole('button', { name: /Yes, make this change/ }).waitFor(LONG) // the data loads and opens on what needs confirming
   await shot('dl1-check')
-  await page.getByRole('button', { name: /^1\. Data/ }).click()
   await page.getByText(/Removed on your device before upload: "name"/).waitFor()
   if (await page.getByLabel('Include name in analysis').count()) throw new Error('the removed column reached PaperAid')
   await shot('dl2-data')
   step('the name column is removed on the device before upload, after both confirmations')
 
-  await page.getByRole('button', { name: /^2\. Check/ }).click()
   await page.getByRole('button', { name: /Yes, make this change/ }).click()
   await page.getByText(/you confirmed, version/).first().waitFor()
   while (await page.getByRole('button', { name: /No, keep it as it is/ }).count()) {
@@ -158,12 +158,46 @@ try {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto(page.url().replace('/app/work', '/app/datalab'))
   await page.getByText('Exam results by sex').first().click()
-  await page.getByRole('button', { name: /^4\. Report/ }).click()
   await page.getByRole('button', { name: /Download Word/ }).waitFor()
   const wide = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)
   await shot('dl5-phone')
   if (wide) throw new Error('the page scrolls sideways at phone width')
   step('phone width')
+
+  await page.setViewportSize({ width: 1366, height: 900 })
+  await page.goto(`${base}/app/datalab?new=QUAL`)
+  await page.getByLabel('Name of this analysis').fill('Reaching care in Kamuli')
+  await page.getByLabel(/Your research question/).fill('How do mothers reach a health facility to give birth?')
+  await page.getByRole('button', { name: 'Continue' }).click()
+  await page.waitForURL(/\/app\/datalab\/dl_/)
+  const transcripts = [
+    ['Interview 1', 'Agnes Akello lives far from the health centre. The walk to the clinic takes most of the morning for women in our village. When labour starts at night there is no transport, so many mothers stay at home.'],
+    ['Interview 2', 'The boda boda riders charge a lot when it rains and the road floods. Mothers wait for the river to go down before they travel. Agnes said the health workers are kind but the distance is the problem for everyone here.'],
+  ]
+  for (const [label, text] of transcripts) {
+    await page.getByRole('tab', { name: 'Paste text' }).click()
+    await page.getByLabel('Name in the report').fill(label)
+    await page.getByLabel('Transcript', { exact: true }).fill(text)
+    await page.getByLabel(/Names to replace/).fill(['Agnes Akello = Participant A', 'Agnes = Participant A'].join('\n'))
+    await page.getByRole('checkbox', { name: /My participants agreed/ }).check()
+    await page.getByRole('button', { name: 'Add transcript' }).click()
+    await page.getByText(new RegExp(`${label} · `)).waitFor()
+  }
+  await page.getByText(/2 transcripts/).first().waitFor()
+  await shot('dl6-qual')
+  step('a qualitative project on one page: two transcripts added with names replaced')
+
+  await page.getByRole('button', { name: /Find the themes/ }).click()
+  await page.getByRole('button', { name: /Codebook/ }).waitFor(LONG)
+  await page.getByRole('heading', { name: /^\d+\. Themes$/ }).waitFor()
+  await page.getByRole('heading', { name: /Appendix A. Codebook/ }).waitFor()
+  const shown = (await page.evaluate(() => document.body.innerText)).replace(/e\.g\. Agnes Akello = Participant A/g, '')
+  if (shown.includes('Agnes')) throw new Error('a replaced name reached the report')
+  const codebook = page.waitForEvent('download')
+  await page.getByRole('button', { name: /Codebook/ }).click()
+  if (!(await codebook).suggestedFilename().endsWith('codebook.xlsx')) throw new Error('the codebook is not .xlsx')
+  await shot('dl7-themes')
+  step('themes found, the report shown, and the codebook downloads')
 
   if (problems.length) throw new Error(problems.join('\n'))
   console.log('\nData Lab journey passed.')

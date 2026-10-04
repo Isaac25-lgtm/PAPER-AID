@@ -39,6 +39,7 @@ from app.datalab.models import (
     DatasetVersion,
     Export,
     Kind,
+    QualDocument,
     ReportVersion,
     SourceFile,
     Variable,
@@ -337,6 +338,9 @@ class DataView(Camel):
     op: OpView | None = None  # the data work in the worker, or the last one
     cleaned_ready: bool = False  # the cleaned-data file matches the current data
     released: list[Released] = []  # flagged columns included again, as recorded decisions
+    kind: Literal["QUANT", "QUAL"] = "QUANT"
+    documents: list[QualDocument] = []  # qualitative: the transcripts (their text stays in file storage)
+    qual_priced: bool = False  # the qualitative analysis is offered only once its prices are set (owner)
 
 
 def _expired(op: DataOp) -> bool:
@@ -391,6 +395,7 @@ def view(rt: Runtime, p: DataProject, user: User | None = None) -> DataView:
         report_current=p.report_current, active_job=p.active_job if running else None, report_failure=failure, alpha=p.alpha, threshold=p.threshold,
         proposal_id=p.proposal_id, objectives=p.objectives, op=_op_view(p.op),
         cleaned_ready=p.cleaned is not None and p.cleaned.fingerprint == _export_fingerprint(p, all_vars), released=released,
+        kind=p.kind, documents=p.documents, qual_priced=work_prices_set(rt.settings, "DATALAB_QUAL"),
         availability=availability(rt.settings, user).get("DATALAB", "soon") if user else "soon", report_priced=work_prices_set(rt.settings, "DATALAB"),
     )
 
@@ -673,16 +678,21 @@ HANDLERS: dict[str, Callable[[Runtime, DataProject, DataOp, list[str]], tuple[Co
 # --- the project and its dataset ------------------------------------------------------------------------
 
 
-def create(rt: Runtime, user: User, title: str, purpose: str) -> DataView:
+def create(rt: Runtime, user: User, title: str, purpose: str, kind: Literal["QUANT", "QUAL"] = "QUANT") -> DataView:
     _require(rt, user)
     if sum(1 for p in rt.store.list_datalab(user.uid) if not p.deleting) >= MAX_PROJECTS:
         raise AppError(f"You have {MAX_PROJECTS} Data Lab projects. Delete one you no longer need first.", code="TOO_MANY_PROJECTS")
     now = utcnow()
     project = DataProject(id=f"dl_{secrets.token_hex(6)}", owner_uid=user.uid, owner_email=user.email, title=" ".join(title.split())[:200] or "My analysis",
-                          purpose=purpose.strip()[:1500], created_at=now, updated_at=now, expires_at=now + timedelta(days=rt.settings.retention_days))
+                          purpose=purpose.strip()[:1500], created_at=now, updated_at=now, expires_at=now + timedelta(days=rt.settings.retention_days), kind=kind)
     if not rt.store.create_datalab_if_open(project):
         raise Conflict(ACCOUNT_CLOSING, code="ACCOUNT_CLOSING")
     return view(rt, project, user)
+
+
+def _quantitative(p: DataProject) -> None:
+    if p.kind != "QUANT":
+        raise AppError("This is a qualitative project: add transcripts to it instead.", code="WRONG_KIND")
 
 
 def update_details(rt: Runtime, user: User, project_id: str, title: str | None, purpose: str | None, alpha: float | None, threshold: int | None) -> DataView:
@@ -717,6 +727,7 @@ def upload(rt: Runtime, user: User, project_id: str, filename: str, data: bytes,
     if not consent:
         raise AppError("Confirm that you may use this data and that names, phone numbers and ID numbers are removed or may be removed.", code="CONSENT_REQUIRED")
     _check_country(country)
+    _quantitative(_owned(rt, user, project_id))
     _rate_limit(rt, user, "upload", rt.settings.uploads_per_hour)
     p = _owned(rt, user, project_id)
     if step_running(rt, p):
@@ -954,6 +965,7 @@ def analyse(rt: Runtime, user: User, project_id: str, spec: AnalysisSpec) -> Dat
     _check_maps_country(p, spec)
     if spec.objective is not None and spec.objective > len(p.objectives):
         raise AppError("Choose one of your proposal's objectives.", code="INVALID_OBJECTIVE")
+    _quantitative(p)
     _rate_limit(rt, user, "analysis", rt.settings.datalab_analyses_per_hour)
     return _queue(rt, user, project_id, "ANALYSE", {"spec": spec.model_dump(by_alias=True)})
 
@@ -1303,6 +1315,171 @@ def export_cleaned(rt: Runtime, user: User, project_id: str) -> tuple[bytes, str
     suffix = PurePosixPath(p.cleaned.path).suffix
     _change(rt, user, project_id, lambda q: q)
     return rt.files.get(p.cleaned.path), f"{_safe_name(p.title, 'Data')} - cleaned data{suffix}", XLSX if suffix == ".xlsx" else "text/csv"
+
+
+# --- qualitative data (owner decision 2026-10-04) --------------------------------------------------------------------
+
+TEXT_SUFFIXES = (".txt", ".docx", ".pdf")
+
+
+def _document_text(filename: str, data: bytes, rt: Runtime) -> str:
+    """A transcript's text: a text file as written; a Word file or a text PDF through the same checks as any paper."""
+    from app.documents.intake import inspect_upload
+
+    suffix = PurePosixPath(filename.lower()).suffix
+    if suffix not in TEXT_SUFFIXES:
+        raise AppError("Upload a transcript as a text file (.txt), a Word document (.docx) or a text PDF.", code="DATA_FORMAT")
+    if suffix == ".txt":
+        for encoding in ("utf-8-sig", "cp1252"):
+            try:
+                return data.decode(encoding)
+            except UnicodeDecodeError:
+                continue
+        raise AppError("PaperAid couldn't read the characters in this file. Save it as UTF-8 text and upload it again.", code="DATA_ENCODING")
+    model = inspect_upload(data, filename, rt.settings.max_upload_bytes, rt.settings.datalab_qual_max_words, rt.settings.max_pdf_pages, min_words=20)
+    return "\n".join(b.text for b in model.blocks if b.text.strip())
+
+
+def add_document(rt: Runtime, user: User, project_id: str, label: str, filename: str, data: bytes, consent: bool, country: str,
+                 replacements: list[tuple[str, str]]) -> DataView:
+    """A transcript, kept only after the names the researcher listed (and any email address, phone or ID number)
+    were replaced: the original never reaches PaperAid's storage (owner decision 2026-10-04)."""
+    from app.datalab import qual
+
+    _require(rt, user)
+    require_terms(rt, user)
+    if not consent:
+        raise AppError("Confirm that your participants agreed and that names you listed may be replaced.", code="CONSENT_REQUIRED")
+    _check_country(country)
+    _rate_limit(rt, user, "upload", rt.settings.uploads_per_hour)
+    p = _owned(rt, user, project_id)
+    if p.kind != "QUAL":
+        raise AppError("This project analyses a dataset of numbers and categories: start a qualitative project for transcripts.", code="WRONG_KIND")
+    if step_running(rt, p):
+        raise Conflict(REPORT_RUNNING, code="STEP_RUNNING")
+    if len(data) > rt.settings.max_upload_bytes:
+        raise AppError(f"This file is larger than {rt.settings.max_upload_bytes // (1024 * 1024)} MB.", code="DATA_TOO_LARGE")
+    text, replaced = qual.pseudonymise(_document_text(filename, data, rt) if filename else data.decode("utf-8"), replacements[:200])
+    words = len(text.split())
+    if words < 20:
+        raise AppError("There isn't enough text here to analyse.", code="NO_TEXT")
+    if len(p.documents) >= rt.settings.datalab_qual_max_documents:
+        raise AppError(f"A project holds up to {rt.settings.datalab_qual_max_documents} transcripts.", code="TOO_MANY_DOCUMENTS")
+    if sum(d.words for d in p.documents) + words > rt.settings.datalab_qual_max_words:
+        raise AppError(f"All transcripts together can hold up to {rt.settings.datalab_qual_max_words:,} words.", code="DOCUMENT_TOO_LONG")
+    body = text.encode("utf-8")
+    path = _new_path(p, "documents", ".txt")
+    rt.files.put(path, body, "text/plain; charset=utf-8")
+    document = QualDocument(id=f"doc_{secrets.token_hex(4)}", label=" ".join(label.split())[:80] or f"Transcript {len(p.documents) + 1}",
+                            name=PurePosixPath(filename).name[:120] if filename else "", path=path, sha256=hashlib.sha256(body).hexdigest(), words=words,
+                            replaced=replaced)
+
+    def apply(q: DataProject) -> DataProject:
+        if step_running(rt, q):
+            raise Conflict(REPORT_RUNNING, code="STEP_RUNNING")
+        if any(d.label.lower() == document.label.lower() for d in q.documents):
+            raise AppError(f"A transcript is already called \"{document.label}\". Give this one another name.", code="DUPLICATE_LABEL")
+        q.documents.append(document)
+        q.country, q.consent = country, {"wording": UPLOAD_WORDING, "terms": rt.settings.terms_version, "at": utcnow().isoformat()}
+        return q
+
+    try:
+        updated = _change(rt, user, project_id, apply)
+    except AppError:
+        rt.files.delete(path)
+        raise
+    return view(rt, updated, user)
+
+
+def remove_document(rt: Runtime, user: User, project_id: str, document_id: str) -> DataView:
+    removed: list[QualDocument] = []
+
+    def apply(q: DataProject) -> DataProject:
+        if step_running(rt, q):
+            raise Conflict(REPORT_RUNNING, code="STEP_RUNNING")
+        removed[:] = [d for d in q.documents if d.id == document_id]
+        q.documents = [d for d in q.documents if d.id != document_id]
+        return q
+
+    updated = _change(rt, user, project_id, apply)
+    for d in removed:
+        rt.files.delete(d.path)
+    return view(rt, updated, user)
+
+
+def qual_band(words: int) -> str:
+    if words <= 20_000:
+        return "QL_SMALL"
+    if words <= 60_000:
+        return "QL_STANDARD"
+    return "QL_LARGE"
+
+
+def start_themes(rt: Runtime, user: User, project_id: str) -> JobView:
+    """The qualitative analysis (the paid step): priced by its tier, held when it starts, charged only when delivered."""
+    from app.datalab import qual
+
+    _require(rt, user)
+    require_terms(rt, user)
+    if not work_prices_set(rt.settings, "DATALAB_QUAL"):
+        raise AppError("The qualitative analysis isn't available yet.", code="REPORT_NOT_PRICED")
+    p = _owned(rt, user, project_id)
+    if p.kind != "QUAL":
+        raise AppError("This project analyses a dataset: run analyses on it instead.", code="WRONG_KIND")
+    if step_running(rt, p):
+        raise Conflict("PaperAid is already analysing these transcripts.", code="STEP_RUNNING")
+    if not p.documents:
+        raise AppError("Add at least one transcript first.", code="NO_DOCUMENTS")
+    inp = qual.QualInput(project_id=p.id, title=p.title, question=p.purpose,
+                         documents=[qual.QualDoc(id=d.id, label=d.label, path=d.path, sha256=d.sha256, words=d.words) for d in p.documents])
+    last = rt.store.get(p.jobs[-1]) if p.jobs else None
+    if last is not None and resumable(rt, last) and last.selection.datalab == "THEMES":
+        before = qual.QualInput.model_validate_json(rt.files.get(f"{last.storage_prefix()}/internal/{qual.INPUT}"))
+        if {(d.id, d.sha256) for d in before.documents} == {(d.id, d.sha256) for d in inp.documents} and resume_step(rt, user, last.id):
+            job = rt.store.get(last.id)
+            assert job is not None
+            return job.view()
+    words = sum(d.words for d in p.documents)
+    tier = qual_band(words)
+    from app.works.service import check_credits
+
+    check_credits(rt, user, "DATALAB", fixed_price(rt.settings, tier, None) if rt.settings.pricing_mode == "fixed" else 0)
+    _rate_limit(rt, user, "quote", rt.settings.quotes_per_hour)
+    data = inp.model_dump_json(by_alias=True).encode()
+    sha = hashlib.sha256(data).hexdigest()
+    now = utcnow()
+    selection = ServiceSelection(datalab="THEMES", datalab_band=tier)
+    job = Job(id=f"job_{secrets.token_hex(6)}", status=JobStatus.DRAFT, owner_uid=user.uid, owner_email=user.email, datalab_id=p.id, input_sha256=sha,
+              selection=selection, created_at=now, expires_at=now + timedelta(days=rt.settings.retention_days),
+              events=[JobEvent(at=now, label=f"Qualitative analysis priced for Data Lab project {p.id}")])
+    rt.files.put(f"{job.storage_prefix()}/internal/{qual.INPUT}", data, "application/json")
+    job.quote = bound_quote(rt.settings, selection, sha, words, work_engine(rt.settings, "DATALAB"))
+    state.transition(job, JobStatus.QUOTED, "Quote issued")
+    if not rt.store.create_if_open(job):
+        rt.files.delete_prefix(job.storage_prefix())
+        raise Conflict(ACCOUNT_CLOSING, code="ACCOUNT_CLOSING")
+    seen_active = p.active_job
+    documents = {(d.id, d.sha256) for d in inp.documents}
+
+    def gate(j: Job, q: DataProject | None) -> DataProject | None:
+        if q is None or q.deleting or q.owner_uid != j.owner_uid or {(d.id, d.sha256) for d in q.documents} != documents:
+            return None
+        if q.active_job not in (seen_active, j.id):
+            return None
+        q.active_job = j.id
+        q.jobs = q.jobs if j.id in q.jobs else (q.jobs + [j.id])[-100:]
+        return _renew(rt, q)
+
+    quote = Quote.model_validate(job.quote.model_dump())
+    return submit(rt, user, job.id, quote.id, data_gate=gate)
+
+
+def export_codebook(rt: Runtime, user: User, project_id: str, version: int | None = None) -> tuple[bytes, str]:
+    p = _owned(rt, user, project_id)
+    entry = _report_entry(p, version)
+    if not entry.workbook:
+        raise NotFound("This report has no codebook.")
+    return rt.files.get(entry.workbook), f"{_safe_name(p.title, 'Analysis')} - codebook.xlsx"
 
 
 # --- Chapter Four of a research proposal (owner decision 2026-10-03) ----------------------------------------------

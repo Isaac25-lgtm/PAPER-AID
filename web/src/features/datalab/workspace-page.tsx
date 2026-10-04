@@ -1,7 +1,7 @@
 import { clsx } from 'clsx'
-import { CheckCircle2, Download, FileSpreadsheet, Loader2, RotateCcw, Sparkles } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router'
+import { CheckCircle2, ChevronDown, Download, FileSpreadsheet, Loader2, RotateCcw, Sparkles } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import { Button } from '../../components/ui/button'
 import { Checkbox, Select, TextArea } from '../../components/ui/field'
 import { Alert, Badge, Card, Skeleton } from '../../components/ui/primitives'
@@ -9,16 +9,9 @@ import type { AnalysisKind, AnalysisResult, AnalysisSpec, DataOp, DataPreview, D
 import { DataError, useData } from '../../lib/data'
 import { useTitle } from '../../lib/use-title'
 import { AnalysisForm } from './analysis-form'
+import { QualWorkspace } from './qual-workspace'
 import { UploadCard } from './upload'
 import { Confirm, FLAG_LABEL, KIND_LABEL, KINDS_FOR, ReportView, ResultCard, title as varTitle } from './parts'
-
-type Step = 'data' | 'check' | 'analyse' | 'report'
-const STEPS: { id: Step; label: string }[] = [
-  { id: 'data', label: '1. Data' },
-  { id: 'check', label: '2. Check' },
-  { id: 'analyse', label: '3. Analyse' },
-  { id: 'report', label: '4. Report' },
-]
 
 const OP_LABEL: Record<DataOp['kind'], string> = {
   LOAD: 'Reading your data…',
@@ -31,21 +24,32 @@ const OP_LABEL: Record<DataOp['kind'], string> = {
 
 const working = (p: DataProject | null) => Boolean(p?.op && (p.op.status === 'QUEUED' || p.op.status === 'RUNNING'))
 
-function firstStep(p: DataProject): Step {
-  if (!p.source) return 'data'
-  if (p.survey === 'ASK' || p.pending.length) return 'check'
-  if (p.activeJob || p.reports.length) return 'report'
-  return 'analyse'
+const scrollTo = (id: string) => window.setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
+
+/** One part of the page, numbered, that can be folded away once done. */
+function Section({ id, n, title, note, open: initiallyOpen = true, children }: { id: string; n: number; title: string; note?: ReactNode; open?: boolean; children: ReactNode }) {
+  const [open, setOpen] = useState(initiallyOpen)
+  return (
+    <section id={id} aria-labelledby={`${id}-title`} className="scroll-mt-20 space-y-4">
+      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex w-full items-center gap-3 border-b border-line pb-2 text-left">
+        <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-brand-700 text-sm font-semibold text-white">{n}</span>
+        <h2 id={`${id}-title`} className="flex-1 text-lg font-semibold text-fg">{title}</h2>
+        {note}
+        <ChevronDown className={clsx('size-5 text-fg-subtle transition-transform', open && 'rotate-180')} aria-hidden />
+      </button>
+      {open && children}
+    </section>
+  )
 }
 
-/** A Data Lab project: the data, the checks PaperAid needs confirmed, the analyses and the report. */
+/** A Data Lab project on one page: the data, the checks PaperAid needs confirmed, the analyses and maps, the report. */
 export function DataLabWorkspace() {
   const { projectId = '' } = useParams()
   const data = useData()
   const navigate = useNavigate()
   const [project, setProject] = useState<DataProject | null>(null)
   const [missing, setMissing] = useState(false)
-  const [step, setStep] = useState<Step | null>(null)
+  const [params] = useSearchParams()
   const [error, setError] = useState<string | null>(null)
   const [acting, setActing] = useState(false)
   const following = useRef(false)
@@ -55,10 +59,7 @@ export function DataLabWorkspace() {
   const load = useCallback(async () => {
     const p = await data.datalab.get(projectId)
     if (!p) setMissing(true)
-    else {
-      setProject(p)
-      setStep((s) => s ?? firstStep(p))
-    }
+    else setProject(p)
     return p
   }, [data, projectId])
 
@@ -125,7 +126,8 @@ export function DataLabWorkspace() {
   }
 
   if (missing) return <Alert tone="warning">This project no longer exists. <Link to="/app/datalab" className="font-semibold underline">Back to Data Lab</Link></Alert>
-  if (!project || !step) return error ? <Alert tone="danger">{error}</Alert> : <Skeleton className="h-96 rounded-2xl" />
+  if (!project) return error ? <Alert tone="danger">{error}</Alert> : <Skeleton className="h-96 rounded-2xl" />
+  if (project.kind === 'QUAL') return <QualWorkspace initial={project} />
   const checks = project.pending.length + (project.survey === 'ASK' ? project.surveyColumns.length : 0)
 
   return (
@@ -163,18 +165,6 @@ export function DataLabWorkspace() {
         </Button>
       </header>
 
-      <nav className="flex flex-wrap gap-2" aria-label="Steps">
-        {STEPS.map((s) => (
-          <button key={s.id} onClick={() => setStep(s.id)} aria-current={step === s.id ? 'step' : undefined} disabled={s.id !== 'data' && !project.source}
-            className={clsx('rounded-full px-4 py-1.5 text-sm font-medium ring-1 transition', step === s.id ? 'bg-brand-700 text-white ring-brand-700' : 'bg-white text-fg-muted ring-line hover:ring-brand-300',
-              s.id !== 'data' && !project.source && 'cursor-not-allowed opacity-50')}>
-            {s.label}
-            {s.id === 'check' && checks > 0 && <span className="ml-1.5 rounded-full bg-amber-100 px-1.5 text-xs text-amber-900">{checks}</span>}
-            {s.id === 'analyse' && project.analyses.length > 0 && <span className="ml-1.5 text-xs opacity-80">({project.analyses.length})</span>}
-          </button>
-        ))}
-      </nav>
-
       {working(project) && project.op && (
         <Card className="flex items-center gap-3 p-4" role="status">
           <Loader2 className="size-5 animate-spin text-brand-700" aria-hidden />
@@ -182,10 +172,25 @@ export function DataLabWorkspace() {
         </Card>
       )}
       {error && <Alert tone="danger">{error}</Alert>}
-      {step === 'data' && <DataStep project={project} busy={busy} act={act} onLoaded={(p) => setStep(firstStep(p))} />}
-      {step === 'check' && <CheckStep project={project} busy={busy} act={act} onDone={() => setStep('analyse')} />}
-      {step === 'analyse' && <AnalyseStep project={project} busy={busy} act={act} goReport={() => setStep('report')} />}
-      {step === 'report' && <ReportStep project={project} busy={busy} act={act} reload={load} />}
+      <Section id="data" n={1} title="Your data" open={!project.source}
+        note={project.source ? <span className="text-xs text-fg-muted">{project.columns} variables</span> : undefined}>
+        <DataStep project={project} busy={busy} act={act} onLoaded={(p) => scrollTo(p.pending.length || p.survey === 'ASK' ? 'checks' : 'analyses')} />
+      </Section>
+      {project.source && (
+        <>
+          <Section id="checks" n={2} title="Checks" open={checks > 0}
+            note={checks > 0 ? <span className="rounded-full bg-amber-100 px-2 text-xs text-amber-900">{checks} to confirm</span> : <span className="text-xs text-fg-muted">Done</span>}>
+            <CheckStep project={project} busy={busy} act={act} onDone={() => scrollTo('analyses')} />
+          </Section>
+          <Section id="analyses" n={3} title="Analyses and maps"
+            note={project.analyses.length > 0 ? <span className="text-xs text-fg-muted">{project.analyses.length} run</span> : undefined}>
+            <AnalyseStep project={project} busy={busy} act={act} goReport={() => scrollTo('report')} startWith={params.get('map') ? 'MAP' : null} />
+          </Section>
+          <Section id="report" n={4} title={project.proposalId ? 'Chapter Four' : 'Report'}>
+            <ReportStep project={project} busy={busy} act={act} reload={load} />
+          </Section>
+        </>
+      )}
     </div>
   )
 }
@@ -366,9 +371,9 @@ const QUESTIONS: { kind: AnalysisKind; title: string; body: string }[] = [
   { kind: 'MAP', title: 'Map of Uganda', body: 'By district, subcounty, sub-region or region: counts, averages, totals or rates.' },
 ]
 
-function AnalyseStep({ project, busy, act, goReport }: { project: DataProject; busy: boolean; act: Act; goReport: () => void }) {
+function AnalyseStep({ project, busy, act, goReport, startWith }: { project: DataProject; busy: boolean; act: Act; goReport: () => void; startWith: AnalysisKind | null }) {
   const data = useData()
-  const [kind, setKind] = useState<AnalysisKind | null>(null)
+  const [kind, setKind] = useState<AnalysisKind | null>(startWith)
   const [results, setResults] = useState<Record<string, AnalysisResult>>({})
   const [error, setError] = useState<string | null>(null)
   const usable = project.variables.filter((v) => !v.excluded)
@@ -442,6 +447,14 @@ function ReportStep({ project, busy, act, reload }: { project: DataProject; busy
   const current = project.analyses.filter((a) => !a.stale && a.status !== 'NOT_ESTIMABLE')
   const outOfDate = project.analyses.filter((a) => a.stale).length
   const [chosen, setChosen] = useState<string[]>(current.map((a) => a.id))
+  // On one page the report form is open while analyses are run: each new one starts ticked.
+  const seen = useRef(new Set(current.map((a) => a.id)))
+  const fresh = current.filter((a) => !seen.current.has(a.id)).map((a) => a.id)
+  useEffect(() => {
+    if (!fresh.length) return
+    fresh.forEach((id) => seen.current.add(id))
+    setChosen((c) => [...c, ...fresh])
+  }, [fresh.join(',')]) // eslint-disable-line react-hooks/exhaustive-deps
   const [noAnalysisOk, setNoAnalysisOk] = useState(false)
   const covered = new Set(current.filter((a) => chosen.includes(a.id) && a.objective !== null).map((a) => a.objective))
   const uncovered = project.proposalId ? project.objectives.map((_, i) => i + 1).filter((k) => !covered.has(k)) : []

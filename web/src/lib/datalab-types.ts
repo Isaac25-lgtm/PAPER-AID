@@ -82,8 +82,28 @@ export interface ReportVersion {
   version: number
   jobId: string
   analyses: string[]
-  kind: 'REPORT' | 'CHAPTER_FOUR'
+  kind: 'REPORT' | 'CHAPTER_FOUR' | 'THEMES'
+  /** A qualitative analysis: its codebook (Excel). */
+  workbook: string
   createdAt: string
+}
+
+/** A transcript in a qualitative project, kept after the names listed were replaced. */
+export interface QualDocument {
+  id: string
+  label: string
+  name: string
+  words: number
+  replaced: number
+  createdAt: string
+}
+
+/** What goes with a transcript: its label, the researcher's confirmation, the data's country, names to replace. */
+export interface TranscriptChoice {
+  label: string
+  consent: boolean
+  country: string
+  replace: [string, string][]
 }
 
 export interface DataProject {
@@ -116,6 +136,10 @@ export interface DataProject {
   objectives: string[]
   op: DataOp | null
   cleanedReady: boolean
+  /** Quantitative (a dataset) or qualitative (transcripts). */
+  kind: 'QUANT' | 'QUAL'
+  documents: QualDocument[]
+  qualPriced: boolean
   /** Columns that may identify people or places, included by the researcher (a recorded decision). */
   released: { name: string; at: string; by: string }[]
 }

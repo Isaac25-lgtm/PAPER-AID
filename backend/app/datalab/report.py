@@ -55,15 +55,19 @@ def build(title: str, source_name: str, sheet: str | None, version: int, rows: i
     findings = {f["id"]: f["paragraphs"] for f in narrative.get("findings", [])}
     used = [v for v in variables if not v.excluded]
     left_out = [v for v in variables if v.excluded]
+    # Said by code, so the reviewer never has to ask for it: which variables the analyses read (live check 2026-10-04).
+    title_of = {v.name: v.title() for v in variables}
+    read = list(dict.fromkeys(title_of.get(n, n) for r in analyses for n in r.spec.names()))
     sections = [
         ReportSection(key="summary", heading="Executive summary", paragraphs=[fill(p) for p in narrative.get("summary", [])]),
         ReportSection(key="key_findings", heading="Key findings", bullets=[fill(p) for p in narrative.get("keyFindings", [])]),
         ReportSection(key="dataset", heading="The dataset", paragraphs=[
             f"The analysis used \"{source_name}\"" + (f" (sheet \"{sheet}\")" if sheet else "") + f": {rows:,} records and {columns:,} variables, "
             f"in version {version} of the data after the preparation described below. The original file was kept unchanged.",
-            (f"{len(left_out)} variable{'s were' if len(left_out) != 1 else ' was'} left out of the analysis because "
-             f"{'they' if len(left_out) != 1 else 'it'} may identify people or places: " + ", ".join(f"\"{v.title()}\"" for v in left_out) + ".") if left_out else
-            "No variable was left out of the analysis.",
+            *([f"The analyses in this report use {len(read)} of the {columns:,} variables: " + ", ".join(f"\"{t}\"" for t in read) + "."] if read else []),
+            *([f"{len(left_out)} variable{'s were' if len(left_out) != 1 else ' was'} set aside, because {'they' if len(left_out) != 1 else 'it'} may identify "
+               "people or places, and no analysis used " + ("them" if len(left_out) != 1 else "it") + ": " + ", ".join(f"\"{v.title()}\"" for v in left_out) + "."]
+              if left_out else []),
             *([f"The researcher chose to include {', '.join(chr(34) + n + chr(34) for n in released)}, which may identify people or places."] if released else []),
         ]),
         ReportSection(key="preparation", heading="Data preparation", bullets=[
@@ -145,11 +149,11 @@ def build_chapter(project_title: str, rows: int, version: int, cleaning: list[Cl
 def _quality_text(variables: list[Variable], threshold: int) -> str:
     missing = [v for v in variables if v.missing]
     if not missing:
-        return f"All {len(variables)} variables analysed have a value in every record."
+        return f"Each of the {len(variables)} variables available for analysis has a value in every record."
     worst = max(missing, key=lambda v: v.missing / max(1, v.valid + v.missing))
     share = 100 * worst.missing / max(1, worst.valid + worst.missing)
     how_many = f"missing in {share:.1f}% of records" if worst.missing >= threshold else f"missing in {few(worst.missing, threshold)} records"
-    return (f"{len(missing)} of the {len(variables)} variables have missing values; the most is \"{worst.title()}\", {how_many}. "
+    return (f"{len(missing)} of the {len(variables)} variables available for analysis have missing values; the most is \"{worst.title()}\", {how_many}. "
             "The table lists each variable's type and its missing values.")
 
 

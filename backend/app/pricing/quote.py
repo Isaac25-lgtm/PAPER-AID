@@ -212,6 +212,15 @@ SPEC_CHARS = 9000  # a resolved specification as the models see it
 WORK_STUDENT_CHARS = 6000  # the student's own description, answers and experience
 
 
+def qual_report_usd(settings: Settings, words: int, engine: Engine) -> float:
+    """A qualitative analysis: every transcript coded (in batches), the themes written, the report reviewed,
+    with the repair rounds; the cap keeps it from ever exceeding its tier."""
+    payload = words * CHARS_PER_WORD
+    rounds = 1 + REVIEW_REPAIRS
+    return (_step_usd(settings, "q_code", payload, words, engine) + rounds * _step_usd(settings, "q_themes", payload / 3, 0, engine)
+            + rounds * _step_usd(settings, "q_review", payload / 2, 0, engine))
+
+
 def datalab_report_usd(settings: Settings, analyses: int, engine: Engine) -> float:
     """A Data Lab analysis report at its worst: the narrative drafted and reviewed, then two targeted
     repairs each reviewed again (the analyses themselves are code and cost nothing here). Each
@@ -423,6 +432,9 @@ def price(
         services.append((selection.proposal, label, proposal_usd(settings, selection.proposal, words, e), None))
     if selection.formatting == "TEMPLATE_FORMAT":
         services.append(("TEMPLATE_FORMAT", "University template formatting", template_usd(settings, guide_words, e), words))
+    if selection.datalab == "THEMES":  # `words` carries the transcripts' words
+        usd = min(qual_report_usd(settings, words, e), settings.datalab_qual_cap_usd)
+        services.append((selection.datalab_band, WORK_LABELS.get(selection.datalab_band, selection.datalab_band) + label_note, usd, None))
     if selection.datalab == "REPORT":  # `words` carries the number of analyses reported
         usd = min(datalab_report_usd(settings, words, e), settings.datalab_report_cap_usd)
         services.append((selection.datalab_band, WORK_LABELS.get(selection.datalab_band, selection.datalab_band) + label_note, usd, None))
@@ -539,6 +551,8 @@ WORK_LABELS = {
     "FP_COMPREHENSIVE": "Funding proposal, comprehensive",
     "DL_SMALL": "Analysis report: up to 10,000 records and 5 analyses", "DL_STANDARD": "Analysis report: up to 100,000 records and 12 analyses",
     "DL_LARGE": "Analysis report: larger datasets, up to 25 analyses",
+    "QL_SMALL": "Qualitative analysis: up to 20,000 words", "QL_STANDARD": "Qualitative analysis: up to 60,000 words",
+    "QL_LARGE": "Qualitative analysis: up to 150,000 words",
 }
 # Every token price a work service needs (owner sets them from the benchmark; none are invented).
 WORK_PRICE_KEYS: dict[str, tuple[str, ...]] = {
@@ -546,6 +560,7 @@ WORK_PRICE_KEYS: dict[str, tuple[str, ...]] = {
     "COURSEWORK": ("WORK_READ", "CW_PLAN", "CW_1500", "CW_3000", "CW_5000", "CW_8000", "WORK_REVISE"),
     "FUNDING_PROPOSAL": ("WORK_READ", "FP_PLAN", "FP_COMPACT", "FP_STANDARD", "FP_COMPREHENSIVE", "WORK_REVISE"),
     "DATALAB": ("DL_SMALL", "DL_STANDARD", "DL_LARGE"),
+    "DATALAB_QUAL": ("QL_SMALL", "QL_STANDARD", "QL_LARGE"),
 }
 
 

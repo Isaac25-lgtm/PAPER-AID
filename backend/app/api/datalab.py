@@ -1,6 +1,7 @@
 """Data Lab routes (owner decision 2026-10-03). Thin, like app.api.works: parse the input, call
 app.datalab.service."""
 
+from typing import Literal
 from urllib.parse import quote
 
 from fastapi import APIRouter, Body, Depends, File, Form, Query, UploadFile
@@ -25,6 +26,15 @@ XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 class NewProject(Camel):
     title: str = Field(default="", max_length=200)
     purpose: str = Field(default="", max_length=1500)
+    kind: Literal["QUANT", "QUAL"] = "QUANT"
+
+
+class PastedTranscript(Camel):
+    label: str = Field(default="", max_length=80)
+    text: str = Field(min_length=1, max_length=1_000_000)
+    consent: bool = False
+    country: str = Field(default="UGA", max_length=8)
+    replace: list[tuple[str, str]] = Field(default=[], max_length=200)
 
 
 class Details(Camel):
@@ -58,7 +68,7 @@ def list_projects(user: User = Depends(current_user), rt: Runtime = Depends(get_
 
 @router.post("", response_model=DataView)
 def create(body: NewProject, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> DataView:
-    return datalab.create(rt, user, body.title, body.purpose)
+    return datalab.create(rt, user, body.title, body.purpose, body.kind)
 
 
 @router.post("/for-proposal/{proposal_id}", response_model=DataView)
@@ -199,6 +209,44 @@ def export_report_pdf(project_id: str, version: int | None = Query(None), user: 
 def workbook(project_id: str, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> Response:
     """The shareable report workbook: protected tables, no individual records."""
     data, name = datalab.export_workbook(rt, user, project_id)
+    return _file(data, name, XLSX)
+
+
+@router.post("/{project_id}/documents", response_model=DataView)
+def add_document(project_id: str, file: UploadFile = File(...), label: str = Form("", max_length=80), consent: bool = Form(False),
+                 country: str = Form("UGA", max_length=8), replace: str = Form("[]", max_length=20_000), user: User = Depends(current_user),
+                 rt: Runtime = Depends(get_runtime)) -> DataView:
+    """A transcript file; `replace`: the names to replace before it is stored, as JSON pairs [["Agnes", "Participant A"], ...]."""
+    import json
+
+    data = file.file.read(rt.settings.max_upload_bytes + 1)
+    try:
+        pairs = [(str(a), str(b)) for a, b in json.loads(replace)] if replace else []
+    except (ValueError, TypeError):
+        pairs = []
+    return datalab.add_document(rt, user, project_id, label, file.filename or "transcript.txt", data, consent, country, pairs)
+
+
+@router.post("/{project_id}/documents/text", response_model=DataView)
+def add_text(project_id: str, body: PastedTranscript, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> DataView:
+    """A transcript pasted as text."""
+    return datalab.add_document(rt, user, project_id, body.label, "", body.text.encode("utf-8"), body.consent, body.country, list(body.replace))
+
+
+@router.delete("/{project_id}/documents/{document_id}", response_model=DataView)
+def remove_document(project_id: str, document_id: str, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> DataView:
+    return datalab.remove_document(rt, user, project_id, document_id)
+
+
+@router.post("/{project_id}/themes")
+def start_themes(project_id: str, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> Response:
+    """The qualitative analysis: the paid step."""
+    return student_json(rt, datalab.start_themes(rt, user, project_id))
+
+
+@router.get("/{project_id}/report/codebook")
+def codebook(project_id: str, version: int | None = Query(None), user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> Response:
+    data, name = datalab.export_codebook(rt, user, project_id, version)
     return _file(data, name, XLSX)
 
 

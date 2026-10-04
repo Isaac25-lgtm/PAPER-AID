@@ -163,7 +163,7 @@ def public_config(rt: Runtime, user: "User | None" = None) -> dict:
 
 
 def pipeline_for(selection: ServiceSelection) -> list[Stage]:
-    if selection.datalab == "REPORT":  # the analyses are already computed: write, review, export
+    if selection.datalab in ("REPORT", "THEMES"):  # computed (or coded) first, then written, reviewed and exported
         return [Stage.DRAFTING, Stage.AUDITING, Stage.EXPORTING]
     if selection.work == "READ":
         return [Stage.ANALYSING, Stage.EXPORTING]
@@ -1460,7 +1460,7 @@ def sweep_datalab_files(rt: Runtime) -> int:
         named = {p.source.path} if p.source else set()
         named |= {v.path for v in p.versions} | {v.profile for v in p.versions} | {s.params_path for s in p.steps if s.params_path}
         named |= {path for a in p.analyses for path in (a.path, a.path.removesuffix(".json") + ".png")}
-        named |= {path for r in p.reports for path in (r.path, r.docx)}
+        named |= {path for r in p.reports for path in (r.path, r.docx, r.workbook) if path} | {d.path for d in p.documents}
         if p.cleaned is not None:
             named.add(p.cleaned.path)
         if p.op is not None and p.op.kind == "LOAD":

@@ -1,12 +1,12 @@
 import type { LucideIcon } from 'lucide-react'
-import { ChartColumn, FileCheck2, FilePen, HandCoins, Lightbulb, NotebookPen, Search } from 'lucide-react'
+import { ChartColumn, FileCheck2, FilePen, HandCoins, Lightbulb, MapPinned, MessageSquareQuote, NotebookPen, Search } from 'lucide-react'
 import type { PublicConfig, ServiceId } from './types'
 
 /** What a student can start, in the order PaperAid offers it (owner decision 2026-10-01: coursework,
  *  the flagship, first). Writing services start with one Start (`/app/start/...`); Paper Check and
  *  Academic Formatting keep their own upload pages. Names say what PaperAid does, never how. */
 export interface StartChoice {
-  id: StartType | 'PAPER_CHECK' | 'ACADEMIC_FORMAT' | 'DATALAB'
+  id: StartType | 'PAPER_CHECK' | 'ACADEMIC_FORMAT' | 'DATALAB' | 'DATALAB_MAP' | 'DATALAB_QUAL'
   service: ServiceId // whose availability applies
   group: 'Coursework' | 'Research proposals' | 'Funding' | 'Data analysis' | 'Your own paper'
   name: string
@@ -48,9 +48,19 @@ export const START_CHOICES: StartChoice[] = [
     benefits: ['Tables built from your figures', 'Every budget sum worked out for you'],
   },
   {
-    id: 'DATALAB', service: 'DATALAB', group: 'Data analysis', name: 'Data Lab', icon: ChartColumn, to: '/app/datalab', action: 'Analyse my data',
-    short: 'Your dataset checked, analysed and written up, every number calculated by code.',
-    benefits: ['Cleaning you confirm, nothing changed silently', 'An analysis report and an Excel workbook'],
+    id: 'DATALAB', service: 'DATALAB', group: 'Data analysis', name: 'Analyse numbers', icon: ChartColumn, to: '/app/datalab?new=QUANT', action: 'Analyse my data',
+    short: 'A survey or records checked, analysed and written up, every number calculated by code.',
+    benefits: ['Describe, compare, relate and correlate, filtered by any variable', 'An analysis report and an Excel workbook'],
+  },
+  {
+    id: 'DATALAB_MAP', service: 'DATALAB', group: 'Data analysis', name: 'Map my data', icon: MapPinned, to: '/app/datalab?new=MAP', action: 'Map my data',
+    short: 'Counts and rates mapped by district, subcounty, sub-region or region of Uganda.',
+    benefits: ['Official boundaries, zoom to any area', 'Small counts never shown'],
+  },
+  {
+    id: 'DATALAB_QUAL', service: 'DATALAB', group: 'Data analysis', name: 'Analyse interviews', icon: MessageSquareQuote, to: '/app/datalab?new=QUAL', action: 'Find the themes',
+    short: 'Interviews, focus groups or open answers coded into themes that answer your question.',
+    benefits: ['Every quote checked word for word', 'A report and a codebook in Excel'],
   },
   {
     id: 'PAPER_CHECK', service: 'AI_CHECK', group: 'Your own paper', name: 'Paper Check', icon: Search, to: '/app/new?service=PAPER_CHECK', action: 'Check my paper',

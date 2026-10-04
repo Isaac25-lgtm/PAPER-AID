@@ -1299,8 +1299,9 @@ def _run_step(rt: Runtime, job_id: str) -> None:
     ctx = StageContext(rt, job)
     if job.selection.datalab != "NONE":
         from app.datalab import pipeline as datalab_pipeline  # Data Lab imports the job service, which the worker's module must not import first
+        from app.datalab import qual
 
-        run = datalab_pipeline.STAGES[stage]
+        run = (qual.STAGES if job.selection.datalab == "THEMES" else datalab_pipeline.STAGES)[stage]
     elif job.selection.work != "NONE":
         run = work_stage(stage)
     elif job.selection.proposal == "REVIEW":
@@ -1315,6 +1316,10 @@ def _run_step(rt: Runtime, job_id: str) -> None:
         _continue_later(rt, job_id, stage)
         return
     except StageError as exc:
+        if exc.code == "PROVIDER_CONFIG":  # a key or a provider balance the owner must fix: they are told at once, once a day
+            from app import notify
+
+            notify.alert(rt, "AI provider can't be used", f"{exc.detail}. Jobs stop and are refunded until it is fixed.", f"provider:{utcnow():%Y-%m-%d}:{exc.detail}")
         _handle_failure(rt, job_id, stage, exc.code, exc.user_message, exc.detail, exc.retryable)
         return
     except Exception as exc:  # unexpected: classify as retryable so a transient bug can recover

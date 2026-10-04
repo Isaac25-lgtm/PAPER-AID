@@ -118,7 +118,7 @@ class ServiceSelection(Camel):
     # is not delivered returns everything. Older releases ignore it.
     bundled: bool = False
     # A Data Lab analysis report (owner decision 2026-10-03), priced by its tier (DL_SMALL ...).
-    datalab: Literal["NONE", "REPORT"] = "NONE"
+    datalab: Literal["NONE", "REPORT", "THEMES"] = "NONE"  # THEMES: a qualitative analysis (owner decision 2026-10-04)
     datalab_band: str = ""
 
     def services(self) -> list[ServiceId]:

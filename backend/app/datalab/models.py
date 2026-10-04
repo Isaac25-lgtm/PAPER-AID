@@ -217,8 +217,23 @@ class ReportVersion(Camel):
     path: str  # the report document's JSON (sections, with numbers filled in)
     docx: str
     job_id: str
-    analyses: list[str]  # the analyses it reports
-    kind: Literal["REPORT", "CHAPTER_FOUR"] = "REPORT"
+    analyses: list[str]  # the analyses it reports (a qualitative analysis: the documents it read)
+    kind: Literal["REPORT", "CHAPTER_FOUR", "THEMES"] = "REPORT"
+    workbook: str = ""  # a qualitative analysis: its codebook (Excel)
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class QualDocument(Camel):
+    """A transcript or set of open answers (qualitative Data Lab, owner decision 2026-10-04), kept as text
+    after the names the researcher listed, and any email address, phone or ID number, were replaced."""
+
+    id: str
+    label: str = Field(max_length=80)  # how the report names it: "Interview 3", "Focus group, Gulu"
+    name: str  # the file it came from ("" when pasted)
+    path: str  # the cleaned text in file storage
+    sha256: str
+    words: int
+    replaced: int = 0  # names and identifiers replaced before it was stored
     created_at: datetime = Field(default_factory=utcnow)
 
 
@@ -246,9 +261,12 @@ class Export(Camel):
 
 
 class DataProject(Camel):
-    """A Data Lab project: metadata only. Rows, levels, results and reports live in file storage."""
+    """A Data Lab project: metadata only. Rows, levels, results and reports live in file storage.
+    Quantitative (a dataset of numbers and categories) or qualitative (transcripts and open answers)."""
 
     id: str
+    kind: Literal["QUANT", "QUAL"] = "QUANT"
+    documents: list[QualDocument] = []  # qualitative: the transcripts
     owner_uid: str
     owner_email: str
     title: str = Field(default="", max_length=200)

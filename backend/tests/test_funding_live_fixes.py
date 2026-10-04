@@ -62,3 +62,23 @@ def test_a_repaired_plan_is_reviewed_against_the_earlier_issues(works_client):  
     work = _settled(client, f"/api/works/{work['id']}", _done)
     assert seen[0] is None and seen[1] == ["Do not state the partnership as fact."]
     assert work["documents"] and work["planReview"]["outcome"] == "APPROVED" and work["planReview"]["suggestions"] == ["A stronger opening."]
+
+
+def test_target_plausibility_cannot_fail_while_the_applicants_figures_are_gaps():
+    """Live check 2026-10-04: the reviewer failed FP-028 ("the applicant has not supplied the baselines and
+    targets") in every round, so no One Start funding proposal without figures could ever be approved."""
+    from app.works.models import Indicator, Outcome, Output, ResultsModel
+    from app.works.pipeline import _results_decision
+
+    rules = [{"rule": "FP-028", "requirement": "Targets are plausible."}, {"rule": "FP-020", "requirement": "Outputs are deliverables."}]
+    review = ResultsReview.model_validate({
+        "rules": [{"rule": "FP-028", "status": "FAIL", "note": "The applicant has not supplied the baselines and targets."},
+                  {"rule": "FP-020", "status": "PASS", "note": "Fine."}],
+        "classified": [{"id": i, "statedAs": level, "reads": level, "note": "ok"} for i, level in (("G1", "goal"), ("O1", "outcome"), ("OP1", "output"))],
+        "issues": []})
+    gaps = ResultsModel(outcomes=[Outcome(id="O1", statement="Mothers reach care")], outputs=[Output(id="OP1", statement="Referral fund", outcome_id="O1")],
+                        indicators=[Indicator(id="I1", result_id="O1", level="outcome", unit="%")])
+    assert _results_decision(review, gaps, rules, "REVIEW_UNAVAILABLE", []).outcome == "APPROVED"
+    given = gaps.model_copy(update={"indicators": [Indicator(id="I1", result_id="O1", level="outcome", unit="%", baseline=20, target=90)]})
+    decision = _results_decision(review, given, rules, "REVIEW_UNAVAILABLE", [])
+    assert decision.outcome == "OBJECTIONS" and any(o.startswith("FP-028") for o in decision.objections)  # with figures, the judgement stands

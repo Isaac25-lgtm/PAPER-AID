@@ -173,8 +173,14 @@ STEPS: dict[str, Step] = {
     # Data Lab reports (owner decision 2026-10-03): code computes every number; the writer interprets
     # the results through number tokens, and the one final reviewer (Sol) approves the exact narrative.
     "d_report": Step("WRITER", Stage.DRAFTING, "d-report-v1", 16000),
-    "d_report_review": Step("EVALUATOR", Stage.AUDITING, "d-report-review-v2", 8000),
+    "d_report_review": Step("EVALUATOR", Stage.AUDITING, "d-report-review-v3", 8000),
     "d_chapter4": Step("WRITER", Stage.DRAFTING, "d-chapter4-v2", 16000),  # Chapter Four of a research proposal, by objective
+    # Qualitative Data Lab (owner decision 2026-10-04): the analyst codes the transcripts with quotes code
+    # checks word for word; the writer builds themes citing quotes by reference; the final reviewer (Sol)
+    # approves the assembled report.
+    "q_code": Step("ANALYST", Stage.DRAFTING, "q-code-v1", 12000),
+    "q_themes": Step("WRITER", Stage.DRAFTING, "q-themes-v1", 16000),
+    "q_review": Step("EVALUATOR", Stage.AUDITING, "q-review-v1", 8000),
 }
 
 
@@ -187,7 +193,7 @@ DRAFTING_TASKS = {"critique", "refine", "repair", "redraft", "redraft_fix", "ver
 # Sonnet, so Sol never approves wording it finalised itself (owner decision 2026-09-30) ...
 FINALISED_BY_DRAFTER = {"p_finalise", "p_profile_finalise", "spec_finalise"}
 # ... and these works reviews are Sol's final decisions instead of the evaluator's.
-FINAL_REVIEW_TASKS = {"w_plan_review", "w_results_review", "w_final", "d_report_review"}
+FINAL_REVIEW_TASKS = {"w_plan_review", "w_results_review", "w_final", "d_report_review", "q_review"}
 REVIEW_REPAIRS = 2  # targeted repairs after a final-review objection, each reviewed again (owner decision 2026-09-30)
 FINAL_PART_WORDS = 7000  # the most one works final-review call reads; a longer deliverable is reviewed in parts
 

@@ -618,3 +618,46 @@ def test_only_search_actions_are_billed_and_sent_queries_are_recorded(monkeypatc
     assert result.usage.search_calls == 1
     assert result.queries == ["mobile money Uganda 2022"]
     assert set(result.sources) == {"https://a.org/r", "https://b.org/p"}
+
+
+def test_a_used_up_provider_balance_stops_at_once_and_is_not_retried(monkeypatch):
+    """Live check 2026-10-04: OpenAI's "no credits remaining" (429 insufficient_quota) was retried as an
+    outage for 14 minutes and told the student to try again; Anthropic's "credit balance is too low" (400)
+    said the document couldn't be processed. Both now stop the step as a configuration fault."""
+    import anthropic
+    import httpx
+    import openai
+
+    from app.core.errors import PermanentStageError
+
+    request = httpx.Request("POST", "https://api.example.com")
+    gpt = OpenAIProvider(real_settings())
+
+    def quota(**_):
+        raise openai.RateLimitError("You have no credits remaining.", response=httpx.Response(429, request=request),
+                                    body={"code": "credit_balance_exhausted", "type": "insufficient_quota", "message": "You have no credits remaining."})
+
+    monkeypatch.setattr(gpt._client.responses, "create", quota)
+    with pytest.raises(PermanentStageError) as stopped:
+        gpt.json("t", "gpt-6-sol", "s", {}, {"type": "object"}, 10)
+    assert stopped.value.code == "PROVIDER_CONFIG" and "balance" in stopped.value.detail
+
+    def busy(**_):
+        raise openai.RateLimitError("Rate limit reached.", response=httpx.Response(429, request=request), body={"code": "rate_limit_exceeded", "message": "Rate limit reached."})
+
+    monkeypatch.setattr(gpt._client.responses, "create", busy)
+    from app.core.errors import RetryableStageError
+
+    with pytest.raises(RetryableStageError):  # an ordinary rate limit is still waited out
+        gpt.json("t", "gpt-6-sol", "s", {}, {"type": "object"}, 10)
+
+    claude = AnthropicProvider(real_settings())
+
+    def low(**_):
+        raise anthropic.BadRequestError("Your credit balance is too low to access the Anthropic API.", response=httpx.Response(400, request=request),
+                                        body={"type": "error", "error": {"type": "invalid_request_error", "message": "Your credit balance is too low."}})
+
+    monkeypatch.setattr(claude._client.messages, "create", low)
+    with pytest.raises(PermanentStageError) as stopped:
+        claude.json("t", "claude-sonnet-5-5", "s", {}, {"type": "object"}, 10)
+    assert stopped.value.code == "PROVIDER_CONFIG"

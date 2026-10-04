@@ -286,12 +286,17 @@ def test_the_report_is_written_from_tokens_approved_and_exported(lab):
     assert all("Person 1" not in r and "0001" not in r for r in sent)  # results only, never rows
     review = next(r for t, r in zip(lab.models.tasks, lab.models.requests, strict=True) if t == "d_report_review")
     assert "Appendix C. Data dictionary" in review and "Methods" in review  # the reviewer reads the whole document (finding 5)
+    # ... knowing what code wrote and the facts it was written from, so it never asks the writer to change code's text (live check 2026-10-04)
+    assert '"by": "CODE"' in review and '"by": "WRITER"' in review and '"rowsUsed"' in review and '"preparation"' in review
     doc = lab.get(f"/api/datalab/{pid}/report", headers=H).json()
     headings = [s["heading"] for s in doc["sections"]]
     assert headings[:6] == ["Executive summary", "Key findings", "The dataset", "Data preparation", "Data quality", "Methods"] and "Limitations" in headings
     assert [a["heading"] for a in doc["appendices"]] == ["Appendix A. Cleaning log", "Appendix B. Statistical output", "Appendix C. Data dictionary"]
     summary = doc["sections"][0]["paragraphs"][0]
     assert "121" in summary and "⟦" not in summary  # tokens filled by code
+    dataset = " ".join(doc["sections"][2]["paragraphs"])
+    assert 'use 3 of the 7 variables: "score", "sex", "district"' in dataset  # never "nothing left out" (the reviewer read it as "all analysed")
+    assert "variables available for analysis" in doc["sections"][4]["paragraphs"][0]
     word = lab.get(f"/api/datalab/{pid}/report/export", headers=H)
     text = "\n".join(p.text for p in Document(io.BytesIO(word.content)).paragraphs)
     assert "Executive summary" in text and "Appendix C. Data dictionary" in text

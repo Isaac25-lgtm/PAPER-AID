@@ -460,6 +460,17 @@ def _results_problems(model: ResultsModel, lines: list[BudgetLine], spec: Resolv
     return problems
 
 
+# Rules judged on the applicant's own figures (whether targets are plausible against baselines). While
+# every indicator's baseline or target is still a gap for the applicant, the reviewer is told such a rule
+# is NOT_APPLICABLE; code knows when that is so, and a FAIL then is not an objection (live check 2026-10-04:
+# the reviewer failed FP-028 "the applicant has not supplied the baselines and targets" in every round).
+FIGURE_JUDGED = {"FP-028"}
+
+
+def _figures_given(model: ResultsModel) -> bool:
+    return any(i.baseline is not None and i.target is not None for i in model.indicators)
+
+
 def _results_decision(checked: "ResultsReview | None", model: ResultsModel, rules: list[dict[str, Any]], reason: str, problems: list[str]) -> ReviewDecision:
     """Approved only when every rule has a verdict and none failed, every goal, outcome and output was
     classified and each reads at its real level (code knows the level; the model's own "stated as" is
@@ -472,7 +483,8 @@ def _results_decision(checked: "ResultsReview | None", model: ResultsModel, rule
     missing = sorted({r["rule"] for r in rules} - {r.rule for r in checked.rules}) + sorted(set(levels) - set(seen))
     if missing:
         return ReviewDecision(outcome="NOT_REVIEWED", reason="REVIEW_UNAVAILABLE", objections=[NOT_COMPLETE.format(", ".join(missing))])
-    failed = [f"{r.rule}: {r.note}" for r in checked.rules if r.status == "FAIL"]
+    figures = _figures_given(model)
+    failed = [f"{r.rule}: {r.note}" for r in checked.rules if r.status == "FAIL" and (figures or r.rule not in FIGURE_JUDGED)]
     misread = [f"{i} is a {level} but reads as a {seen[i].reads}: {seen[i].note}" for i, level in levels.items() if seen[i].reads != level]
     objections = [*checked.issues, *failed, *misread, *problems]
     suggestions = list(dict.fromkeys(checked.suggestions))[:20]

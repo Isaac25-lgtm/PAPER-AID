@@ -17,6 +17,14 @@ MISCONFIGURED = "PaperAid couldn't reach its AI service. Our team has been notif
 AI_NOT_CONFIGURED = "AI not configured. This job could not run."
 
 
+def _no_balance(exc: Exception) -> bool:
+    """The provider account's prepaid balance is used up (OpenAI answers 429 insufficient_quota, Anthropic
+    400 "credit balance is too low"): no retry helps until the owner tops it up (live check 2026-10-04)."""
+    code = str(getattr(exc, "code", "") or "")
+    text = str(exc).lower()
+    return code in ("insufficient_quota", "credit_balance_exhausted") or "credit balance" in text or "no credits remaining" in text
+
+
 @dataclass
 class Usage:
     input_tokens: int  # uncached input, excluding cache writes
@@ -84,12 +92,16 @@ class AnthropicProvider:
                 output_config={"format": {"type": "json_schema", "schema": schema}, "effort": self._effort},
             )
         except (sdk.RateLimitError, sdk.APITimeoutError, sdk.APIConnectionError, sdk.InternalServerError) as exc:
+            if _no_balance(exc):
+                raise PermanentStageError("PROVIDER_CONFIG", MISCONFIGURED, "anthropic balance used up") from exc
             raise RetryableStageError("PROVIDER_UNAVAILABLE", UNAVAILABLE, f"anthropic {type(exc).__name__}") from exc
         except sdk.AuthenticationError as exc:
             raise PermanentStageError("PROVIDER_CONFIG", MISCONFIGURED, "anthropic authentication failed") from exc
         except sdk.APIStatusError as exc:
             if exc.status_code >= 500:
                 raise RetryableStageError("PROVIDER_UNAVAILABLE", UNAVAILABLE, f"anthropic {exc.status_code}") from exc
+            if _no_balance(exc):
+                raise PermanentStageError("PROVIDER_CONFIG", MISCONFIGURED, "anthropic balance used up") from exc
             raise PermanentStageError("PROVIDER_REJECTED", "We couldn't process this document.", f"anthropic {exc.status_code}") from exc
         text = next((block.text for block in response.content if block.type == "text"), "")
         usage = response.usage
@@ -138,12 +150,16 @@ class OpenAIProvider:
                 text={"format": {"type": "json_schema", "name": f"paperaid_{task}", "schema": schema, "strict": True}},
             )
         except (sdk.RateLimitError, sdk.APITimeoutError, sdk.APIConnectionError, sdk.InternalServerError) as exc:
+            if _no_balance(exc):
+                raise PermanentStageError("PROVIDER_CONFIG", MISCONFIGURED, "openai balance used up") from exc
             raise RetryableStageError("PROVIDER_UNAVAILABLE", UNAVAILABLE, f"openai {type(exc).__name__}") from exc
         except sdk.AuthenticationError as exc:
             raise PermanentStageError("PROVIDER_CONFIG", MISCONFIGURED, "openai authentication failed") from exc
         except sdk.APIStatusError as exc:
             if exc.status_code >= 500:
                 raise RetryableStageError("PROVIDER_UNAVAILABLE", UNAVAILABLE, f"openai {exc.status_code}") from exc
+            if _no_balance(exc):
+                raise PermanentStageError("PROVIDER_CONFIG", MISCONFIGURED, "openai balance used up") from exc
             raise PermanentStageError("PROVIDER_REJECTED", "We couldn't process this document.", f"openai {exc.status_code}") from exc
         return self._result(response, model, started)
 
@@ -166,12 +182,16 @@ class OpenAIProvider:
                 text={"format": {"type": "json_schema", "name": f"paperaid_{task}", "schema": schema, "strict": True}},
             )
         except (sdk.RateLimitError, sdk.APITimeoutError, sdk.APIConnectionError, sdk.InternalServerError) as exc:
+            if _no_balance(exc):
+                raise PermanentStageError("PROVIDER_CONFIG", MISCONFIGURED, "openai balance used up") from exc
             raise RetryableStageError("PROVIDER_UNAVAILABLE", UNAVAILABLE, f"openai {type(exc).__name__}") from exc
         except sdk.AuthenticationError as exc:
             raise PermanentStageError("PROVIDER_CONFIG", MISCONFIGURED, "openai authentication failed") from exc
         except sdk.APIStatusError as exc:
             if exc.status_code >= 500:
                 raise RetryableStageError("PROVIDER_UNAVAILABLE", UNAVAILABLE, f"openai {exc.status_code}") from exc
+            if _no_balance(exc):
+                raise PermanentStageError("PROVIDER_CONFIG", MISCONFIGURED, "openai balance used up") from exc
             raise PermanentStageError("PROVIDER_REJECTED", "We couldn't process this document.", f"openai {exc.status_code}") from exc
         result = self._result(response, model, started)
         calls = [item for item in (getattr(response, "output", None) or []) if getattr(item, "type", None) == "web_search_call"]

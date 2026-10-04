@@ -150,9 +150,14 @@ def assemble(inp: ReportInput, draft: dict[str, Any], values: dict[str, tuple[st
                         inp.analyses, inp.charts, draft, fill, inp.released)
 
 
-def _rendered(section: ReportSection) -> dict[str, Any]:
-    """A section as the reviewer reads it: its text, its tables cell by cell, its notes."""
-    return {"key": section.key, "heading": section.heading, "paragraphs": section.paragraphs, "bullets": section.bullets,
+def _rendered(section: ReportSection, written: set[str] | None = None) -> dict[str, Any]:
+    """A section as the reviewer reads it: its text, its tables cell by cell, its notes. With `written`
+    (the writer's text as filled in), each paragraph and bullet says who wrote it: the writer, whom a
+    repair can change, or PaperAid's code (live check 2026-10-04)."""
+    def by(texts: list[str]) -> list[Any]:
+        return texts if written is None else [{"by": "WRITER" if t in written else "CODE", "text": t} for t in texts]
+
+    return {"key": section.key, "heading": section.heading, "paragraphs": by(section.paragraphs), "bullets": by(section.bullets),
             "tables": [{"title": t.title, "columns": t.columns, "rows": [[c.text for c in r] for r in t.rows], "notes": t.notes} for t in section.tables],
             "figure": bool(section.chart), "notes": section.notes}
 
@@ -161,9 +166,9 @@ def _words(entry: dict[str, Any]) -> int:
     return len(json.dumps(entry).split())
 
 
-def document_parts(document: ReportDocument) -> tuple[list[list[dict[str, Any]]], list[dict[str, Any]]]:
+def document_parts(document: ReportDocument, written: set[str] | None = None) -> tuple[list[list[dict[str, Any]]], list[dict[str, Any]]]:
     """The document in bounded parts (every section and appendix, in order) and the manifest of the whole."""
-    entries = [_rendered(s) for s in document.sections + document.appendices]
+    entries = [_rendered(s, written) for s in document.sections + document.appendices]
     parts: list[list[dict[str, Any]]] = [[]]
     words = 0
     for entry in entries:
@@ -177,13 +182,29 @@ def document_parts(document: ReportDocument) -> tuple[list[list[dict[str, Any]]]
     return parts, manifest
 
 
-def _review(runner: DataRunner, inp: ReportInput, document: ReportDocument, analyses: list[dict[str, Any]], previous: list[str]) -> Review | None:
+def _dataset(inp: ReportInput) -> dict[str, Any]:
+    """The facts PaperAid's code states about the data, so the reviewer can check that text against them."""
+    return {"file": inp.source_name, "sheet": inp.sheet, "records": inp.rows, "variables": inp.columns, "version": inp.version,
+            "preparation": [{"step": s.description, "how": "applied automatically" if s.automatic else "confirmed by the researcher"} for s in inp.cleaning],
+            "columns": [{"name": v.title(), "type": v.kind, "withValue": v.valid, "missing": v.missing, "setAside": v.excluded} for v in inp.variables],
+            "includedByResearcher": inp.released}
+
+
+def _written(draft: dict[str, Any], values: dict[str, tuple[str, str]]) -> set[str]:
+    """Every paragraph and bullet of the writer's draft, as it prints."""
+    texts = [t for key in ("summary", "keyFindings", "limitations", "conclusions", "introduction") for t in draft.get(key, [])]
+    texts += [t for f in draft.get("findings", []) for t in f.get("paragraphs", [])]
+    return {narrative.fill(t, values) for t in texts}
+
+
+def _review(runner: DataRunner, inp: ReportInput, document: ReportDocument, analyses: list[dict[str, Any]], previous: list[str],
+            written: set[str]) -> Review | None:
     """Sol's review of the exact document, part by part. A rule passes only with an explicit PASS in
     every part; any missing verdict, cut-off or unaffordable part: None (not reviewed)."""
     rules = RULES[inp.mode]
-    parts, manifest = document_parts(document)
-    base: dict[str, Any] = {"mode": inp.mode, "significanceLevel": inp.alpha, "analyses": analyses, "rules": rules, "manifest": manifest,
-                            **({"previousIssues": previous} if previous else {})}
+    parts, manifest = document_parts(document, written)
+    base: dict[str, Any] = {"mode": inp.mode, "significanceLevel": inp.alpha, "dataset": _dataset(inp), "analyses": analyses, "rules": rules,
+                            "manifest": manifest, **({"previousIssues": previous} if previous else {})}
     if inp.mode == "CHAPTER_FOUR":
         base["objectives"] = [{"number": n, "objective": text} for n, text in enumerate(inp.objectives, start=1)]
         base["chapterThree"] = [p.model_dump() for p in inp.chapter_three]
@@ -212,12 +233,13 @@ def stage_auditing(ctx: "StageContext") -> None:
     chapter = inp.mode == "CHAPTER_FOUR"
     draft = ctx.get_json("draft.json")
     analyses = [{"ref": prefixes[r.id], "title": r.title, "question": r.record.question, "method": r.record.method, "status": r.status, "warnings": r.warnings,
-                 "numbers": {k.split(".", 1)[1]: v for k, (v, _m) in values.items() if k.startswith(prefixes[r.id] + ".")}} for r in inp.analyses]
+                 "numbers": {k.split(".", 1)[1]: v for k, (v, _m) in values.items() if k.startswith(prefixes[r.id] + ".")},
+                 "record": r.record.model_dump(mode="json", by_alias=True)} for r in inp.analyses]
     seen: list[dict[str, Any]] = []
     previous: list[str] = []
     for round_ in range(REVIEW_REPAIRS + 1):
         document = assemble(inp, draft, values)
-        review = _review(runner, inp, document, analyses, previous)
+        review = _review(runner, inp, document, analyses, previous, _written(draft, values))
         if review is None:
             ctx.put_json("report_review.json", seen)
             raise PermanentStageError("DOCUMENT_NOT_APPROVED", NOT_FINISHED, "final review not completed (missing verdict, cut off or spend cap)")

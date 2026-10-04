@@ -42,7 +42,7 @@ def main() -> None:
     # Test prices for the work services, in the browser-test backend only (the product has none until the owner sets them).
     work_tokens = {"WORK_READ": 1, "CN_PLAN": 2, "CN_BRIEF": 3, "CN_STANDARD": 4, "CN_EXTENDED": 6, "CW_PLAN": 2, "CW_1500": 4, "CW_3000": 6, "CW_5000": 8, "CW_8000": 11,
                    "FP_PLAN": 3, "FP_COMPACT": 8, "FP_STANDARD": 12, "FP_COMPREHENSIVE": 18, "WORK_REVISE": 2,
-                   "DL_SMALL": 3, "DL_STANDARD": 5, "DL_LARGE": 8}
+                   "DL_SMALL": 3, "DL_STANDARD": 5, "DL_LARGE": 8, "QL_SMALL": 4, "QL_STANDARD": 7, "QL_LARGE": 12}
     os.environ["FIXED_TOKENS"] = json.dumps({**Settings(_env_file=None).fixed_tokens, **work_tokens})
     get_settings.cache_clear()
     from app.ai import costs, orchestration
