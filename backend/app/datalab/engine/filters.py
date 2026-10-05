@@ -114,7 +114,7 @@ def apply(frame: pd.DataFrame, filters: list[Filter], variables: dict[str, Varia
         raise AppError(f"This filter leaves out fewer than {threshold} records ({words}). Compared with the whole data, it would reveal those few "
                        "people: widen it, or analyse without it.", code="FILTER_TOO_NARROW")
     notes = [f"{dropped:,} records are outside the filter ({words})." if dropped else "", *[n.replace("Fewer than 5", f"Fewer than {threshold}") for n in missing_notes]]
-    return frame[keep].reset_index(drop=True), [n for n in notes if n], words
+    return frame[keep], [n for n in notes if n], words  # original identities survive missing-value and map selection
 
 
 def overlaps(frame: pd.DataFrame, populations: dict[str, list[Filter]], titles: dict[str, str], variables: dict[str, Variable], threshold: int,

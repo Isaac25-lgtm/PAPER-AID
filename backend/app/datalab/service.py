@@ -267,7 +267,7 @@ def _fingerprint(p: DataProject, variables: dict[str, Variable], kind: str, name
     map layer, and the analysis itself (its Chapter Four objective excepted: that link can change)."""
     entry = next((v for v in p.versions if v.version == p.current), None)
     used = [(n, variables[n].kind, variables[n].excluded, variables[n].title()) if n in variables else (n, "", True, "") for n in names]
-    parts = {"data": entry.sha256 if entry else "", "alpha": p.alpha, "threshold": p.threshold, "rules": RULES_VERSION,
+    parts = {"data": entry.sha256 if entry else "", "alpha": p.alpha, "threshold": p.threshold, "rules": RULES_VERSION, "rowIdentity": 1,
              "survey": sorted((n, s.survey) for n, s in p.settings.items() if s.survey), "variables": used, "spec": spec_sha}
     if kind == "MAP":
         from app.datalab.engine import maps
@@ -1418,7 +1418,7 @@ def add_document(rt: Runtime, user: User, project_id: str, label: str, filename:
     path = _new_path(p, "documents", ".txt")
     rt.files.put(path, body, "text/plain; charset=utf-8")
     document = QualDocument(id=f"doc_{secrets.token_hex(4)}", label=shown or f"Transcript {len(p.documents) + 1}", name=name, path=path,
-                            sha256=hashlib.sha256(body).hexdigest(), words=words, replaced=replaced + n_label)
+                            sha256=hashlib.sha256(body).hexdigest(), words=words, replaced=replaced + n_label, anonymisation_version=qual.ANONYMISATION_VERSION)
 
     def apply(q: DataProject) -> DataProject:
         if step_running(rt, q):
@@ -1477,8 +1477,11 @@ def start_themes(rt: Runtime, user: User, project_id: str) -> JobView:
         raise Conflict("PaperAid is already analysing these transcripts.", code="STEP_RUNNING")
     if not p.documents:
         raise AppError("Add at least one transcript first.", code="NO_DOCUMENTS")
+    if any(d.anonymisation_version != qual.ANONYMISATION_VERSION for d in p.documents):
+        raise AppError("Please remove and add your older transcripts again so their labels and contact details can be protected.", code="TRANSCRIPTS_NEED_REUPLOAD")
     inp = qual.QualInput(project_id=p.id, title=p.title, question=p.purpose,
-                         documents=[qual.QualDoc(id=d.id, label=d.label, path=d.path, sha256=d.sha256, words=d.words) for d in p.documents])
+                         documents=[qual.QualDoc(id=d.id, label=d.label, path=d.path, sha256=d.sha256, words=d.words,
+                                                 anonymisation_version=d.anonymisation_version) for d in p.documents])
     last = rt.store.get(p.jobs[-1]) if p.jobs else None
     if last is not None and resumable(rt, last) and last.selection.datalab == "THEMES":
         before = qual.QualInput.model_validate_json(rt.files.get(f"{last.storage_prefix()}/internal/{qual.INPUT}"))

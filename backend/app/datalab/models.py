@@ -235,6 +235,7 @@ class QualDocument(Camel):
     sha256: str
     words: int
     replaced: int = 0  # names and identifiers replaced before it was stored
+    anonymisation_version: int = 0  # older transcripts must be re-uploaded before model calls
     created_at: datetime = Field(default_factory=utcnow)
 
 

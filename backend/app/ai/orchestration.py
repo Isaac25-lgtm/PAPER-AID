@@ -162,7 +162,7 @@ STEPS: dict[str, Step] = {
     "w_plan": Step("WRITER", Stage.PLANNING, "w-plan-v4", 12000),  # v2: claims within the evidence, a repair changes only what was raised; v3: says the plan is internal (Codex audit of 9239dd0); v4: the applicant's own facts never asserted either way, no page claims (live funding runs 2026-10-03)
     "w_plan_review": Step("EVALUATOR", Stage.PLANNING, "w-plan-review-v2", 6000),  # v2: blocking issues apart from suggestions; a repair is checked against the earlier issues (live funding runs 2026-10-03)
     "w_results": Step("WRITER", Stage.PLANNING, "w-results-v3", 16000),  # v2: says the Results Model is internal (Codex audit of 9239dd0); v3: measurement rules (live funding runs 2026-10-03)
-    "w_results_review": Step("EVALUATOR", Stage.PLANNING, "w-results-review-v3", 8000),  # v2: blocking issues apart from suggestions; a repair is checked against the earlier issues
+    "w_results_review": Step("EVALUATOR", Stage.PLANNING, "w-results-review-v4", 8000),  # v2: blocking issues apart from suggestions; a repair is checked against the earlier issues
     "w_draft": Step("WRITER", Stage.DRAFTING, "w-draft-v1", 16000),
     "w_integrity": Step("INTEGRITY", Stage.AUDITING, "w-integrity-v1", 6000),
     "w_evaluate": Step("EVALUATOR", Stage.AUDITING, "w-evaluate-v1", 8000),

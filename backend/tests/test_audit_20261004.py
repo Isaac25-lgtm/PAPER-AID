@@ -193,7 +193,7 @@ def test_a_reversal_on_unchanged_wording_counts_only_with_its_reason():
                {"id": "OP1", "statedAs": "output", "reads": "activity", "note": "Reads as an activity."}]
     earlier = {"OP1": Classified(id="OP1", statedAs="output", reads="output", note="A service.")}
     quiet = _results_decision(_review([], flipped), _results_model(), rules, "R", [], earlier, {"G1", "O1", "OP1"})
-    assert quiet.outcome == "APPROVED"  # unexplained, on text the repair never touched
+    assert quiet.outcome == "NOT_REVIEWED" and quiet.reason == "REVIEW_CLARIFICATION"
     explained = _review([], flipped, [{"id": "OP1", "before": "output", "now": "activity", "reason": "It describes holding sessions, not what they deliver."}])
     assert _results_decision(explained, _results_model(), rules, "R", [], earlier, {"G1", "O1", "OP1"}).outcome == "OBJECTIONS"
     assert _results_decision(_review([], flipped), _results_model(), rules, "R", [], earlier, {"G1", "O1"}).outcome == "OBJECTIONS"  # OP1 changed
@@ -217,10 +217,13 @@ def test_a_superseded_attempt_never_changes_the_operation(lab):
 
     rt.store.update_datalab(view["id"], won)
     upload = op.params.get("path", "")
-    service._end_op(rt, view["id"], op, "late", [], "Your data changed.", "DATA_CHANGED")
+    assert upload and rt.files.exists(upload)
+    own = f"{p.storage_prefix()}/late-attempt.txt"
+    rt.files.put(own, b"late result", "text/plain")
+    service._end_op(rt, view["id"], op, "late", [upload, own], "Your data changed.", "DATA_CHANGED")
     after = rt.store.get_datalab(view["id"]).op
     assert after.status == "DONE" and after.result == "an_1" and not after.code
-    assert not upload or rt.files.exists(upload) or True  # the shared upload is never the late attempt's to delete
+    assert rt.files.exists(upload) and not rt.files.exists(own)
 
 
 # --- 7. long inputs are split inside a paragraph or section ---------------------------------------------------------

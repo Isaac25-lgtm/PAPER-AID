@@ -136,8 +136,8 @@ export function ResearchLive() {
           <>
             <p className="text-[13px] font-semibold text-fg">1.1 Background to the study</p>
             <p data-at="text" className="mt-3 min-h-[3.4rem] font-serif text-[12.5px] leading-relaxed text-fg">
-              <Typed active={step === 2} done={step > 2 && step < 5} text="Uptake of the malaria vaccine remains uneven across districts, and caregivers cite distance and cost as the main barriers " />
-              {step >= 3 && step < 5 && <span className="rounded bg-brand-50 px-1 font-sans text-[11px] text-brand-700">(Author, 2023)</span>}
+              <Typed active={step === 2} done={step > 2 && step < 5} text="A trial in seven African countries found that RTS,S reduced clinical malaria, with greater efficacy when a booster dose was given " />
+              {step >= 3 && step < 5 && <a href="https://pubmed.ncbi.nlm.nih.gov/25913272/" target="_blank" rel="noopener noreferrer" tabIndex={-1} className="rounded bg-brand-50 px-1 font-sans text-[11px] text-brand-700">(RTS,S Clinical Trials Partnership, 2015)</a>}
             </p>
             <p className={clsx('mt-2 flex items-center gap-1 text-[11px] text-emerald-700 transition-opacity duration-500', step >= 3 && step < 5 ? 'opacity-100' : 'opacity-0')}>
               <BookCheck className="size-3.5" /> Source confirmed
@@ -159,7 +159,7 @@ export function ResearchLive() {
               </tbody>
             </table>
             <p className="mt-3 font-serif text-[12px] leading-relaxed text-fg-muted">Uptake was higher among caregivers living under 5 km from a facility (χ²(1) = 12.4, p &lt; .001).</p>
-            <p className="mt-2 text-[10px] text-fg-subtle">Example data · every number calculated by code</p>
+            <p className="mt-2 text-[10px] text-fg-subtle">Illustrative data · not study findings</p>
           </div>
         )}
       </div>

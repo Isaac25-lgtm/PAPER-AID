@@ -494,12 +494,15 @@ def _results_decision(checked: "ResultsReview | None", model: ResultsModel, rule
     waived = set() if figures else FIGURE_JUDGED | compliance.STUDENT_FIGURES  # the applicant's own figures are gaps for them to fill
     failed = [f"{r.rule}: {r.note}" for r in checked.rules if r.status == "FAIL" and r.rule not in waived]
     issues = [i.text for i in checked.issues if i.rule not in waived]  # the free-text objection follows its rule (Codex audit 2026-10-04, finding 5)
-    # A classification reversed on unchanged wording counts only with its reason (Codex's recommendation): an unexplained
-    # flip on text the repair never touched keeps the earlier classification.
-    explained = {r.id for r in checked.reversed if r.reason.strip()}
+    # Never substitute an earlier pass for the accountable reviewer's latest judgement.
+    unexplained = []
     for i, before in (earlier or {}).items():
-        if i in seen and i in (unchanged or set()) and i not in explained and seen[i].reads != before.reads:
-            seen[i] = before
+        if i in seen and i in (unchanged or set()) and seen[i].reads != before.reads:
+            explained = any(r.id == i and r.before == before.reads and r.now == seen[i].reads and r.reason.strip() for r in checked.reversed)
+            if not explained:
+                unexplained.append(f"Explain the changed classification of {i} from {before.reads} to {seen[i].reads} on unchanged wording.")
+    if unexplained:
+        return ReviewDecision(outcome="NOT_REVIEWED", reason="REVIEW_CLARIFICATION", objections=unexplained)
     misread = [f"{i} is a {level} but reads as a {seen[i].reads}: {seen[i].note}" for i, level in levels.items() if seen[i].reads != level]
     objections = [*issues, *failed, *misread, *problems]
     suggestions = list(dict.fromkeys(checked.suggestions))[:20]
@@ -526,6 +529,12 @@ def _final_results(runner: WorkRunner, payload: dict[str, Any], model: ResultsMo
                                                "statements": [{"id": i, "sha": h} for i, h in now.items()], **earlier})
         decision = _results_decision(checked, model, rules, "SPEND_CAP" if runner.budget_reached else "REVIEW_UNAVAILABLE", problems,
                                      classified if round_ else None, set(now) - set(changed))
+        if decision.reason == "REVIEW_CLARIFICATION":
+            # Keep the established comparison baseline and the exact candidate. The
+            # next bounded round asks Sol again, without buying another writer repair.
+            if round_ == REVIEW_REPAIRS or runner.budget_reached:
+                break
+            continue
         if checked is not None:
             classified = {c.id: c for c in checked.classified}
         hashes = now

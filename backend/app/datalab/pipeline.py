@@ -84,6 +84,7 @@ class DataRunner(AIRunner):
         return (self.chapter(payload) if chapter else self.report(payload)).model_dump()
 
     def final_review(self, payload: dict[str, Any]) -> Review | None:
+        check_review_size(payload)
         try:
             return self._call("d_report_review", payload, REVIEW_SCHEMA, Review)
         except PermanentStageError as exc:
@@ -166,6 +167,13 @@ def _words(entry: Any) -> int:
     return len(json.dumps(entry, ensure_ascii=False).split())
 
 
+def check_review_size(payload: Any) -> None:
+    if _words(payload) > FINAL_PART_WORDS:
+        raise PermanentStageError("REVIEW_INPUT_TOO_LARGE",
+                                  "PaperAid could not fit this document and its supporting evidence into a complete review. Nothing was charged. Please use fewer analyses or shorter supporting material.",
+                                  f"review request exceeds {FINAL_PART_WORDS} words")
+
+
 def split_rendered(entry: dict[str, Any], limit: int) -> list[dict[str, Any]]:
     """A rendered section longer than `limit` words in consecutive pieces within it: paragraphs and bullets
     cut at sentence ends, tables by rows with their columns repeated (Codex audit 2026-10-04, finding 7:
@@ -215,8 +223,12 @@ def split_rendered(entry: dict[str, Any], limit: int) -> list[dict[str, Any]]:
 def bounded_parts(entries: list[dict[str, Any]], repeated: Any) -> tuple[list[list[dict[str, Any]]], list[dict[str, Any]]]:
     """Sections in review parts of at most FINAL_PART_WORDS each, counting what every part repeats (the
     inputs and the manifest); the manifest names the part each section is in."""
-    bound = max(800, FINAL_PART_WORDS - _words(repeated) - 12 * len(entries))
-    for _ in range(6):  # the manifest grows as long sections are split: settle the bound until every request fits
+    reserve = 100  # document title, subtitle, part labels and JSON envelope
+    bound = FINAL_PART_WORDS - _words(repeated) - 12 * len(entries) - reserve
+    for _ in range(16):  # the manifest grows as long sections are split
+        if bound < 80:
+            check_review_size({"context": repeated, "document": entries})
+            raise PermanentStageError("REVIEW_INPUT_TOO_LARGE", "PaperAid could not fit the complete evidence into its review. Nothing was charged. Please use fewer analyses or shorter supporting material.")
         parts: list[list[dict[str, Any]]] = [[]]
         words = 0
         for entry in entries:
@@ -228,11 +240,11 @@ def bounded_parts(entries: list[dict[str, Any]], repeated: Any) -> tuple[list[li
                 parts[-1].append(piece)
                 words += size
         manifest = [{"key": e["key"], "heading": e["heading"], "part": n} for n, part in enumerate(parts, start=1) for e in part]
-        over = max(_words(part) for part in parts) + _words(repeated) + _words(manifest) - FINAL_PART_WORDS
-        if over <= 0 or bound <= 800:
-            break
-        bound = max(800, bound - over - 50)
-    return parts, manifest
+        over = max(_words(part) for part in parts) + _words(repeated) + _words(manifest) + reserve - FINAL_PART_WORDS
+        if over <= 0:
+            return parts, manifest
+        bound -= over + 50
+    raise PermanentStageError("REVIEW_INPUT_TOO_LARGE", "PaperAid could not fit the complete evidence into its review. Nothing was charged. Please use fewer analyses or shorter supporting material.")
 
 
 def document_parts(document: ReportDocument, written: set[str] | None = None, repeated: Any = None) -> tuple[list[list[dict[str, Any]]], list[dict[str, Any]]]:

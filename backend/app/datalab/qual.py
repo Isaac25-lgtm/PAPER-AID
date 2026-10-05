@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from app.jobs.pipeline import StageContext
 
 INPUT = "qual_input.json"
+ANONYMISATION_VERSION = 1
 DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 BATCH_WORDS = 9_000  # transcript words one coding call reads
@@ -66,13 +67,23 @@ NATIONAL_ID = re.compile(r"\bC[MF][A-Z0-9]{12}\b", re.I)
 # A phone number in any common layout: +256 772 123 456, 0772 123456, 0772-123-456, (0772) 123 456,
 # 256772123456. Only a run that starts as a phone number does (+, 00, 0 or 256) and has 9 to 13 digits,
 # so years, dates and figures stay (Codex audit 2026-10-04, finding 1: spaced numbers got through).
-PHONE_RUN = re.compile(r"(?<![\w+])(?:\+|\(\+?)?\d[\d\s().\-]{6,20}\d(?!\w)")
+# Fixed lengths for Uganda and local numbers prevent the following year or another
+# phone from becoming part of the match. Separators never consume a new line.
+_SEP = r"[ \t()-]*"  # no dots: a run of decimals ("0.25 0.30 0.45") is not a phone number (Claude's audit 2026-10-05)
+PHONE_RUN = re.compile(
+    rf"(?<![\w+])(?:\(?\+?256{_SEP}(?:\d{_SEP}){{8}}\d|"
+    rf"\(?00256{_SEP}(?:\d{_SEP}){{8}}\d|"
+    rf"\(?0{_SEP}(?:\d{_SEP}){{8}}\d|"
+    rf"\(?\+\d(?:{_SEP}\d){{8,12}})(?!\w)\)?"
+)
 NAME_WORDS = re.compile(r"[^\W\d_][\w'’.-]*")
 
 
 def _phone(match: re.Match[str]) -> str:
     run = match.group()
     digits = re.sub(r"\D", "", run)
+    if digits.startswith("00"):
+        digits = digits[2:]  # international dialling prefix is not part of the number
     starts = run.lstrip("(").startswith(("+", "0")) or digits.startswith("256")
     return "[phone]" if starts and 9 <= len(digits) <= 13 else run
 
@@ -149,8 +160,9 @@ def _locate(quote: str, source: str) -> str | None:
             chars.append(" ")
             where.append(i)
             space = False
-        chars.append(fold.get(ch, ch).lower())
-        where.append(i)
+        normalised = fold.get(ch, ch).lower()
+        chars.extend(normalised)
+        where.extend([i] * len(normalised))
     needle = " ".join("".join(fold.get(c, c) for c in quote).lower().split())
     at = "".join(chars).find(needle)
     if not needle or at < 0:
@@ -167,6 +179,7 @@ class QualDoc(Camel):
     path: str
     sha256: str
     words: int
+    anonymisation_version: int = 0
 
 
 class QualInput(Camel):
@@ -226,6 +239,9 @@ class QualRunner(AIRunner):
         return answer.model_dump()
 
     def final_review(self, payload: dict[str, Any]) -> Review | None:
+        from app.datalab.pipeline import check_review_size
+
+        check_review_size(payload)
         try:
             return self._call("q_review", payload, REVIEW_SCHEMA, Review)
         except PermanentStageError as exc:
@@ -237,7 +253,10 @@ class QualRunner(AIRunner):
 
 def _input(ctx: "StageContext") -> QualInput:
     check_content(ctx.job.quote.engine if ctx.job.quote else None)
-    return QualInput.model_validate(ctx.get_json(INPUT))
+    inp = QualInput.model_validate(ctx.get_json(INPUT))
+    if any(d.anonymisation_version != ANONYMISATION_VERSION for d in inp.documents):
+        raise PermanentStageError("TRANSCRIPTS_NEED_REUPLOAD", "Please remove and add your older transcripts again so their labels and contact details can be protected. Nothing was charged.")
+    return inp
 
 
 def _runner(ctx: "StageContext") -> QualRunner:

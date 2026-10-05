@@ -573,7 +573,7 @@ class Notice(Camel):
     key: str  # the outcome it is for: COMPLETED:<generation>, FAILED:<generation> or STOPPED:<generation>
     outcome: Literal["READY", "STOPPED"]
     pending: bool = True
-    channels: dict[str, str] = {}  # channel → SENT or FAILED
+    channels: dict[str, str] = {}  # channel → SENT, FAILED (retryable) or PERMANENT_FAILURE
     attempts: int = 0
     next_at: datetime | None = None
     lease_until: datetime | None = None  # one sender at a time

@@ -24,6 +24,11 @@ logger = logging.getLogger("paperaid.notify")
 Outcome = Literal["READY", "STOPPED"]
 ATTEMPTS = 5  # sends tried per channel before the message is given up (logged)
 LEASE = timedelta(minutes=2)
+TERMINAL = {"SENT", "PERMANENT_FAILURE"}
+
+
+class SmsRejected(Exception):
+    """The recipient needs correction; repeating this request cannot deliver it."""
 
 
 def channels(rt: Runtime) -> dict[str, bool]:
@@ -104,7 +109,7 @@ def deliver(rt: Runtime, job_id: str) -> None:
         if n is None or n.key != key or not n.pending or (n.lease_until is not None and n.lease_until > now) or (n.next_at is not None and n.next_at > now):
             return None
         wanted.clear()
-        wanted.update({ch: to for ch, to in targets.items() if n.channels.get(ch) != "SENT"})
+        wanted.update({ch: to for ch, to in targets.items() if n.channels.get(ch) not in TERMINAL})
         if not wanted:  # nothing (more) to send: done
             n.pending = False
             return j
@@ -121,17 +126,20 @@ def deliver(rt: Runtime, job_id: str) -> None:
         if channel == "email":
             results[channel] = _email(rt, to, subject, f"{line}\n\nYou can turn these messages off in your settings: {settings_link}\n\nPaperAid")
         else:
-            results[channel] = _sms(rt, to, f"PaperAid: {line}")
+            try:
+                results[channel] = _sms(rt, to, f"PaperAid: {line}")
+            except SmsRejected:
+                results[channel] = "PERMANENT_FAILURE"
 
     def record(j: Job) -> Job | None:
         n = j.notice
         if n is None or n.key != key or n.sender != sender:
             return None
         for channel, ok in results.items():
-            n.channels[channel] = "SENT" if ok else "FAILED"
+            n.channels[channel] = "PERMANENT_FAILURE" if ok == "PERMANENT_FAILURE" else "SENT" if ok else "FAILED"
         n.attempts += 1
         n.lease_until, n.sender = None, ""
-        done = all(n.channels.get(ch) == "SENT" for ch in targets)
+        done = all(n.channels.get(ch) in TERMINAL for ch in targets)
         if done or n.attempts >= ATTEMPTS:
             n.pending = False
             if not done:
@@ -215,4 +223,27 @@ def _sms(rt: Runtime, phone: str, text: str) -> bool:
     if r.status_code >= 300:
         log(logger, logging.WARNING, "sms not sent", status=r.status_code)
         return False
-    return True
+    try:
+        body = r.json()
+    except ValueError:
+        log(logger, logging.WARNING, "sms response invalid")
+        return False
+    data = body.get("SMSMessageData") if isinstance(body, dict) else None
+    recipients = data.get("Recipients") if isinstance(data, dict) else None
+    if not isinstance(recipients, list) or len(recipients) != 1 or not isinstance(recipients[0], dict):
+        log(logger, logging.WARNING, "sms response invalid")
+        return False
+    recipient = recipients[0]
+    if recipient.get("number") != phone:
+        log(logger, logging.WARNING, "sms recipient mismatch")
+        return False
+    code = str(recipient.get("statusCode", ""))
+    if code in {"100", "101", "102"}:  # provider accepted it; this is not proof of handset delivery
+        return True
+    log(logger, logging.WARNING, "sms recipient rejected", status=code)
+    if code in {"403", "404", "406"}:  # invalid number, unsupported recipient, opted out
+        raise SmsRejected(code)
+    if code in {"401", "402", "405"}:
+        alert(rt, "SMS provider needs attention", f"SMS provider rejected a message (code {code}). Check the provider account, sender and balance.",
+              f"sms:{utcnow():%Y-%m-%d}:{code}")
+    return False
