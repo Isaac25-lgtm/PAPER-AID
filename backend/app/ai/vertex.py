@@ -11,6 +11,7 @@ Google exposes no hard cap on queries: they are counted and charged as run, neve
 
 import atexit
 import json
+import random
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor, wait
@@ -81,8 +82,13 @@ MEDIA_TYPES = {
 
 # Many students share Gemini's capacity (owner, 2026-10-07: 20 at once). A throttled (429) or briefly
 # unavailable (503) request is retried here within seconds, with jitter, before the stage fails and waits for
-# the queue's backoff: Google bills neither, and nothing else is retried here (a timeout may have been billed).
-THROTTLE_RETRY = types.HttpRetryOptions(attempts=4, initial_delay=2.0, max_delay=20.0, exp_base=2.0, jitter=1.0, http_status_codes=[429, 503])
+# the queue's backoff: Google bills neither. The SDK itself never retries: whatever status codes it is
+# given, it also resends a request that timed out or lost its connection, and such a request may have been
+# billed without PaperAid recording it (Codex review 2026-10-07, finding 1). Those reach the runner once.
+NO_SDK_RETRY = types.HttpRetryOptions(attempts=1)
+THROTTLE_ATTEMPTS = 4
+THROTTLE_DELAYS = (2.0, 4.0, 8.0)  # seconds before the 2nd, 3rd and 4th attempt, each plus up to 1 s of jitter
+_pause = time.sleep  # tests replace it
 # Each call gets the time its own token allowance needs: thinking counts against it, and a HIGH call that
 # thinks to its full room (32k) at Flash's measured 145-165 tokens a second needs about four minutes. A
 # fixed 180 seconds cut such calls off (live run 2026-10-07: three timeouts in a row, each possibly
@@ -109,7 +115,7 @@ def _vertex_client(project: str, location: str, timeout: float) -> genai.Client:
                 credentials, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"], quota_project_id=project)
                 _CLIENTS[key] = genai.Client(vertexai=True, project=project, location=location, credentials=credentials,
                                             http_options=types.HttpOptions(api_version="v1", timeout=int(timeout * 1000),
-                                                                           retry_options=THROTTLE_RETRY))
+                                                                           retry_options=NO_SDK_RETRY))
             return _CLIENTS[key]
     except (auth_errors.DefaultCredentialsError, auth_errors.RefreshError):
         raise PermanentStageError("VERTEX_AUTH", MISCONFIGURED, "Vertex ADC unavailable") from None
@@ -424,13 +430,11 @@ class VertexGeminiProvider:
                                              tool_config=options.tool_config,
                                              automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
                                              http_options=types.HttpOptions(timeout=int(call_timeout(options.max_output_tokens, self.settings.provider_timeout_sec) * 1000),
-                                                                            retry_options=THROTTLE_RETRY))
+                                                                            retry_options=NO_SDK_RETRY))
         started = time.monotonic()
         client = _vertex_client(self.settings.vertex_project, self.settings.vertex_location, self.settings.provider_timeout_sec)
         try:
-            response = client.models.generate_content(model=model, contents=contents, config=config)
-        except errors.APIError as exc:
-            raise _error(exc, search) from None
+            response = self._throttled(client, model, contents, config, search)
         except (httpx.ConnectError, httpx.ConnectTimeout):  # never reached Google: nothing billed
             raise RetryableStageError("PROVIDER_UNAVAILABLE", UNAVAILABLE, "vertex unreachable") from None
         except httpx.TimeoutException:  # sent, answer not received: Google may have billed it
@@ -468,6 +472,19 @@ class VertexGeminiProvider:
             # answer's links are resolved by the caller AFTER the call's usage is recorded (resolve_sources).
             result.grounding["queriesOverAllowance"] = max(0, len(result.queries) - (options.max_grounding_queries or 0))
         return result
+
+    @staticmethod
+    def _throttled(client: genai.Client, model: str, contents: Any, config: types.GenerateContentConfig, search: bool) -> Any:
+        """The request, retried only while Google answers 429 (rate, not quota) or 503: neither is billed."""
+        for attempt in range(THROTTLE_ATTEMPTS):
+            try:
+                return client.models.generate_content(model=model, contents=contents, config=config)
+            except errors.APIError as exc:
+                error = _error(exc, search)
+                if error.code not in ("VERTEX_RATE_LIMIT", "PROVIDER_UNAVAILABLE") or exc.code not in (429, 503) or attempt + 1 >= THROTTLE_ATTEMPTS:
+                    raise error from None
+                _pause(THROTTLE_DELAYS[min(attempt, len(THROTTLE_DELAYS) - 1)] + random.random())
+        raise AssertionError("unreachable")
 
     @staticmethod
     def _result(response: types.GenerateContentResponse, model: str, started: float, search: bool) -> ModelResult:

@@ -57,6 +57,8 @@ def sdk(monkeypatch):
             raise value
         return value
     monkeypatch.setattr(vertex, "_vertex_client", lambda *args: SimpleNamespace(models=SimpleNamespace(generate_content=generate)))
+    monkeypatch.setattr(vertex, "THROTTLE_ATTEMPTS", 1)  # one attempt per answer; tests/test_vertex.py covers the throttle loop
+    monkeypatch.setattr(vertex, "_pause", lambda seconds: None)
     return calls, answers
 
 
@@ -409,7 +411,7 @@ def test_client_reuse_thread_safety_and_teardown(monkeypatch):
         assert clients[0]["credentials"] is credentials and clients[0]["vertexai"]
         assert clients[0]["project"] == accounts[0]["quota_project_id"] == "paperaid"
         assert clients[0]["location"] == "global" and "api_key" not in clients[0]
-        assert clients[0]["http_options"].retry_options.http_status_codes == [429, 503]  # throttling only (2026-10-07)
+        assert clients[0]["http_options"].retry_options.attempts == 1  # the SDK never retries; throttling is retried by PaperAid
         vertex._vertex_client("paperaid", "global", 60)
         assert len(clients) == 2  # timeout is server config, not a per-model selection
     finally:

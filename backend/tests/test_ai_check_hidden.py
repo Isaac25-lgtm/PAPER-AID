@@ -25,3 +25,30 @@ def test_a_hidden_check_is_refused_and_a_redraft_still_quotes(client, monkeypatc
     assert refused.status_code == 400 and refused.json()["code"] == "SERVICE_UNAVAILABLE"
     redraft = client.post(f"/api/jobs/{job_id}/quote", headers=STUDENT, json={"selection": {"writing": "REDRAFT"}})
     assert redraft.status_code == 200, redraft.json()
+
+
+def test_the_daily_canary_still_runs_its_check_while_students_cannot(client, monkeypatch):
+    """Codex review 2026-10-07, finding 11: the canary asks for the check; hiding it from students must
+    not turn the daily diagnostic into a daily "unavailable" alert."""
+    from app.jobs import canary
+    from app.jobs.service import User
+    from app.runtime import get_runtime
+
+    rt = get_runtime()
+    monkeypatch.setattr(rt.settings, "ai_check_enabled", False)
+    monkeypatch.setattr(rt.settings, "canary_enabled", True)
+    monkeypatch.setattr(rt.settings, "canary_uid", "u_canary")
+    monkeypatch.setattr(rt.settings, "canary_email", "canary@example.com")
+    monkeypatch.setattr(rt.settings, "canary_budget_usd", 100.0)
+    from app.pricing import credits
+
+    def funded(w):
+        w = credits.top_up(w, 1_000_000, "Canary credits")
+        w.terms_version = rt.settings.terms_version
+        return w
+
+    rt.store.update_wallet("u_canary", "canary@example.com", funded)
+    started = canary.run(rt)
+    assert started.get("started"), started
+    assert availability(rt.settings, User(uid="u_canary", email="canary@example.com", is_admin=False, verified=True))["AI_CHECK"] == "available"
+    assert availability(rt.settings, User(uid="u_student", email="s@example.com", is_admin=False, verified=True))["AI_CHECK"] == "soon"

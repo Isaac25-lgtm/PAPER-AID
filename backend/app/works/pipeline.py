@@ -16,13 +16,14 @@ import hashlib
 import json
 import math
 import re
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from app.ai.orchestration import FINAL_PART_WORDS, REVIEW_REPAIRS, check_content
+from app.ai.orchestration import FINAL_PART_WORDS, HISTORY_WORDS, REVIEW_REPAIRS, check_content, payload_words
 from app.analysis import fetch, research
 from app.core.errors import PermanentStageError
 from app.jobs import state
-from app.jobs.models import Job, JobStatus, Progress, ReadinessItem, Stage, Wallet, utcnow
+from app.jobs.models import Engine, Job, JobStatus, Progress, ReadinessItem, Stage, Wallet, utcnow
 from app.pricing.billing import settle_completed
 from app.proposals import evidence as ev
 from app.proposals.ai import Figure, SectionText, Table
@@ -140,19 +141,41 @@ def _figure_problems(figure: Figure | None) -> list[str]:
 
 
 def _kept(old: SectionText, new: SectionText) -> SectionText:
-    """A section's graph survives a rewrite that leaves it out (compression's format has no figure; a repair
-    that does not mention it): only a new figure replaces it."""
-    return new if new.figure is not None or old.figure is None else new.model_copy(update={"figure": old.figure})
+    """A section's graph and its worked example's label survive a rewrite that leaves them out (compression's
+    format has neither; a repair that does not mention them): only a new figure replaces the graph, and a
+    table that is still there stays the illustrative example it was (Codex review 2026-10-07, finding 3)."""
+    kept = new if new.figure is not None or old.figure is None else new.model_copy(update={"figure": old.figure})
+    if old.table.illustrative and kept.table.rows and not kept.table.illustrative:
+        kept = kept.model_copy(update={"table": kept.table.model_copy(update={"illustrative": True})})
+    return kept
 
 
-def _illustrative(text: SectionText) -> str:
-    """A section's own worked example and graph: their numbers are illustrative by construction (labelled
-    as such by code), so the same numbers in its text are not unsupported figures (2026-10-07: a worked
-    example was blanked cell by cell and the question's "numerical illustrations" failed)."""
+# A sentence about the section's own worked example or graph (2026-10-07: "Suppose the price falls from
+# 900 to 860..."); only such a sentence may use the example's numbers.
+ABOUT_EXAMPLE = re.compile(r"\b(suppose|supposing|assum\w*|hypothetical\w*|illustrat\w*|examples?|imagine|scenario|if|tables?|figures?|graphs?|curves?|diagrams?)\b", re.I)
+
+
+def _examples_allowed(inp: WorkStepInput) -> bool:
+    """Hypothetical worked examples and drawn graphs belong to coursework answers only; a funding
+    proposal's or concept note's numbers must always be evidence or the applicant's own (finding 4)."""
+    return _spec(inp).kind == "COURSEWORK"
+
+
+def _illustrative(inp: WorkStepInput, text: SectionText) -> str:
+    """A coursework section's own worked example and graph: their numbers are illustrative by construction
+    (labelled as such by code), so the example's cells, and sentences about the example, may use them
+    (2026-10-07: a worked example was blanked cell by cell and the question's "numerical illustrations"
+    failed). Never a factual claim elsewhere in the section (Codex review 2026-10-07, finding 4)."""
+    if not _examples_allowed(inp):
+        return ""
     parts = [" ".join(c for row in text.table.rows for c in row)] if text.table.illustrative else []
     if text.figure is not None and not _figure_problems(text.figure):
         parts += [f"{p.x:g} {p.y:g}" for line in text.figure.series for p in line.points]
     return " ".join(parts)
+
+
+def _about_example(example: str) -> Callable[[str], str] | None:
+    return (lambda sentence: example if ABOUT_EXAMPLE.search(sentence) else "") if example else None
 
 
 def _tokens(inp: WorkStepInput) -> dict[str, tuple[str, str]]:
@@ -260,10 +283,21 @@ def _earlier_research(ctx: "StageContext", inp: WorkStepInput) -> list[dict[str,
             return None
         before = WorkStepInput.model_validate(json.loads(ctx.rt.files.get(paths[0])))
         found = json.loads(ctx.rt.files.get(paths[1]))
-        if before.plan_version != inp.plan_version or before.plan != inp.plan:
+        # Reused only when everything the research was made from is the same: the question and answers, the
+        # files, the specification, the plan, the notes and private words, and the engine that searched
+        # (Codex review 2026-10-07, finding 5: a PLAN has no plan, so a changed topic matched).
+        if before.model_dump(include=RESEARCH_INPUTS) != inp.model_dump(include=RESEARCH_INPUTS) or _engine(job) != _engine(ctx.job):
             return None
         return found
     return None
+
+
+def _engine(job: Job) -> Engine | None:
+    return job.quote.engine if job.quote else None
+
+
+RESEARCH_INPUTS = {"step", "kind", "variant", "mode", "level", "citation", "inputs", "sources", "spec", "plan", "plan_version",
+                   "results", "results_version", "evidence_files", "note", "exploratory", "private"}
 
 
 def stage_researching(ctx: "StageContext") -> None:
@@ -705,12 +739,21 @@ def _checks(inp: WorkStepInput, section: PlanSection, text: SectionText, library
     """Code checks on one section: citations, figures, number tokens, length, and the source rule."""
     spec = _spec(inp)
     usable = {i for i, item in library_items.items() if item.usable}
-    allowed = allowed + " " + _illustrative(text)
-    problems: list[str] = list(_figure_problems(text.figure))
-    for paragraph in [*text.paragraphs, *(_cells(text) if text.table.rows else [])]:
+    example = _illustrative(inp, text)
+    problems: list[str] = list(_figure_problems(text.figure)) if _examples_allowed(inp) else []
+    cells = _cells(text) if text.table.rows else []
+    for n, paragraph in enumerate([*text.paragraphs, *cells]):
         plain = numbers.strip(paragraph)
         problems += ev.citation_problems(plain, usable)
-        problems += [p + " Use a number token for figures from the budget, Results Model or your answers." for p in ev.figure_problems(plain, library_items, allowed)]
+        if n >= len(text.paragraphs) and text.table.illustrative:  # the worked example's own cells
+            found = ev.figure_problems(plain, library_items, allowed + " " + example)
+        elif example:  # a sentence may use the example's numbers only when it is about the example
+            cited = " ".join(f"⟦{i}⟧" for i in ev.cited_ids(plain))
+            found = [p for s in ev.sentences(plain)
+                     for p in ev.figure_problems(s if ev.cited_ids(s) else f"{s} {cited}", library_items, allowed + (" " + example if ABOUT_EXAMPLE.search(s) else ""))]
+        else:
+            found = ev.figure_problems(plain, library_items, allowed)
+        problems += [p + " Use a number token for figures from the budget, Results Model or your answers." for p in found]
         problems += [f"{t} is not an available number token." for t in numbers.render(paragraph, tokens)[1]]
         if spec.source_policy == "CLOSED":
             problems += [f"⟦{i}⟧ is not one of the set readings." for i in ev.cited_ids(plain) if i in library_items and not library_items[i].source.url.startswith("reading:")]
@@ -852,12 +895,34 @@ def _audit(ctx: "StageContext", runner: WorkRunner, inp: WorkStepInput, current:
             "repairs": repairs}
 
 
-def _blocking(final: "Final", doc_rules: list[dict[str, Any]]) -> frozenset[str]:
-    """What blocks a final review: failed blocking rules, unanswered question parts, unaddressed priorities."""
+Objection = tuple[str, str, frozenset[str]]  # what blocks, where the reviewer placed it, the words of its note
+
+
+def _words_of(text: str) -> frozenset[str]:
+    return frozenset(w for w in re.findall(r"[a-z0-9]+", text.lower()) if len(w) > 3)
+
+
+def _blocking(final: "Final", doc_rules: list[dict[str, Any]]) -> list[Objection]:
+    """What blocks a final review: failed blocking rules, unanswered question parts, unaddressed priorities,
+    each with where the reviewer placed it and what it said."""
     blocking_ids = {r["id"] for r in doc_rules if r["severity"] == "BLOCKING"}
-    return frozenset([*(f"rule:{r.rule}" for r in final.rules if r.status == "FAIL" and r.rule in blocking_ids),
-                      *(f"part:{c.id}" for c in final.coverage if not c.answered),
-                      *(f"priority:{p.priority}" for p in final.priorities if not p.addressed)])
+    return [*((f"rule:{r.rule}", " ".join(sorted(_words_of(r.where))), _words_of(r.note)) for r in final.rules if r.status == "FAIL" and r.rule in blocking_ids),
+            *((f"part:{c.id}", " ".join(sorted(_words_of(c.where))), frozenset()) for c in final.coverage if not c.answered),
+            *((f"priority:{p.priority}", " ".join(sorted(_words_of(p.where))), frozenset()) for p in final.priorities if not p.addressed)]
+
+
+SAME_OBJECTION = 0.6  # the share of a note's words two objections must share to be the same one
+
+
+def _repeats(now: list[Objection], before: list[Objection]) -> bool:
+    """The same objections again after a repair: the same rules, parts and priorities, placed in the same
+    place, saying much the same. A different weakness under the same rule, or one moved elsewhere, is not a
+    repeat: the shared repair limit still bounds the loop (Codex review 2026-10-07, finding 7)."""
+    def same(a: Objection, b: Objection) -> bool:
+        words = a[2] | b[2]
+        return a[0] == b[0] and a[1] == b[1] and (not words or len(a[2] & b[2]) / len(words) >= SAME_OBJECTION)
+
+    return bool(now) and len(now) == len(before) and all(any(same(a, b) for b in before) for a in now)
 
 
 def _strip(inp: WorkStepInput, text: SectionText, library_items: dict[str, EvidenceItem], allowed: str) -> SectionText:
@@ -865,15 +930,17 @@ def _strip(inp: WorkStepInput, text: SectionText, library_items: dict[str, Evide
     citation or figure is withheld whole, never left without its support (Codex review 2026-09-30 #3).
     A section's own illustrative worked example and graph are not untraceable (`_illustrative`)."""
     usable = {i for i, item in library_items.items() if item.usable}
-    allowed = allowed + " " + _illustrative(text)
+    example = _illustrative(inp, text)
+    about = _about_example(example)
+    in_example = (allowed + " " + example) if text.table.illustrative else allowed
 
-    def clean(paragraph: str) -> str:
+    def clean(paragraph: str, cell: bool = False) -> str:
         # Placeholders without digits: a digit in one would read as an unsupported figure.
         protected = {"⟪" + "".join(chr(97 + int(d)) for d in str(n)) + "⟫": m.group(0) for n, m in enumerate(numbers.NUMBER_TOKEN.finditer(paragraph))}
         plain = paragraph
         for placeholder, token in protected.items():
             plain = plain.replace(token, placeholder, 1)
-        kept = ev.strip_unsupported(plain, library_items, usable, allowed)
+        kept = ev.strip_unsupported(plain, library_items, usable, in_example) if cell else ev.strip_unsupported(plain, library_items, usable, allowed, about)
         for placeholder, token in protected.items():
             kept = kept.replace(placeholder, token)
         return kept
@@ -883,7 +950,7 @@ def _strip(inp: WorkStepInput, text: SectionText, library_items: dict[str, Evide
             "paragraphs": [p for p in (clean(p) for p in text.paragraphs) if p],
             # Table cells and the caption are delivered like prose, so they are held to the same rule
             # (Codex audit 2026-09-30 #6); a withheld cell stays as an empty cell.
-            "table": text.table.model_copy(update={"caption": clean(text.table.caption), "rows": [[clean(c) for c in row] for row in text.table.rows]}),
+            "table": text.table.model_copy(update={"caption": clean(text.table.caption, cell=True), "rows": [[clean(c, cell=True) for c in row] for row in text.table.rows]}),
         })
         if tidy == text:
             break
@@ -1036,10 +1103,16 @@ def _final_review(runner: WorkRunner, inp: WorkStepInput, document: WorkDocument
     missing, cut off or unaffordable: None (not reviewed)."""
     spec = _spec(inp)
     whole = deliverable(inp, document, library_items, tokens)
-    # Every part, the front matter, tables, references and notes included, stays within FINAL_PART_WORDS
-    # (Codex audit 2026-10-01): what follows the sections goes on the last part while it fits, else on
-    # further parts of its own.
-    bound = max(100, FINAL_PART_WORDS - len(" ".join(whole["front"]).split()))
+    base = {"spec": _compact_spec(spec), "student": _student(inp), "position": inp.plan.position if inp.plan else "",
+            "rules": [{"rule": r["id"], "requirement": r["requirement"], "severity": r["severity"]} for r in doc_rules],
+            "coverage": [c.model_dump(by_alias=True) for c in spec.coverage], "priorities": spec.priorities}
+    # Every whole request stays within FINAL_PART_WORDS (Codex audit 2026-10-01; Codex review 2026-10-07,
+    # finding 8): what every part repeats (specification, rules, the student's context, front matter, the
+    # manifest) and the sign-off's room for earlier findings come off first, then a tenth for the request's
+    # JSON; what follows the sections goes on the last part while it fits, else on further parts of its own.
+    manifest_room = 2 * payload_words([{"key": e["key"], "heading": e["heading"], "words": 0, "part": "99"} for e in whole["sections"]])
+    repeated = payload_words(base) + payload_words(whole["front"]) + manifest_room + payload_words({"part": "99 of 99"})
+    bound = max(100, int((FINAL_PART_WORDS - repeated - HISTORY_WORDS) * 0.9))
     parts: list[dict[str, Any]] = [{"sections": [], "tables": [], "references": [], "notes": [], "words": 0}]
 
     def place(kind: str, item: Any, words: int) -> None:
@@ -1059,9 +1132,6 @@ def _final_review(runner: WorkRunner, inp: WorkStepInput, document: WorkDocument
             for chunk in _chunks(text, bound):
                 place(kind, chunk, len(chunk.split()))
     manifest = [{"key": e["key"], "heading": e["heading"], "words": _words_of_entry(e), "part": n} for n, part in enumerate(parts, start=1) for e in part["sections"]]
-    base = {"spec": _compact_spec(spec), "student": _student(inp), "position": inp.plan.position if inp.plan else "",
-            "rules": [{"rule": r["id"], "requirement": r["requirement"], "severity": r["severity"]} for r in doc_rules],
-            "coverage": [c.model_dump(by_alias=True) for c in spec.coverage], "priorities": spec.priorities}
     rule_ids, coverage_ids, priorities = {r["id"] for r in doc_rules}, {c.id for c in spec.coverage}, set(spec.priorities)
     answers = []
     for n, part in enumerate(parts, start=1):
@@ -1192,9 +1262,9 @@ def _document(inp: WorkStepInput, current: dict[str, SectionText], reviewed: set
         table = rows if len(rows) >= 2 and width >= 2 else None
         for field in [*text.paragraphs, *(_cells(text) if table else [])]:
             cited += [i for i in ev.cited_ids(field) if i not in cited]
-        figure = text.figure if text.figure is not None and not _figure_problems(text.figure) else None
+        figure = text.figure if text.figure is not None and not _figure_problems(text.figure) and _examples_allowed(inp) else None
         sections.append(WorkSection(key=s.key, heading=s.heading, paragraphs=text.paragraphs, table=table, table_caption=text.table.caption if table else "",
-                                    table_illustrative=bool(table) and text.table.illustrative, figure=figure,
+                                    table_illustrative=bool(table) and text.table.illustrative and _examples_allowed(inp), figure=figure,
                                     field_id=s.field_id, reviewed=s.key in reviewed))
     note = ""
     if spec.kind == "COURSEWORK":
@@ -1234,13 +1304,14 @@ def stage_auditing(ctx: "StageContext") -> None:
     original: dict[str, SectionText] = {}
     if inp.step == "REVISE":
         base = _base(ctx, inp)
-        current = {s.key: SectionText(key=s.key, paragraphs=s.paragraphs, table=Table(caption=s.table_caption, rows=s.table or [])) for s in base.sections}
+        current = {s.key: SectionText(key=s.key, paragraphs=s.paragraphs, table=Table(caption=s.table_caption, rows=s.table or [], illustrative=s.table_illustrative),
+                                      figure=s.figure) for s in base.sections}  # every section as delivered (Codex review 2026-10-07, finding 3)
         original = dict(current)
         targets = [k for k in inp.revise if k in current]
         requests = _repair_items(inp, current, _library(ctx, inp), {k: [f"The student asks: {r}" for r in inp.revise[k]] for k in targets})
         for key, revised in runner.repair(requests, _common(inp)).items():
             if key in targets:
-                current[key] = revised
+                current[key] = _kept(current[key], revised)
         # A requested section the writer did not return, or returned unchanged, was not revised: never
         # charged for, and its request stays open (Codex audit 2026-09-30, second round).
         unchanged = [k for k in targets if current[k] == original[k]]
@@ -1351,7 +1422,7 @@ def stage_auditing(ctx: "StageContext") -> None:
         final: Final | None = None
         doc_rules = _document_rules(spec)
         rounds_seen: list[dict[str, Any]] = []
-        previous_failing: frozenset[str] = frozenset()
+        previous_failing: list[Objection] = []
         for round_ in runner.audit_rounds(REVIEW_REPAIRS + 1):
             settle_wording()
             progress(ctx, "FINAL_REVIEW", round_ + 1)
@@ -1367,7 +1438,7 @@ def stage_auditing(ctx: "StageContext") -> None:
             ctx.put_json("final_review.json", rounds_seen)  # what the final reviewer objected to each round (admin diagnosis; never logged)
             failing = _blocking(final, doc_rules)
             # The same objections after a repair: another round would only repeat it (live 2026-10-07).
-            repeated = round_ > 0 and failing == previous_failing
+            repeated = round_ > 0 and _repeats(failing, previous_failing)
             previous_failing = failing
             if not fix or round_ == REVIEW_REPAIRS or runner.budget_reached or repeated or (shared and repairs_left[0] <= 0):
                 break

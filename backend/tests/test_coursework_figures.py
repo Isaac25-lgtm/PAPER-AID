@@ -5,6 +5,7 @@ a worked example is an illustrative table that code labels; both reach the stude
 final review. Also: one repair limit for the whole draft, and the loop stops when objections repeat."""
 
 import io
+from types import SimpleNamespace
 
 import pytest
 from docx import Document
@@ -51,6 +52,29 @@ def test_an_illustrative_worked_example_is_kept_and_a_sourced_looking_table_is_n
     assert stripped.table.rows[1][1] == "" and not stripped.paragraphs  # unsupported figures are still withheld
 
 
+def test_an_examples_numbers_never_support_a_factual_claim_and_only_coursework_has_examples():
+    """Codex review 2026-10-07, finding 4: the model sets `illustrative`, so its numbers may be used only in
+    the example itself and in sentences about it; a funding proposal never gets the exemption."""
+    text = SectionText(key="k", paragraphs=["Suppose the price falls from 900 to 860 dollars. District officials recorded 900 cases last year."],
+                       table=Table.model_validate(WORKED))
+    kept = pipeline._strip(_inp(), text, {}, "")
+    assert kept.paragraphs == ["Suppose the price falls from 900 to 860 dollars."] and kept.table.rows == text.table.rows
+    section = SimpleNamespace(max_words=0, min_words=0, words=0, field_id="")
+    problems = pipeline._checks(_inp(), section, text, {}, "", {})
+    assert len([p for p in problems if "900" in p]) == 1  # the factual claim, not the example
+    funding = pipeline._strip(_inp("FUNDING_PROPOSAL"), text, {}, "")
+    assert funding.table.rows[1][1] == "" and not funding.paragraphs
+
+
+def test_a_compressed_example_keeps_its_label_and_a_revision_keeps_graphs_and_examples():
+    """Codex review 2026-10-07, finding 3: compression's format has no illustrative flag; a revision rebuilt
+    the delivered sections without their graphs or labels."""
+    example = SectionText(key="k", paragraphs=["Suppose the price falls from 900 to 860 dollars."], table=Table.model_validate(WORKED))
+    compressed = SectionText(key="k", paragraphs=["Suppose it falls from 900 to 860."], table=Table(caption="Worked example", rows=WORKED["rows"]))
+    kept = pipeline._kept(example, compressed)
+    assert kept.table.illustrative and pipeline._strip(_inp(), kept, {}, "").table.rows == WORKED["rows"]
+
+
 def test_a_graph_survives_a_rewrite_that_leaves_it_out():
     with_figure = SectionText(key="k", paragraphs=["x"], table=Table(caption="", rows=[]), figure=Figure.model_validate(FIGURE))
     shorter = SectionText(key="k", paragraphs=["y"], table=Table(caption="", rows=[]))
@@ -91,6 +115,18 @@ def test_a_coursework_question_asking_for_graphs_and_numbers_is_answered_drawn_a
     jobs = [get_runtime().store.get(j) for j in work["jobs"]]
     assert all(j.status == "COMPLETED" for j in jobs)
 
+    # Ask for changes to another section: the graph and the labelled example stay as delivered (Codex review
+    # 2026-10-07, finding 3: a revision rebuilt every section without them).
+    from tests.test_works_flows import _run
+
+    other = next(s["key"] for s in view["sections"] if s["key"] != drawn[0]["key"])
+    client.post(f"/api/works/{work['id']}/requests", headers=H, json={"instruction": "Make this section clearer.", "sections": [other]})
+    _, revised = _run(client, work["id"], "REVISE")
+    assert revised["status"] == "COMPLETED", revised.get("failure")
+    after = client.get(f"/api/works/{work['id']}/document", headers=H).json()
+    kept = next(s for s in after["sections"] if s["key"] == drawn[0]["key"])
+    assert kept["figure"] == drawn[0]["figure"] and kept["tableCaption"].endswith("(illustrative values)") and kept["table"] == worked[0]["table"]
+
 
 def test_one_repair_limit_for_the_whole_draft_and_no_round_that_only_repeats(works_client):
     """The section checks and the final review share the draft's repairs; the same objections after a
@@ -120,10 +156,10 @@ def test_one_repair_limit_for_the_whole_draft_and_no_round_that_only_repeats(wor
     assert 1 <= calls["w_repair"] <= get_runtime().settings.repair_attempts + 1  # one limit for the whole draft
 
 
-def _inp():
+def _inp(kind="COURSEWORK"):
     from types import SimpleNamespace
 
-    return SimpleNamespace()
+    return SimpleNamespace(spec=SimpleNamespace(kind=kind, source_policy="OPEN", fields=[]))
 
 
 def test_a_retry_after_a_failed_draft_reuses_its_checked_sources(works_client):
@@ -148,3 +184,19 @@ def test_a_retry_after_a_failed_draft_reuses_its_checked_sources(works_client):
     work = _settled(client, f"/api/works/{work['id']}", lambda w: bool(w["documents"]) or (bool(w["autoFailure"]) and w["jobs"][-1] != w["jobs"][-2]))
     assert work["documents"], work["autoFailure"]
     assert client.models.tasks.count("w_needs") == searched_before  # no new research for the retry
+
+
+def test_a_different_weakness_under_the_same_rule_is_not_a_repeat():
+    """Codex review 2026-10-07, finding 7: rule ids alone made a new objection under CW-008 look like the
+    old one, ending the loop with repairs still allowed."""
+    from app.works.ai import Final, FinalRule
+
+    rules = [{"id": "CW-008", "severity": "BLOCKING"}]
+
+    def review(note, where="Discussion"):
+        return pipeline._blocking(Final(rules=[FinalRule(rule="CW-008", status="FAIL", note=note, where=where)], coverage=[], priorities=[]), rules)
+
+    first = review("The elasticity calculation omits the percentage change in quantity demanded.")
+    assert pipeline._repeats(review("The elasticity calculation still omits the percentage change in quantity demanded."), first)
+    assert not pipeline._repeats(review("The conclusion does not state which market structure the brand operates in."), first)
+    assert not pipeline._repeats(review("The elasticity calculation omits the percentage change in quantity demanded.", "Conclusion"), first)

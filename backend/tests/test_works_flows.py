@@ -271,3 +271,36 @@ def test_changing_the_writer_is_a_settings_change_for_new_quotes_only(works_clie
     assert rt.store.get(second["job"]["id"]).quote.engine.roles["WRITER"] == "anthropic:claude-sonnet-5-5"
     client.post(f"/api/works/{work['id']}/steps/{second['job']['id']}/submit", headers=STUDENT, json={"quoteId": second["quote"]["id"]})
     assert wait(client, second["job"]["id"], timeout=120)["status"] == "COMPLETED"
+
+
+def test_a_failed_plans_research_is_reused_only_for_the_same_question(works_client):
+    """Codex review 2026-10-07, finding 5: a PLAN has no plan to compare, so a retry after the question
+    changed reused the old topic's sources."""
+    from app.core.errors import PermanentStageError
+
+    client = works_client
+    work = _coursework(client)
+
+    def refused(payload):
+        raise PermanentStageError("MODEL_REFUSED", "Refused.", "test: plan refused after research")
+
+    client.models.overrides["w_plan"] = refused
+    _, failed = _run(client, work["id"], "PLAN")
+    assert failed["status"] == "FAILED"
+    researched = client.models.tasks.count("w_needs")
+    _, again = _run(client, work["id"], "PLAN")  # the same question: its checked sources are reused
+    assert again["status"] == "FAILED" and client.models.tasks.count("w_needs") == researched
+
+    work = _work(client, work["id"])
+    changed = client.post(f"/api/works/{work['id']}/details", headers=STUDENT, json={
+        "inputs": {**work["inputs"], "description": "Discuss how school feeding programmes affect pupils' attendance in rural primary schools."},
+        "baseVersion": work["specVersion"]})
+    assert changed.status_code == 200, changed.json()
+    work = changed.json()
+    if work["specStatus"] != "CONFIRMED":
+        work = client.post(f"/api/works/{work['id']}/answers", headers=STUDENT, json={"answers": {}, "skipRest": True, "baseVersion": work["specVersion"]}).json()
+        work = client.post(f"/api/works/{work['id']}/spec/confirm", headers=STUDENT, json={"baseVersion": work["specVersion"]}).json()
+    del client.models.overrides["w_plan"]
+    _, planned = _run(client, work["id"], "PLAN")
+    assert planned["status"] == "COMPLETED", planned.get("failure")
+    assert client.models.tasks.count("w_needs") > researched  # a new question is researched again

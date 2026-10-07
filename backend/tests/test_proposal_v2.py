@@ -211,3 +211,24 @@ def test_a_pdf_that_cannot_be_made_says_so(client, monkeypatch):
     monkeypatch.setattr(service, "compile_pdf", lambda result: (None, "engine missing"))
     failed = client.get(f"/api/projects/{project_id}/export.pdf", headers=STUDENT)
     assert failed.status_code == 400 and failed.json()["code"] == "PDF_FAILED" and "Word file" in failed.json()["message"]
+
+
+def test_a_whole_chapter_request_met_only_in_part_stays_open(client):
+    """Codex review 2026-10-07, finding 6: a request naming two sections is not applied when only one of
+    them was revised; the sections it names are found by code, as for supervisor comments."""
+    project_id = _with_chapter_one(client)
+    added = client.post(f"/api/projects/{project_id}/chapters/1/request", headers=STUDENT,
+                        json={"instruction": "Shorten the background and give local figures in the statement of the problem.", "sections": []}).json()
+    request = added["feedback"][0]
+
+    def revise_background_only(payload):
+        return {"sections": [{"key": s["key"], "paragraphs": ["A shorter background."], "table": s["table"]} for s in payload["sections"] if s["key"] == "background"]}
+
+    client.models.overrides["p_fix"] = revise_background_only
+    quoted = client.post(f"/api/projects/{project_id}/steps", headers=STUDENT, json={"step": "REVISE_1", "comments": [request["id"]]}).json()
+    client.post(f"/api/projects/{project_id}/steps/{quoted['job']['id']}/submit", headers=STUDENT, json={"quoteId": quoted["quote"]["id"]})
+    job = wait(client, quoted["job"]["id"])
+    assert job["status"] == "COMPLETED", job
+    assert any("stay open" in str(w) for w in job["warnings"])
+    project = client.get(f"/api/projects/{project_id}", headers=STUDENT).json()
+    assert project["feedback"][0]["status"] == "OPEN"

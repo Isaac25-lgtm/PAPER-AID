@@ -252,6 +252,7 @@ def work_engine(settings: Settings, service: str) -> Engine:
 
 SIGNOFF = "final_signoff"
 # A request that may have been billed although its answer was lost (Codex audit 2026-10-07, finding 2).
+RETIRED_PROVIDERS = frozenset({"openai", "anthropic", "google"})  # older engines' routes (Settings.legacy_providers)
 UNKNOWN_BILLING = frozenset({"VERTEX_TIMEOUT", "VERTEX_CONNECTION_LOST", "VERTEX_MALFORMED_ENVELOPE"})
 # Payload keys by which a pipeline passes a review its own earlier findings (scoped and size-checked there).
 OWN_HISTORY = frozenset({"previousIssues", "previousAudit"})
@@ -260,6 +261,9 @@ HISTORY_WORDS = 1_200  # the most earlier findings a sign-off is shown
 
 def _words(value: Any) -> int:
     return len(json.dumps(value, ensure_ascii=False).split())
+
+
+payload_words = _words  # the measure every bounded request is held to
 
 
 def _history_room(payload: dict[str, Any]) -> int:
@@ -279,7 +283,14 @@ def _history(prior: list[Any], limit: int) -> list[Any]:
         words = _words(answer)
         if used + words > limit:
             if not kept and limit > 0:
-                kept.append(_shortened(answer, limit))
+                # shortened by its text, then again until it fits by the measure the bound uses (keys included)
+                room = limit
+                short = _shortened(answer, room)
+                while room > 0 and _words(short) > limit:
+                    room = room * 3 // 4
+                    short = _shortened(answer, room)
+                if _words(short) <= limit:
+                    kept.append(short)
             break
         kept.insert(0, answer)
         used += words
@@ -918,6 +929,9 @@ class AIRunner:
                     raise PermanentStageError("VERTEX_PRICE_PERIOD_CHANGED",
                                               "AI pricing changed after this job was quoted. Please start it again with a new quote.",
                                               "frozen Vertex token-rate period is no longer current")
+            if ref.partition(":")[0] in RETIRED_PROVIDERS and not self.settings.legacy_providers:
+                raise PermanentStageError("ENGINE_RETIRED", "PaperAid was updated after this job was priced. Nothing was charged; please start it again.",
+                                          f"{ref.partition(':')[0]} route of an older engine: LEGACY_PROVIDERS is off")
             provider, model = provider_for(ref, self.settings)
             provider_name = provider.name
             # Vertex has no hard query cap: reserve for the queries a search really runs, not just those allowed.
@@ -937,55 +951,63 @@ class AIRunner:
                 result: ModelResult = (provider.search_json(task, model, system, payload, schema, max_tokens, max_searches, **options)
                                        if max_searches else provider.json(task, model, system, payload, schema, max_tokens, **options))
             except (RetryableStageError, PermanentStageError) as exc:
-                with self._inflight_lock:
-                    self._inflight -= estimate
-                if provider_name == "vertex":
-                    # Google bills only requests that succeed. A request that may have succeeded before its answer
-                    # was lost (timeout, broken connection, unreadable answer) reserves its estimate against the
-                    # job's cap: kept apart from confirmed cost, so reports never show it as spent.
-                    unknown = exc.code in UNKNOWN_BILLING
-                    self._record(ModelCall(stage=step.stage, phase=self._phase, provider=provider_name, model=model,
-                                           prompt_version=prompt, input_tokens=0, output_tokens=0, cached_tokens=0,
-                                           latency_ms=int((time.monotonic() - started) * 1000), cost_usd=0, reserved_usd=estimate if unknown else 0,
-                                           task=task, role=step.role, workflow_stage=stage, thinking_level=thinking,
-                                           error_code=exc.code, fallback_attempt=attempt, estimated_cost_usd=estimate,
-                                           pricing_status="UNKNOWN_BILLING" if unknown else "NOT_CHARGED"))
+                try:
+                    if provider_name == "vertex":
+                        # Google bills only requests that succeed. A request that may have succeeded before its answer
+                        # was lost (timeout, broken connection, unreadable answer) reserves its estimate against the
+                        # job's cap: kept apart from confirmed cost, so reports never show it as spent.
+                        unknown = exc.code in UNKNOWN_BILLING
+                        self._record(ModelCall(stage=step.stage, phase=self._phase, provider=provider_name, model=model,
+                                               prompt_version=prompt, input_tokens=0, output_tokens=0, cached_tokens=0,
+                                               latency_ms=int((time.monotonic() - started) * 1000), cost_usd=0, reserved_usd=estimate if unknown else 0,
+                                               task=task, role=step.role, workflow_stage=stage, thinking_level=thinking,
+                                               error_code=exc.code, fallback_attempt=attempt, estimated_cost_usd=estimate,
+                                               pricing_status="UNKNOWN_BILLING" if unknown else "NOT_CHARGED"))
+                finally:  # released only once the record is saved: a call alongside never sees spending dip (Codex review 2026-10-07, finding 2)
+                    with self._inflight_lock:
+                        self._inflight -= estimate
                 fallback_ok = provider_name == "vertex" and exc.code in {"PROVIDER_UNAVAILABLE", "VERTEX_TIMEOUT", "VERTEX_CONNECTION_LOST",
                                                                           "VERTEX_RATE_LIMIT", "VERTEX_MODEL_UNAVAILABLE"}
                 if fallback_ok and attempt + 1 < len(refs):
                     self._heartbeat()
                     continue
                 raise
-            with self._inflight_lock:
-                self._inflight -= estimate
             break
         u = result.usage
         error_code = result.error_code
-        self._record(
-            ModelCall(
-                stage=step.stage,
-                phase=self._phase,
-                provider=result.provider,
-                model=result.model,
-                prompt_version=prompt,
-                input_tokens=u.input_tokens,
-                output_tokens=u.output_tokens,
-                cached_tokens=u.cached_tokens,
-                cache_write_tokens=u.cache_write_tokens,
-                search_calls=u.search_calls,
-                task=task,
-                role=("EVALUATOR_PREMIUM" if self._engine.tier == "PREMIUM" else "EVALUATOR_STANDARD") if step.role == "EVALUATOR" else step.role,
-                latency_ms=u.latency_ms,
-                cost_usd=costs.cost_usd(result.provider, result.model, u.input_tokens, u.output_tokens, u.cached_tokens, prices, u.cache_write_tokens,
-                                       u.search_calls, billable_units=u.billable_units, unit_prices=self.settings.model_unit_prices, long_prices=long_prices),
-                workflow_stage=stage, thinking_level=thinking if result.provider == "vertex" else "", thinking_tokens=u.thinking_tokens,
-                visible_output_tokens=u.visible_output_tokens,
-                tool_input_tokens=u.tool_input_tokens, billable_units=u.billable_units, finish_reason=result.finish_reason or result.stop,
-                safety_block=result.safety_block, error_code=error_code, fallback_attempt=attempt, estimated_cost_usd=estimate,
-                pricing_status=("UNKNOWN_USAGE" if error_code == "VERTEX_USAGE_MISSING" else "VERIFIED") if result.provider == "vertex" else "",
-                model_version=result.model_version,
+        cost = costs.cost_usd(result.provider, result.model, u.input_tokens, u.output_tokens, u.cached_tokens, prices, u.cache_write_tokens,
+                              u.search_calls, billable_units=u.billable_units, unit_prices=self.settings.model_unit_prices, long_prices=long_prices)
+        # An answer without usable usage was billed by an amount PaperAid cannot verify: what the counts do
+        # not cover of the call's estimate is reserved, as for a lost answer (Codex review 2026-10-07, finding 9).
+        unmetered = max(0.0, estimate - cost) if error_code == "VERTEX_USAGE_MISSING" else 0.0
+        try:
+            self._record(
+                ModelCall(
+                    stage=step.stage,
+                    phase=self._phase,
+                    provider=result.provider,
+                    model=result.model,
+                    prompt_version=prompt,
+                    input_tokens=u.input_tokens,
+                    output_tokens=u.output_tokens,
+                    cached_tokens=u.cached_tokens,
+                    cache_write_tokens=u.cache_write_tokens,
+                    search_calls=u.search_calls,
+                    task=task,
+                    role=("EVALUATOR_PREMIUM" if self._engine.tier == "PREMIUM" else "EVALUATOR_STANDARD") if step.role == "EVALUATOR" else step.role,
+                    latency_ms=u.latency_ms,
+                    cost_usd=cost, reserved_usd=unmetered,
+                    workflow_stage=stage, thinking_level=thinking if result.provider == "vertex" else "", thinking_tokens=u.thinking_tokens,
+                    visible_output_tokens=u.visible_output_tokens,
+                    tool_input_tokens=u.tool_input_tokens, billable_units=u.billable_units, finish_reason=result.finish_reason or result.stop,
+                    safety_block=result.safety_block, error_code=error_code, fallback_attempt=attempt, estimated_cost_usd=estimate,
+                    pricing_status=("UNKNOWN_USAGE" if error_code == "VERTEX_USAGE_MISSING" else "VERIFIED") if result.provider == "vertex" else "",
+                    model_version=result.model_version,
+                )
             )
-        )
+        finally:
+            with self._inflight_lock:
+                self._inflight -= estimate
         if self._spent() > self._budget:
             # A search that ran more queries than reserved can pass the cap: what it bought is used, nothing
             # more is bought (the next call refuses), and the student is never charged above the quote.

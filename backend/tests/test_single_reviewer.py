@@ -503,3 +503,17 @@ def test_a_funding_workplan_converts_to_pdf():
     pdf, problem = compile_pdf(converted)
     if pdf is None:  # a machine without LaTeX cannot compile; the character must not be the reason
         assert "U+25A0" not in (problem or ""), problem
+
+
+def test_every_final_review_request_fits_the_bound_whole(works_client, monkeypatch):
+    """Codex review 2026-10-07, finding 8: the bound covered the document part, not the specification, rules,
+    context and manifest every part repeats; the whole request is now measured."""
+    from app.ai.orchestration import payload_words
+
+    monkeypatch.setattr(works_pipeline, "FINAL_PART_WORDS", 900)  # about 460 words of every request are repeated context
+    client = works_client
+    work = _drafted(client)
+    _, job = _run(client, work["id"], "DRAFT")
+    assert job["status"] == "COMPLETED", job.get("failure")
+    sent = _requests(client, "w_final")
+    assert len(sent) > 2 and all(payload_words(p) <= 900 for p in sent), [payload_words(p) for p in sent]

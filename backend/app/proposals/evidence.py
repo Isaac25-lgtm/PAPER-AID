@@ -11,7 +11,7 @@ confirmed the quoted passage itself. Code also refuses, before release:
 
 import hashlib
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import Literal
 
 from app.analysis import research
@@ -241,18 +241,24 @@ def tense_problems(paragraph: str) -> list[str]:
     return [f"'{m.group(0)}' describes the planned study in the past tense; a proposal uses the future tense." for m in PAST_TENSE.finditer(paragraph)]
 
 
-def strip_unsupported(paragraph: str, library: dict[str, EvidenceItem], usable: set[str], allowed_text: str) -> str:
+def sentences(paragraph: str) -> list[str]:
+    return re.split(r"(?<=[.!?])\s+(?=[A-Z⟦])", paragraph)
+
+
+def strip_unsupported(paragraph: str, library: dict[str, EvidenceItem], usable: set[str], allowed_text: str,
+                      also_allowed: Callable[[str], str] | None = None) -> str:
     """The last line of defence after the fix rounds: remove each sentence that still carries an
     invalid citation or an unsupported figure. Never adds anything, and returns the paragraph exactly
-    as it was when nothing is removed: its spacing and line breaks are part of the approved text."""
+    as it was when nothing is removed: its spacing and line breaks are part of the approved text.
+    `also_allowed` gives a sentence figures of its own to use (a coursework sentence about its worked example)."""
     kept = []
     removed = False
-    for sentence in re.split(r"(?<=[.!?])\s+(?=[A-Z⟦])", paragraph):
+    for sentence in sentences(paragraph):
         if citation_problems(sentence, usable):
             removed = True
             continue
         context = sentence if cited_ids(sentence) else sentence + " " + " ".join(f"⟦{i}⟧" for i in cited_ids(paragraph))
-        if figure_problems(context, library, allowed_text):
+        if figure_problems(context, library, allowed_text + (" " + also_allowed(sentence) if also_allowed else "")):
             removed = True
             if kept and LIST_MARKER.fullmatch(kept[-1]):
                 kept.pop()  # "1." whose objective was withheld is never left behind on its own

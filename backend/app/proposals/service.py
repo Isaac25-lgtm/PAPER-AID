@@ -926,10 +926,14 @@ def request_changes(rt: Runtime, user: User, project_id: str, number: int, instr
         raise AppError("Say what you would like changed.", code="NO_FEEDBACK")
     p = _owned(rt, user, project_id)
     _rate_limit(rt, user, "feedback", rt.settings.uploads_per_hour)
-    keys = [w.key for w in _written(rt, p) if w.chapter == number]
+    written = [w for w in _written(rt, p) if w.chapter == number]
+    keys = [w.key for w in written]
     if not keys:
         raise AppError("Write this chapter before asking for changes.", code="NOTHING_TO_REVISE")
-    chosen = [k for k in dict.fromkeys(sections) if k in set(keys)] or keys
+    picked = [k for k in dict.fromkeys(sections) if k in set(keys)]
+    chosen = picked or keys
+    # Nothing picked: the whole chapter goes to the writer, and the sections the request names must all change.
+    required = [] if picked else feedback.named(text, written)
     from app.works.service import save_context  # the same storage for every service's context documents
 
     comment_id = f"fb_{secrets.token_hex(4)}"
@@ -940,7 +944,7 @@ def request_changes(rt: Runtime, user: User, project_id: str, number: int, instr
             raise AppError(f"A proposal keeps up to {feedback.MAX_COMMENTS} comments. Remove ones already dealt with first.", code="TOO_MANY_COMMENTS")
         round_ = max((c.round for c in q.feedback), default=0) + 1
         q.feedback.append(FeedbackComment(id=comment_id, round=round_, text=text, anchor="Your request", chapter=number, sections=chosen, by="STUDENT",
-                                          context_name=context_name[:120] if path else "", context_path=path))
+                                          required=required, context_name=context_name[:120] if path else "", context_path=path))
         return q
 
     saved: Project | None = None

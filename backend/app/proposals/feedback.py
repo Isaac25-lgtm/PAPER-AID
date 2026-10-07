@@ -177,6 +177,20 @@ def _norm(text: str) -> str:
     return re.sub(r"[^a-z ]", "", text.lower()).strip()
 
 
+def named(text: str, written: list[Written]) -> list[str]:
+    """Every written section a request names, by number, heading or the words used for it: where `suggest`
+    places a comment, this lists all a request asks about ("the background and the problem statement")."""
+    keys: list[str] = []
+    by_number = {w.number: w for w in written}
+    keys += [by_number[n].key for n in (f"{a}.{b}" for a, b in SECTION_NUMBER.findall(text)) if n in by_number]
+    plain = _norm(text)
+    keys += [w.key for w in written if len(_norm(w.heading)) > 4 and _norm(w.heading) in plain]
+    for pattern, chapter, key in KEYWORDS:
+        if pattern.search(text):
+            keys += [w.key for w in written if w.chapter == chapter and (w.key == key or (w.key.startswith(key) and w.key[len(key):].isdigit()))]
+    return list(dict.fromkeys(keys))
+
+
 def suggest(comment: Read, written: list[Written]) -> tuple[int | None, list[str]]:
     """Where a comment probably applies: a section number it names, a heading it names or sits
     under, or a word it uses for one. Only sections the student has written are suggested."""

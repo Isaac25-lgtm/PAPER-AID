@@ -73,6 +73,8 @@ def sdk(monkeypatch):
 
     monkeypatch.setattr(vertex, "_vertex_client", lambda *args: SimpleNamespace(models=SimpleNamespace(generate_content=generate)))
     monkeypatch.setattr(vertex, "_resolve", lambda link: "https://www.who.int/report" if link == LINK else None)
+    monkeypatch.setattr(vertex, "THROTTLE_ATTEMPTS", 1)  # one attempt per answer; the throttle loop has its own test
+    monkeypatch.setattr(vertex, "_pause", lambda seconds: None)
     return calls, answers
 
 
@@ -186,8 +188,7 @@ def test_adc_client_reused_and_no_keys_passed(monkeypatch):
         assert clients[0]["vertexai"] and clients[0]["credentials"] is credentials
         assert clients[0]["project"] == "paperaid" and clients[0]["location"] == "global"
         assert "api_key" not in clients[0]
-        retry = clients[0]["http_options"].retry_options  # only throttling and brief unavailability, never a timeout
-        assert retry.attempts == 4 and retry.http_status_codes == [429, 503]
+        assert clients[0]["http_options"].retry_options.attempts == 1  # the SDK never retries (it would resend timeouts too)
     finally:
         vertex.close_vertex_clients()
 
@@ -348,7 +349,7 @@ def test_each_call_has_the_time_its_token_allowance_needs_within_the_stage_margi
     high, low = (c["config"].http_options for c in calls)
     assert high.timeout == vertex.CALL_SECONDS_CAP * 1000  # 32k thinking + the answer: as long as a stage allows
     assert 180_000 <= low.timeout < high.timeout  # never below the configured timeout
-    assert high.retry_options.http_status_codes == [429, 503]
+    assert high.retry_options.attempts == 1
     assert vertex.call_timeout(40_000, 180) * vertex.TOKENS_PER_SECOND >= 40_000 * 0.85  # nearly the whole allowance fits
     from app.jobs.pipeline import LEASE, STAGE_WORK_LIMIT
 
@@ -602,3 +603,103 @@ def test_a_search_gemini_declines_to_recite_finds_nothing_and_the_step_goes_on(s
     answer = AIRunner(s, records.append, lambda: 0, 5).research_claim("Uptake was 60%.", "malaria vaccine uptake", True, 2, lambda q: True)
     assert answer.support == "NOT_FOUND" and not answer.sources
     assert [r.error_code for r in records] == ["", "", ""] and all(r.safety_block and r.cost_usd > 0 for r in records)
+
+
+# --- Codex review 2026-10-07, finding 1: no hidden retries ------------------------------------------------
+
+
+def test_a_timed_out_request_is_sent_once_through_the_real_sdk(monkeypatch):
+    """The real SDK client, its transport replaced: a timeout reaches PaperAid after one request, never a
+    silent second one (the SDK retries timeouts whatever status codes it is given)."""
+    from google.genai import _api_client
+
+    vertex.close_vertex_clients()
+    sent = []
+
+    def request_once(self, http_request, stream=False):
+        sent.append(http_request.url)
+        raise httpx.ReadTimeout("slow")
+
+    monkeypatch.setattr(google.auth, "default", lambda **kw: (SimpleNamespace(token="t", valid=True, expired=False, quota_project_id="paperaid"), "paperaid"))
+    monkeypatch.setattr(_api_client.BaseApiClient, "_request_once", request_once)
+    from google.genai.models import Models  # the session guard blocks the public method; its request path runs here
+
+    monkeypatch.setattr(Models, "generate_content", lambda self, **kw: self._generate_content(**kw))
+    try:
+        with pytest.raises(RetryableStageError, match="VERTEX_TIMEOUT"):
+            vertex.VertexGeminiProvider(settings()).json("plan", MODEL, "s", {}, SCHEMA, 1000)
+        assert len(sent) == 1
+    finally:
+        vertex.close_vertex_clients()
+
+
+def test_throttling_is_retried_by_paperaid_and_a_quota_or_timeout_never(sdk, monkeypatch):
+    calls, answers = sdk
+    pauses = []
+    monkeypatch.setattr(vertex, "THROTTLE_ATTEMPTS", 4)
+    monkeypatch.setattr(vertex, "_pause", pauses.append)
+    answers[:] = [errors.APIError(429, {}), errors.APIError(503, {}), response()]
+    assert vertex.VertexGeminiProvider(settings()).json("plan", MODEL, "s", {}, SCHEMA, 1000).text
+    assert len(calls) == 3 and len(pauses) == 2 and 2 <= pauses[0] < 3 and 4 <= pauses[1] < 5
+    for exc, code in ((errors.APIError(429, {"error": {"message": "quota exceeded"}}), "VERTEX_QUOTA"), (httpx.ReadTimeout("slow"), "VERTEX_TIMEOUT")):
+        calls.clear()
+        answers[:] = [exc, response()]
+        with pytest.raises((PermanentStageError, RetryableStageError), match=code):
+            vertex.VertexGeminiProvider(settings()).json("plan", MODEL, "s", {}, SCHEMA, 1000)
+        assert len(calls) == 1
+    calls.clear()
+    answers[:] = [errors.APIError(503, {})] * 4
+    with pytest.raises(RetryableStageError, match="PROVIDER_UNAVAILABLE"):
+        vertex.VertexGeminiProvider(settings()).json("plan", MODEL, "s", {}, SCHEMA, 1000)
+    assert len(calls) == 4  # bounded: then the stage's own retry and the queue's backoff
+
+
+# --- Codex review 2026-10-07, findings 2 and 9: no dip in counted spending; unmetered answers reserved -------
+
+
+@pytest.mark.parametrize("answer", [response(), httpx.ReadTimeout("slow")])
+def test_a_calls_reservation_is_held_until_its_record_is_saved(sdk, answer):
+    """Two checks run side by side (`together`): the first call's estimate must still count while its
+    record is being saved, or the other check could buy work against spending that seems lower than it is."""
+    _, answers = sdk
+    answers[:] = [answer]
+    held = []
+    records = []
+
+    def record(call):
+        held.append(ai._inflight)  # saving: the call's estimate still counts
+        records.append(call)
+
+    ai = AIRunner(flat(), record, lambda: sum(r.cost_usd + r.reserved_usd for r in records), 5)
+    try:
+        ai._call("plan", {}, SCHEMA, Answer)
+    except RetryableStageError:
+        pass
+    assert held and held[0] >= records[0].estimated_cost_usd > 0
+    assert ai._inflight == 0  # released once saved
+
+
+def test_an_answer_without_usage_reserves_what_it_may_have_cost(sdk):
+    _, answers = sdk
+    answers[:] = [response(usageMetadata=None)]
+    ai, records = runner(flat())
+    with pytest.raises((PermanentStageError, RetryableStageError), match="VERTEX_USAGE_MISSING"):
+        ai._call("plan", {}, SCHEMA, Answer)
+    call = records[0]
+    assert call.pricing_status == "UNKNOWN_USAGE" and call.reserved_usd > 0
+    assert call.cost_usd + call.reserved_usd == pytest.approx(call.estimated_cost_usd)
+
+
+def test_an_older_engines_provider_route_is_refused_before_any_spend_unless_switched_on():
+    """Codex review 2026-10-07, finding 10: frozen older engines keep their OpenAI/Anthropic routes; with
+    LEGACY_PROVIDERS off (the owner: Gemini only) a resumed or retried one is refused cleanly, never sent."""
+    legacy = Settings(_env_file=None, gemini_workflow=False, openai_api_key="k", anthropic_api_key="k", gemini_api_key="k", legacy_providers=False)
+    engine = current_engine(legacy)
+    assert not engine.vertex_routes
+    records = []
+    ai = AIRunner(legacy, records.append, lambda: 0.0, 5, engine=engine)
+    with pytest.raises(PermanentStageError, match="ENGINE_RETIRED"):
+        ai._call("plan", {}, SCHEMA, Answer)
+    assert records == [] and ai._inflight == 0
+    assert not legacy.provider_configured("openai:gpt-6-sol") and not legacy.ai_configured
+    assert legacy.model_copy(update={"legacy_providers": True}).provider_configured("openai:gpt-6-sol")

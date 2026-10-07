@@ -64,6 +64,11 @@ class Settings(BaseSettings):
     # of app.ai.gemini, executed on Vertex AI in its own project. Engines frozen before keep their
     # openai:/anthropic:/google: routes; the settings above serve them (and GEMINI_WORKFLOW=false).
     gemini_workflow: bool = True
+    # The OpenAI, Anthropic and Gemini-API routes of engines priced before 2026-10-07 (owner, 2026-10-07: "we
+    # are only going to use Gemini"). Off: such a route is refused before any spend (ENGINE_RETIRED, nothing
+    # charged; the student starts again on Gemini) and counts as not configured; finished results and their
+    # downloads are untouched. On: those engines run as priced, with their keys (Codex review, finding 10).
+    legacy_providers: bool = False
     # Vertex inference, quota and billing live in their own project. Never GOOGLE_CLOUD_PROJECT: Google
     # libraries (Firebase among them) read that one, and the application's resources stay in gcp_project.
     vertex_project: str | None = None
@@ -323,7 +328,7 @@ class Settings(BaseSettings):
                         and price and price.status == "VERIFIED" and price.covers()
                         and (not price.location or price.location == self.vertex_location))
         key = {"openai": self.openai_api_key, "anthropic": self.anthropic_api_key, "google": self.gemini_api_key}.get(provider)
-        return key is not None and bool(key.get_secret_value().strip())
+        return self.legacy_providers and key is not None and bool(key.get_secret_value().strip())
 
     @model_validator(mode="after")
     def _vertex_configuration(self) -> "Settings":

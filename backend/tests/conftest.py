@@ -44,6 +44,13 @@ def pytest_sessionstart(session: pytest.Session) -> None:
         subprocess.run([sys.executable, str(FIXTURES.parent / "generate.py")], check=True, capture_output=True)
 
 
+@pytest.fixture(autouse=True)
+def legacy_routes_for_the_earlier_algorithm(monkeypatch):
+    """The earlier algorithm's tests drive older engines' OpenAI/Anthropic routes through stand-ins; production
+    has them off (LEGACY_PROVIDERS, 2026-10-07), covered by tests/test_vertex.py, which passes it explicitly."""
+    monkeypatch.setenv("LEGACY_PROVIDERS", "true")
+
+
 def fixture_bytes(name: str) -> bytes:
     return (FIXTURES / name).read_bytes()
 

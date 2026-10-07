@@ -299,3 +299,27 @@ audit fell back to 3.8 Flash at HIGH as designed. A dropped connection after sen
 estimate (unknown billing) and the stage retries.
 Suggested, not built: Data Lab headings use a variable's name until the researcher gives it a label
 (for example "knowledge_score by completed"); prompting for labels before a report would read better.
+
+
+## 11. Codex's review of release 5c33697: eleven findings fixed (2026-10-07)
+
+Each finding was confirmed in the code before it was fixed; every fix has a regression test, and the
+tests for findings 1, 3 and 8 were run against the old code and failed there.
+
+| # | Finding | Fix | Where |
+|---|---|---|---|
+| 1 | The SDK resent timed-out/disconnected requests (up to 4 sends, possibly billed, unrecorded) | `NO_SDK_RETRY`; PaperAid retries only 429/503 (`THROTTLE_ATTEMPTS` 4, 2/4/8 s + jitter) | `vertex.py` |
+| 2 | Parallel checks: a reservation released before the cost was saved | released in `finally`, after the record | `orchestration.py` `_call` |
+| 3 | Revisions dropped graphs and example labels; compression dropped the label | the revision rebuilds sections as delivered; `_kept` keeps the label | `works/pipeline.py` |
+| 4 | Example numbers allowed anywhere in the section, for any work | coursework only; only in the example and sentences about it (`ABOUT_EXAMPLE`) | `works/pipeline.py`, `evidence.strip_unsupported` |
+| 5 | Research reused after the question changed | all research inputs and the engine compared (`RESEARCH_INPUTS`) | `works/pipeline.py` |
+| 6 | A whole-chapter request closed when any section changed | the sections it names (`feedback.named`) must all change | `proposals/` |
+| 7 | "Repeated" objections compared rule ids only | same id, place and wording (`_repeats`) | `works/pipeline.py` |
+| 8 | Review parts bounded the document only | the whole request measured (`payload_words`), history room kept | `works/pipeline.py`, `orchestration._history` |
+| 9 | No reservation for an answer without usage | the unmetered part of the estimate reserved | `orchestration.py` |
+| 10 | Older engines could still call OpenAI/Anthropic | `LEGACY_PROVIDERS` (off): refused before spend, `ENGINE_RETIRED` | `config.py`, `orchestration.py` |
+| 11 | The canary asks for the hidden AI check | the check stays open to the canary account only | `jobs/service.py` |
+
+Owner question answered in passing: there is no access-request flow. Anyone can sign up; AI services show
+"invited testers" to emails not in `TESTER_EMAILS` (live: three), and nobody is notified. A "Request
+access" button with an admin approval would be new work.

@@ -709,3 +709,30 @@ real calls, grant the worker's access, deploy and verify production. Architectur
   HIGH-thinking step is no longer cut off at 180 seconds and retried.
 - The admin job page shows each AI call's step, workflow stage, thinking level, fallback (for example a
   premium review answered by Flash while Pro was busy), error and any reserved amount.
+
+
+## 2026-10-07 — Codex's review of the Gemini release: eleven findings fixed
+
+All eleven confirmed in the code and fixed, each with a regression test (tests named after the finding):
+1. The Google SDK retried timed-out and disconnected requests on its own (whatever status codes it was
+   given), so one call could be sent up to four times, each possibly billed and unrecorded. The SDK now
+   never retries; PaperAid retries only 429 and 503 (neither billed), at most four attempts.
+2. A parallel check's spending reservation is released only after the call's cost (or unknown billing) is
+   saved.
+3. A revision keeps the graph and the illustrative example of the sections it does not change; a
+   compressed or repaired example keeps its label.
+4. Worked examples and drawn graphs belong to coursework only; their numbers may be used only in the
+   example and in sentences about it, never in a factual claim.
+5. A failed step's research is reused only when every research input (question, files, specification,
+   plan, notes, private words) and the engine are the same.
+6. A whole-chapter request is applied when every section it names (found by code) was revised; one met
+   only in part stays open.
+7. The final review stops early only for the same objections in the same place saying much the same, not
+   for a different weakness under the same rule.
+8. Every final-review request, with all it repeats (specification, rules, context, manifest) and room
+   for earlier findings, fits FINAL_PART_WORDS.
+9. An answer without usable usage reserves the part of its estimate its counts do not cover.
+10. Older engines' OpenAI/Anthropic routes run only with `LEGACY_PROVIDERS` on (owner: Gemini only); off,
+    a retried or resumed older job is refused before any spend. Production had 5 expired quotes and 4
+    failed jobs on older engines.
+11. The daily canary keeps its AI check while the check is hidden from students (its own account only).

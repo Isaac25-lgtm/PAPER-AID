@@ -1214,11 +1214,16 @@ def stage_exporting(ctx: "StageContext") -> None:
                 if comment.id not in inp.comment_signatures or comment.status != "OPEN":
                     continue
                 answered = [k for k in comment.sections if k in inp.revise]
-                # A request about the whole chapter (no section picked) is answered by revising the sections
-                # it concerns, not every one (live run 2026-10-07: two of eleven revised, left open).
+                # A request about the whole chapter (no section picked) is answered by revising the sections it
+                # names, not every one (live run 2026-10-07: two of eleven revised, left open); one that names
+                # none, by any revised section. A request only partly met stays open (Codex review, finding 6).
                 whole = {s.key for s in document.sections} <= set(comment.sections)
-                done = any if whole else all
-                if comment.signature() == inp.comment_signatures[comment.id] and answered and done(k in document.revised for k in answered):
+                named = [k for k in comment.required if k in answered]
+                if whole and not named:
+                    done = any(k in document.revised for k in answered)
+                else:
+                    done = all(k in document.revised for k in (named if whole else answered))
+                if comment.signature() == inp.comment_signatures[comment.id] and answered and done:
                     comment.status, comment.applied_in = "APPLIED", version
                 else:
                     left_open.append(comment.text[:60])
