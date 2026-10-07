@@ -148,15 +148,19 @@ def _around(text: str, pattern: re.Pattern[str]) -> str:
 
 
 def payload(title: str, purpose: str, dataset: dict[str, Any], alpha: float, analyses: list[AnalysisResult], prefixes: dict[str, str],
-            values: dict[str, tuple[str, str]], objectives: list[str] | None = None, objective_of: dict[str, int] | None = None,
-            chapter_three: list[dict[str, str]] | None = None, missing: list[int] | None = None) -> dict[str, Any]:
+             values: dict[str, tuple[str, str]], objectives: list[str] | None = None, objective_of: dict[str, int] | None = None,
+             chapter_three: list[dict[str, str]] | None = None, missing: list[int] | None = None, threshold: int = 5) -> dict[str, Any]:
     """What the writer sees: results and tokens, never rows."""
+    from app.datalab.engine.disclosure import records_used
+
     items = []
     for result in analyses:
         prefix = prefixes[result.id]
         items.append({
             "id": result.id, "ref": prefix, "title": result.title, "question": result.record.question, "method": result.record.method, "why": result.record.why,
-            "status": result.status, "warnings": result.warnings, "rowsUsed": result.record.rows_used, "rowsAvailable": result.record.rows_available,
+            "status": result.status, "warnings": result.warnings,
+            "rowsUsed": records_used(result.record.rows_used, result.record.rows_available, threshold),
+            "rowsAvailable": "hidden to protect privacy" if 0 < result.record.rows_available < threshold else result.record.rows_available,
             "leftOut": result.record.left_out, "coding": result.record.coding, "sentencesFromCode": result.sentences,
             "tokens": [{"token": f"⟦N:{k}⟧", "means": m, "prints": v} for k, (v, m) in values.items() if k.startswith(prefix + ".")],
             **({"objective": (objective_of or {}).get(result.id)} if objectives else {}),

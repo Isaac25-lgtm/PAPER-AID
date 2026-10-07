@@ -40,8 +40,14 @@ def _readable(rt: Runtime, job: Job) -> Job:
     return job
 
 
+def _internal_path(job: Job, name: str) -> str:
+    """Where a stage saved this artifact: its attempt's own path (Codex 2026-10-07, finding 2), or the
+    shared path older jobs used."""
+    return job.artifact_paths.get(name, f"{job.storage_prefix()}/internal/{name}")
+
+
 def _internal(rt: Runtime, job: Job, name: str) -> Any:
-    path = f"{job.storage_prefix()}/internal/{name}"
+    path = _internal_path(job, name)
     return json.loads(rt.files.get(path)) if rt.files.exists(path) else None
 
 
@@ -73,7 +79,7 @@ def document(rt: Runtime, user: User, job_id: str) -> dict[str, Any]:
         elif (
             job.analysis_after.algorithm_version == signals.ALGORITHM_VERSION
             and raw is not None and _internal(rt, job, "analysis.json") is not None
-            and rt.files.exists(f"{job.storage_prefix()}/internal/refined.docx")
+            and rt.files.exists(_internal_path(job, "refined.docx"))
         ):
             percent_after = _analysis_after(StageContext(rt, job), job.analysis_after.method).percent
     return {**result, "percent": percent, "percentAfter": percent_after}

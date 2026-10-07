@@ -475,15 +475,25 @@ class VertexGeminiProvider:
 
     @staticmethod
     def _throttled(client: genai.Client, model: str, contents: Any, config: types.GenerateContentConfig, search: bool) -> Any:
-        """The request, retried only while Google answers 429 (rate, not quota) or 503: neither is billed."""
+        """Retry transient rejections within one bounded call window, including waits and response time."""
+        original_timeout = int(config.http_options.timeout or 0) if config.http_options else 0
+        deadline = time.monotonic() + original_timeout / 1000 + sum(THROTTLE_DELAYS) + len(THROTTLE_DELAYS)
         for attempt in range(THROTTLE_ATTEMPTS):
+            remaining_ms = int((deadline - time.monotonic()) * 1000)
+            if remaining_ms <= 0:
+                raise RetryableStageError("PROVIDER_UNAVAILABLE", UNAVAILABLE, "Vertex retry deadline reached")
+            options = config.http_options.model_copy(update={"timeout": min(original_timeout, remaining_ms)}) if config.http_options else None
+            bounded = config.model_copy(update={"http_options": options})
             try:
-                return client.models.generate_content(model=model, contents=contents, config=config)
+                return client.models.generate_content(model=model, contents=contents, config=bounded)
             except errors.APIError as exc:
                 error = _error(exc, search)
                 if error.code not in ("VERTEX_RATE_LIMIT", "PROVIDER_UNAVAILABLE") or exc.code not in (429, 503) or attempt + 1 >= THROTTLE_ATTEMPTS:
                     raise error from None
-                _pause(THROTTLE_DELAYS[min(attempt, len(THROTTLE_DELAYS) - 1)] + random.random())
+                delay = THROTTLE_DELAYS[min(attempt, len(THROTTLE_DELAYS) - 1)] + random.random()
+                if time.monotonic() + delay >= deadline:
+                    raise error from None
+                _pause(delay)
         raise AssertionError("unreachable")
 
     @staticmethod

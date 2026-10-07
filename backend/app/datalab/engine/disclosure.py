@@ -25,6 +25,23 @@ def few(n: int, threshold: int) -> str:
     return f"{n:,}" if n == 0 or n >= threshold else f"fewer than {threshold}"
 
 
+def count_hidden(count: int, total: int, threshold: int) -> bool:
+    return 0 < total < threshold or 0 < count < threshold or 0 < total - count < threshold
+
+
+def records_used(used: int, available: int, threshold: int) -> str:
+    """A shareable record count must not reveal a small used or excluded group by subtraction."""
+    if count_hidden(used, available, threshold):
+        return "hidden to protect privacy"
+    return f"{used:,} of {available:,}"
+
+
+def cleaning_description(description: str, column: str, affected: int, total: int, threshold: int) -> str:
+    if count_hidden(affected, max(total, affected), threshold):
+        return f"A data cleaning change was made to {column}. Details are hidden to protect privacy."
+    return description
+
+
 @dataclass
 class Protection:
     """Which entries of a table to hide: the cells, each row's total, each column's total, the grand total."""

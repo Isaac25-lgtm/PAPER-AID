@@ -283,7 +283,8 @@ def stage_exporting(ctx: "StageContext") -> None:
     assert job.proposal_review is not None
     name = job.source.name if job.source else "proposal"
     data = report(name, utcnow(), job.proposal_review)
-    path = f"{ctx.prefix}/output/proposal-review.docx"
+    ctx.assert_owner()
+    path = f"{ctx.prefix}/output/{ctx.owner}/proposal-review.docx"
     ctx.rt.files.put(path, data, DOCX_TYPE)
     stem = PurePosixPath(name).stem[:120]
     output = StoredOutput(id="proposal-review", label="Proposal review (Word)", name=f"{stem} – proposal review.docx", size_bytes=len(data), path=path, content_type=DOCX_TYPE)

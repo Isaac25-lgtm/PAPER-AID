@@ -736,3 +736,26 @@ All eleven confirmed in the code and fixed, each with a regression test (tests n
     a retried or resumed older job is refused before any spend. Production had 5 expired quotes and 4
     failed jobs on older engines.
 11. The daily canary keeps its AI check while the check is hidden from students (its own account only).
+
+
+## 2026-10-07 — Codex's third review: eleven more findings fixed by Codex, checked and completed by Claude
+
+Codex fixed all eleven findings of its review of 6eaa1ee in the working tree; Claude reviewed every change,
+fixed four gaps, added one regression test per finding (`backend/tests/test_codex_20261007b.py`) and ran the
+full suite and the five browser journeys.
+- Worker ownership (`lease_owner`, attempt-scoped artifacts); Data Lab disclosure-v3 (counts, missing-value notes,
+  cleaning notes and reviewer inputs protected, including by subtraction; an analysis that uses or leaves out
+  fewer people than the threshold is not shared); whole-request bound for final reviews; locations keep section
+  numbers; a chapter request is applied only when every section it targets changed; total deadlines for source
+  pages and throttle retries; stale browser responses ignored; explicit graph removal; protected large CSV
+  exports; distinct legend limits.
+- Claude's corrections: the results page and research reuse read attempt-scoped files (they read the old shared
+  paths: every new result would have opened as the uploaded paper with no changes); a worked example's numbers
+  are allowed in sentences that open as hypotheticals ("Suppose…", "In this example…"), not in none (the
+  economics coursework could not be explained); "the figure" meaning a number is not a missing exhibit; source
+  pages get 10 s per network step within 30 s (3 s per step lost slow academic sites); the review manifest lists
+  each section once with the parts it spans (listing every piece made further splitting grow the request); the
+  sign-off's history room is proportional; the new job fields are classified for support views.
+- Owner decision pending: an analysis leaving out 1-4 people (for example a few missing values) is now withheld
+  under the "leave out none or at least the threshold" rule. Real datasets with a few blanks will see more
+  "cannot be shared" results.

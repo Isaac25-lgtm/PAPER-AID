@@ -10,7 +10,7 @@ from docx import Document
 
 from app.analysis import signals
 from app.documents.docx_io import read_docx
-from app.jobs.models import JobStatus
+from app.jobs.models import JobStatus, Stage
 from app.jobs.pipeline import StageContext, _select_targets
 from app.proposals import profile, rulebook, service
 from app.runtime import get_runtime
@@ -244,7 +244,9 @@ def test_review2_the_whole_paper_means_every_passage(fixed_client):
     assert len(draft["selection"]["onlyBlocks"]) == 305 and list(draft["fixNotes"]) == ["*"]
     model = read_docx(out.getvalue())
     analysis, measured = signals.analyse(model)
-    ctx = StageContext(rt, rt.store.get(draft["id"]))
+    # the draft as a running stage owns it: artifacts are written only by the attempt holding the job
+    running = rt.store.update(draft["id"], lambda j: j.model_copy(update={"status": JobStatus.PROCESSING, "stage": Stage.PLANNING, "lease_owner": "attempt"}))
+    ctx = StageContext(rt, running)
     ctx.put_json("analysis.json", {"result": analysis.model_dump(by_alias=True), "scores": {s.block.id: s.score for s in measured}})
     targets = _select_targets(ctx, model)
     assert {t.id for t in targets} == {b.id for b in model.blocks if b.editable}

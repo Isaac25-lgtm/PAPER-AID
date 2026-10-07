@@ -166,10 +166,10 @@ STEPS: dict[str, Step] = {
     "w_plan_review": Step("EVALUATOR", Stage.PLANNING, "w-plan-review-v2", 6000),  # v2: blocking issues apart from suggestions; a repair is checked against the earlier issues (live funding runs 2026-10-03)
     "w_results": Step("WRITER", Stage.PLANNING, "w-results-v3", 16000),  # v2: says the Results Model is internal (Codex audit of 9239dd0); v3: measurement rules (live funding runs 2026-10-03)
     "w_results_review": Step("EVALUATOR", Stage.PLANNING, "w-results-review-v4", 8000),  # v2: blocking issues apart from suggestions; a repair is checked against the earlier issues
-    "w_draft": Step("WRITER", Stage.DRAFTING, "w-draft-v2", 16000),  # v2: graphs as data, illustrative worked examples (2026-10-07)
+    "w_draft": Step("WRITER", Stage.DRAFTING, "w-draft-v3", 16000),  # v3: illustrative numbers only in table cells
     "w_integrity": Step("INTEGRITY", Stage.AUDITING, "w-integrity-v1", 6000),
     "w_evaluate": Step("EVALUATOR", Stage.AUDITING, "w-evaluate-v1", 8000),
-    "w_repair": Step("WRITER", Stage.AUDITING, "w-repair-v3", 16000),  # v3: graphs and illustrative examples repaired as data (v2: with the section's evidence)
+    "w_repair": Step("WRITER", Stage.AUDITING, "w-repair-v4", 16000),  # v4: protected illustrative prose and explicit graph removal
     "w_adjudicate": Step("ADJUDICATOR", Stage.AUDITING, "w-adjudicate-v1", 4000),
     "w_final": Step("EVALUATOR", Stage.AUDITING, "w-final-v2", 8000),  # v2: the exact deliverable, every verdict required (Sol with one final reviewer)
     "w_compress": Step("WRITER", Stage.AUDITING, "w-compress-v1", 12000),
@@ -889,6 +889,8 @@ class AIRunner:
                     payload = {**payload, "previousAudit": _history(prior, _history_room(payload))}
         if max_searches and refs[0].startswith("vertex:"):
             system += "\n\n" + PROMPTS[self._engine.vertex_addenda["search"]].replace("{max_searches}", str(max_searches))
+        if task == "w_final" and _words(payload) > FINAL_PART_WORDS:
+            raise PermanentStageError("REVIEW_REQUEST_TOO_LARGE", "The final review could not safely fit the document. Nothing was charged.")
         model_ref = refs[0]
         cache_input = [task, model_ref, system, payload]
         if model_ref.startswith("vertex:"):

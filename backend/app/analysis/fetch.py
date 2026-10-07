@@ -17,6 +17,7 @@ import json
 import logging
 import re
 import socket
+import time
 from typing import Literal
 from urllib.parse import quote, urljoin, urlsplit, urlunsplit
 
@@ -27,7 +28,8 @@ from pypdf.errors import PdfReadError
 logger = logging.getLogger("paperaid.fetch")
 
 MAX_BYTES = 3_000_000
-TIMEOUT_SEC = 15
+TIMEOUT_SEC = 10  # each network step (connect, each read)
+TOTAL_SEC = 30  # the whole fetch: redirects, headers and body (Codex review 2026-10-07)
 MAX_REDIRECTS = 3
 HEADERS = {"User-Agent": "PaperAid-SourceCheck/1.0 (+https://paperaid-ca172.web.app)", "Accept": "text/html,application/pdf,application/json,text/plain;q=0.8"}
 TAGS = re.compile(r"<(script|style|noscript|svg|head)\b.*?</\1\s*>", re.I | re.S)
@@ -89,15 +91,22 @@ def _fetch(url: str) -> tuple[int, bytes, str] | None:
     """(status, body, content type) of a public URL's final response, or None when it could not be
     reached safely (then nothing is known about it)."""
     current = url
+    deadline = time.monotonic() + TOTAL_SEC
     try:
         # trust_env=False: an environment proxy would resolve the host itself, bypassing the pinning.
         with httpx.Client(timeout=TIMEOUT_SEC, headers=HEADERS, follow_redirects=False, trust_env=False) as client:
             for _ in range(MAX_REDIRECTS + 1):  # every hop is resolved, validated and pinned again
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return None
                 pinned = _pinned(current)
                 if pinned is None:
                     return None
                 target, host, tls = pinned
-                with client.stream("GET", target, headers=host, extensions=tls) as response:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return None
+                with client.stream("GET", target, headers=host, extensions=tls, timeout=min(TIMEOUT_SEC, remaining)) as response:
                     if response.is_redirect and "location" in response.headers:
                         current = urljoin(current, response.headers["location"])
                         continue
@@ -105,6 +114,8 @@ def _fetch(url: str) -> tuple[int, bytes, str] | None:
                         return response.status_code, b"", ""
                     body = b""
                     for chunk in response.iter_bytes():
+                        if time.monotonic() >= deadline:
+                            return None
                         body += chunk
                         if len(body) > MAX_BYTES:
                             break

@@ -144,7 +144,7 @@ def test_missing_values_are_left_out_and_counted():
     ctx = _ctx({"y": [1.0, 2.0, None, 4.0, 5.0, 6.0, None, 8.0], "x": [2.0, 4.0, 6.0, 8.0, None, 12.0, 14.0, 16.0]})
     r = stats.run(ctx, AnalysisSpec(kind="CORRELATE", variables=["y", "x"]))
     assert r.record.rows_used == 5 and r.record.rows_available == 8
-    assert sum("Fewer than 5 records have no value" in x for x in r.record.left_out) == 2  # small counts are never printed (finding 2)
+    assert sum("A protected number of records have no value" in x for x in r.record.left_out) == 2  # small counts are never printed (finding 2)
 
 
 def test_significance_wording_follows_the_level_set():

@@ -11,6 +11,7 @@ import time
 import pytest
 from docx import Document
 
+from tests.conftest import internal
 from tests.test_api import OTHER, STUDENT
 
 H = STUDENT
@@ -305,7 +306,7 @@ def test_the_report_is_written_from_tokens_approved_and_exported(lab):
     rt = get_runtime()
     job = rt.store.get(started.json()["id"])
     assert job.status == "COMPLETED" and job.billing.charged > 0
-    approved = json.loads(rt.files.get(f"{job.storage_prefix()}/internal/approved.json"))
+    approved = internal(rt, job, "approved.json")
     assert approved["document"]["sections"] == doc["sections"]  # exactly what the reviewer approved is what is delivered
 
 
@@ -330,7 +331,7 @@ def test_a_report_the_reviewer_does_not_approve_fails_without_charge(lab):
 
     rt = get_runtime()
     job = rt.store.get(started["id"])
-    rounds = json.loads(rt.files.get(f"{job.storage_prefix()}/internal/report_review.json"))
+    rounds = internal(rt, job, "report_review.json")
     assert len(rounds) == 3  # reviewed, repaired and reviewed again, twice (an identical repeat is answered from the cache)
     assert job.status == "FAILED" and job.failure.code == "DOCUMENT_NOT_APPROVED" and job.billing.charged == 0
 
@@ -361,7 +362,7 @@ def test_an_empty_narrative_is_never_delivered(lab):
     rt = get_runtime()
     job = rt.store.get(started["id"])
     assert not view["reports"] and job.failure.code == "DOCUMENT_NOT_APPROVED" and job.billing.charged == 0
-    rounds = json.loads(rt.files.get(f"{job.storage_prefix()}/internal/report_rounds.json"))
+    rounds = internal(rt, job, "report_rounds.json")
     assert any("Write the summary" in p for p in rounds[0]["problems"])
     assert "d_report_review" not in lab.models.tasks  # never even reviewed
 

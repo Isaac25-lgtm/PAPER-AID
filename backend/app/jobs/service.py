@@ -987,7 +987,7 @@ SUPPORT_FIELDS = frozenset(
         "id", "status", "stage", "payment_status", "selection", "services", "pipeline", "source", "guideline", "logo", "quote", "estimate",
         "billing", "outcome", "warnings", "protected", "dismissed", "rejected_changes", "source_job", "latex", "formatting", "scope_words",
         "project_id", "work_id", "datalab_id", "outputs", "failure", "created_at", "queued_at", "completed_at", "expires_at",
-        "owner_uid", "owner_email", "completed_stages", "generation", "attempts", "lease_until", "cost_usd", "reserved_usd", "estimate_cost_usd", "progress",
+        "owner_uid", "owner_email", "completed_stages", "generation", "attempts", "lease_until", "lease_owner", "artifact_paths", "cost_usd", "reserved_usd", "estimate_cost_usd", "progress",
         "refine_cost_usd", "budget_usd", "model_calls", "events", "admin_actions", "failure_detail", "files_deleted", "deleting", "retiring",
         "input_sha256", "delivery", "notice",
     }

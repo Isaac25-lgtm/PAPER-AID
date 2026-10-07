@@ -336,7 +336,7 @@ class WorkRunner(AIRunner):
         known = {i["key"] for i in items}
         out: dict[str, SectionText] = {}
         # The answer format of the prompt version the step was priced with: figures from w-draft-v2 / w-repair-v3.
-        schema = WORK_SECTIONS_SCHEMA if self._prompt_for(task) in ("w-draft-v2", "w-repair-v3") else SECTIONS_SCHEMA
+        schema = WORK_SECTIONS_SCHEMA if self._prompt_for(task) in ("w-draft-v2", "w-draft-v3", "w-repair-v3", "w-repair-v4") else SECTIONS_SCHEMA
         for answer in self._batched(task, items, lambda b: {**common, "sections": b}, schema, _Sections, stop_on_budget=True):
             out.update({s.key: s for s in answer.sections if s.key in known})
         return out

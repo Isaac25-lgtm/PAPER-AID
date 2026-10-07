@@ -14,7 +14,7 @@ from datetime import timedelta
 import pandas as pd
 
 from app.core.errors import AppError
-from app.datalab.engine.disclosure import few
+from app.datalab.engine.disclosure import count_hidden, few
 from app.datalab.models import Filter, Variable
 
 MAX_FILTERS = 5
@@ -71,7 +71,7 @@ def describe(filters: list[Filter], variables: dict[str, Variable]) -> str:
     return "; ".join(parts)
 
 
-def mask(frame: pd.DataFrame, filters: list[Filter], variables: dict[str, Variable]) -> tuple[pd.Series, list[str]]:
+def mask(frame: pd.DataFrame, filters: list[Filter], variables: dict[str, Variable], threshold: int = 5) -> tuple[pd.Series, list[str]]:
     """Which records match every condition, and the records left out for having no value."""
     keep = pd.Series(True, index=frame.index)
     notes = []
@@ -92,7 +92,7 @@ def mask(frame: pd.DataFrame, filters: list[Filter], variables: dict[str, Variab
                 match &= (col < high + timedelta(days=1) if whole_day else col <= high).fillna(False).astype(bool)
         keep &= match & present
         notes.append((var, int((~present).sum())))
-    return keep, [f"{few(n, 5).capitalize()} records have no value for \"{v.title()}\", so no filter could include them." for v, n in notes if n]
+    return keep, [f"{('A protected number of' if count_hidden(n, len(frame), threshold) else few(n, threshold).capitalize())} records have no value for \"{v.title()}\", so no filter could include them." for v, n in notes if n]
 
 
 def apply(frame: pd.DataFrame, filters: list[Filter], variables: dict[str, Variable], threshold: int) -> tuple[pd.DataFrame, list[str], str]:
@@ -102,7 +102,7 @@ def apply(frame: pd.DataFrame, filters: list[Filter], variables: dict[str, Varia
     if not filters:
         return frame, [], ""
     check(filters, variables)
-    keep, missing_notes = mask(frame, filters, variables)
+    keep, missing_notes = mask(frame, filters, variables, threshold)
     kept, dropped = int(keep.sum()), int((~keep).sum())
     words = describe(filters, variables)
     if kept == 0:
@@ -113,7 +113,7 @@ def apply(frame: pd.DataFrame, filters: list[Filter], variables: dict[str, Varia
     if 0 < dropped < threshold:
         raise AppError(f"This filter leaves out fewer than {threshold} records ({words}). Compared with the whole data, it would reveal those few "
                        "people: widen it, or analyse without it.", code="FILTER_TOO_NARROW")
-    notes = [f"{dropped:,} records are outside the filter ({words})." if dropped else "", *[n.replace("Fewer than 5", f"Fewer than {threshold}") for n in missing_notes]]
+    notes = [f"{dropped:,} records are outside the filter ({words})." if dropped else "", *missing_notes]
     return frame[keep], [n for n in notes if n], words  # original identities survive missing-value and map selection
 
 
@@ -127,7 +127,7 @@ def overlaps(frame: pd.DataFrame, populations: dict[str, list[Filter]], titles: 
         if used and analysis_id in used:
             masks[analysis_id] = used[analysis_id]
         else:
-            masks[analysis_id] = mask(frame, filters, variables)[0] if filters else pd.Series(True, index=frame.index)
+            masks[analysis_id] = mask(frame, filters, variables, threshold)[0] if filters else pd.Series(True, index=frame.index)
     ids = list(masks)
     for i, a in enumerate(ids):
         for b in ids[i + 1:]:

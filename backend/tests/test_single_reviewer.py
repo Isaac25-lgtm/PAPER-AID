@@ -272,7 +272,7 @@ def test_a_missing_final_verdict_is_not_reviewed_and_nothing_is_delivered_or_cha
 
 
 def test_a_long_deliverable_is_reviewed_in_parts_with_a_manifest_of_the_whole(works_client, monkeypatch):
-    monkeypatch.setattr(works_pipeline, "FINAL_PART_WORDS", 400)
+    monkeypatch.setattr(works_pipeline, "FINAL_PART_WORDS", 900)  # whole requests: about 460 words of every one are repeated context (Codex review 2026-10-07, finding 8)
     client = works_client
     work = _drafted(client)
     _, job = _run(client, work["id"], "DRAFT")

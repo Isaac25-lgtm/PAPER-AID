@@ -29,6 +29,7 @@ from app.ai.orchestration import work_engine
 from app.core.errors import AppError, Conflict, NotFound
 from app.core.logging import log
 from app.datalab.engine import charts, clean, filters, ingest, profile, stats
+from app.datalab.engine.disclosure import cleaning_description, count_hidden
 from app.datalab.models import (
     AnalysisRef,
     AnalysisResult,
@@ -59,7 +60,7 @@ MAX_REPORTED = 25
 PARQUET = "application/vnd.apache.parquet"
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 INPUT = "datalab_input.json"
-RULES_VERSION = "disclosure-v2"  # part of every fingerprint: a change to the disclosure rules makes results out of date
+RULES_VERSION = "disclosure-v3"  # a changed disclosure rule makes previously calculated results out of date
 OP_LEASE = timedelta(minutes=10)  # data work longer than this has stopped (measured limits keep it far shorter)
 OP_WAIT = timedelta(minutes=20)  # data work still queued after this never started
 MAX_RECORD_BYTES = 800_000  # a project record stays well inside Firestore's 1 MiB document limit
@@ -612,7 +613,8 @@ def _op_analyse(rt: Runtime, p: DataProject, op: DataOp, written: list[str]) -> 
     _check_maps_country(p, spec)
     whole = _frame(rt, p)
     frame, notes, population = filters.apply(whole, spec.filters, by_name, p.threshold)  # before anything is counted
-    cleaning = [s.description for s in p.steps if s.status == "APPLIED" and s.version is not None and s.version <= p.current]
+    cleaning = [cleaning_description(s.description, s.column, s.affected, len(whole), p.threshold)
+                for s in p.steps if s.status == "APPLIED" and s.version is not None and s.version <= p.current]
     ctx = stats.Context(frame, by_name, p.current, p.alpha, p.threshold, cleaning, available=len(whole), population=population, notes=notes)
     if spec.kind == "MAP":
         from app.datalab.engine import maps
@@ -621,6 +623,14 @@ def _op_analyse(rt: Runtime, p: DataProject, op: DataOp, written: list[str]) -> 
     else:
         result = stats.run(ctx, spec)
         png = charts.for_result(result, frame, p.threshold)
+    if count_hidden(result.record.rows_used, result.record.rows_available, p.threshold):
+        # A result based on all but a few people can expose the excluded people through its test
+        # statistics, narrative or map even when the metadata count itself is hidden. Fail closed.
+        result.status = "NOT_ESTIMABLE"
+        result.tables, result.statistics, result.estimates, result.sentences = [], {}, [], []
+        result.warnings = ["This analysis cannot be shared because a small group would be identifiable from the result."]
+        result.record.left_out, result.record.coding, result.record.assumptions = [], [], []
+        png = None
     base = f"{p.storage_prefix()}/analyses/{result.id}"
     if png is not None:
         rt.files.put(base + ".png", png, "image/png")
@@ -665,6 +675,28 @@ def _unpack(data: bytes, n: int):
     return pd.Series(np.unpackbits(np.frombuffer(zlib.decompress(data), dtype=np.uint8))[:n].astype(bool))
 
 
+def _safe_csv(data: pd.DataFrame) -> bytes:
+    """Protect text cells and headers in the large cleaned-data CSV fallback.
+
+    Spreadsheet programs interpret these prefixes as formulas even in CSV. Prefixing the text
+    with an apostrophe keeps it inert when a researcher opens their export in Excel.
+    Process bounded row chunks so the safety pass does not clone a large dataset at once.
+    """
+    def safe(value: object) -> object:
+        return "'" + value if isinstance(value, str) and value.lstrip().startswith(("=", "+", "-", "@", "\t", "\r", "\n")) else value
+
+    output = io.StringIO()
+    first = True
+    for start in range(0, len(data), 5000):
+        chunk = data.iloc[start:start + 5000].copy()
+        chunk.columns = [safe(str(name)) for name in chunk.columns]
+        for name in chunk.select_dtypes(include=["object", "string", "category"]).columns:
+            chunk[name] = chunk[name].map(safe)
+        chunk.to_csv(output, index=False, header=first)
+        first = False
+    return output.getvalue().encode("utf-8-sig")
+
+
 def _op_cleaned(rt: Runtime, p: DataProject, op: DataOp, written: list[str]) -> tuple[Commit, str]:
     """The researcher's own cleaned data, apart from the shareable report workbook (finding 2): its
     individual records, without the columns left out (names, phone numbers, coordinates) unless
@@ -679,7 +711,7 @@ def _op_cleaned(rt: Runtime, p: DataProject, op: DataOp, written: list[str]) -> 
         content, suffix, media = workbook.cleaned(p.title, p.source.name if p.source else "", p.current, data, released=[n for n in kept if p.settings.get(n) and
                                                                                                                         p.settings[n].released_at]), ".xlsx", XLSX
     else:
-        content, suffix, media = data.to_csv(index=False).encode("utf-8-sig"), ".csv", "text/csv"
+        content, suffix, media = _safe_csv(data), ".csv", "text/csv"
     path = _new_path(p, "exports", suffix)
     rt.files.put(path, content, media)
     written.append(path)

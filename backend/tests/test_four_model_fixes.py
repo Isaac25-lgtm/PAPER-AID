@@ -18,6 +18,7 @@ from app.pricing import quote
 from app.proposals import evidence
 from app.proposals.ai import ProposalRunner
 from app.runtime import get_runtime
+from tests.conftest import internal
 from tests.test_ai import ScriptedProvider, real_settings, runner_with
 from tests.test_ai_coverage import _judgment, _passage
 from tests.test_api import STUDENT, _judge_all, _submit, enable_score
@@ -59,7 +60,7 @@ def test_a_chapter_with_double_spaces_and_line_breaks_is_delivered_as_written(cl
     job = run_step(client, pid, "CHAPTER_1")
     assert job["status"] == "COMPLETED", job.get("failure")
     rt = get_runtime()
-    stored = json.loads(rt.files.get(f"{rt.store.get(job['id']).storage_prefix()}/internal/chapter.json"))
+    stored = internal(rt, rt.store.get(job['id']), "chapter.json")
     assert all(s["paragraphs"][0] == spaced_text for s in stored["sections"])  # exactly the approved wording
     last = [r for t, r in zip(client.models.tasks, client.models.requests, strict=True) if t == "p_review"][-1]  # the one final reviewer
     assert json.dumps(spaced_text)[1:-1] in last

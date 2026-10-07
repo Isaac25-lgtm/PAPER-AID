@@ -323,3 +323,27 @@ tests for findings 1, 3 and 8 were run against the old code and failed there.
 Owner question answered in passing: there is no access-request flow. Anyone can sign up; AI services show
 "invited testers" to emails not in `TESTER_EMAILS` (live: three), and nobody is notified. A "Request
 access" button with an admin approval would be new work.
+
+
+## 12. Codex's third review (code at 6eaa1ee): fixed by Codex, completed by Claude (2026-10-07)
+
+| # | Finding | Codex's fix | Claude's check |
+|---|---|---|---|
+| 1 | Example numbers accepted in factual sentences ("…as shown in the table") | No keyword exemption; prompts `w-draft-v3`, `w-repair-v4` | Corrected: sentences opening as hypotheticals may use them (`HYPOTHETICAL`), otherwise the worked example could not be explained |
+| 2 | A stale worker could fail, finish or overwrite its replacement | `lease_owner` on every heartbeat, update, completion, failure and publication; attempt-scoped artifacts | Corrected: the results page (`workspace._internal_path`) and research reuse read the attempt's files |
+| 3 | Small counts leaked through "Records used", notes and subtraction | disclosure-v3 across report, workbook, notes, reviewer inputs; fail-closed analyses | Correct; owner decision on fail-closed noted in decisions.md |
+| 4 | Final-review requests could exceed the bound | whole-request measure; hard refusal in the runner (`REVIEW_REQUEST_TOO_LARGE`) | Corrected: one manifest entry per section (it grew with each split, so splitting could never fit); proportional history room |
+| 5 | s1/s2 and 1.1/1.2 read as the same place | locations keep identifiers | Correct |
+| 6 | A chapter-wide instruction closed after one section changed | every targeted section must change | Correct (a request naming no section now needs every section revised; the student can mark it done) |
+| 7 | Source reading and throttle retries had no total deadline | deadlines | Corrected: 10 s per network step within 30 s total (3 s per step was too short) |
+| 8 | Old preview responses replaced the selected version | stale responses ignored | Correct; covered by the browser journeys |
+| 9 | A graph could not be removed on request | explicit removal; references to a missing figure flagged | Corrected: "the figure" meaning a number is not flagged |
+| 10 | Large CSV exports lacked formula protection | protected in chunks | Correct |
+| 11 | Legend limits could still read the same | precision up to 12 places; one value for constant data | Correct |
+
+Also classified the new job fields (`lease_owner`, `artifact_paths`) for support views. Tests: one regression per
+finding in `tests/test_codex_20261007b.py` (the results-page test fails without Claude's path fix); tests that read
+the old artifact paths now use `tests.conftest.internal`; final-review tests now bound the whole request at 900
+words (about 460 words of each request are repeated context, so their former 120-400 limits could not fit).
+Deployment: the worker is deployed before the API (release.sh); a job claimed by the previous revision has no owner
+token and is taken over normally once its lease expires.

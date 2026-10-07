@@ -601,7 +601,8 @@ def stage_exporting(ctx: "StageContext") -> None:
         raise PermanentStageError("DATA_CHANGED", CHANGED, "transcripts changed")
     files = ctx.rt.files
     job_id = ctx.job.id
-    prefix = f"{project.storage_prefix()}/reports/{job_id}"
+    ctx.assert_owner()
+    prefix = f"{project.storage_prefix()}/reports/{job_id}-{ctx.owner}"
     files.put(prefix + ".json", document.model_dump_json(by_alias=True).encode(), "application/json")
     files.put(prefix + ".docx", report.to_docx(document, lambda path: None), DOCX)
     files.put(prefix + ".xlsx", codebook_workbook(sheets), XLSX)
@@ -610,7 +611,7 @@ def stage_exporting(ctx: "StageContext") -> None:
     def finish(j: Job, w: Wallet, p: DataProject | None) -> tuple[Job, Wallet, DataProject] | None:
         nonlocal gone
         gone = p is None or p.deleting
-        if p is None or p.deleting or j.status != JobStatus.PROCESSING or j.stage != Stage.EXPORTING:
+        if p is None or p.deleting or j.status != JobStatus.PROCESSING or j.stage != Stage.EXPORTING or j.lease_owner != ctx.owner:
             return None
         if not any(r.job_id == job_id for r in p.reports):
             version = len(p.reports) + 1
@@ -621,7 +622,7 @@ def stage_exporting(ctx: "StageContext") -> None:
         j.outcome = j.outcome or "FULL"
         if Stage.EXPORTING not in j.completed_stages:
             j.completed_stages.append(Stage.EXPORTING)
-        j.attempts, j.lease_until, j.stage = 0, None, None
+        j.attempts, j.lease_until, j.stage, j.lease_owner = 0, None, None, ""
         state.transition(j, JobStatus.COMPLETED, "Completed")
         settle_completed(j, w)
         return j, w, p

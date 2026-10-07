@@ -1139,19 +1139,22 @@ def stage_exporting(ctx: "StageContext") -> None:
     job_id = ctx.job.id
     evidence_path = ""
     if ctx.has("evidence.json"):
-        evidence_path = f"{project.storage_prefix()}/evidence/{job_id}.json"
+        ctx.assert_owner()
+        evidence_path = f"{project.storage_prefix()}/evidence/{job_id}-{ctx.owner}.json"
         ctx.rt.files.put(evidence_path, ctx.get_bytes("evidence.json"), "application/json")
     chapter_path = ""
     document: ChapterDocument | None = None
     if inp.step in ("CHAPTER", "REVISE", "COMPLETE"):
         document = ChapterDocument.model_validate(ctx.get_json("chapter.json"))
-        chapter_path = f"{project.storage_prefix()}/chapters/{inp.chapter}/{job_id}.json"
+        ctx.assert_owner()
+        chapter_path = f"{project.storage_prefix()}/chapters/{inp.chapter}/{job_id}-{ctx.owner}.json"
         ctx.rt.files.put(chapter_path, document.model_dump_json(by_alias=True).encode(), "application/json")
     planned = ctx.get_json("plan.json") if inp.step == "PLAN" else None
     plan = ProposalPlan.model_validate(planned["plan"]) if planned else None
     review = PlanReview.model_validate(planned["review"]) if planned and planned.get("review") else None  # None: an older engine's plan
     book = ctx.get_json("profile.json")["profile"] if inp.step == "PROFILE" else None
     if book is not None:  # written once under its own id; a retry writes the same file again
+        ctx.assert_owner()
         ctx.rt.files.put(rulebook.stored_path(book["id"]), json.dumps(book).encode(), "application/json")
     written_meanwhile = False
     library_paths = list(dict.fromkeys([*project.evidence_files, *([evidence_path] if evidence_path else [])]))
@@ -1214,15 +1217,11 @@ def stage_exporting(ctx: "StageContext") -> None:
                 if comment.id not in inp.comment_signatures or comment.status != "OPEN":
                     continue
                 answered = [k for k in comment.sections if k in inp.revise]
-                # A request about the whole chapter (no section picked) is answered by revising the sections it
-                # names, not every one (live run 2026-10-07: two of eleven revised, left open); one that names
-                # none, by any revised section. A request only partly met stays open (Codex review, finding 6).
+                # A chapter-wide request without named sections is not complete after one section changes.
+                # Every targeted section must change and pass its own review before it is marked applied.
                 whole = {s.key for s in document.sections} <= set(comment.sections)
-                named = [k for k in comment.required if k in answered]
-                if whole and not named:
-                    done = any(k in document.revised for k in answered)
-                else:
-                    done = all(k in document.revised for k in (named if whole else answered))
+                targets = comment.required if whole and comment.required else comment.sections
+                done = bool(targets) and all(k in document.revised for k in targets)
                 if comment.signature() == inp.comment_signatures[comment.id] and answered and done:
                     comment.status, comment.applied_in = "APPLIED", version
                 else:
@@ -1241,7 +1240,7 @@ def stage_exporting(ctx: "StageContext") -> None:
         gone = p is None or p.deleting
         if p is None or p.deleting:
             return None
-        if j.status != JobStatus.PROCESSING or j.stage != Stage.EXPORTING:
+        if j.status != JobStatus.PROCESSING or j.stage != Stage.EXPORTING or j.lease_owner != ctx.owner:
             return None  # failed, cancelled or already completed meanwhile: nothing more to do
         already = job_id in p.published
         if publish(p) is None:
@@ -1258,7 +1257,7 @@ def stage_exporting(ctx: "StageContext") -> None:
         j.outcome = j.outcome or "FULL"
         if Stage.EXPORTING not in j.completed_stages:
             j.completed_stages.append(Stage.EXPORTING)
-        j.attempts, j.lease_until, j.stage = 0, None, None
+        j.attempts, j.lease_until, j.stage, j.lease_owner = 0, None, None, ""
         state.transition(j, JobStatus.COMPLETED, "Completed with warnings" if j.outcome == "PARTIAL" else "Completed")
         settle_completed(j, w)
         return j, w, p

@@ -140,19 +140,32 @@ def _figure_problems(figure: Figure | None) -> list[str]:
     return problems
 
 
-def _kept(old: SectionText, new: SectionText) -> SectionText:
+def _kept(old: SectionText, new: SectionText, *, remove_figure: bool = False) -> SectionText:
     """A section's graph and its worked example's label survive a rewrite that leaves them out (compression's
     format has neither; a repair that does not mention them): only a new figure replaces the graph, and a
     table that is still there stays the illustrative example it was (Codex review 2026-10-07, finding 3)."""
-    kept = new if new.figure is not None or old.figure is None else new.model_copy(update={"figure": old.figure})
+    if remove_figure:
+        kept = new.model_copy(update={"figure": None})
+    elif new.figure is None and old.figure is not None:
+        kept = new.model_copy(update={"figure": old.figure})
+    else:
+        kept = new
     if old.table.illustrative and kept.table.rows and not kept.table.illustrative:
         kept = kept.model_copy(update={"table": kept.table.model_copy(update={"illustrative": True})})
     return kept
 
 
-# A sentence about the section's own worked example or graph (2026-10-07: "Suppose the price falls from
-# 900 to 860..."); only such a sentence may use the example's numbers.
-ABOUT_EXAMPLE = re.compile(r"\b(suppose|supposing|assum\w*|hypothetical\w*|illustrat\w*|examples?|imagine|scenario|if|tables?|figures?|graphs?|curves?|diagrams?)\b", re.I)
+def _remove_figure_requested(requests: list[str]) -> bool:
+    """Only an explicit student instruction removes a previously delivered graph."""
+    for request in requests:
+        words = " ".join(request.casefold().split())
+        if re.search(r"\b(?:do not|don't|never|keep|retain)\s+(?:\w+\s+){0,3}(?:remove|delete|omit|drop)\b", words):
+            continue
+        if (re.search(r"\b(?:remove|delete|omit|drop|take out)\b.{0,70}\b(?:graph|figure|chart|diagram)\b", words)
+                or re.search(r"\b(?:graph|figure|chart|diagram)\b.{0,40}\b(?:removed|deleted|omitted|dropped)\b", words)
+                or re.search(r"\bwithout\s+(?:a |the )?(?:graph|figure|chart|diagram)\b", words)):
+            return True
+    return False
 
 
 def _examples_allowed(inp: WorkStepInput) -> bool:
@@ -162,20 +175,26 @@ def _examples_allowed(inp: WorkStepInput) -> bool:
 
 
 def _illustrative(inp: WorkStepInput, text: SectionText) -> str:
-    """A coursework section's own worked example and graph: their numbers are illustrative by construction
-    (labelled as such by code), so the example's cells, and sentences about the example, may use them
-    (2026-10-07: a worked example was blanked cell by cell and the question's "numerical illustrations"
-    failed). Never a factual claim elsewhere in the section (Codex review 2026-10-07, finding 4)."""
+    """A coursework section's worked example and graph: their numbers are illustrative by construction (labelled
+    as such by code). Its cells and caption may use them, and so may a sentence explicitly framed as hypothetical
+    (`HYPOTHETICAL`); a mention of the table never turns a factual assertion into an example (Codex review,
+    2026-10-07). Without the framed sentences the worked example could not be explained, the coursework failure of
+    2026-10-07 ("Suppose the price falls from 900 to 860...")."""
     if not _examples_allowed(inp):
         return ""
-    parts = [" ".join(c for row in text.table.rows for c in row)] if text.table.illustrative else []
+    parts = [" ".join([text.table.caption, *(c for row in text.table.rows for c in row)])] if text.table.illustrative else []
     if text.figure is not None and not _figure_problems(text.figure):
         parts += [f"{p.x:g} {p.y:g}" for line in text.figure.series for p in line.points]
     return " ".join(parts)
 
 
-def _about_example(example: str) -> Callable[[str], str] | None:
-    return (lambda sentence: example if ABOUT_EXAMPLE.search(sentence) else "") if example else None
+# A sentence that opens as a hypothetical: the only prose that may use a worked example's numbers.
+HYPOTHETICAL = re.compile(r"^\W*(?:suppose|supposing|assume|assuming|imagine|hypothetically|for (?:illustration|example)|to illustrate|"
+                          r"in (?:this|the|our) (?:worked |hypothetical |illustrative |numerical )?(?:example|illustration|scenario))\b", re.I)
+
+
+def _framed(example: str) -> Callable[[str], str] | None:
+    return (lambda sentence: example if HYPOTHETICAL.search(sentence) else "") if example else None
 
 
 def _tokens(inp: WorkStepInput) -> dict[str, tuple[str, str]]:
@@ -278,7 +297,8 @@ def _earlier_research(ctx: "StageContext", inp: WorkStepInput) -> list[dict[str,
         job = ctx.rt.store.get(job_id)
         if job is None or job.status != JobStatus.FAILED or job.selection.work != inp.step or Stage.RESEARCHING not in job.completed_stages:
             continue
-        paths = (f"{job.storage_prefix()}/internal/{INPUT}", f"{job.storage_prefix()}/internal/evidence.json")
+        paths = (f"{job.storage_prefix()}/internal/{INPUT}",  # written at quote time; evidence where its attempt saved it
+                 job.artifact_paths.get("evidence.json", f"{job.storage_prefix()}/internal/evidence.json"))
         if not all(ctx.rt.files.exists(path) for path in paths):
             return None
         before = WorkStepInput.model_validate(json.loads(ctx.rt.files.get(paths[0])))
@@ -744,13 +764,18 @@ def _checks(inp: WorkStepInput, section: PlanSection, text: SectionText, library
     cells = _cells(text) if text.table.rows else []
     for n, paragraph in enumerate([*text.paragraphs, *cells]):
         plain = numbers.strip(paragraph)
+        if n < len(text.paragraphs) and text.figure is None and re.search(
+            r"\b(?:figure|graph|chart|diagram)\s*(?:\d+|above|below)\b|\b(?:the|this)\s+(?:graph|chart|diagram)\b",
+            plain, re.I,
+        ):
+            problems.append("The text refers to a figure that this section does not contain.")
         problems += ev.citation_problems(plain, usable)
         if n >= len(text.paragraphs) and text.table.illustrative:  # the worked example's own cells
             found = ev.figure_problems(plain, library_items, allowed + " " + example)
-        elif example:  # a sentence may use the example's numbers only when it is about the example
+        elif example and n < len(text.paragraphs):  # only a sentence framed as hypothetical may use the example's numbers
             cited = " ".join(f"⟦{i}⟧" for i in ev.cited_ids(plain))
             found = [p for s in ev.sentences(plain)
-                     for p in ev.figure_problems(s if ev.cited_ids(s) else f"{s} {cited}", library_items, allowed + (" " + example if ABOUT_EXAMPLE.search(s) else ""))]
+                     for p in ev.figure_problems(s if ev.cited_ids(s) else f"{s} {cited}", library_items, allowed + (" " + example if HYPOTHETICAL.search(s) else ""))]
         else:
             found = ev.figure_problems(plain, library_items, allowed)
         problems += [p + " Use a number token for figures from the budget, Results Model or your answers." for p in found]
@@ -906,9 +931,11 @@ def _blocking(final: "Final", doc_rules: list[dict[str, Any]]) -> list[Objection
     """What blocks a final review: failed blocking rules, unanswered question parts, unaddressed priorities,
     each with where the reviewer placed it and what it said."""
     blocking_ids = {r["id"] for r in doc_rules if r["severity"] == "BLOCKING"}
-    return [*((f"rule:{r.rule}", " ".join(sorted(_words_of(r.where))), _words_of(r.note)) for r in final.rules if r.status == "FAIL" and r.rule in blocking_ids),
-            *((f"part:{c.id}", " ".join(sorted(_words_of(c.where))), frozenset()) for c in final.coverage if not c.answered),
-            *((f"priority:{p.priority}", " ".join(sorted(_words_of(p.where))), frozenset()) for p in final.priorities if not p.addressed)]
+    def place(value: str) -> str:
+        return " ".join(re.findall(r"[\w]+(?:\.[\w]+)*", value.casefold()))
+    return [*((f"rule:{r.rule}", place(r.where), _words_of(r.note)) for r in final.rules if r.status == "FAIL" and r.rule in blocking_ids),
+            *((f"part:{c.id}", place(c.where), frozenset()) for c in final.coverage if not c.answered),
+            *((f"priority:{p.priority}", place(p.where), frozenset()) for p in final.priorities if not p.addressed)]
 
 
 SAME_OBJECTION = 0.6  # the share of a note's words two objections must share to be the same one
@@ -931,7 +958,6 @@ def _strip(inp: WorkStepInput, text: SectionText, library_items: dict[str, Evide
     A section's own illustrative worked example and graph are not untraceable (`_illustrative`)."""
     usable = {i for i, item in library_items.items() if item.usable}
     example = _illustrative(inp, text)
-    about = _about_example(example)
     in_example = (allowed + " " + example) if text.table.illustrative else allowed
 
     def clean(paragraph: str, cell: bool = False) -> str:
@@ -940,7 +966,7 @@ def _strip(inp: WorkStepInput, text: SectionText, library_items: dict[str, Evide
         plain = paragraph
         for placeholder, token in protected.items():
             plain = plain.replace(token, placeholder, 1)
-        kept = ev.strip_unsupported(plain, library_items, usable, in_example) if cell else ev.strip_unsupported(plain, library_items, usable, allowed, about)
+        kept = ev.strip_unsupported(plain, library_items, usable, in_example) if cell else ev.strip_unsupported(plain, library_items, usable, allowed, _framed(example))
         for placeholder, token in protected.items():
             kept = kept.replace(placeholder, token)
         return kept
@@ -1112,26 +1138,50 @@ def _final_review(runner: WorkRunner, inp: WorkStepInput, document: WorkDocument
     # JSON; what follows the sections goes on the last part while it fits, else on further parts of its own.
     manifest_room = 2 * payload_words([{"key": e["key"], "heading": e["heading"], "words": 0, "part": "99"} for e in whole["sections"]])
     repeated = payload_words(base) + payload_words(whole["front"]) + manifest_room + payload_words({"part": "99 of 99"})
-    bound = max(100, int((FINAL_PART_WORDS - repeated - HISTORY_WORDS) * 0.9))
-    parts: list[dict[str, Any]] = [{"sections": [], "tables": [], "references": [], "notes": [], "words": 0}]
+    # Room kept for the sign-off's earlier findings: the history is trimmed to what is left, and the runner refuses any
+    # request above the bound, so a part need only leave a proportionate share (all of HISTORY_WORDS at 7,000 words).
+    history_room = min(HISTORY_WORDS, FINAL_PART_WORDS // 6)
+    bound = max(100, int((FINAL_PART_WORDS - repeated - history_room) * 0.9))
+    def build_parts(room: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        parts: list[dict[str, Any]] = [{"sections": [], "tables": [], "references": [], "notes": [], "words": 0}]
 
-    def place(kind: str, item: Any, words: int) -> None:
-        if parts[-1]["words"] and parts[-1]["words"] + words > bound:
-            parts.append({"sections": [], "tables": [], "references": [], "notes": [], "words": 0})
-        parts[-1][kind].append(item)
-        parts[-1]["words"] += words
+        def place(kind: str, item: Any, words: int) -> None:
+            if parts[-1]["words"] and parts[-1]["words"] + words > room:
+                parts.append({"sections": [], "tables": [], "references": [], "notes": [], "words": 0})
+            parts[-1][kind].append(item)
+            parts[-1]["words"] += words
 
-    for entry in whole["sections"]:
-        for piece in _split_entry(entry, bound):
-            place("sections", piece, _words_of_entry(piece))
-    for table in whole["tables"]:
-        for piece_of_table in _table_pieces(table, bound):
-            place("tables", piece_of_table, _table_words(piece_of_table))
-    for kind in ("references", "notes"):
-        for text in whole[kind]:
-            for chunk in _chunks(text, bound):
-                place(kind, chunk, len(chunk.split()))
-    manifest = [{"key": e["key"], "heading": e["heading"], "words": _words_of_entry(e), "part": n} for n, part in enumerate(parts, start=1) for e in part["sections"]]
+        for entry in whole["sections"]:
+            for piece in _split_entry(entry, room):
+                place("sections", piece, _words_of_entry(piece))
+        for table in whole["tables"]:
+            for piece_of_table in _table_pieces(table, room):
+                place("tables", piece_of_table, _table_words(piece_of_table))
+        for kind in ("references", "notes"):
+            for text in whole[kind]:
+                for chunk in _chunks(text, room):
+                    place(kind, chunk, len(chunk.split()))
+        # One entry per section of the whole, with the parts it spans ("2-3" when split): the manifest does not
+        # grow as parts get smaller, so splitting further always makes a request smaller (it listed every piece).
+        spans: dict[str, list[int]] = {}
+        for n, part in enumerate(parts, start=1):
+            for e in part["sections"]:
+                spans.setdefault(e["key"], []).append(n)
+        manifest = [{"key": e["key"], "heading": e["heading"], "words": _words_of_entry(e),
+                     "part": (str(spans[e["key"]][0]) if spans[e["key"]][0] == spans[e["key"]][-1] else f"{spans[e['key']][0]}-{spans[e['key']][-1]}")}
+                    for e in whole["sections"] if e["key"] in spans]
+        return parts, manifest
+
+    for _ in range(10):
+        parts, manifest = build_parts(bound)
+        if all(payload_words({**base, "document": {"front": whole["front"], "sections": part["sections"],
+                                                        "tables": part["tables"], "references": part["references"], "notes": part["notes"]},
+                              "manifest": manifest, "part": f"{n} of {len(parts)}"}) + history_room <= FINAL_PART_WORDS
+               for n, part in enumerate(parts, start=1)):
+            break
+        bound = max(20, bound // 2)
+    else:
+        return None  # even the repeated context does not fit; never send an oversized paid request
     rule_ids, coverage_ids, priorities = {r["id"] for r in doc_rules}, {c.id for c in spec.coverage}, set(spec.priorities)
     answers = []
     for n, part in enumerate(parts, start=1):
@@ -1311,7 +1361,7 @@ def stage_auditing(ctx: "StageContext") -> None:
         requests = _repair_items(inp, current, _library(ctx, inp), {k: [f"The student asks: {r}" for r in inp.revise[k]] for k in targets})
         for key, revised in runner.repair(requests, _common(inp)).items():
             if key in targets:
-                current[key] = _kept(current[key], revised)
+                current[key] = _kept(current[key], revised, remove_figure=_remove_figure_requested(inp.revise[key]))
         # A requested section the writer did not return, or returned unchanged, was not revised: never
         # charged for, and its request stays open (Codex audit 2026-09-30, second round).
         unchanged = [k for k in targets if current[k] == original[k]]
@@ -1576,22 +1626,25 @@ def stage_exporting(ctx: "StageContext") -> None:
     job_id = ctx.job.id
     evidence_path = ""
     if ctx.has("evidence.json"):
-        evidence_path = f"{work.storage_prefix()}/evidence/{job_id}.json"
+        ctx.assert_owner()
+        evidence_path = f"{work.storage_prefix()}/evidence/{job_id}-{ctx.owner}.json"
         ctx.rt.files.put(evidence_path, ctx.get_bytes("evidence.json"), "application/json")
     doc_path = docx_path = ""
     document: WorkDocument | None = None
     if inp.step in ("DRAFT", "REVISE"):
         document = WorkDocument.model_validate(ctx.get_json("document.json"))
-        doc_path = f"{work.storage_prefix()}/documents/{job_id}.json"
+        ctx.assert_owner()
+        doc_path = f"{work.storage_prefix()}/documents/{job_id}-{ctx.owner}.json"
         ctx.rt.files.put(doc_path, document.model_dump_json(by_alias=True).encode(), "application/json")
         if ctx.has("document.docx"):  # the Word file built and checked before completion: every download serves exactly it
-            docx_path = f"{work.storage_prefix()}/documents/{job_id}.docx"
+            docx_path = f"{work.storage_prefix()}/documents/{job_id}-{ctx.owner}.docx"
             ctx.rt.files.put(docx_path, ctx.get_bytes("document.docx"), DOCX)
     planned = ctx.get_json("plan.json") if inp.step == "PLAN" else None
     read = ctx.get_json("read.json") if inp.step == "READ" else None
     requirements_path = ""
     if read is not None:
-        requirements_path = f"{work.storage_prefix()}/requirements/{job_id}.json"
+        ctx.assert_owner()
+        requirements_path = f"{work.storage_prefix()}/requirements/{job_id}-{ctx.owner}.json"
         ctx.rt.files.put(requirements_path, json.dumps(read).encode(), "application/json")
     notes: list[str] = []
 
@@ -1658,7 +1711,7 @@ def stage_exporting(ctx: "StageContext") -> None:
         gone = k is None or k.deleting
         if k is None or k.deleting:
             return None
-        if j.status != JobStatus.PROCESSING or j.stage != Stage.EXPORTING:
+        if j.status != JobStatus.PROCESSING or j.stage != Stage.EXPORTING or j.lease_owner != ctx.owner:
             return None  # failed, cancelled or already completed meanwhile: nothing more to do
         if job_id not in k.published:
             publish(k)
@@ -1666,7 +1719,7 @@ def stage_exporting(ctx: "StageContext") -> None:
         j.outcome = j.outcome or "FULL"
         if Stage.EXPORTING not in j.completed_stages:
             j.completed_stages.append(Stage.EXPORTING)
-        j.attempts, j.lease_until, j.stage = 0, None, None
+        j.attempts, j.lease_until, j.stage, j.lease_owner = 0, None, None, ""
         state.transition(j, JobStatus.COMPLETED, "Completed with warnings" if j.outcome == "PARTIAL" else "Completed")
         settle_completed(j, w)
         return j, w, k
@@ -1693,4 +1746,3 @@ STAGES = {
     Stage.AUDITING: stage_auditing,
     Stage.EXPORTING: stage_exporting,
 }
-

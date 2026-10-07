@@ -15,7 +15,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Inches, Pt, RGBColor
 from pydantic import Field
 
-from app.datalab.engine.disclosure import few
+from app.datalab.engine.disclosure import cleaning_description, count_hidden, few, records_used
 from app.datalab.models import AnalysisResult, CleaningStep, ResultTable, Variable
 from app.jobs.models import Camel
 
@@ -62,7 +62,7 @@ def build(title: str, source_name: str, sheet: str | None, version: int, rows: i
         ReportSection(key="summary", heading="Executive summary", paragraphs=[fill(p) for p in narrative.get("summary", [])]),
         ReportSection(key="key_findings", heading="Key findings", bullets=[fill(p) for p in narrative.get("keyFindings", [])]),
         ReportSection(key="dataset", heading="The dataset", paragraphs=[
-            f"The analysis used \"{source_name}\"" + (f" (sheet \"{sheet}\")" if sheet else "") + f": {rows:,} records and {columns:,} variables, "
+            f"The analysis used \"{source_name}\"" + (f" (sheet \"{sheet}\")" if sheet else "") + f": {few(rows, threshold)} records and {columns:,} variables, "
             f"in version {version} of the data after the preparation described below. The original file was kept unchanged.",
             *([f"The analyses in this report use {len(read)} of the {columns:,} variables: " + ", ".join(f"\"{t}\"" for t in read) + "."] if read else []),
             *([f"{len(left_out)} variable{'s were' if len(left_out) != 1 else ' was'} set aside, because {'they' if len(left_out) != 1 else 'it'} may identify "
@@ -71,7 +71,8 @@ def build(title: str, source_name: str, sheet: str | None, version: int, rows: i
             *([f"The researcher chose to include {', '.join(chr(34) + n + chr(34) for n in released)}, which may identify people or places."] if released else []),
         ]),
         ReportSection(key="preparation", heading="Data preparation", bullets=[
-            f"{s.description.rstrip('.')} ({'applied automatically' if s.automatic else 'confirmed by the researcher'})." for s in cleaning
+            f"{cleaning_description(s.description, s.column, s.affected, rows, threshold).rstrip('.')} "
+            f"({'applied automatically' if s.automatic else 'confirmed by the researcher'})." for s in cleaning
         ] or [], paragraphs=[] if cleaning else ["No changes were made to the data as uploaded."]),
         ReportSection(key="quality", heading="Data quality", paragraphs=[_quality_text(used, threshold)], tables=[_quality_table(used, threshold)]),
         ReportSection(key="methods", heading="Methods", paragraphs=[
@@ -92,7 +93,7 @@ def build(title: str, source_name: str, sheet: str | None, version: int, rows: i
         ReportSection(key="conclusions", heading="Conclusions", paragraphs=[fill(p) for p in narrative.get("conclusions", [])]),
     ]
     appendices = [
-        ReportSection(key="appendix_cleaning", heading="Appendix A. Cleaning log", tables=[_cleaning_table(cleaning, threshold)] if cleaning else [],
+        ReportSection(key="appendix_cleaning", heading="Appendix A. Cleaning log", tables=[_cleaning_table(cleaning, threshold, rows)] if cleaning else [],
                       paragraphs=[] if cleaning else ["No changes were made to the data as uploaded."]),
         ReportSection(key="appendix_output", heading="Appendix B. Statistical output", paragraphs=[], bullets=[]),
         ReportSection(key="appendix_dictionary", heading="Appendix C. Data dictionary", tables=[_dictionary_table(variables)]),
@@ -100,7 +101,7 @@ def build(title: str, source_name: str, sheet: str | None, version: int, rows: i
     output = appendices[1]
     for n, result in enumerate(analyses, start=1):
         r = result.record
-        output.bullets.append(f"{n}. {result.title}. Method: {r.method}. Records used: {r.rows_used:,} of {r.rows_available:,}. "
+        output.bullets.append(f"{n}. {result.title}. Method: {r.method}. Records used: {records_used(r.rows_used, r.rows_available, threshold)}. "
                               + " ".join(r.left_out) + (" " + " ".join(r.coding) if r.coding else "") + (" Checks: " + " ".join(r.assumptions) if r.assumptions else "")
                               + f" Significance level {r.alpha:g}. Data version {r.dataset_version}. Calculated {r.calculated_at:%d %B %Y}.")
     document = ReportDocument(title=title or "Analysis report", subtitle=f"Analysis report · {datetime.now(UTC):%d %B %Y}", sections=sections, appendices=appendices)
@@ -109,14 +110,17 @@ def build(title: str, source_name: str, sheet: str | None, version: int, rows: i
 
 
 def build_chapter(project_title: str, rows: int, version: int, cleaning: list[CleaningStep], objectives: list[str], objective_of: dict[str, int],
-                  analyses: list[AnalysisResult], charts: dict[str, str], narrative: dict[str, Any], fill, missing: list[int] | None = None) -> ReportDocument:
+                  analyses: list[AnalysisResult], charts: dict[str, str], narrative: dict[str, Any], fill, missing: list[int] | None = None,
+                  threshold: int = 5) -> ReportDocument:
     """Chapter Four of a research report (owner decision 2026-10-03): the results, one section per
     specific objective, each analysis with its table and figure; then the summary of the results. An
     objective with no analysis keeps its section and says so (Codex audit, finding 6)."""
     findings = {f["id"]: f["paragraphs"] for f in narrative.get("findings", [])}
-    preparation = (" Before the analysis, " + "; ".join(s.description.rstrip(".").lower()[:1] + s.description.rstrip(".")[1:] for s in cleaning) + ".") if cleaning else ""
+    preparation = (" Before the analysis, " + "; ".join(
+        (safe := cleaning_description(s.description, s.column, s.affected, rows, threshold).rstrip("."))[:1].lower() + safe[1:]
+        for s in cleaning) + ".") if cleaning else ""
     sections = [ReportSection(key="introduction", heading="4.1 Introduction", paragraphs=[*(fill(p) for p in narrative.get("introduction", [])),
-                f"The analysis used {rows:,} records (version {version} of the data).{preparation} Records missing a value for a variable in an analysis were "
+                f"The analysis used {few(rows, threshold)} records (version {version} of the data).{preparation} Records missing a value for a variable in an analysis were "
                 "left out of that analysis."])]
     number = 1
 
@@ -152,7 +156,8 @@ def _quality_text(variables: list[Variable], threshold: int) -> str:
         return f"Each of the {len(variables)} variables available for analysis has a value in every record."
     worst = max(missing, key=lambda v: v.missing / max(1, v.valid + v.missing))
     share = 100 * worst.missing / max(1, worst.valid + worst.missing)
-    how_many = f"missing in {share:.1f}% of records" if worst.missing >= threshold else f"missing in {few(worst.missing, threshold)} records"
+    hidden = count_hidden(worst.missing, worst.valid + worst.missing, threshold)
+    how_many = "missing in a protected number of records" if hidden else f"missing in {share:.1f}% of records"
     return (f"{len(missing)} of the {len(variables)} variables available for analysis have missing values; the most is \"{worst.title()}\", {how_many}. "
             "The table lists each variable's type and its missing values.")
 
@@ -165,17 +170,19 @@ def _quality_table(variables: list[Variable], threshold: int) -> ResultTable:
     rows = []
     for v in variables:
         total = v.valid + v.missing
-        small = 0 < v.missing < threshold
+        small = count_hidden(v.missing, total, threshold)
         rows.append([Cell(text=v.title()), Cell(text=_kind_label(v)),
-                     Cell(text=few(v.missing, threshold) if small else (f"{v.missing:,} ({100 * v.missing / total:.1f}%)" if total else "0"),
+                     Cell(text="hidden to protect privacy" if small else (f"{v.missing:,} ({100 * v.missing / total:.1f}%)" if total else "0"),
                           value=None if small else v.missing, count=True, suppressed=small)])
     return ResultTable(title="Variables and missing values", columns=["Variable", "Type", "Missing"], rows=rows)
 
 
-def _cleaning_table(steps: list[CleaningStep], threshold: int) -> ResultTable:
+def _cleaning_table(steps: list[CleaningStep], threshold: int, total: int) -> ResultTable:
     from app.datalab.models import Cell
 
-    rows = [[Cell(text=str(n)), Cell(text=s.description), Cell(text=few(s.affected, threshold), value=s.affected if s.affected == 0 or s.affected >= threshold else None),
+    rows = [[Cell(text=str(n)), Cell(text=cleaning_description(s.description, s.column, s.affected, total, threshold)),
+             Cell(text="hidden to protect privacy" if count_hidden(s.affected, max(total, s.affected), threshold) else f"{s.affected:,}",
+                  value=None if count_hidden(s.affected, max(total, s.affected), threshold) else s.affected),
              Cell(text="Automatic" if s.automatic else "Confirmed"),
              Cell(text=f"{s.decided_at:%d %b %Y}" if s.decided_at else "")] for n, s in enumerate(steps, start=1)]
     return ResultTable(title="Changes made to the data", columns=["Step", "Change", "Values or rows changed", "How", "Date"], rows=rows)

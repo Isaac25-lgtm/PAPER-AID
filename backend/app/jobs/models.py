@@ -281,6 +281,7 @@ class EstimateRun(EstimateView):
     guide_words: int = 0
     attempts: int = 0
     lease_until: datetime | None = None
+    lease_owner: str = ""  # unique attempt token for estimate retries
     requested_at: datetime = Field(default_factory=utcnow)
 
 
@@ -708,6 +709,8 @@ class Job(JobView):
     generation: int = 0
     attempts: int = 0
     lease_until: datetime | None = None
+    lease_owner: str = ""  # unique delivery token; an expired worker cannot finish its replacement's stage
+    artifact_paths: dict[str, str] = {}  # committed attempt-scoped artifacts; stale writes cannot replace them
     cost_usd: float = 0.0  # every model call, estimate included
     reserved_usd: float = 0.0  # calls whose billing is unknown, held against the cap apart from confirmed cost
     estimate_cost_usd: float = 0.0

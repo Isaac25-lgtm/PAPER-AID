@@ -140,7 +140,7 @@ def test_a_step_priced_on_older_validators_is_refused_and_refunded(works_client)
 def test_a_rule_omitted_in_one_part_is_not_hidden_by_another(works_client, monkeypatch):
     from app.runtime import get_runtime
 
-    monkeypatch.setattr(works_pipeline, "FINAL_PART_WORDS", 400)
+    monkeypatch.setattr(works_pipeline, "FINAL_PART_WORDS", 900)  # whole requests: about 460 words of every one are repeated context (Codex review 2026-10-07, finding 8)
     client = works_client
 
     def final(payload):
@@ -157,7 +157,9 @@ def test_a_rule_omitted_in_one_part_is_not_hidden_by_another(works_client, monke
 
 
 def test_a_section_longer_than_one_part_is_split_across_parts(works_client, monkeypatch):
-    monkeypatch.setattr(works_pipeline, "FINAL_PART_WORDS", 120)
+    from app.ai.orchestration import payload_words
+
+    monkeypatch.setattr(works_pipeline, "FINAL_PART_WORDS", 900)  # whole requests: about 460 words of every one are repeated context (Codex review 2026-10-07, finding 8)
     client = works_client
     work = _drafted(client)
     _, job = _run(client, work["id"], "DRAFT")
@@ -165,7 +167,7 @@ def test_a_section_longer_than_one_part_is_split_across_parts(works_client, monk
     parts = _requests(client, "w_final")
     headings = [s["heading"] for p in parts for s in p["document"]["sections"]]
     assert any("(continued, piece" in h for h in headings)
-    assert all(sum(len(" ".join(s["text"]).split()) for s in p["document"]["sections"]) <= 120 or len(p["document"]["sections"]) == 1 for p in parts)
+    assert all(payload_words(p) <= 900 for p in parts)
 
 
 # --- 5: an edit replaces the earlier review ------------------------------------------------------------------

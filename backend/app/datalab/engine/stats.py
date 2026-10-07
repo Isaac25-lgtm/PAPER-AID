@@ -112,7 +112,9 @@ def _complete(ctx: Context, names: list[str]) -> tuple[pd.DataFrame, list[str]]:
     for name in names:
         n = int(ctx.frame[name].isna().sum())
         if n:
-            left_out.append(f"{disclosure.few(n, ctx.threshold).capitalize()} records have no value for \"{ctx.variables[name].title()}\".")
+            shown = ("A protected number of" if disclosure.count_hidden(n, len(ctx.frame), ctx.threshold)
+                     else disclosure.few(n, ctx.threshold).capitalize())
+            left_out.append(f"{shown} records have no value for \"{ctx.variables[name].title()}\".")
     ctx.used = frame.index[keep]
     return frame[keep], left_out
 

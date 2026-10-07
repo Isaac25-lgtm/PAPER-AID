@@ -190,7 +190,9 @@ def test_a_paragraph_or_table_longer_than_a_part_is_split_within_the_bound():
 
 
 def test_every_final_review_part_is_within_the_bound(works_client, monkeypatch):
-    monkeypatch.setattr(works_pipeline, "FINAL_PART_WORDS", 150)
+    from app.ai.orchestration import payload_words
+
+    monkeypatch.setattr(works_pipeline, "FINAL_PART_WORDS", 900)  # whole requests: about 460 words of every one are repeated context (Codex review 2026-10-07, finding 8)
     client = works_client
 
     def one_long_paragraph(payload):
@@ -203,10 +205,8 @@ def test_every_final_review_part_is_within_the_bound(works_client, monkeypatch):
     work = _approved(client, _coursework(client))
     _, job = _run(client, work["id"], "DRAFT")
     assert job["status"] == "COMPLETED", job.get("failure")
-    for part in _requests(client, "w_final"):
-        doc = part["document"]
-        words = sum(len(" ".join([s["heading"], *s["text"]]).split()) for s in doc["sections"]) + len(" ".join([*doc["front"], *doc["references"], *doc["notes"]]).split())
-        assert words <= 150, words
+    parts = _requests(client, "w_final")
+    assert len(parts) > 1 and all(payload_words(part) <= 900 for part in parts), [payload_words(p) for p in parts]
 
 
 # --- Codex's re-check of the fixes (2026-10-01) ------------------------------------------------------------

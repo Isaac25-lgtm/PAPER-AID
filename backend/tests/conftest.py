@@ -51,6 +51,11 @@ def legacy_routes_for_the_earlier_algorithm(monkeypatch):
     monkeypatch.setenv("LEGACY_PROVIDERS", "true")
 
 
+def internal(rt, job, name: str):
+    """A stage's saved artifact, where its attempt wrote it (attempt-scoped paths, Codex 2026-10-07)."""
+    return json.loads(rt.files.get(job.artifact_paths.get(name, f"{job.storage_prefix()}/internal/{name}")))
+
+
 def fixture_bytes(name: str) -> bytes:
     return (FIXTURES / name).read_bytes()
 

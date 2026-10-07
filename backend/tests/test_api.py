@@ -4,7 +4,7 @@ import logging
 import re
 import time
 
-from tests.conftest import fixture_bytes, grant
+from tests.conftest import fixture_bytes, grant, internal
 
 STUDENT = {"Authorization": "Dev student@example.com"}
 OTHER = {"Authorization": "Dev other@example.com"}
@@ -424,7 +424,7 @@ def test_refinement_agrees_a_plan_before_rewriting(client):
     job = wait(client, job_id)
     assert job["status"] == "COMPLETED"
     rt = get_runtime()
-    plan = json.loads(rt.files.get(f"{rt.store.get(job_id).storage_prefix()}/internal/plan.json"))
+    plan = internal(rt, rt.store.get(job_id), "plan.json")
     assert plan["final"] and all(item["action"] == "rewrite" for item in plan["final"].values())
     assert all(c["reason"] for c in job["refinement"]["changes"])  # each change says why it was made
 

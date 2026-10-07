@@ -149,9 +149,10 @@ def test_two_analyses_one_person_apart_after_missing_values_are_not_released_tog
     p = lab.post("/api/datalab", headers=H, json={"title": "Scores", "purpose": "Scores"}).json()
     _act(lab, p["id"], f"/api/datalab/{p['id']}/dataset", files={"file": ("s.csv", "\n".join(rows).encode(), "text/csv")}, data={"consent": "true"})
     _analyse(lab, p["id"], {"kind": "DESCRIBE", "variables": ["score"]})  # 100 people
-    _analyse(lab, p["id"], {"kind": "COMPARE_TWO", "variables": ["score", "group"]})  # 99: one has no group
-    refused = lab.post(f"/api/datalab/{p['id']}/report", headers=H, json={})
-    assert refused.status_code == 400 and refused.json()["code"] == "OVERLAPPING_RESULTS"
+    compared = _analyse(lab, p["id"], {"kind": "COMPARE_TWO", "variables": ["score", "group"]})  # 99: one has no group
+    # Since disclosure-v3 (Codex review 2026-10-07) an analysis that leaves out fewer people than the threshold is
+    # withheld when it is calculated, so the two can never be released together to single that person out.
+    assert compared["status"] == "NOT_ESTIMABLE" and not compared["tables"] and "cannot be shared" in compared["warnings"][0]
 
 
 # --- 5. the missing-figures exception covers the matching free-text objection ---------------------------------------

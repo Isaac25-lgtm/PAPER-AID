@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 import pandas as pd
 import xlsxwriter
 
+from app.datalab.engine.disclosure import cleaning_description, count_hidden, few, records_used
 from app.datalab.models import AnalysisResult, CleaningStep, ResultTable, Variable
 
 GREEN = "#0F633E"
@@ -47,7 +48,7 @@ def build(title: str, source_name: str, version: int, rows: int, threshold: int,
     readme.set_column(0, 0, 28)
     readme.set_column(1, 1, 90)
     readme.write(0, 0, title or "Analysis", title_fmt)
-    lines = [("Made", f"{datetime.now(UTC):%d %B %Y} by PaperAid Data Lab"), ("Source file", source_name), ("Data version", f"{version} ({rows:,} records)"),
+    lines = [("Made", f"{datetime.now(UTC):%d %B %Y} by PaperAid Data Lab"), ("Source file", source_name), ("Data version", f"{version} ({few(rows, threshold)} records)"),
              ("Analyses", str(len(analyses))), ("Small counts", f"Counts below {threshold} are hidden (–), with any number that would reveal them."),
              ("Personal identifiers", "This workbook holds no individual records. Columns that may identify people or places are left out of the analyses."),
              ("Numbers", "Every number was calculated by PaperAid's code; see each analysis sheet for how.")]
@@ -56,9 +57,10 @@ def build(title: str, source_name: str, version: int, rows: int, threshold: int,
         readme.write(i, 1, v, cell)
 
     _table_sheet(book, used, "Data dictionary", ["Column", "Label", "Type", "Missing", "Left out"],
-                 [[v.name, v.label, v.kind.title(), _count(v.missing, threshold), "Yes" if v.excluded else ""] for v in variables], head, cell, whole)
+                  [[v.name, v.label, v.kind.title(), _count(v.missing, threshold, v.valid + v.missing), "Yes" if v.excluded else ""] for v in variables], head, cell, whole)
     _table_sheet(book, used, "Cleaning log", ["Step", "Change", "Values or rows changed", "How", "Version made"],
-                 [[n, s.description, _count(s.affected, threshold), "Automatic" if s.automatic else "Confirmed", s.version or ""]
+                  [[n, cleaning_description(s.description, s.column, s.affected, rows, threshold),
+                    _count(s.affected, threshold, max(rows, s.affected)), "Automatic" if s.automatic else "Confirmed", s.version or ""]
                   for n, s in enumerate(cleaning, start=1)], head, cell, whole)
 
     for n, result in enumerate(analyses, start=1):
@@ -86,7 +88,7 @@ def build(title: str, source_name: str, version: int, rows: int, threshold: int,
                 ws.write(row, 0, text, note)
             row += 2
         rec = result.record
-        details = [("Question", rec.question), ("Method", rec.method), ("Why this method", rec.why), ("Records used", f"{rec.rows_used:,} of {rec.rows_available:,}"),
+        details = [("Question", rec.question), ("Method", rec.method), ("Why this method", rec.why), ("Records used", records_used(rec.rows_used, rec.rows_available, threshold)),
                    ("Left out", " ".join(rec.left_out) or "None"), ("Coding", " ".join(rec.coding) or "As in the data"), ("Missing values", rec.missing),
                    ("Checks", " ".join(rec.assumptions) or "None needed"), ("Significance level", f"{rec.alpha:g}"), ("Software", ", ".join(rec.software)),
                    ("Warnings", " ".join(result.warnings) or "None")]
@@ -106,8 +108,8 @@ def build(title: str, source_name: str, version: int, rows: int, threshold: int,
     return buffer.getvalue()
 
 
-def _count(n: int, threshold: int) -> int | str:
-    return n if n == 0 or n >= threshold else f"fewer than {threshold}"
+def _count(n: int, threshold: int, total: int | None = None) -> int | str:
+    return "hidden to protect privacy" if count_hidden(n, total if total is not None else n, threshold) else n
 
 
 def cleaned(title: str, source_name: str, version: int, data: pd.DataFrame, released: list[str]) -> bytes:

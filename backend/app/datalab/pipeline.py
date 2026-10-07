@@ -106,16 +106,19 @@ def _runner(ctx: "StageContext") -> DataRunner:
 
 
 def _context(inp: ReportInput) -> tuple[dict[str, tuple[str, str]], dict[str, str], dict[str, Any]]:
-    general = {"records": (f"{inp.rows:,}", "the records in the dataset"), "variables": (f"{inp.columns:,}", "the variables in the dataset"),
+    from app.datalab.engine.disclosure import cleaning_description, few
+
+    general = {"records": (few(inp.rows, inp.threshold), "the records in the dataset"), "variables": (f"{inp.columns:,}", "the variables in the dataset"),
                "analyses": (f"{len(inp.analyses):,}", "the analyses reported"), "alpha": (f"{inp.alpha:g}".lstrip("0") or "0", "the significance level"),
                "ci": ("95%", "the confidence level of every interval")}
     values, prefixes = narrative.tokens(inp.analyses, general)
     dataset = {"source": inp.source_name, "records": "⟦N:records⟧", "variables": "⟦N:variables⟧", "version": inp.version,
-               "changes": [s.description for s in inp.cleaning]}
+                "changes": [cleaning_description(s.description, s.column, s.affected, inp.rows, inp.threshold) for s in inp.cleaning]}
     chapter = inp.mode == "CHAPTER_FOUR"
     return values, prefixes, narrative.payload(inp.title, inp.purpose, dataset, inp.alpha, inp.analyses, prefixes, values,
                                                inp.objectives if chapter else None, inp.objective_of,
-                                               [p.model_dump() for p in inp.chapter_three] if chapter else None, inp.missing_objectives if chapter else None)
+                                                [p.model_dump() for p in inp.chapter_three] if chapter else None, inp.missing_objectives if chapter else None,
+                                                inp.threshold)
 
 
 def stage_drafting(ctx: "StageContext") -> None:
@@ -146,7 +149,7 @@ def assemble(inp: ReportInput, draft: dict[str, Any], values: dict[str, tuple[st
 
     if inp.mode == "CHAPTER_FOUR":
         return report.build_chapter(inp.title, inp.rows, inp.version, inp.cleaning, inp.objectives, inp.objective_of, inp.analyses, inp.charts, draft, fill,
-                                    inp.missing_objectives)
+                                    inp.missing_objectives, inp.threshold)
     return report.build(inp.title, inp.source_name, inp.sheet, inp.version, inp.rows, inp.columns, inp.alpha, inp.threshold, inp.cleaning, inp.variables,
                         inp.analyses, inp.charts, draft, fill, inp.released)
 
@@ -220,7 +223,7 @@ def split_rendered(entry: dict[str, Any], limit: int) -> list[dict[str, Any]]:
             for n, piece in enumerate(pieces)]
 
 
-def bounded_parts(entries: list[dict[str, Any]], repeated: Any) -> tuple[list[list[dict[str, Any]]], list[dict[str, Any]]]:
+def bounded_parts(entries: list[dict[str, Any]], repeated: Any, title: str = "", subtitle: str = "") -> tuple[list[list[dict[str, Any]]], list[dict[str, Any]]]:
     """Sections in review parts of at most FINAL_PART_WORDS each, counting what every part repeats (the
     inputs and the manifest); the manifest names the part each section is in."""
     reserve = 100  # document title, subtitle, part labels and JSON envelope
@@ -240,7 +243,9 @@ def bounded_parts(entries: list[dict[str, Any]], repeated: Any) -> tuple[list[li
                 parts[-1].append(piece)
                 words += size
         manifest = [{"key": e["key"], "heading": e["heading"], "part": n} for n, part in enumerate(parts, start=1) for e in part]
-        over = max(_words(part) for part in parts) + _words(repeated) + _words(manifest) + reserve - FINAL_PART_WORDS
+        over = max(_words({**repeated, "manifest": manifest, "part": f"{n} of {len(parts)}",
+                           "document": {"title": title, "subtitle": subtitle, "sections": part}})
+                   for n, part in enumerate(parts, start=1)) - FINAL_PART_WORDS
         if over <= 0:
             return parts, manifest
         bound -= over + 50
@@ -249,14 +254,20 @@ def bounded_parts(entries: list[dict[str, Any]], repeated: Any) -> tuple[list[li
 
 def document_parts(document: ReportDocument, written: set[str] | None = None, repeated: Any = None) -> tuple[list[list[dict[str, Any]]], list[dict[str, Any]]]:
     """The document in bounded parts (every section and appendix, in order) and the manifest of the whole."""
-    return bounded_parts([_rendered(s, written) for s in document.sections + document.appendices], repeated or {})
+    return bounded_parts([_rendered(s, written) for s in document.sections + document.appendices], repeated or {}, document.title, document.subtitle)
 
 
 def _dataset(inp: ReportInput) -> dict[str, Any]:
     """The facts PaperAid's code states about the data, so the reviewer can check that text against them."""
-    return {"file": inp.source_name, "sheet": inp.sheet, "records": inp.rows, "variables": inp.columns, "version": inp.version,
-            "preparation": [{"step": s.description, "how": "applied automatically" if s.automatic else "confirmed by the researcher"} for s in inp.cleaning],
-            "columns": [{"name": v.title(), "type": v.kind, "withValue": v.valid, "missing": v.missing, "setAside": v.excluded} for v in inp.variables],
+    from app.datalab.engine.disclosure import cleaning_description, count_hidden, few
+
+    return {"file": inp.source_name, "sheet": inp.sheet, "records": few(inp.rows, inp.threshold), "variables": inp.columns, "version": inp.version,
+            "preparation": [{"step": cleaning_description(s.description, s.column, s.affected, inp.rows, inp.threshold),
+                             "how": "applied automatically" if s.automatic else "confirmed by the researcher"} for s in inp.cleaning],
+            "columns": [{"name": v.title(), "type": v.kind,
+                         "withValue": "hidden" if count_hidden(v.valid, v.valid + v.missing, inp.threshold) else v.valid,
+                         "missing": "hidden" if count_hidden(v.missing, v.valid + v.missing, inp.threshold) else v.missing,
+                         "setAside": v.excluded} for v in inp.variables],
             "includedByResearcher": inp.released}
 
 
@@ -303,9 +314,14 @@ def stage_auditing(ctx: "StageContext") -> None:
     values, prefixes, payload = _context(inp)
     chapter = inp.mode == "CHAPTER_FOUR"
     draft = ctx.get_json("draft.json")
+    from app.datalab.engine.disclosure import records_used
+
     analyses = [{"ref": prefixes[r.id], "title": r.title, "question": r.record.question, "method": r.record.method, "status": r.status, "warnings": r.warnings,
-                 "numbers": {k.split(".", 1)[1]: v for k, (v, _m) in values.items() if k.startswith(prefixes[r.id] + ".")},
-                 "record": r.record.model_dump(mode="json", by_alias=True)} for r in inp.analyses]
+                  "numbers": {k.split(".", 1)[1]: v for k, (v, _m) in values.items() if k.startswith(prefixes[r.id] + ".")},
+                  "record": {**r.record.model_dump(mode="json", by_alias=True),
+                             "rowsUsed": records_used(r.record.rows_used, r.record.rows_available, inp.threshold),
+                             "rowsAvailable": "hidden to protect privacy" if 0 < r.record.rows_available < inp.threshold else r.record.rows_available}}
+                for r in inp.analyses]
     seen: list[dict[str, Any]] = []
     previous: list[str] = []
     for round_ in runner.audit_rounds(REVIEW_REPAIRS + 1):
@@ -357,8 +373,9 @@ def stage_exporting(ctx: "StageContext") -> None:
 
     docx = report.to_docx(document, chart_bytes)
     job_id = ctx.job.id
-    doc_path = f"{project.storage_prefix()}/reports/{job_id}.json"
-    docx_path = f"{project.storage_prefix()}/reports/{job_id}.docx"
+    ctx.assert_owner()
+    doc_path = f"{project.storage_prefix()}/reports/{job_id}-{ctx.owner}.json"
+    docx_path = f"{project.storage_prefix()}/reports/{job_id}-{ctx.owner}.docx"
     files.put(doc_path, document.model_dump_json(by_alias=True).encode(), "application/json")
     files.put(docx_path, docx, DOCX)
     gone = False
@@ -368,7 +385,7 @@ def stage_exporting(ctx: "StageContext") -> None:
         gone = p is None or p.deleting
         if p is None or p.deleting:
             return None
-        if j.status != JobStatus.PROCESSING or j.stage != Stage.EXPORTING:
+        if j.status != JobStatus.PROCESSING or j.stage != Stage.EXPORTING or j.lease_owner != ctx.owner:
             return None
         if not any(r.job_id == job_id for r in p.reports):
             version = len(p.reports) + 1
@@ -378,7 +395,7 @@ def stage_exporting(ctx: "StageContext") -> None:
         j.outcome = j.outcome or "FULL"
         if Stage.EXPORTING not in j.completed_stages:
             j.completed_stages.append(Stage.EXPORTING)
-        j.attempts, j.lease_until, j.stage = 0, None, None
+        j.attempts, j.lease_until, j.stage, j.lease_owner = 0, None, None, ""
         state.transition(j, JobStatus.COMPLETED, "Completed")
         settle_completed(j, w)
         return j, w, p

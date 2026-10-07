@@ -123,11 +123,14 @@ function Workspace({ work, onChange, onReload }: { work: Work; onChange: (w: Wor
   }, [running])
 
   useEffect(() => {
+    let current = true
     setDoc(null)
+    setError(null)
     data.works
       .document(work.id, work.current)
-      .then(setDoc)
-      .catch((e: unknown) => setError(e instanceof DataError ? e.message : 'We could not load the document.'))
+      .then((value) => { if (current) setDoc(value) })
+      .catch((e: unknown) => { if (current) setError(e instanceof DataError ? e.message : 'We could not load the document.') })
+    return () => { current = false }
   }, [data, work.id, work.current])
 
   // A change is being applied: check until the new version is saved, then show it.

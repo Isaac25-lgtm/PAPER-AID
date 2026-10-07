@@ -199,25 +199,34 @@ function Workspace({ project, onChange, onReload }: { project: Project; onChange
   const running = Boolean(project.activeJob)
 
   useEffect(() => {
+    let current = true
     setChapter(null)
-    if (!state?.current) return
+    setError(null)
+    if (!state?.current) return () => { current = false }
     data.projects
       .chapter(project.id, shown, state.current)
-      .then(setChapter)
-      .catch((e: unknown) => setError(e instanceof DataError ? e.message : 'We could not load this chapter.'))
+      .then((value) => { if (current) setChapter(value) })
+      .catch((e: unknown) => { if (current) setError(e instanceof DataError ? e.message : 'We could not load this chapter.') })
+    return () => { current = false }
   }, [data, project.id, shown, state?.current])
 
   useEffect(() => {
-    if (!project.framework) return
+    if (!project.framework) {
+      setFigure(null)
+      return
+    }
+    let current = true
     let url: string | null = null
     data.projects
       .framework(project.id)
       .then((blob) => {
         url = URL.createObjectURL(blob)
-        setFigure(url)
+        if (current) setFigure(url)
+        else URL.revokeObjectURL(url)
       })
-      .catch(() => setFigure(null))
+      .catch(() => { if (current) setFigure(null) })
     return () => {
+      current = false
       if (url) URL.revokeObjectURL(url)
     }
   }, [data, project.id, project.framework, project.planVersion])
