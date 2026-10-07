@@ -21,6 +21,13 @@ from tests.test_api import STUDENT, wait
 from tests.test_works import QUESTION, _coursework, _run, _work
 from tests.test_works_golden import _spec
 
+
+@pytest.fixture(autouse=True)
+def earlier_workflow(monkeypatch):
+    """These tests cover the multi-provider algorithm that engines priced before the Gemini workflow
+    (owner decision 2026-10-07) keep running on, and that GEMINI_WORKFLOW=false brings back."""
+    monkeypatch.setenv("GEMINI_WORKFLOW", "false")
+
 # What the live final reviewer said about the owner's plan (job_76db5523ed82, 2026-09-30).
 LIVE_OBJECTIONS = [
     "Eligibility requires use of only one specified feature, but the analyses include separate quality measures for recommendations and conversational tools. "

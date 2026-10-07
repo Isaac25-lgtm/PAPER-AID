@@ -12,6 +12,8 @@ dependencies = [
   "pypdf>=5",
   "anthropic>=1.0",
   "openai>=1.50",
+  "google-genai==2.28.0",  # Vertex Gemini via ADC; current SDK verified locally 2026-10-06
+  "jsonschema>=4.23,<5",  # independently enforce Vertex response JSON schemas, including additionalProperties
   "httpx>=0.27",  # the source check reads source pages to confirm quotations
   "pillow>=11",  # the conceptual framework figure (2026-10-01)
   # Data Lab (2026-10-03): reading, statistics, charts, the workbook and district maps, all by code
@@ -35,7 +37,7 @@ cloud = [
   "google-cloud-storage>=2.18",
   "google-cloud-tasks>=2.16",
 ]
-dev = ["pytest>=8", "httpx>=0.27", "ruff>=0.6", "statsmodels>=0.14"]  # statsmodels: an independent check of the Data Lab statistics
+dev = ["pytest>=8", "pytest-xdist>=3.6", "httpx>=0.27", "ruff>=0.6", "statsmodels>=0.14"]  # statsmodels: an independent check of the Data Lab statistics; xdist: release.sh runs the suite in parallel
 
 [build-system]
 requires = ["setuptools>=68"]

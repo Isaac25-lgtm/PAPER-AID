@@ -68,6 +68,7 @@ WORKS = ("CONCEPT_NOTE", "COURSEWORK", "FUNDING_PROPOSAL")
 # Data Lab (owner decision 2026-10-03): its analyses are code; its report uses the work roles. Offered
 # like a work service: switched on and priced first, testers and admins while the pilot is closed.
 GATED = (*WORKS, "DATALAB")
+SEARCHING = ("SOURCE_CHECK", "PROPOSAL", *WORKS)  # services with web research steps
 
 
 def availability(settings: Settings, user: "User | None" = None) -> dict[str, str]:
@@ -75,13 +76,15 @@ def availability(settings: Settings, user: "User | None" = None) -> dict[str, st
     = built, but the AI keys are not set; "invite_only" = testing is limited to invited testers and
     this user isn't one."""
     result = {}
+    search_ready = settings.search_configured
     for service in ("AI_CHECK", "REFINE", "FORMAT", "TEMPLATE_FORMAT", "REDRAFT", "LATEX", "SOURCE_CHECK", "PROPOSAL", *GATED):
         switched_on = settings.datalab_enabled if service == "DATALAB" else service in settings.works_enabled
         # Data Lab's analyses are code and free, so it opens without prices; its paid report checks its own (app.datalab.service).
         priced = service == "DATALAB" or work_prices_set(settings, service)
         if service not in BUILT or (service in GATED and (not switched_on or not priced)):
             result[service] = "soon"  # no invented prices: a work service without its token prices is not offered
-        elif service in NEEDS_AI and not settings.ai_configured or service in GATED and not settings.roles_configured:
+        elif ((service in GATED and not settings.roles_configured) or (service in NEEDS_AI and service not in GATED and not settings.ai_configured)
+              or (service in SEARCHING and not search_ready)):
             result[service] = "not_configured"
         elif service in NEEDS_AI and not may_use_ai(settings, user) or service in GATED and not may_use_works(settings, user):
             result[service] = "invite_only"

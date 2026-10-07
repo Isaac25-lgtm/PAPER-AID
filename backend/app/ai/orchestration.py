@@ -60,7 +60,8 @@ Spend guarantees:
 
 import hashlib
 import json
-from collections.abc import Callable
+import time
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Protocol
@@ -194,12 +195,18 @@ DRAFTING_TASKS = {"critique", "refine", "repair", "redraft", "redraft_fix", "ver
 FINALISED_BY_DRAFTER = {"p_finalise", "p_profile_finalise", "spec_finalise"}
 # ... and these works reviews are Sol's final decisions instead of the evaluator's.
 FINAL_REVIEW_TASKS = {"w_plan_review", "w_results_review", "w_final", "d_report_review", "q_review"}
+# A web search the provider declined to answer (a safety or recitation stop: Gemini stops rather than
+# repeat a web page word for word, live run 2026-10-07) found nothing usable: that need or claim has no
+# source, and the rest of the step goes on. It was still recorded and counts against the cap.
+SEARCH_DECLINED = frozenset({"VERTEX_SAFETY_BLOCK", "MODEL_REFUSED"})
 REVIEW_REPAIRS = 2  # targeted repairs after a final-review objection, each reviewed again (owner decision 2026-09-30)
 FINAL_PART_WORDS = 7000  # the most one works final-review call reads; a longer deliverable is reviewed in parts
 
 
 def model_for_engine(engine: Engine, task: str) -> str:
     """One routing rule shared by execution and the cost projection, using frozen run settings."""
+    if task in engine.vertex_routes:
+        return engine.vertex_routes[task][0]
     role = STEPS[task].role
     if engine.single_reviewer and task in FINALISED_BY_DRAFTER:
         return engine.drafting_model or engine.writer_model
@@ -230,7 +237,7 @@ def work_engine(settings: Settings, service: str) -> Engine:
     from app.rules import library
 
     engine = current_engine(settings)
-    return engine.model_copy(
+    return freeze_vertex(settings, engine.model_copy(
         update={
             "roles": {k: v for k, v in settings.role_models.items() if v},
             "tier": settings.service_tiers.get(service, "STANDARD"),
@@ -238,7 +245,86 @@ def work_engine(settings: Settings, service: str) -> Engine:
             "rules_version": library.VERSION,
             "content": content_now(),
         }
-    )
+    ))
+
+
+SIGNOFF = "final_signoff"
+# Instructions added to a released prompt on Vertex, versioned and frozen like the prompts themselves.
+VERTEX_ADDENDA = {"signoff": "signoff-v1", "search": "vertex-search-v1"}
+
+
+def freeze_vertex(settings: Settings, engine: Engine) -> Engine:
+    """Resolve the Gemini workflow to concrete Vertex routes, thinking levels, capabilities and the
+    dated price records in force, once, when the engine is priced. Engines frozen before the workflow
+    (and GEMINI_WORKFLOW=false) keep their own provider routes and leave all of this empty.
+
+    A fallback must have the task's capabilities and cost no more than its primary in any billing
+    dimension, so the projection of the primary route stays a ceiling."""
+    from app.ai.gemini import VertexPrice, stage_for, stage_route
+
+    for name in ("vertex_routes", "vertex_stages", "vertex_thinking", "vertex_models", "vertex_prices", "vertex_signoff"):
+        setattr(engine, name, {} if name != "vertex_signoff" else [])
+    if not settings.gemini_workflow:
+        return engine
+    prices = {model: price.at() for model, price in settings.vertex_prices.items()}
+    prices = {model: price if price.covers() else VertexPrice(source=price.source) for model, price in prices.items()}
+
+    def freeze(stage: str, task: str) -> list[str]:
+        refs, thinking = stage_route(settings, stage, task)
+        engine.vertex_thinking[stage] = thinking
+        for ref in refs:
+            model = ref.partition(":")[2]
+            engine.vertex_models[model] = settings.paperaid_gemini_models[model].model_dump(mode="json")
+            if model in prices:
+                engine.vertex_prices[model] = prices[model].model_dump(mode="json")
+        primary = prices.get(refs[0].partition(":")[2])
+        for ref in refs[1:]:
+            fallback = prices.get(ref.partition(":")[2])
+            if not primary or not fallback or primary.status != "VERIFIED" or fallback.status != "VERIFIED":
+                raise PermanentStageError("VERTEX_PRICING_UNVERIFIED", "AI pricing is not configured.", "fallback prices must be verified")
+            primary_rates = (primary.input, primary.output, primary.cached, primary.long_input or primary.input,
+                             primary.long_output or primary.output, primary.long_cached or primary.cached)
+            fallback_rates = (fallback.input, fallback.output, fallback.cached, fallback.long_input or fallback.input,
+                              fallback.long_output or fallback.output, fallback.long_cached or fallback.cached)
+            if any(b > a for a, b in zip(primary_rates, fallback_rates, strict=True)):
+                raise PermanentStageError("VERTEX_FALLBACK_PRICE", "AI fallback pricing is not configured safely.", "fallback can cost more than quote")
+        return refs
+
+    for task in STEPS:
+        stage = stage_for(task, engine.tier)
+        engine.vertex_routes[task], engine.vertex_stages[task] = freeze(stage, task), stage
+    engine.vertex_signoff = freeze(SIGNOFF, "review")
+    engine.vertex_addenda = dict(VERTEX_ADDENDA)
+    engine.vertex_project = settings.vertex_project or ""
+    engine.vertex_location = settings.vertex_location or ""
+    engine.vertex_search_enabled = settings.vertex_search_enabled
+    return engine
+
+
+def vertex_settings(settings: Settings, engine: Engine) -> Settings:
+    """The frozen Vertex project, location, capabilities and rates of an engine, for its execution AND
+    its projections. An engine without Vertex routes runs on the settings unchanged."""
+    if not engine.vertex_routes:
+        return settings
+    from app.ai.gemini import GeminiModel, VertexPrice
+
+    return Settings.model_validate({**settings.model_dump(),
+        "vertex_project": engine.vertex_project, "vertex_location": engine.vertex_location,
+        "vertex_search_enabled": engine.vertex_search_enabled,
+        "paperaid_gemini_models": {k: GeminiModel.model_validate(v) for k, v in engine.vertex_models.items()},
+        "vertex_prices": {k: VertexPrice.model_validate(v) for k, v in engine.vertex_prices.items()}})
+
+
+def output_allowance(engine: Engine, task: str, stage: str = "") -> tuple[int, int]:
+    """(output limit, expected thinking tokens) of a step on its frozen route. On Vertex, thinking
+    counts against the output limit, so the step's visible allowance gets its level's thinking room."""
+    from app.ai.gemini import THINKING_ROOM
+
+    step = STEPS[task]
+    level = engine.vertex_thinking.get(stage or engine.vertex_stages.get(task, ""))
+    if not level:
+        return step.max_tokens, costs.THINKING_ALLOWANCE_TOKENS
+    return step.max_tokens + THINKING_ROOM[level], THINKING_ROOM[level] // 2
 
 
 def content_now() -> dict[str, str]:
@@ -269,11 +355,11 @@ def check_content(engine: Engine | None) -> None:
 
 def current_engine(settings: Settings) -> Engine:
     """The engine a run priced now will execute with (see `Engine`)."""
-    return Engine(lead_model=settings.lead_model, writer_model=settings.writer_model, ai_check_model=settings.ai_check_model,
+    return freeze_vertex(settings, Engine(lead_model=settings.lead_model, writer_model=settings.writer_model, ai_check_model=settings.ai_check_model,
                   ai_check_peer_model=settings.ai_check_peer_model, routine_model=settings.routine_model, drafting_model=settings.drafting_model,
                   require_dual_approval=settings.require_dual_approval, explicit_coverage=True, frontier_guidance=settings.frontier_guidance,
                   partial_chapters=settings.partial_chapters, single_reviewer=settings.single_reviewer,
-                  prompts={task: step.prompt for task, step in STEPS.items()})
+                   prompts={task: step.prompt for task, step in STEPS.items()}))
 
 
 REASONS = ["GENERIC_PHRASING", "UNIFORM_STRUCTURE", "LOW_SPECIFICITY", "FORMULAIC_TRANSITIONS", "OVER_HEDGING", "UNSUPPORTED_SUMMARY", "REPETITION", "STYLE_SHIFT"]
@@ -633,6 +719,10 @@ class AIRunner:
     ):
         self.settings = settings
         self._engine = engine or current_engine(settings)
+        if self._engine.vertex_routes:
+            # A resumed job keeps its project, capabilities and verified rates, even when local
+            # configuration changes. Legacy engines never enter this branch.
+            self.settings = vertex_settings(settings, self._engine)
         self.budget_reached = False  # a batched step stopped early because the job's spend cap was reached
         self._phase = phase
         self._record = record
@@ -642,9 +732,27 @@ class AIRunner:
         # Called before every paid call: renews the stage's lease and may hand the rest of the stage
         # to a fresh delivery (which replays the calls already made from the cache, at no cost).
         self._heartbeat = heartbeat or (lambda: None)
+        self._round = 0  # the round of the review loop in progress (audit_rounds)
+        self._audits: dict[str, list[Any]] = {}  # this loop's earlier answers of each approval review
 
     def model_for(self, task: str) -> str:
         return model_for_engine(self._engine, task)
+
+    def audit_rounds(self, count: int, start: int = 0) -> Iterator[int]:
+        """The rounds of one review → targeted repair → review loop. On the Gemini workflow the first
+        round's approval review is the premium audit; each later round, after a repair, is the final
+        sign-off, which is shown the earlier rounds' answers and checks that they were resolved and
+        nothing broke, instead of repeating the full audit. Older engines are unaffected.
+        `start` is 1 when the loop's first review was made before it."""
+        if start == 0:
+            self._audits.clear()
+        try:
+            for round_ in range(start, start + count):
+                self._round = round_
+                yield round_
+        finally:
+            self._round = 0
+            self._audits.clear()
 
     @property
     def guided(self) -> bool:
@@ -672,38 +780,90 @@ class AIRunner:
         `max_searches`, the model may search the web that many times; `accept` then sees the
         answer with the provider's result (URLs returned, queries sent) and returns what may be kept
         (and cached)."""
+        from app.ai.gemini import SIGNOFF_TASKS
+
         step = STEPS[task]
-        model_ref = self.model_for(task)
         prompt = self._prompt_for(task)
         system = PROMPTS[prompt]
-        key = hashlib.sha256(json.dumps([task, model_ref, system, payload], sort_keys=True).encode()).hexdigest()[:40]
+        refs = self._engine.vertex_routes.get(task) or [self.model_for(task)]
+        stage = self._engine.vertex_stages.get(task, "")
+        prior: list[Any] = []
+        if task in SIGNOFF_TASKS and self._engine.vertex_signoff:
+            prior = self._audits.setdefault(task, [])
+            if self._round > 0:  # a re-review after a repair: the final sign-off, shown the earlier rounds' answers
+                refs, stage = self._engine.vertex_signoff, SIGNOFF
+                system += "\n\n" + PROMPTS[self._engine.vertex_addenda["signoff"]]
+                payload = {**payload, "previousAudit": list(prior)}
+        if max_searches and refs[0].startswith("vertex:"):
+            system += "\n\n" + PROMPTS[self._engine.vertex_addenda["search"]].replace("{max_searches}", str(max_searches))
+        model_ref = refs[0]
+        cache_input = [task, model_ref, system, payload]
+        if model_ref.startswith("vertex:"):
+            cache_input.extend([schema, self._engine.vertex_project, self._engine.vertex_location, refs, self._engine.vertex_thinking.get(stage, "")])
+        key = hashlib.sha256(json.dumps(cache_input, sort_keys=True).encode()).hexdigest()[:40]
         cached = self._cache.get(key) if self._cache else None
         if cached is not None:
             try:
-                return shape.model_validate(parse(cached, task))
+                answer = shape.model_validate(parse(cached, task))
             except (RetryableStageError, ValidationError):
                 pass  # an unusable saved answer is ignored and the call is made again
+            else:
+                prior.append(answer.model_dump(mode="json"))
+                return answer
 
         self._heartbeat()
-        provider, model = provider_for(model_ref, self.settings)
         prices = self.settings.model_prices
+        long_prices = self.settings.model_long_prices
         table = self._engine.price_table  # the projection and cap use the table the step was priced with
         prompt_chars = len(system) + len(json.dumps(payload))
-        fee = 0.0
-        if max_searches:  # the pages the searches read arrive as input, and each search has a fee
-            prompt_chars += int(costs.SEARCH_INPUT_TOKENS_WORST * costs.CEILING_CHARS_PER_TOKEN) * max_searches
-            fee = costs.search_fee_usd(provider.name, max_searches)
-        spent = self._spent()
-        costs.ensure_within_budget(spent, costs.estimate_usd(provider.name, model, prompt_chars, step.max_tokens, prices, table) + fee, self._budget)
-        # Hard ceiling: never allow more output than the remaining budget can pay for in the worst case.
-        max_tokens = costs.affordable_output_tokens(provider.name, model, prompt_chars, step.max_tokens, self._budget - spent - fee, prices, table)
-        if max_tokens < min(costs.MIN_OUTPUT_TOKENS, step.max_tokens):
-            costs.ensure_within_budget(spent, float("inf"), self._budget)  # raises BUDGET_EXCEEDED
+        if model_ref.startswith("vertex:"):
+            prompt_chars += len(json.dumps(schema))  # Vertex sends the answer schema as input too
         if max_searches:
-            result: ModelResult = provider.search_json(task, model, system, payload, schema, max_tokens, max_searches)
-        else:
-            result = provider.json(task, model, system, payload, schema, max_tokens)
+            prompt_chars += int(costs.SEARCH_INPUT_TOKENS_WORST * costs.CEILING_CHARS_PER_TOKEN) * max_searches
+        limit, thinking_tokens = output_allowance(self._engine, task, stage)
+        thinking = self._engine.vertex_thinking.get(stage, "")
+        for attempt, ref in enumerate(refs):
+            if ref.startswith("vertex:"):
+                record = self.settings.vertex_prices.get(ref.partition(":")[2])
+                if record and not record.covers():
+                    # Keep the old quote untouched, but don't buy a new call at an expired rate.
+                    # Cached work returned above is safe to reuse and incurs no new spend.
+                    raise PermanentStageError("VERTEX_PRICE_PERIOD_CHANGED",
+                                              "AI pricing changed after this job was quoted. Please start it again with a new quote.",
+                                              "frozen Vertex token-rate period is no longer current")
+            provider, model = provider_for(ref, self.settings)
+            provider_name = provider.name
+            fee = costs.search_fee_usd(provider_name, max_searches, self.settings.model_unit_prices, model) if max_searches else 0.0
+            spent = self._spent()
+            estimate = costs.estimate_usd(provider_name, model, prompt_chars, limit, prices, table, long_prices, thinking_tokens) + fee
+            costs.ensure_within_budget(spent, estimate, self._budget)
+            max_tokens = costs.affordable_output_tokens(provider_name, model, prompt_chars, limit, self._budget - spent - fee, prices, table, long_prices)
+            if max_tokens < min(costs.MIN_OUTPUT_TOKENS, limit):
+                costs.ensure_within_budget(spent, float("inf"), self._budget)
+            options = {"thinking": thinking} if provider_name == "vertex" and thinking else {}
+            started = time.monotonic()
+            try:
+                result: ModelResult = (provider.search_json(task, model, system, payload, schema, max_tokens, max_searches, **options)
+                                       if max_searches else provider.json(task, model, system, payload, schema, max_tokens, **options))
+            except (RetryableStageError, PermanentStageError) as exc:
+                if provider_name == "vertex":
+                    # Google charges only requests that succeed; one we stopped waiting for may still have been
+                    # billed, so a timeout counts against the job's cap at its estimate.
+                    timed_out = exc.code == "VERTEX_TIMEOUT"
+                    self._record(ModelCall(stage=step.stage, phase=self._phase, provider=provider_name, model=model,
+                                           prompt_version=prompt, input_tokens=0, output_tokens=0, cached_tokens=0,
+                                           latency_ms=int((time.monotonic() - started) * 1000), cost_usd=estimate if timed_out else 0,
+                                           task=task, role=step.role, workflow_stage=stage, thinking_level=thinking,
+                                           error_code=exc.code, fallback_attempt=attempt, estimated_cost_usd=estimate,
+                                           pricing_status="ESTIMATED_TIMEOUT" if timed_out else "NOT_CHARGED"))
+                fallback_ok = provider_name == "vertex" and exc.code in {"PROVIDER_UNAVAILABLE", "VERTEX_TIMEOUT", "VERTEX_RATE_LIMIT", "VERTEX_MODEL_UNAVAILABLE"}
+                if fallback_ok and attempt + 1 < len(refs):
+                    self._heartbeat()
+                    continue
+                raise
+            break
         u = result.usage
+        error_code = result.error_code
         self._record(
             ModelCall(
                 stage=step.stage,
@@ -719,10 +879,23 @@ class AIRunner:
                 task=task,
                 role=("EVALUATOR_PREMIUM" if self._engine.tier == "PREMIUM" else "EVALUATOR_STANDARD") if step.role == "EVALUATOR" else step.role,
                 latency_ms=u.latency_ms,
-                cost_usd=costs.cost_usd(result.provider, result.model, u.input_tokens, u.output_tokens, u.cached_tokens, prices, u.cache_write_tokens, u.search_calls),
+                cost_usd=costs.cost_usd(result.provider, result.model, u.input_tokens, u.output_tokens, u.cached_tokens, prices, u.cache_write_tokens,
+                                       u.search_calls, billable_units=u.billable_units, unit_prices=self.settings.model_unit_prices, long_prices=long_prices),
+                workflow_stage=stage, thinking_level=thinking if result.provider == "vertex" else "", thinking_tokens=u.thinking_tokens,
+                visible_output_tokens=u.visible_output_tokens,
+                tool_input_tokens=u.tool_input_tokens, billable_units=u.billable_units, finish_reason=result.finish_reason or result.stop,
+                safety_block=result.safety_block, error_code=error_code, fallback_attempt=attempt, estimated_cost_usd=estimate,
+                pricing_status=("UNKNOWN_USAGE" if error_code == "VERTEX_USAGE_MISSING" else "VERIFIED") if result.provider == "vertex" else "",
+                model_version=result.model_version,
             )
         )
+        if error_code:
+            retryable = result.error_retryable or error_code in ("MALFORMED_OUTPUT", "SCHEMA_VALIDATION_FAILED")
+            error = RetryableStageError if retryable else PermanentStageError
+            raise error(error_code, UNAVAILABLE if retryable else "The AI provider could not produce a verifiable result. Nothing was delivered.", f"{result.provider} {task}: {error_code}")
         if result.stop == "refusal":
+            if result.safety_block:
+                raise PermanentStageError("VERTEX_SAFETY_BLOCK", "The AI provider blocked this request. Nothing was delivered.", f"vertex safety block on {task}")
             raise PermanentStageError("MODEL_REFUSED", "We couldn't process this document with our AI provider.", f"{result.provider} refusal on {task}")
         if result.stop == "max_tokens":
             return None
@@ -733,6 +906,7 @@ class AIRunner:
             text = validated.model_dump_json()
         if self._cache:
             self._cache.put(key, text)
+        prior.append(validated.model_dump(mode="json"))
         return validated
 
     def _batched[T: BaseModel](
@@ -1060,7 +1234,12 @@ class AIRunner:
                 return ResearchAnswer(support="NOT_FOUND", note="No source that the search actually opened could be confirmed for this claim.", sources=[])
             return answer.model_copy(update={"sources": kept})
 
-        return self._call("research", {"claim": claim, "query": query, "citedInPaper": cited}, _RESEARCH, ResearchAnswer, max_searches=max_searches, accept=accept)
+        try:
+            return self._call("research", {"claim": claim, "query": query, "citedInPaper": cited}, _RESEARCH, ResearchAnswer, max_searches=max_searches, accept=accept)
+        except PermanentStageError as exc:
+            if exc.code not in SEARCH_DECLINED:
+                raise
+            return ResearchAnswer(support="NOT_FOUND", note="The search could not return a source that could be quoted for this claim.", sources=[])
 
     def verify_claims(self, items: list[dict[str, Any]]) -> dict[str, VerifyItem]:
         """The writer's independent check, without searching: does each quoted passage support

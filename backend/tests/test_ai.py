@@ -12,6 +12,13 @@ from app.ai.styles import writing_brief
 from app.core.config import Settings
 from app.core.errors import PermanentStageError, RetryableStageError
 
+
+@pytest.fixture(autouse=True)
+def earlier_workflow(monkeypatch):
+    """These tests cover the multi-provider algorithm that engines priced before the Gemini workflow
+    (owner decision 2026-10-07) keep running on, and that GEMINI_WORKFLOW=false brings back."""
+    monkeypatch.setenv("GEMINI_WORKFLOW", "false")
+
 BRIEF = writing_brief("PRESERVE_VOICE", "STANDARD")
 
 

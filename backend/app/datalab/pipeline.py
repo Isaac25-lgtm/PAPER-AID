@@ -308,7 +308,7 @@ def stage_auditing(ctx: "StageContext") -> None:
                  "record": r.record.model_dump(mode="json", by_alias=True)} for r in inp.analyses]
     seen: list[dict[str, Any]] = []
     previous: list[str] = []
-    for round_ in range(REVIEW_REPAIRS + 1):
+    for round_ in runner.audit_rounds(REVIEW_REPAIRS + 1):
         document = assemble(inp, draft, values)
         review = _review(runner, inp, document, analyses, previous, _written(draft, values))
         if review is None:

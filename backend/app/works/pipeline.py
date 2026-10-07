@@ -427,7 +427,7 @@ def _final_plan(runner: WorkRunner, payload: dict[str, Any], plan: WorkPlan, ske
     repaired by the writer (only what was named) and the repaired plan reviewed again, at most twice;
     the decision always concerns the plan that is delivered."""
     decision = ReviewDecision(outcome="NOT_REVIEWED", reason="REVIEW_UNAVAILABLE")
-    for round_ in range(REVIEW_REPAIRS + 1):
+    for round_ in runner.audit_rounds(REVIEW_REPAIRS + 1):
         problems = _plan_problems(plan, spec)
         # After a repair the reviewer first checks its earlier blocking issues (w-plan-review-v2), so the
         # review settles instead of starting over each round (live funding runs 2026-10-03).
@@ -519,7 +519,7 @@ def _final_results(runner: WorkRunner, payload: dict[str, Any], model: ResultsMo
     decision = ReviewDecision(outcome="NOT_REVIEWED", reason="REVIEW_UNAVAILABLE")
     classified: dict[str, Classified] = {}
     hashes: dict[str, str] = {}
-    for round_ in range(REVIEW_REPAIRS + 1):
+    for round_ in runner.audit_rounds(REVIEW_REPAIRS + 1):
         problems = _results_problems(model, lines, spec)
         now = _statements(model)
         changed = sorted(i for i, h in now.items() if hashes.get(i) != h)
@@ -1248,7 +1248,7 @@ def stage_auditing(ctx: "StageContext") -> None:
         final: Final | None = None
         doc_rules = _document_rules(spec)
         rounds_seen: list[dict[str, Any]] = []
-        for round_ in range(REVIEW_REPAIRS + 1):
+        for round_ in runner.audit_rounds(REVIEW_REPAIRS + 1):
             settle_wording()
             final = _final_review(runner, inp, _document(inp, current, set()), library_items, tokens, doc_rules)
             if final is None:

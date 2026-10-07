@@ -1,5 +1,5 @@
-"""Provider adapters. The only module that imports the OpenAI and Anthropic SDKs or calls the
-Gemini API; the rest of the system sees provider-neutral `ModelResult`s. Retries here are limited to one SDK retry —
+"""Legacy provider adapters and namespace dispatch. The Vertex SDK adapter lives in app.ai.vertex;
+feature pipelines see provider-neutral `ModelResult`s. Legacy retries here are limited to one SDK retry —
 the job queue owns retry policy, so retries never nest into storms."""
 
 import json
@@ -34,6 +34,10 @@ class Usage:
     latency_ms: int
     cache_write_tokens: int = 0  # input written to the prompt cache (billed at 1.25x input)
     search_calls: int = 0  # web searches made (billed per search)
+    thinking_tokens: int = 0  # subset of output_tokens, never billed twice
+    tool_input_tokens: int = 0  # subset/informational, provider prompt accounting determines billing
+    billable_units: dict[str, float] = field(default_factory=dict)
+    visible_output_tokens: int | None = None  # separate from thinking; None on older/legacy responses
 
 
 @dataclass
@@ -47,6 +51,14 @@ class ModelResult:
     stop: str = "end_turn"  # "end_turn" | "max_tokens" | "refusal"
     sources: list[str] = field(default_factory=list)  # every URL the web search returned or opened
     queries: list[str] = field(default_factory=list)  # the search queries the model actually sent
+    grounding: dict[str, Any] = field(default_factory=dict)  # private provider metadata; never log
+    finish_reason: str = ""
+    safety_block: bool = False
+    error_code: str = ""  # a billed but unusable response, recorded before failing
+    error_retryable: bool = False
+    model_version: str = ""
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)  # declarations/results only; never auto-executed
+    safety: dict[str, Any] = field(default_factory=dict)  # provider reason codes/ratings, no prompt text
 
 
 class Provider(Protocol):
@@ -73,8 +85,8 @@ class AnthropicProvider:
     def __init__(self, settings: Settings):
         import anthropic
 
-        if not settings.ai_configured or settings.anthropic_api_key is None:
-            raise PermanentStageError("AI_NOT_CONFIGURED", AI_NOT_CONFIGURED, "both AI provider keys are required")
+        if not settings.provider_configured("anthropic:configured"):
+            raise PermanentStageError("AI_NOT_CONFIGURED", AI_NOT_CONFIGURED, "Anthropic key is required")
         self._sdk = anthropic
         self._client = anthropic.Anthropic(
             api_key=settings.anthropic_api_key.get_secret_value(), timeout=settings.provider_timeout_sec, max_retries=1
@@ -134,8 +146,8 @@ class OpenAIProvider:
     def __init__(self, settings: Settings):
         import openai
 
-        if not settings.ai_configured or settings.openai_api_key is None:
-            raise PermanentStageError("AI_NOT_CONFIGURED", AI_NOT_CONFIGURED, "both AI provider keys are required")
+        if not settings.provider_configured("openai:configured"):
+            raise PermanentStageError("AI_NOT_CONFIGURED", AI_NOT_CONFIGURED, "OpenAI key is required")
         self._sdk = openai
         self._client = openai.OpenAI(api_key=settings.openai_api_key.get_secret_value(), timeout=settings.provider_timeout_sec, max_retries=1)
 
@@ -329,4 +341,8 @@ def provider_for(model_ref: str, settings: Settings) -> tuple[Provider, str]:
         return OpenAIProvider(settings), model
     if provider == "google":
         return GeminiProvider(settings), model
+    if provider == "vertex":
+        from app.ai.vertex import VertexGeminiProvider
+
+        return VertexGeminiProvider(settings), model
     raise PermanentStageError("PROVIDER_CONFIG", MISCONFIGURED, f"unknown provider in {model_ref!r}")

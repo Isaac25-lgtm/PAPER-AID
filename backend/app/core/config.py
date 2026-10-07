@@ -5,6 +5,9 @@ from typing import Literal
 from pydantic import SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.ai.gemini import CONFIRMED_MODELS, GeminiModel, Thinking, VertexPrice
+from app.ai.vertex_pricing import VERIFIED_VERTEX_PRICES
+
 
 class Settings(BaseSettings):
     """Every limit, model name and backend choice lives here, read from env / .env."""
@@ -52,6 +55,43 @@ class Settings(BaseSettings):
     anthropic_api_key: SecretStr | None = None
     openai_api_key: SecretStr | None = None
     gemini_api_key: SecretStr | None = None  # Secret Manager GEMINI_API_KEY (paid tier), for roles on google:*
+
+    # The Gemini workflow (owner decision 2026-10-07): every NEW engine routes each AI step to a stage
+    # of app.ai.gemini, executed on Vertex AI in its own project. Engines frozen before keep their
+    # openai:/anthropic:/google: routes; the settings above serve them (and GEMINI_WORKFLOW=false).
+    gemini_workflow: bool = True
+    # Vertex inference, quota and billing live in their own project. Never GOOGLE_CLOUD_PROJECT: Google
+    # libraries (Firebase among them) read that one, and the application's resources stay in gcp_project.
+    vertex_project: str | None = None
+    vertex_location: str | None = "global"
+    intake_model: str = "gemini-3.5-flash-lite"  # classifies and extracts requirements and claims
+    intake_thinking: Thinking = "LOW"
+    planner_model: str = "gemini-3.8-flash"  # plans, briefs, evidence needs, rule specs
+    planner_thinking: Thinking = "HIGH"
+    research_model: str = "gemini-3.8-flash"  # grounded search and evidence extraction
+    research_thinking: Thinking = "MEDIUM"
+    execution_model: str = "gemini-3.8-flash"  # writes: rewrites, drafts, chapters, reports, themes
+    execution_thinking: Thinking = "MEDIUM"
+    first_audit_model: str = "gemini-3.8-flash"  # independent checks: AI check, integrity, sections, critiques
+    first_audit_thinking: Thinking = "HIGH"
+    second_check_model: str = "gemini-3.5-flash-lite"  # the AI check's second, independent assessor
+    second_check_thinking: Thinking = "MEDIUM"
+    premium_audit_model: str = "gemini-3.1-pro-preview"  # the approval review of every deliverable (first round)
+    premium_audit_thinking: Thinking = "HIGH"
+    fix_model: str = "gemini-3.8-flash"  # targeted repairs of what an audit named
+    fix_thinking: Thinking = "MEDIUM"
+    final_signoff_model: str = "gemini-3.8-flash"  # re-review after a repair: were the findings resolved?
+    final_signoff_thinking: Thinking = "HIGH"
+    # A stage's fallback stages, used only when its model is unavailable, rate-limited or timing out, and
+    # only if they cost no more in any billing dimension. The premium auditor is a preview model on shared
+    # capacity: a live run was rate-limited four times in five minutes, so its review goes to the first
+    # auditor's model rather than failing the job after its retries. GEMINI_FALLBACKS={} turns this off.
+    gemini_fallbacks: dict[str, list[str]] = {"premium_audit": ["first_audit"]}
+    paperaid_gemini_models: dict[str, GeminiModel] = CONFIRMED_MODELS
+    vertex_prices: dict[str, VertexPrice] = VERIFIED_VERTEX_PRICES
+    model_unit_prices: dict[str, float] = {}  # derived from vertex_prices: "vertex:model:unit" → USD per unit
+    model_long_prices: dict[str, tuple[int, float, float, float]] = {}  # derived: long-context tier (threshold, in, out, cached)
+    vertex_search_enabled: bool = True  # Google Search grounding; false shows the searching services as not set up
 
     # Works (concept notes, coursework, funding proposals; owner decisions 2026-09-30). Each role is a
     # "provider:model" in configuration, so changing API in January is a settings change; a quote
@@ -217,19 +257,86 @@ class Settings(BaseSettings):
 
     @property
     def ai_configured(self) -> bool:
-        return all(key is not None and key.get_secret_value().strip() for key in (self.openai_api_key, self.anthropic_api_key))
+        from app.ai.orchestration import STEPS, current_engine, model_for_engine
+        from app.core.errors import StageError
+
+        try:
+            engine = current_engine(self)
+            unused = set()
+            if not self.frontier_guidance:
+                unused.update({"guide", "spec_guide", "p_guide", "p_profile_guide"})
+            if self.single_reviewer:
+                unused.update({"review_peer", "spec_review_peer", "p_plan_review_peer", "p_review_peer", "p_profile_review_peer"})
+            return all(self.provider_configured(model_for_engine(engine, task)) for task, step in STEPS.items()
+                       if step.role in ("lead", "writer") and task not in unused)
+        except StageError:
+            return False
 
     @property
     def roles_configured(self) -> bool:
         """Every provider a configured work role needs has its key."""
-        keys = {"openai": self.openai_api_key, "anthropic": self.anthropic_api_key, "google": self.gemini_api_key}
-        for ref in self.role_models.values():
-            if not ref:
-                continue
-            key = keys.get(ref.partition(":")[0])
-            if key is None or not key.get_secret_value().strip():
-                return False
-        return True
+        from app.ai.orchestration import STEPS, WORK_ROLES, current_engine, freeze_vertex, model_for_engine
+        from app.core.errors import StageError
+
+        try:
+            base = current_engine(self)
+            # Availability needs model routes, not content hashes (which require disk reads).
+            for tier in set(self.service_tiers.values()) | {"STANDARD"}:
+                engine = freeze_vertex(self, base.model_copy(deep=True, update={"roles": dict(self.role_models), "tier": tier}))
+                if not all(self.provider_configured(model_for_engine(engine, task)) for task, step in STEPS.items()
+                           if step.role in WORK_ROLES and (step.role != "ADJUDICATOR" or self.role_models.get("ADJUDICATOR"))):
+                    return False
+            return True
+        except StageError:
+            return False
+
+    @property
+    def search_configured(self) -> bool:
+        """Whether the web research steps of a job priced now can run: on Vertex they need grounding."""
+        from app.ai.gemini import SEARCH_TASKS
+        from app.ai.orchestration import current_engine, model_for_engine
+        from app.core.errors import StageError
+
+        try:
+            engine = current_engine(self)
+            return all(self.vertex_search_enabled or not model_for_engine(engine, task).startswith("vertex:") for task in SEARCH_TASKS)
+        except StageError:
+            return False
+
+    def provider_configured(self, ref: str) -> bool:
+        provider, _, model = ref.partition(":")
+        if provider == "vertex":
+            # ADC is resolved lazily by the worker; the API never fetches credentials for availability.
+            # Unverified rates close availability as well as quoting.
+            price = self.vertex_prices.get(model)
+            price = price.at() if price else None
+            return bool(self.vertex_project and self.vertex_location and model in self.paperaid_gemini_models
+                        and price and price.status == "VERIFIED" and price.covers()
+                        and (not price.location or price.location == self.vertex_location))
+        key = {"openai": self.openai_api_key, "anthropic": self.anthropic_api_key, "google": self.gemini_api_key}.get(provider)
+        return key is not None and bool(key.get_secret_value().strip())
+
+    @model_validator(mode="after")
+    def _vertex_configuration(self) -> "Settings":
+        from app.ai.gemini import STAGES
+
+        if any(stage not in STAGES or any(f not in STAGES for f in fallbacks) for stage, fallbacks in self.gemini_fallbacks.items()):
+            raise ValueError("GEMINI_FALLBACKS must name Gemini workflow stages")
+        token_prices = {k: v for k, v in self.model_prices.items() if not k.startswith("vertex:")}
+        unit_prices = {k: v for k, v in self.model_unit_prices.items() if not k.startswith("vertex:")}
+        long_prices: dict[str, tuple[int, float, float, float]] = {}
+        for model, price in self.vertex_prices.items():
+            price = price.at()
+            if price.status == "VERIFIED" and (not price.location or price.location == self.vertex_location):
+                token_prices["vertex:" + model] = (price.input, price.output, price.cached)
+                unit_prices.update({f"vertex:{model}:{unit}": value for unit, value in price.units.items()})
+                if price.grounding is not None:
+                    # Every query at the rate above the shared free allowance: never assume a job gets free queries.
+                    unit_prices.setdefault(f"vertex:{model}:google_search_query", price.grounding.per_query_usd)
+                if price.long_context_tokens:
+                    long_prices["vertex:" + model] = (price.long_context_tokens, price.long_input, price.long_output, price.long_cached)
+        self.model_prices, self.model_unit_prices, self.model_long_prices = token_prices, unit_prices, long_prices
+        return self
 
 
 @lru_cache

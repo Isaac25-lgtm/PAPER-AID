@@ -837,7 +837,7 @@ def stage_auditing(ctx: StageContext) -> None:
     failed = {r.id: (r.problems or review.issues.get(r.id, [])) for r in changed if r.problems or review.issues.get(r.id)}
     reviewer_notes, risk = dict(review.warnings), dict(review.risk)
     notes: dict[str, str] = {}
-    for _ in range(settings.repair_attempts):
+    for _ in runner.audit_rounds(settings.repair_attempts, start=1):  # the review above was round 0
         if not failed:
             break
         try:
@@ -1015,7 +1015,7 @@ def _format_from_guide(ctx: StageContext, base: bytes) -> tuple[bytes, Formattin
     reviews: list[list[dict[str, str]]] = []
     unresolved: list[dict[str, str]] = []
     rounds = ctx.rt.settings.repair_attempts
-    for round_number in range(rounds + 1):
+    for round_number in runner.audit_rounds(rounds + 1):
         spec, evidence, notes, checks = to_spec(answer, label, guide)
         formatted, result = apply_formatting(base, spec, read_docx(base))
         applied = {"spec": {k: v for k, v in answer.items() if k not in ("evidence",)}, "rulesApplied": [f"{r.label}: {r.value}" for r in result.rules]}

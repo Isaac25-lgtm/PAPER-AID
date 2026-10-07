@@ -6,6 +6,7 @@ projection and cap never move afterwards (Codex review 2026-09-30 #5). What a ca
 recorded at the table in force when it was made. "" means the table in force today."""
 
 from datetime import date
+from decimal import Decimal
 
 from app.core.errors import PermanentStageError
 
@@ -43,8 +44,24 @@ def price_for(provider: str, model: str, overrides: Prices | None = None, table:
     key = f"{provider}:{model}"
     price = (overrides or {}).get(key) or PRICE_TABLES[table or table_in_force()].get(key)
     if price is None:
+        if provider == "vertex":
+            raise PermanentStageError("VERTEX_PRICING_UNVERIFIED", "AI pricing is not configured for Vertex.", f"unverified price for {key}")
         raise PermanentStageError("MODEL_PRICE_NOT_CONFIGURED", "AI pricing is not configured for this model.", f"model={key}")
     return price
+
+
+LongPrices = dict[str, tuple[int, float, float, float]]
+
+
+def rates_for(provider: str, model: str, input_tokens: float, overrides: Prices | None = None, table: str = "",
+              long_prices: LongPrices | None = None) -> tuple[float, float, float]:
+    """The rates a request of this many input tokens is billed at: a model priced in two context tiers
+    (Gemini Pro on Vertex) bills the whole request at its long-context rates above the threshold."""
+    rates = price_for(provider, model, overrides, table)
+    tier = (long_prices or {}).get(f"{provider}:{model}")
+    if tier and input_tokens > tier[0]:
+        return tier[1], tier[2], tier[3]
+    return rates
 
 
 # Writing input to the prompt cache costs 1.25x the input price on both providers
@@ -68,7 +85,12 @@ REQUEST_OVERHEAD_CHARS = 2_000
 CEILING_CHARS_PER_TOKEN = 2.0
 
 
-def search_fee_usd(provider: str, searches: int) -> float:
+def search_fee_usd(provider: str, searches: int, unit_prices: dict[str, float] | None = None, model: str = "") -> float:
+    if provider == "vertex" and searches:
+        key = f"vertex:{model}:google_search_query"
+        if key not in (unit_prices or {}):
+            raise PermanentStageError("VERTEX_PRICING_UNVERIFIED", "AI pricing is not configured for web search.", "Vertex grounding fee unverified")
+        return searches * unit_prices[key]
     if searches and provider not in SEARCH_FEE_USD:
         raise PermanentStageError("SEARCH_PRICE_NOT_CONFIGURED", "AI pricing is not configured for web search.", f"provider={provider}")
     return searches * SEARCH_FEE_USD.get(provider, 0.0)
@@ -84,42 +106,74 @@ def cost_usd(
     cache_write_tokens: int = 0,
     search_calls: int = 0,
     table: str = "",
+    billable_units: dict[str, float] | None = None,
+    unit_prices: dict[str, float] | None = None,
+    long_prices: LongPrices | None = None,
 ) -> float:
-    inp, out, cached = price_for(provider, model, overrides, table)
+    inp, out, cached = rates_for(provider, model, input_tokens + cached_tokens, overrides, table, long_prices)
+    if provider == "vertex":
+        tokens = vertex_token_cost(input_tokens, output_tokens, cached_tokens, (inp, out, cached), cache_write_tokens)
+        units = dict(billable_units or {})
+        if search_calls:
+            units.setdefault("google_search_query", search_calls)
+        for unit, count in units.items():
+            key = f"vertex:{model}:{unit}"
+            if key not in (unit_prices or {}):
+                raise PermanentStageError("VERTEX_PRICING_UNVERIFIED", "AI pricing is not configured.", f"unpriced Vertex unit {unit}")
+            tokens += Decimal(str(count)) * Decimal(str(unit_prices[key]))
+        return float(tokens)  # existing ledger boundary; retain sub-microdollar precision per call
     tokens = (input_tokens * inp + cache_write_tokens * inp * CACHE_WRITE_MULTIPLIER + output_tokens * out + cached_tokens * cached) / 1_000_000
     return tokens + search_fee_usd(provider, search_calls)
+
+
+def vertex_token_cost(input_tokens: int, billable_output_tokens: int, cached_tokens: int,
+                      rates: tuple[float, float, float], cache_write_tokens: int = 0) -> Decimal:
+    """Exact token cost. Output already includes thinking: never add it here again.
+
+    Explicit cache creation/storage is not implemented by the Vertex adapter; never
+    borrow another provider's cache-write multiplier for an actual Vertex charge.
+    """
+    if cache_write_tokens:
+        raise PermanentStageError("VERTEX_PRICING_UNVERIFIED", "AI pricing is not configured.", "Vertex cache creation is not priced")
+    inp, out, cached = (Decimal(str(rate)) for rate in rates)
+    return (Decimal(input_tokens) * inp + Decimal(billable_output_tokens) * out + Decimal(cached_tokens) * cached) / Decimal(1_000_000)
 
 
 MIN_OUTPUT_TOKENS = 2000  # below this a structured answer can't be useful: stop instead of calling
 
 
 def affordable_output_tokens(
-    provider: str, model: str, prompt_chars: int, max_output_tokens: int, remaining_usd: float, overrides: Prices | None = None, table: str = ""
+    provider: str, model: str, prompt_chars: int, max_output_tokens: int, remaining_usd: float, overrides: Prices | None = None, table: str = "",
+    long_prices: LongPrices | None = None,
 ) -> int:
     """The most output a call may produce so that its worst case stays within the remaining budget:
-    the whole request (plus framing) counted at 2 characters per token and billed as a cache write
-    (the dearest input), plus every output token. Output is therefore capped exactly; the input
+    the whole request (plus framing) counted at 2 characters per token, at uncached input for
+    Vertex (no explicit cache creation) or cache-write rates for legacy providers, plus every
+    output token. Output is therefore capped exactly; the input
     side is a conservative bound, not an exact count: a call whose text packs more than one token
     per two characters could still overshoot by that difference, which PaperAid absorbs (the
     student is never charged above the quote)."""
-    inp, out, _ = price_for(provider, model, overrides, table)
+    worst_input_tokens = (prompt_chars + REQUEST_OVERHEAD_CHARS) / CEILING_CHARS_PER_TOKEN
+    inp, out, _ = rates_for(provider, model, worst_input_tokens, overrides, table, long_prices)
     if out <= 0:
         return max_output_tokens
-    worst_input_tokens = (prompt_chars + REQUEST_OVERHEAD_CHARS) / CEILING_CHARS_PER_TOKEN
-    worst_input_usd = worst_input_tokens * inp * CACHE_WRITE_MULTIPLIER / 1_000_000
+    input_multiplier = 1.0 if provider == "vertex" else CACHE_WRITE_MULTIPLIER
+    worst_input_usd = worst_input_tokens * inp * input_multiplier / 1_000_000
     return max(0, min(max_output_tokens, int((remaining_usd - worst_input_usd) * 1_000_000 / out)))
 
 
 THINKING_ALLOWANCE_TOKENS = 3000
 
 
-def estimate_usd(provider: str, model: str, prompt_chars: int, max_output_tokens: int, overrides: Prices | None = None, table: str = "") -> float:
+def estimate_usd(provider: str, model: str, prompt_chars: int, max_output_tokens: int, overrides: Prices | None = None, table: str = "",
+                 long_prices: LongPrices | None = None, thinking_tokens: int = THINKING_ALLOWANCE_TOKENS) -> float:
     """Realistic high estimate of a call's cost before making it (about 3.5 characters per token).
     Output is sized to the input (a rewrite is roughly as long as its source) plus room for the
-    model's thinking, capped at the call's output limit."""
-    inp, out, _ = price_for(provider, model, overrides, table)
+    model's thinking, capped at the call's output limit. The context tier is chosen on the
+    worst-case token count, so a request near a tier threshold is estimated at the dearer rates."""
+    inp, out, _ = rates_for(provider, model, (prompt_chars + REQUEST_OVERHEAD_CHARS) / CEILING_CHARS_PER_TOKEN, overrides, table, long_prices)
     input_tokens = prompt_chars / 3.5
-    expected_output = min(max_output_tokens, input_tokens * 1.3 + THINKING_ALLOWANCE_TOKENS)
+    expected_output = min(max_output_tokens, input_tokens * 1.3 + thinking_tokens)
     return (input_tokens * inp + expected_output * out) / 1_000_000
 
 

@@ -122,7 +122,11 @@ def test_duplicate_delivery_after_completion_does_nothing(client):
     client.post(f"/api/jobs/{job_id}/submit", headers=STUDENT, json={"quoteId": quote["id"]})
     wait(client, job_id)
     rt = get_runtime()
-    before = rt.store.get(job_id)
+    # COMPLETED is published before the "ready" message is sent, which writes the job's notice: compare
+    # only once that is settled, or the snapshot races the worker (the flaky failure of 2026-10-06).
+    deadline = time.time() + 10
+    while (before := rt.store.get(job_id)).notice is not None and (before.notice.lease_until or (before.notice.pending and not before.notice.attempts)) and time.time() < deadline:
+        time.sleep(0.05)
     run_step(rt, job_id)
     assert rt.store.get(job_id) == before
 
@@ -595,11 +599,11 @@ def test_a_quote_is_not_saved_for_files_that_changed_while_pricing(client, monke
     assert get_runtime().store.get(job_id).quote is None
 
 
-def test_without_ai_keys_the_ai_services_cannot_be_quoted_or_run(client, monkeypatch):
+def test_without_the_ai_provider_the_ai_services_cannot_be_quoted_or_run(client, monkeypatch):
     from app.runtime import get_runtime
 
     settings = get_runtime().settings
-    monkeypatch.setattr(settings, "openai_api_key", None)
+    monkeypatch.setattr(settings, "vertex_project", None)  # the Gemini workflow's Vertex target is not set up
     config = client.get("/api/config").json()["availability"]
     assert config["AI_CHECK"] == config["REFINE"] == config["TEMPLATE_FORMAT"] == "not_configured"
     assert config["FORMAT"] == "available"  # APA/Harvard formatting needs no AI
@@ -609,11 +613,11 @@ def test_without_ai_keys_the_ai_services_cannot_be_quoted_or_run(client, monkeyp
     assert response.status_code == 400 and response.json()["code"] == "SERVICE_UNAVAILABLE"
 
 
-def test_an_old_ai_quote_cannot_be_submitted_after_keys_are_removed(client, monkeypatch):
+def test_an_old_ai_quote_cannot_be_submitted_after_the_ai_provider_is_removed(client, monkeypatch):
     from app.runtime import get_runtime
 
     job_id, quote = start_job(client)
-    monkeypatch.setattr(get_runtime().settings, "openai_api_key", None)
+    monkeypatch.setattr(get_runtime().settings, "vertex_project", None)
     response = client.post(f"/api/jobs/{job_id}/submit", headers=STUDENT, json={"quoteId": quote["id"]})
     assert response.status_code == 400 and response.json()["code"] == "SERVICE_UNAVAILABLE"
     assert get_runtime().store.get(job_id).status == "QUOTED"
@@ -621,7 +625,9 @@ def test_an_old_ai_quote_cannot_be_submitted_after_keys_are_removed(client, monk
 
 # --- prepaid credits (owner decision 2026-09-24) -----------------------------------------------
 
-REAL_PRICES = {"fake:gpt-6-sol": (2.0, 10.0, 0.2), "fake:gpt-6-luna": (0.1, 0.5, 0.01), "fake:claude-sonnet-5-5": (2.0, 10.0, 0.2), "fake:claude-opus-5-5": (4.0, 20.0, 0.2)}
+REAL_PRICES = {"fake:gpt-6-sol": (2.0, 10.0, 0.2), "fake:gpt-6-luna": (0.1, 0.5, 0.01), "fake:claude-sonnet-5-5": (2.0, 10.0, 0.2), "fake:claude-opus-5-5": (4.0, 20.0, 0.2),
+               # the Gemini workflow's models at their published Vertex rates
+               "fake:gemini-3.8-flash": (0.75, 3.75, 0.075), "fake:gemini-3.5-flash-lite": (0.30, 2.50, 0.03), "fake:gemini-3.1-pro-preview": (2.0, 12.0, 0.2)}
 
 
 def _priced_models(client, monkeypatch, tokens=(2000, 800)):
@@ -1689,7 +1695,7 @@ def test_only_the_services_list_skips_app_check(monkeypatch):
     from app.core.errors import Unauthorized
 
     settings = Settings(_env_file=None, auth_mode="firebase", require_app_check=True)
-    monkeypatch.setattr(auth, "_firebase", lambda: None)
+    monkeypatch.setattr(auth, "_firebase", lambda settings: None)
     monkeypatch.setattr(fb_auth, "verify_id_token", lambda token, check_revoked: {"uid": "u1", "email": "a@b.co", "email_verified": True})
 
     def no_attestation(token):

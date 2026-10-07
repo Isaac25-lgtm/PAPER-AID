@@ -9,7 +9,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, field_validator
 
-from app.ai.orchestration import _VERIFY, AIRunner, VerifyItem, _Verify
+from app.ai.orchestration import _VERIFY, SEARCH_DECLINED, AIRunner, VerifyItem, _Verify
 from app.ai.providers import UNAVAILABLE, ModelResult
 from app.analysis import research
 from app.core.errors import PermanentStageError, RetryableStageError
@@ -281,6 +281,8 @@ class WorkRunner(AIRunner):
         try:
             answer = self._call("w_search", {"need": need, "query": query}, SEARCH_SCHEMA, _Searched, max_searches=max_searches, accept=accept)
         except PermanentStageError as exc:
+            if exc.code in SEARCH_DECLINED:
+                return []  # declined by the provider: nothing usable found for this need
             if exc.code != "BUDGET_EXCEEDED":
                 raise
             self.budget_reached = True

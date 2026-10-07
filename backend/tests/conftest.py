@@ -8,9 +8,38 @@ import pytest
 FIXTURES = Path(__file__).parent / "fixtures" / "generated"
 
 
+def no_paid_provider_calls():
+    """Fail at every billable SDK boundary unless a test explicitly replaces it with a fake.
+    A future manual paid check lives in scripts/, outside pytest collection.
+    """
+    import httpx
+    from anthropic.resources.messages import Messages
+    from google.genai.models import Models
+    from openai.resources.responses import Responses
+
+    def blocked(*args, **kwargs):
+        raise AssertionError("Real paid model calls are forbidden in tests; mock the SDK boundary")
+
+    original_post = httpx.post
+
+    def post(url, *args, **kwargs):
+        if "generativelanguage.googleapis.com" in str(url) or "aiplatform.googleapis.com" in str(url):
+            blocked()
+        return original_post(url, *args, **kwargs)
+
+    # Session lifetime, not per-test monkeypatch lifetime: an interrupted background queue
+    # must still hit a guard after the test's fakes have been restored. Never restore these
+    # to real endpoints inside a pytest process; scripted tests may temporarily replace them.
+    Messages.create = blocked
+    Responses.create = blocked
+    Models.generate_content = blocked
+    httpx.post = post
+
+
 def pytest_sessionstart(session: pytest.Session) -> None:
     """Generate the test documents before collection: several test modules parametrize over the
     manifest at import time, and a fresh checkout (CI) does not have them yet."""
+    no_paid_provider_calls()
     if not (FIXTURES / "manifest.json").exists():
         subprocess.run([sys.executable, str(FIXTURES.parent / "generate.py")], check=True, capture_output=True)
 
@@ -47,11 +76,13 @@ def _client(tmp_path, monkeypatch, pricing: str):
         return None if page is None else fetch._text(page.encode(), "text/html")
 
     models = FakeModels()
+    # New jobs run the Gemini workflow, as in production; the stand-in answers every stage's model.
+    monkeypatch.setenv("VERTEX_PROJECT", "paperaid")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     monkeypatch.setenv("GEMINI_API_KEY", "gm-test")
     monkeypatch.setenv("WORKS_PUBLIC", "true")  # the works tests use ordinary students, not invited testers
-    monkeypatch.setenv("MODEL_PRICES", '{"fake:gpt-6-sol":[0,0,0],"fake:gpt-6-luna":[0,0,0],"fake:claude-sonnet-5-5":[0,0,0],"fake:claude-opus-5-5":[0,0,0],"fake:gemini-3.8-flash":[0,0,0]}')
+    monkeypatch.setenv("MODEL_PRICES", '{"fake:gpt-6-sol":[0,0,0],"fake:gpt-6-luna":[0,0,0],"fake:claude-sonnet-5-5":[0,0,0],"fake:claude-opus-5-5":[0,0,0],"fake:gemini-3.8-flash":[0,0,0],"fake:gemini-3.5-flash-lite":[0,0,0],"fake:gemini-3.1-pro-preview":[0,0,0]}')
     monkeypatch.setenv("ADMIN_EMAILS", '["demo@paperaid.app"]')
     monkeypatch.setenv("PRICING_MODE", pricing)
     monkeypatch.setattr(orchestration, "provider_for", lambda ref, settings: (models, ref.split(":")[-1]))

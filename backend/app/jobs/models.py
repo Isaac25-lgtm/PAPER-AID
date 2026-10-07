@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
@@ -215,6 +215,18 @@ class Engine(Camel):
     price_table: str = ""  # the dated model price table the spend projection and cap use ("" = live prices)
     rules_version: str = ""  # the rule files the step runs on
     content: dict[str, str] = {}  # sha256 of each prompt, rule file, validator set and render profile the run executes
+    # The Gemini workflow (owner decision 2026-10-07), resolved once at pricing. Empty on every engine
+    # frozen before it, which keeps its own provider routes above.
+    vertex_routes: dict[str, list[str]] = {}  # task → Vertex refs: the stage's model, then any fallbacks
+    vertex_stages: dict[str, str] = {}  # task → workflow stage (intake, planner, ..., premium_audit, fix)
+    vertex_thinking: dict[str, str] = {}  # stage → thinking level
+    vertex_signoff: list[str] = []  # refs of the final sign-off that re-reviews a repaired deliverable
+    vertex_addenda: dict[str, str] = {}  # instruction versions added on Vertex (sign-off, search)
+    vertex_models: dict[str, dict[str, Any]] = {}  # frozen capability declarations
+    vertex_prices: dict[str, dict[str, Any]] = {}  # frozen flat price records
+    vertex_project: str = ""
+    vertex_location: str = ""
+    vertex_search_enabled: bool = False
 
 
 class Passage(Camel):
@@ -601,6 +613,19 @@ class ModelCall(Camel):
     role: str = ""  # who made it: lead, writer, or a works role (EVALUATOR_PREMIUM, WRITER, ...)
     latency_ms: int
     cost_usd: float
+    workflow_stage: str = ""  # the Gemini workflow stage that made the call (premium_audit, final_signoff, ...)
+    thinking_level: str = ""
+    thinking_tokens: int = 0  # already included in output_tokens
+    visible_output_tokens: int | None = None  # Vertex response tokens; old records remain readable
+    tool_input_tokens: int = 0
+    billable_units: dict[str, float] = {}
+    finish_reason: str = ""
+    safety_block: bool = False
+    error_code: str = ""
+    fallback_attempt: int = 0
+    estimated_cost_usd: float = 0.0
+    pricing_status: str = ""  # VERIFIED for Vertex execution; legacy entries remain readable
+    model_version: str = ""  # version actually reported by Vertex; billing still uses the priced model ref
     at: datetime = Field(default_factory=utcnow)
 
 

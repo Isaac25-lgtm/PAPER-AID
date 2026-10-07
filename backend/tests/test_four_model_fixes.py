@@ -24,6 +24,13 @@ from tests.test_api import STUDENT, _judge_all, _submit, enable_score
 from tests.test_audit_20260928 import _chapter_ready
 from tests.test_audit_20260928 import _run as run_step
 
+
+@pytest.fixture(autouse=True)
+def earlier_workflow(monkeypatch):
+    """These tests cover the multi-provider algorithm that engines priced before the Gemini workflow
+    (owner decision 2026-10-07) keep running on, and that GEMINI_WORKFLOW=false brings back."""
+    monkeypatch.setenv("GEMINI_WORKFLOW", "false")
+
 # --- F1: approved text is delivered exactly as approved -----------------------------------------
 
 

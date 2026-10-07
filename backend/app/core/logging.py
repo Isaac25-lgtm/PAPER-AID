@@ -37,7 +37,7 @@ def setup_logging(level: str) -> None:
     root = logging.getLogger()
     root.handlers = [handler]
     root.setLevel(level)
-    for noisy in ("httpx", "httpcore", "uvicorn.access", "anthropic", "openai"):
+    for noisy in ("httpx", "httpcore", "uvicorn.access", "anthropic", "openai", "google.genai", "google.auth"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 

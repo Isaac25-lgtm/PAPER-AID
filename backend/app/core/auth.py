@@ -14,12 +14,14 @@ _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _firebase_ready = False
 
 
-def _firebase():
+def _firebase(settings: Settings):
+    """Firebase is pinned to the application project (GCP_PROJECT). Never inferred: Vertex runs in a
+    project of its own, and an inferred project could verify sign-ins against the wrong one."""
     global _firebase_ready
     import firebase_admin
 
     if not _firebase_ready:
-        firebase_admin.initialize_app()
+        firebase_admin.initialize_app(options={"projectId": settings.gcp_project} if settings.gcp_project else None)
         _firebase_ready = True
     return firebase_admin
 
@@ -43,7 +45,7 @@ def _verified_user(request: Request, settings: Settings, need_app_check: bool) -
 
     if not header.startswith("Bearer "):
         raise Unauthorized("Please sign in to continue.")
-    _firebase()
+    _firebase(settings)
     from firebase_admin import app_check, auth, exceptions
 
     try:

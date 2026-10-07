@@ -214,7 +214,8 @@ def test_the_january_price_rise_never_changes_a_quoted_steps_projection():
     from app.core.config import Settings
     from app.pricing.quote import work_usd
 
-    settings = Settings(openai_api_key="k", anthropic_api_key="k", gemini_api_key="k")
+    # The direct Gemini API's dated tables, for works priced before the Gemini workflow (Vertex: test_vertex_pricing).
+    settings = Settings(openai_api_key="k", anthropic_api_key="k", gemini_api_key="k", gemini_workflow=False)
     engine = orchestration.work_engine(settings, "COURSEWORK").model_copy(update={"price_table": "2026-09"})
     later = engine.model_copy(update={"price_table": "2027-01"})
     assert work_usd(settings, "DRAFT", "COURSEWORK", 2000, later) > work_usd(settings, "DRAFT", "COURSEWORK", 2000, engine)

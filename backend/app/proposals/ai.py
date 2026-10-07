@@ -8,7 +8,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, StrictBool
 
-from app.ai.orchestration import AIRunner
+from app.ai.orchestration import SEARCH_DECLINED, AIRunner
 from app.ai.providers import UNAVAILABLE, ModelResult
 from app.analysis import research
 from app.core.errors import PermanentStageError, RetryableStageError
@@ -248,6 +248,8 @@ class ProposalRunner(AIRunner):
         try:
             answer = self._call("p_search", {"need": need, "query": query}, SEARCH_SCHEMA, _Searched, max_searches=max_searches, accept=accept)
         except PermanentStageError as exc:
+            if exc.code in SEARCH_DECLINED:
+                return []  # declined by the provider: nothing usable found for this need
             if exc.code != "BUDGET_EXCEEDED":
                 raise
             self.budget_reached = True

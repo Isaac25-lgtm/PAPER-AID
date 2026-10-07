@@ -15,7 +15,17 @@ from dataclasses import dataclass
 from datetime import timedelta
 
 from app.ai import costs
-from app.ai.orchestration import BATCH_WORDS, FINAL_PART_WORDS, PROMPTS, REVIEW_REPAIRS, STEPS, current_engine, model_for_engine
+from app.ai.orchestration import (
+    BATCH_WORDS,
+    FINAL_PART_WORDS,
+    PROMPTS,
+    REVIEW_REPAIRS,
+    STEPS,
+    current_engine,
+    model_for_engine,
+    output_allowance,
+    vertex_settings,
+)
 from app.analysis import research
 from app.core.config import Settings
 from app.jobs.models import BoundQuote, Engine, Passage, QuoteLine, ServiceSelection, utcnow
@@ -48,11 +58,22 @@ def _step_usd(settings: Settings, task: str, payload_chars: float, words: float,
     """Projected cost of one algorithm step over a payload, batched as the runner batches it, with
     the model and prompt version of the engine being priced (F9: an older engine's own prompts)."""
     engine = engine or current_engine(settings)
+    settings = vertex_settings(settings, engine)
     step = STEPS[task]
     provider, _, model = model_for_engine(engine, task).partition(":")
     batches = max(1, math.ceil(words / BATCH_WORDS))
     per_batch = len(PROMPTS[engine.prompts.get(task, step.prompt)]) + payload_chars / batches
-    return batches * costs.estimate_usd(provider, model, int(per_batch), step.max_tokens, settings.model_prices, engine.price_table)
+    limit, thinking = output_allowance(engine, task)
+    return batches * costs.estimate_usd(provider, model, int(per_batch), limit, settings.model_prices, engine.price_table, settings.model_long_prices, thinking)
+
+
+def _search_usd(settings: Settings, task: str, searches: int, engine: Engine) -> float:
+    """One web-research call at its worst: every allowed search, the pages it reads and the fee."""
+    provider, _, model = model_for_engine(engine, task).partition(":")
+    limit, thinking = output_allowance(engine, task)
+    usd = costs.estimate_usd(provider, model, 1500 + costs.SEARCH_INPUT_TOKENS_WORST * 4 * searches, limit, settings.model_prices,
+                             engine.price_table, settings.model_long_prices, thinking)
+    return usd + costs.search_fee_usd(provider, searches, settings.model_unit_prices, model)
 
 
 # --- projections (USD of provider spend) ------------------------------------------------------
@@ -64,6 +85,7 @@ def _batches_for(words: float) -> int:
 
 def analysis_usd(settings: Settings, words: int, engine: Engine | None = None) -> float:
     e = engine or current_engine(settings)
+    settings = vertex_settings(settings, e)
     passages = max(1, words // 120)
     payload = words * CHARS_PER_WORD + (ITEM_OVERHEAD + SIGNAL_CHARS) * passages + BUNDLE_CHARS * _batches_for(words)
     usd = _step_usd(settings, "analyse", payload, words, e)
@@ -79,6 +101,7 @@ ANCHOR_CHARS = 4000  # the objectives passages sent with every academic-review b
 def academic_usd(settings: Settings, words: int, engine: Engine | None = None) -> float:
     """The lead's academic, evidence and methodology review over every passage."""
     e = engine or current_engine(settings)
+    settings = vertex_settings(settings, e)
     passages = max(1, words // 120)
     payload = words * CHARS_PER_WORD + ITEM_OVERHEAD * passages + (ANCHOR_CHARS + BUNDLE_CHARS) * _batches_for(words)
     return _step_usd(settings, "academic", payload, words, e)
@@ -89,6 +112,7 @@ def estimate_scan_usd(settings: Settings, words: int, selection: ServiceSelectio
     plan for the share of the paper the service may change (a quarter or a half for refinement,
     all of it for Deep Redraft)."""
     e = engine or current_engine(settings)
+    settings = vertex_settings(settings, e)
     share = 1.0 if selection.writing == "REDRAFT" else 0.25 if selection.intensity == "LIGHT" else 0.5
     planned_words = max(150, share * words)
     plan = _step_usd(settings, "plan", planned_words * CHARS_PER_WORD * 1.4 + BRIEF_CHARS * _batches_for(planned_words), planned_words, e)
@@ -99,6 +123,7 @@ def refinement_usd(settings: Settings, passages: list[Passage], deep: bool = Fal
     """The rest of the refinement once the draft plan exists: critique and final plan over every
     planned passage, then rewrite, review, one fix round and a second review of the rewrites."""
     e = engine or current_engine(settings)
+    settings = vertex_settings(settings, e)
     if not passages:
         return 0.0
     all_chars = sum(p.chars + p.instruction_chars + ITEM_OVERHEAD for p in passages)
@@ -129,14 +154,14 @@ def source_check_usd(settings: Settings, words: int, engine: Engine | None = Non
     """The source check at its worst: finding the claims, every allowed search for every claim
     (each search's fee plus the pages it reads), and the writer's check of the evidence."""
     e = engine or current_engine(settings)
+    settings = vertex_settings(settings, e)
     claims = research.claims_for(words, settings.research_max_claims)
     if not claims:
         return 0.0
     usd = _step_usd(settings, "claims", words * CHARS_PER_WORD + ITEM_OVERHEAD * max(1, words // 120), words, e)
-    provider, _, model = model_for_engine(e, "research").partition(":")
     searches = settings.research_max_searches
-    per_claim = costs.estimate_usd(provider, model, 1500 + costs.SEARCH_INPUT_TOKENS_WORST * 4 * searches, STEPS["research"].max_tokens, settings.model_prices)
-    usd += claims * (per_claim + costs.search_fee_usd(provider, searches))
+    per_claim = _search_usd(settings, "research", searches, e)
+    usd += claims * per_claim
     usd += _step_usd(settings, "verify", claims * 3200, claims * 450, e)
     return usd
 
@@ -145,6 +170,7 @@ def template_usd(settings: Settings, guide_words: int, engine: Engine | None = N
     """University template rules: draft, critique and final rules, then every review and fix
     round allowed (the worst case)."""
     e = engine or current_engine(settings)
+    settings = vertex_settings(settings, e)
     guide = guide_words * CHARS_PER_WORD
     rounds = settings.repair_attempts
     usd = _step_usd(settings, "spec_plan", guide, 0, e)
@@ -170,14 +196,13 @@ def proposal_usd(settings: Settings, step: str, words: int, engine: Engine | Non
     chapter) drafting, every review and fix round, and the readiness assessment. `words` is the
     chapter's target length."""
     e = engine or current_engine(settings)
+    settings = vertex_settings(settings, e)
     chapter = 0 if step == "PLAN" else 4 if step == "CONCEPT" else int(step[-1])
     needs = settings.proposal_needs.get(chapter, 6)
     searches = settings.research_max_searches
-    provider, _, model = model_for_engine(e, "p_search").partition(":")
     usd = _step_usd(settings, "p_needs", PLAN_CHARS + LIBRARY_ITEMS * 200, 0, e)
     per_need = _step_usd(settings, "p_extract", settings.proposal_works_per_need * 3200, 0, e)
-    per_need += costs.estimate_usd(provider, model, 1500 + costs.SEARCH_INPUT_TOKENS_WORST * 4 * searches, STEPS["p_search"].max_tokens, settings.model_prices)
-    per_need += costs.search_fee_usd(provider, searches)
+    per_need += _search_usd(settings, "p_search", searches, e)
     usd += needs * per_need
     found = needs * 3
     usd += _step_usd(settings, "verify", found * 1600, found * 250, e)
@@ -240,6 +265,7 @@ def work_usd(settings: Settings, step: str, kind: str, words: int, engine: Engin
     compression rounds. `words` is the target length (READ: the documents' words; REVISE: the
     revised text)."""
     e = engine
+    settings = vertex_settings(settings, e)
     base = SPEC_CHARS + WORK_STUDENT_CHARS
     if step == "READ":  # every part of every document, in calls of at most READ_CHARS (works.pipeline.read_parts)
         from app.works.pipeline import READ_CHARS, READ_OVERLAP
@@ -250,11 +276,9 @@ def work_usd(settings: Settings, step: str, kind: str, words: int, engine: Engin
     usd = 0.0
     if step in ("PLAN", "DRAFT"):
         needs = 5 if step == "PLAN" else 8
-        provider, _, model = model_for_engine(e, "w_search").partition(":")
         searches = settings.research_max_searches
         per_need = 2 * _step_usd(settings, "w_extract", settings.proposal_works_per_need * 3200, 0, e)
-        per_need += costs.estimate_usd(provider, model, 1500 + costs.SEARCH_INPUT_TOKENS_WORST * 4 * searches, STEPS["w_search"].max_tokens, settings.model_prices, e.price_table)
-        per_need += costs.search_fee_usd(provider, searches)
+        per_need += _search_usd(settings, "w_search", searches, e)
         found = needs * 3
         usd += _step_usd(settings, "w_needs", base + LIBRARY_ITEMS * 200, 0, e) + needs * per_need + _step_usd(settings, "w_verify", found * 1600, found * 250, e)
     evidence_chars = (8 * 3 + LIBRARY_ITEMS) * EVIDENCE_ITEM_CHARS
@@ -300,6 +324,7 @@ def revise_usd(settings: Settings, words: int, engine: Engine | None = None) -> 
     """Sections revised from supervisor comments at their worst: the first fix, every review and
     further fix round, and the chapter's readiness check again. `words` is the revised text."""
     e = engine or current_engine(settings)
+    settings = vertex_settings(settings, e)
     batches = _batches_for(words)
     fix_input = batches * (PLAN_CHARS + BRIEF_CHARS) + LIBRARY_ITEMS * EVIDENCE_ITEM_CHARS + words * CHARS_PER_WORD * 2
     rounds = settings.repair_attempts
@@ -318,6 +343,7 @@ def profile_usd(settings: Settings, guide_words: int, engine: Engine | None = No
     """An institution profile: the lead drafts it from the whole guide, the writer critiques it and
     the lead finalises it (each call reads the guide)."""
     e = engine or current_engine(settings)
+    settings = vertex_settings(settings, e)
     guide = guide_words * CHARS_PER_WORD + 12000
     usd = _step_usd(settings, "p_profile", guide, 0, e) + _step_usd(settings, "p_profile_critique", guide + 8000, 0, e) + _step_usd(settings, "p_profile_finalise", guide + 12000, 0, e)
     if e.require_dual_approval and e.frontier_guidance:
@@ -334,6 +360,7 @@ def profile_usd(settings: Settings, guide_words: int, engine: Engine | None = No
 def proposal_review_usd(settings: Settings, words: int, engine: Engine | None = None) -> float:
     """The lead's audit of an uploaded proposal: one call over the whole text."""
     e = engine or current_engine(settings)
+    settings = vertex_settings(settings, e)
     return _step_usd(settings, "p_audit", words * CHARS_PER_WORD + 150 * max(1, words // 120) + 12000, 0, e)
 
 
@@ -398,6 +425,7 @@ def price(
     so quality is never cut to fit a price."""
     fixed_mode = settings.pricing_mode == "fixed"
     e = engine or current_engine(settings)
+    settings = vertex_settings(settings, e)
     label_note = f": {note}" if note else ""  # the engine the run will execute with (its routes and prompts)
     services: list[tuple[str, str, float, int | None]] = []  # (key, label, worst-case USD, banded words)
     if selection.writing == "AI_CHECK":

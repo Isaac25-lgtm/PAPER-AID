@@ -158,7 +158,8 @@ def test_reversal_clarification_is_bounded_and_never_invokes_another_writer(monk
         seen.append(payload)
         return replies[len(seen) - 1]
 
-    runner = SimpleNamespace(budget_reached=False, final_review_results=review, results=lambda payload: repairs.append(payload))
+    runner = SimpleNamespace(budget_reached=False, final_review_results=review, results=lambda payload: repairs.append(payload),
+                             audit_rounds=lambda count, start=0: range(start, start + count))
     monkeypatch.setattr(pipeline, "_results_problems", lambda *args: [])
     monkeypatch.setattr(pipeline, "_results_from", lambda answer: (model, []))
     _, _, decision = _final_results(runner, {}, model, [], [{"rule": "FP-028"}], SimpleNamespace())

@@ -22,6 +22,13 @@ from tests.test_proposals import _create, _run
 
 
 @pytest.fixture(autouse=True)
+def earlier_workflow(monkeypatch):
+    """These tests cover the multi-provider algorithm that engines priced before the Gemini workflow
+    (owner decision 2026-10-07) keep running on, and that GEMINI_WORKFLOW=false brings back."""
+    monkeypatch.setenv("GEMINI_WORKFLOW", "false")
+
+
+@pytest.fixture(autouse=True)
 def dual_approval_engine(monkeypatch):
     """This file pins the policy of jobs priced before one accountable final reviewer (owner decision
     2026-09-30): both approvals and Opus's guidance, which those jobs keep."""

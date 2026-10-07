@@ -554,7 +554,7 @@ def stage_auditing(ctx: "StageContext") -> None:
     payload = _payload(inp, codes, quotes)
     seen: list[dict[str, Any]] = []
     previous: list[str] = []
-    for round_ in range(REVIEW_REPAIRS + 1):
+    for round_ in runner.audit_rounds(REVIEW_REPAIRS + 1):
         shipped_codes, shipped = withhold(draft, codes, quotes)
         document = assemble(inp, draft, shipped_codes, shipped)
         review = _review(runner, inp, document, shipped_codes, previous)

@@ -18,6 +18,13 @@ from tests.fake_models import FakeModels
 from tests.test_ai_coverage import _judgment, _passage
 from tests.test_api import STUDENT, _submit, enable_score
 
+
+@pytest.fixture(autouse=True)
+def earlier_workflow(monkeypatch):
+    """These tests cover the multi-provider algorithm that engines priced before the Gemini workflow
+    (owner decision 2026-10-07) keep running on, and that GEMINI_WORKFLOW=false brings back."""
+    monkeypatch.setenv("GEMINI_WORKFLOW", "false")
+
 BRIEF = writing_brief("PRESERVE_VOICE", "STANDARD")
 
 

@@ -552,3 +552,120 @@ This supersedes the earlier rule that an unexplained classification reversal kee
 Implementation and tests are local. This entry does not record a commit, deployment or real-provider verification. Claude's handoff contains the final test results and release considerations.
 
 **Claude's audit of these fixes (2026-10-05):** all seven reproductions fixed; full backend suite 893 passed; Data Lab, One Start and main browser journeys passed. One follow-up fixed: dots no longer count as phone-number separators, so a run of decimals ("0.25 0.30 0.45") is no longer read as a phone number. Real-model checks of `w-results-review-v4` and real SMS sending wait for credit.
+## 2026-10-06 — Local Vertex Gemini architecture (owner's explicit phase instructions)
+
+Add an ADC-backed `vertex:*` provider with the official Google Gen AI SDK. Preserve `openai:*`,
+`anthropic:*` and `google:*` exactly as separate provider routes. Production/default routes remain
+the current ones. No deployment, production changes, commit, push or billable model requests in
+this phase. The target model account is project `paperaid`, location `global`; this does not move
+Firebase, Firestore, Storage, Tasks or Cloud Run out of the existing project `paperaid-ca172`.
+
+Central logical roles and capabilities select models for NEW engines only; concrete IDs, optional
+fallback chains, capability declarations, project/location and verified rate records are frozen
+in the quote. Task overrides opt in selected tasks, or `PAPERAID_GEMINI_ROUTING_ENABLED` opts in
+the central task classifications. Both mechanisms default off. Gemini 3.8 Flash is the only
+configured/confirmed model. Routine/writer/reasoner/reviewer/search bindings use that model;
+multimodal, image, audio, live and embeddings roles remain unconfigured. A supported model
+capability does not imply PaperAid has implemented its service adapter.
+
+Vertex prices are UNVERIFIED until configured with rates and an explicit verification source.
+Unverified pricing blocks both quotes and AIRunner calls; no copied Developer API rates and no
+customer billing guesses. Additional billable units have explicit USD/unit rates. Fallbacks
+are Vertex-only, capability-compatible and no more expensive in any configured dimension.
+No fallback after a billed response, refusal, invalid schema or authentication failure.
+
+Grounded JSON uses Google's Google Search tool and retains source URLs, queries, citation
+segments and Search Suggestions privately. Missing metadata/unsupported requests fail clearly.
+Google Search has no equivalent to OpenAI's exact max_tool_calls: post-response query checks
+can refuse an excessive result but cannot prevent provider overrun. Search defaults off and
+is explicitly blocked in production until combined structured/grounded behavior, redirect
+sources, suggestions display and query-budget handling are verified. Deterministic operations
+remain outside the LLM. See `docs/Vertex_Local_Phase_20261006.md` for the implementation report.
+
+## 2026-10-06 — Local verified Vertex pricing phase (owner's explicit instructions)
+
+This entry supersedes the preceding phase's UNVERIFIED status for **Vertex Gemini 3.8 Flash,
+Standard, Global only**. Official pricing was checked at
+https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing on 2026-10-06.
+No actual environment file, production route, Cloud Run setting, IAM role or secret was changed.
+No additional model request, grounding request, commit, push or deployment was made.
+
+- Published USD per million tokens through 2026-12-31: input 0.75, output including thinking
+  3.75, cached input 0.075. Beginning 2027-01-01: input 1.50, output including thinking 7.50,
+  cached input 0.15. Rates and source/effective-date/scope metadata live in
+  `app/ai/vertex_pricing.py`. We do not backdate this newly verified schedule before 2026-10-06.
+- The source describes introductory rates as 50% credits back on eligible net spend.
+  Reconcile the net rate with the Google billing statement before customer billing. The
+  separate $300 Cloud promotional credit is never subtracted from PaperAid model unit prices.
+- Selection uses the UTC date at quote creation, including in a process with cached Settings.
+  Each engine freezes one flat price record; neither that record nor the legacy price tables
+  is rewritten on the January transition. An uncached model call outside its frozen rate's
+  period stops before the SDK with VERTEX_PRICE_PERIOD_CHANGED and needs a new quote.
+- Visible response and thinking token counts are stored separately; output_tokens remains
+  their combined billable quantity. Decimal arithmetic prices that quantity exactly once and
+  prices cached reads at the discounted input rate. Per-call cost retains precision at the
+  existing float boundary; job totals still follow the established six-decimal rounding.
+  Explicit Vertex cache creation/storage is not implemented/priced and fails closed.
+- Gemini 3 Search metadata records 5,000 free queries/month aggregated across Gemini 3 models,
+  then USD 14/1,000 individual queries, not requests. Repeated returned queries are counted.
+  Google Search-provided input is informational, not added to paid input tokens. There is no
+  billing-wide allowance counter or reconciliation, so this metadata never becomes a flat
+  fee or per-student free allowance: customer grounding pricing remains gated. Search remains
+  off by default and blocked in production.
+- Text-only Vertex quoting can now use verified prices without legacy provider keys.
+  Quotes that require Vertex grounding remain unavailable. Routing still defaults off;
+  settings alone are not evidence of ADC, IAM or live job readiness. Unverified models and
+  wrong endpoint locations remain unavailable. Explicit VERTEX_PRICES={} disables the registry.
+
+See `docs/Vertex_Pricing_Phase_20261006.md` for tests, files and the handoff for the next offline phase.
+
+## 2026-10-07 — Vertex infrastructure only; no function/model strategy approved
+
+Owner's instructions began 2026-10-06 and supersede any implication that the earlier migration's
+Gemini role bindings/task classifications were approved for use. Keep those assignments in
+place for the owner's decision; report them explicitly rather than silently removing them.
+Automatic routing remains off and task overrides empty by default. No final model or thinking
+level is assigned to a PaperAid function. No mapping-strategy tests in this phase.
+
+Complete a provider-level explicit-model generation interface with request sampling, schema,
+thinking, media, tools/grounding and safety parameters. Preserve namespaces and the existing
+structured wrappers; provider task labels do not determine model choice or capability needs.
+Forward the caller's system instruction exactly, including grounded requests, rather than
+adding the previous adapter's grounding instruction. Existing PaperAid prompts are unchanged.
+Tools are declarations only: caller handles any later turn, never automatic execution.
+Models/capabilities are declared outside the provider; unsupported requests fail clearly.
+Clients are reused safely across concurrent starts and closed at process exit.
+
+No workflow, academic methodology, deterministic analysis, pricing/credits, formatting,
+citations, customer-facing behavior, actual environment configuration, production, IAM,
+commit/push or paid model call changed. Source/test changes are local and uncommitted.
+See `docs/Vertex_Infrastructure_Phase_20261007.md` for all 20 requested report items,
+the retained assignments with locations, Cloud Run requirements and the 156 passing offline
+provider/schema/usage tests. Model/function strategy awaits the owner.
+
+## 2026-10-07 — PaperAid's AI runs on Gemini through Vertex AI (owner: "finish the Gemini integration", Claude's final pass over Codex's three phases)
+
+The owner's prompt authorised the whole integration: review Codex's work, complete it, test it with
+real calls, grant the worker's access, deploy and verify production. Architecture and operations:
+`docs/Gemini_Vertex_Handoff_20261007.md`.
+
+- **New jobs use the Gemini workflow** (`GEMINI_WORKFLOW`, on): intake (3.5 Flash-Lite), planner,
+  research, execution, first audit, fix and final sign-off (3.8 Flash), premium audit (3.1 Pro
+  Preview), and a second check (Flash-Lite) so the AI check keeps two independent assessors. Thinking
+  levels per stage are settings. The premium audit approves each deliverable; every re-review after a
+  repair is the lighter final sign-off, shown the earlier findings (`signoff-v1`). This supersedes,
+  for new jobs, "Sol alone approves" (2026-09-30); frozen older jobs keep their quoted roles.
+- **Kept from Codex:** the separate `vertex:` provider over ADC and google-genai, response JSON schemas
+  validated again locally, usage normalisation (thinking billed once, search-tool input free), the
+  error classification, the dated verified price records, freezing everything into the quote.
+- **Changed from Codex:** logical roles replaced by the owner's stages; routing on for new engines;
+  `VERTEX_PROJECT`/`VERTEX_LOCATION` instead of `GOOGLE_CLOUD_PROJECT` (Firebase pinned to
+  `GCP_PROJECT`); grounding enabled and priced at $0.014 a query; grounding redirect links resolved
+  to their pages (live: with a JSON answer Vertex returns no source list); extra queries charged, not
+  failed; a search Google declines (RECITATION) finds nothing instead of failing the step; thinking
+  room added to every output limit (Gemini counts thinking against it); Pro's long-context tier
+  priced; a timeout counts against the cap at its estimate; the premium audit falls back to 3.8 Flash
+  when the preview model is rate-limited (seen live); release scripts replaced by `release.sh`.
+- **Not used:** `gemini-3.5-pro` answers in Vertex but has no published price.
+- **Access:** custom role `paperaidVertexInference` (`aiplatform.endpoints.predict`,
+  `serviceusage.services.use`) in project `paperaid` for the worker's service account only.

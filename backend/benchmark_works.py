@@ -31,8 +31,10 @@ def main() -> int:
     parser.add_argument("--budget-usd", type=float, required=True, help="stop once this much has been spent in total")
     parser.add_argument("--margin", type=float, default=2.0, help="price = measured worst spend x this")
     args = parser.parse_args()
-    if not all(os.environ.get(k) for k in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY")):
-        print("Set OPENAI_API_KEY, ANTHROPIC_API_KEY and GEMINI_API_KEY first.", file=sys.stderr)
+    from app.core.config import Settings
+
+    if not Settings().ai_configured:
+        print("The AI is not set up: set VERTEX_PROJECT (and sign in with gcloud application-default credentials).", file=sys.stderr)
         return 1
     data = Path(tempfile.mkdtemp(prefix="paperaid-bench-"))
     os.environ.update({"DATA_DIR": str(data), "CREDITS_ENABLED": "false", "PRICING_MODE": "cost", "QUOTES_PER_HOUR": "1000", "SUBMITS_PER_HOUR": "1000",

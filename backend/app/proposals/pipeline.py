@@ -289,7 +289,7 @@ def stage_planning(ctx: "StageContext") -> None:
             # One final reviewer (owner decision 2026-09-30): an objection is repaired and the repaired profile
             # reviewed again, at most twice (Codex audit 2026-10-01). A profile still not approved is never used:
             # proposals are built on it, so the step fails without charge.
-            for round_ in range(REVIEW_REPAIRS + 1):
+            for round_ in runner.audit_rounds(REVIEW_REPAIRS + 1):
                 approved, objections = runner.review_profile({**payload, "finalProfile": book})  # the exact profile to be used
                 if approved:
                     break
@@ -349,7 +349,7 @@ def _reviewed_plan(runner: ProposalRunner, payload: dict[str, Any], plan: Propos
     as objections; a review that could not complete is "not reviewed", never approval."""
     plan, code_issues = _typed_citations(plan, usable)
     review = PlanReview(outcome="NOT_REVIEWED", reason="REVIEW_UNAVAILABLE")
-    for round_ in range(REVIEW_REPAIRS + 1):
+    for round_ in runner.audit_rounds(REVIEW_REPAIRS + 1):
         approved, objections, reason = runner.review_plan({**payload, "finalPlan": _as_reviewed(plan)})
         objections = [*code_issues, *objections]
         if approved and not code_issues:
@@ -665,7 +665,7 @@ def stage_auditing(ctx: "StageContext") -> None:
     rounds = settings.repair_attempts
     # review, fix, review ... review: the delivered text is always the reviewed text, with at most
     # `rounds` fixes, as priced (Codex audit 2026-09-28 #11).
-    for round_ in range(rounds + 1):
+    for round_ in runner.audit_rounds(rounds + 1):
         problems = {k: _checks(inp, k, t, library, allowed) for k, t in current.items()}
         review = [
             {**items[k], "text": t.paragraphs, "table": t.table.model_dump(), "paperaidChecks": problems[k], "_words": " ".join(t.paragraphs)}

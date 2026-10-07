@@ -1,5 +1,16 @@
 # Deploying PaperAid to Google Cloud
 
+## AI on Gemini through Vertex AI (2026-10-07)
+
+Read [Gemini_Vertex_Handoff_20261007.md](Gemini_Vertex_Handoff_20261007.md): projects, identity,
+the workflow and its models, grounding, prices, older jobs, release, rollback and the live check.
+In short: the services stay in `paperaid-ca172`; Vertex inference, quota and billing are in project
+`paperaid`, location `global` (`VERTEX_PROJECT`, `VERTEX_LOCATION`, set by `release.sh`); only the
+worker's service account may call it (custom role `paperaidVertexInference` in `paperaid`); no key.
+Release with `./release.sh` from Git Bash: it builds the committed HEAD with `backend/cloudbuild.yaml`
+and deploys both services by digest. The earlier `release-*.ps1` scripts are gone. Keep the OpenAI,
+Anthropic and Gemini API secrets until no job priced before 2026-10-07 can still run.
+
 This guide covers the production setup:
 
 - **Website:** Firebase Hosting, with `/api` routed to Cloud Run.

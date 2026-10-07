@@ -26,10 +26,11 @@ def main() -> None:
             "OPENAI_API_KEY": "sk-e2e",
             "ANTHROPIC_API_KEY": "sk-e2e",
             "GEMINI_API_KEY": "gm-e2e",
+            "VERTEX_PROJECT": "paperaid",  # the Gemini workflow, as in production; the stand-in answers every stage
             # Every work service on, with test prices, so the browser journeys can run them.
             "WORKS_ENABLED": '["CONCEPT_NOTE","COURSEWORK","FUNDING_PROPOSAL"]', "WORKS_PUBLIC": "true",
             "DATALAB_ENABLED": "true",
-            "MODEL_PRICES": '{"fake:gpt-6-sol":[0,0,0],"fake:gpt-6-luna":[0,0,0],"fake:claude-sonnet-5-5":[0,0,0],"fake:claude-opus-5-5":[0,0,0],"fake:gemini-3.8-flash":[0,0,0]}',
+            "MODEL_PRICES": '{"fake:gpt-6-sol":[0,0,0],"fake:gpt-6-luna":[0,0,0],"fake:claude-sonnet-5-5":[0,0,0],"fake:claude-opus-5-5":[0,0,0],"fake:gemini-3.8-flash":[0,0,0],"fake:gemini-3.5-flash-lite":[0,0,0],"fake:gemini-3.1-pro-preview":[0,0,0]}',
             "ADMIN_EMAILS": '["demo@paperaid.app"]',
             "ENV": "local",
             "CREDITS_ENABLED": "true",  # the browser journey covers credits, whatever the local .env says
@@ -45,9 +46,21 @@ def main() -> None:
                    "DL_SMALL": 3, "DL_STANDARD": 5, "DL_LARGE": 8, "QL_SMALL": 4, "QL_STANDARD": 7, "QL_LARGE": 12}
     os.environ["FIXED_TOKENS"] = json.dumps({**Settings(_env_file=None).fixed_tokens, **work_tokens})
     get_settings.cache_clear()
+    # Even a later accidental bypass of the stand-in must never become a paid Vertex call.
+    from anthropic.resources.messages import Messages
+    from google.genai.models import Models
+    from openai.resources.responses import Responses
+
     from app.ai import costs, orchestration
     from app.main import create_app
     from tests.fake_models import FakeModels
+
+    def no_vertex_call(*args, **kwargs):
+        raise AssertionError("Browser-test backend cannot call Vertex")
+
+    Models.generate_content = no_vertex_call
+    Messages.create = no_vertex_call
+    Responses.create = no_vertex_call
 
     models = FakeModels()
     orchestration.provider_for = lambda ref, settings: (models, ref.split(":")[-1])
