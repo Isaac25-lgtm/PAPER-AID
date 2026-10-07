@@ -155,3 +155,38 @@ gcloud run jobs deploy paperaid-vertex-check --project paperaid-ca172 --region e
 gcloud run jobs execute paperaid-vertex-check --project paperaid-ca172 --region europe-west1 --wait
 gcloud run jobs delete paperaid-vertex-check --project paperaid-ca172 --region europe-west1 --quiet
 ```
+
+## 7. Released and verified (2026-10-07)
+
+| | |
+|---|---|
+| Commit | `50dd7a7` (the integration is `66f9452`) |
+| Image | `europe-west1-docker.pkg.dev/paperaid-ca172/paperaid/backend:release-50dd7a7`, `sha256:c6e405141097bb43cc86090d748b1585938aa2aabb844354a549111856b3b261` |
+| Worker | `paperaid-worker-00045-sv2` (was `00044-7rz`), service account `paperaid-worker@…` |
+| API | `paperaid-api-00044-66x` (was `00043-f4p`), service account `paperaid-api@…` |
+| Settings added | `VERTEX_PROJECT=paperaid`, `VERTEX_LOCATION=global` (both services); nothing else changed |
+| IAM added | `projects/paperaid/roles/paperaidVertexInference` → worker service account |
+
+**Tests.** Backend 1,112 passed (lint clean); web unit tests 10 passed, typecheck and production build
+pass; browser journeys (main, One Start, proposal, works, Data Lab) pass on the Gemini workflow.
+
+**Live runs on Vertex** (local API and pipelines, real calls, test documents, credits off):
+
+| Service | Result | Time | Cost |
+|---|---|---|---|
+| Paper Check: AI check + academic review + source check | completed; links resolved to real pages | 63 s | $0.04 |
+| Paper Check: light rewrite + formatting | completed; Pro approved first time | 7 min | $0.32 |
+| Coursework (1,500 words), One Start | plan and document approved by Pro; 16 evidence citations, 14 sources | 19 min | $0.99 |
+| Research proposal, One Start → Chapter One | plan approved; chapter: Pro audit → fix → Flash sign-off → readiness | 28 min | $1.39 |
+| Funding proposal (compact), One Start | plan: Pro audit → repair → sign-off; Results Model and document approved by Pro | 26 min | $1.37 |
+| Data Lab quantitative report | Pro audit → repair → sign-off; Pro rate-limited 4 times first | 9 min | $0.13 |
+| Data Lab qualitative themes | approved by Pro | 49 s | $0.04 |
+
+The first proposal run failed Chapter One on a Google `RECITATION` stop in one search; fixed
+(`SEARCH_DECLINED`) and re-run. **Production check** (Cloud Run job, deployed image, worker service
+account): all nine stages and one grounded search succeeded, $0.075. The temporary job was deleted.
+
+**Known limitations.** The premium auditor is a preview model on shared capacity (fallback covers it);
+Gemini wrote a 1,500-word essay about 10% short (PaperAid flagged it "ready with warnings");
+web research is the largest cost of a research step (thinking plus $0.014 a query); whether Google's
+50% introductory credit-back applies while the $300 credit pays the bill shows only on the invoice.
