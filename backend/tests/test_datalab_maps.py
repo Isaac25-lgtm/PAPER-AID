@@ -148,3 +148,14 @@ def test_a_subcounty_map_counts_within_each_district():
     labels = {r[0].text for r in result.tables[0].rows}
     assert labels == {f"{gulu[0].title()} (Gulu)", f"{gulu[1].title()} (Gulu)"} and png[:4] == b"\x89PNG"
     assert np.isclose(result.statistics["n"], 14)
+
+
+def test_the_legend_never_shows_two_classes_with_the_same_limits():
+    """Live check 2026-10-07: a rate map's legend read "0.4 – 0.4" (limits 0.36 and 0.44 at one decimal)."""
+    from app.datalab.engine.maps import _legend_numbers
+
+    breaks = [0.21, 0.31, 0.36, 0.44, 0.61, 0.9]
+    shown = _legend_numbers(breaks, whole=False)
+    assert len({shown(b) for b in breaks}) == len(breaks) and shown(0.36) == "0.36"
+    assert _legend_numbers([2.0, 15.0, 400.0], whole=False)(15.0) == "15.0"  # one decimal when that is enough
+    assert _legend_numbers([12.0, 13.0, 1500.0], whole=True)(1500.0) == "1,500"

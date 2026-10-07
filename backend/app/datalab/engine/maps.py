@@ -24,6 +24,7 @@ import io
 import json
 import re
 import secrets
+from collections.abc import Callable
 from functools import cache
 from pathlib import Path
 
@@ -203,6 +204,15 @@ def area_label(level: str, key: str) -> str:
 def _breaks(values: np.ndarray, k: int = 5) -> list[float]:
     qs = np.unique(np.quantile(values, np.linspace(0, 1, k + 1)))
     return [float(q) for q in qs] if len(qs) > 1 else [float(values.min()), float(values.max()) + 1e-9]
+
+
+def _legend_numbers(breaks: list[float], whole: bool) -> Callable[[float], str]:
+    """How the legend writes its class limits: the fewest decimals (whole numbers first for counts, one
+    otherwise, at most three) at which no two limits read the same ("0.4 – 0.4", live check 2026-10-07)."""
+    for places in range(0 if whole else 1, 4):
+        if len({f"{b:,.{places}f}" for b in breaks}) == len(breaks):
+            break
+    return lambda v: f"{v:,.{places}f}"
 
 
 def _nice(km: float) -> float:
@@ -426,7 +436,7 @@ def draw(layer, values: dict[str, float], hidden: set[str], title: str, label: s
     ax.set_ylim(miny - pad * 3, maxy + pad)
     ax.set_aspect("equal")
     ax.set_title(title, fontsize=11, loc="left", color="#111827")
-    shown_as = (lambda v: f"{v:,.0f}") if whole else (lambda v: f"{v:,.1f}")
+    shown_as = _legend_numbers(breaks, whole)
     handles = [Patch(facecolor=colours[i], edgecolor="none", label=f"{shown_as(breaks[i])} – {shown_as(breaks[i + 1])}") for i in range(len(breaks) - 1)] if values else []
     if hidden:
         handles.append(Patch(facecolor="#e5e7eb", hatch="////", edgecolor="#9ca3af", label="Hidden to protect privacy"))
