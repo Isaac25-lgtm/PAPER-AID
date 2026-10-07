@@ -117,7 +117,7 @@ class Block:
     """One piece of the delivered document, in order. The Word file and PaperAid's final review are
     both built from the same list, so the reviewer judges exactly what prints (Codex audit 2026-10-01)."""
 
-    kind: Literal["title", "label", "heading", "paragraph", "count", "table", "references_heading", "reference", "note"]
+    kind: Literal["title", "label", "heading", "paragraph", "count", "table", "figure", "references_heading", "reference", "note"]
     text: str = ""
     rows: tuple[tuple[str, ...], ...] = ()
     section: str = ""  # the section key it belongs to ("" outside sections)
@@ -165,7 +165,13 @@ def layout(document: WorkDocument, spec: ResolvedSpec, results: ResultsModel | N
             count = f"{len(whole):,} characters" if field.max_characters else f"{len(whole.split()):,} words"
             blocks.append(Block("count", f"{count} (limit {limit})", section=s.key))
         if s.table:
-            blocks += table([[show(c) for c in row] for row in s.table], show(s.table_caption) or s.heading, s.key)
+            caption = show(s.table_caption) or s.heading
+            if s.table_illustrative and ILLUSTRATIVE not in caption:
+                caption = f"{caption} {ILLUSTRATIVE}"
+            blocks += table([[show(c) for c in row] for row in s.table], caption, s.key)
+        if s.figure is not None:
+            figure_rows = [("Line", s.figure.x_axis, s.figure.y_axis), *((line.label, f"{p.x:g}", f"{p.y:g}") for line in s.figure.series for p in line.points)]
+            blocks.append(Block("figure", f"{s.figure.caption} {ILLUSTRATIVE}", tuple(figure_rows), s.key))
         for rows, caption in generated.pop(s.key, []):
             blocks += table(rows, caption, s.key)
     for rows, caption in [t for group in generated.values() for t in group]:  # tables whose section is absent
@@ -186,6 +192,7 @@ def build(document: WorkDocument, spec: ResolvedSpec, results: ResultsModel | No
     doc = Document()
     _setup(doc, profile)
     _footer_numbers(doc.sections[0], "decimal")
+    figures = 0
     for block in layout(document, spec, results, budget, library, tokens, draft):
         if block.kind == "title":
             title = doc.add_paragraph()
@@ -204,6 +211,13 @@ def build(document: WorkDocument, spec: ResolvedSpec, results: ResultsModel | No
             doc.add_paragraph().add_run(block.text).italic = True
         elif block.kind == "table":
             _table(doc, [list(r) for r in block.rows], block.text)
+        elif block.kind == "figure":
+            figures += 1
+            doc.add_picture(io.BytesIO(draw_figure(block.rows)), width=Inches(5.8))
+            doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+            caption = doc.add_paragraph()
+            caption.add_run(f"Figure {figures}. ").bold = True
+            caption.add_run(block.text).italic = True
         elif block.kind == "references_heading":
             doc.add_heading(block.text, level=1)
         elif block.kind == "reference":
@@ -216,6 +230,36 @@ def build(document: WorkDocument, spec: ResolvedSpec, results: ResultsModel | No
     out = io.BytesIO()
     doc.save(out)
     return out.getvalue()
+
+
+ILLUSTRATIVE = "(illustrative values)"
+
+
+def draw_figure(rows: tuple[tuple[str, ...], ...]) -> bytes:
+    """A figure block drawn by code: its first row names the axes, then one row per point (line, x, y)."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    _, x_axis, y_axis = rows[0]
+    lines: dict[str, list[tuple[float, float]]] = {}
+    for label, x, y in rows[1:]:
+        lines.setdefault(label, []).append((float(x), float(y)))
+    fig, ax = plt.subplots(figsize=(6.4, 4.0), dpi=200)
+    ax.spines[["top", "right"]].set_visible(False)
+    for (label, points), colour in zip(lines.items(), ("#1f3a8a", "#c2410c", "#15803d", "#7c3aed", "#0e7490", "#b45309"), strict=False):
+        xs, ys = zip(*sorted(points), strict=True)
+        ax.plot(xs, ys, marker="o", markersize=3, linewidth=1.8, color=colour, label=label)
+    ax.set_xlabel(x_axis)
+    ax.set_ylabel(y_axis)
+    if len(lines) > 1:
+        ax.legend(frameon=False, fontsize=8)
+    buffer = io.BytesIO()
+    fig.tight_layout()
+    fig.savefig(buffer, format="png", dpi=200)
+    plt.close(fig)
+    return buffer.getvalue()
 
 
 def generated_tables(document: WorkDocument, spec: ResolvedSpec, results: ResultsModel | None, budget: Budget | None) -> list[tuple[str, str, list[list[str]], str]]:

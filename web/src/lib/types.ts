@@ -290,6 +290,7 @@ export interface Job {
   id: string
   status: JobStatus
   stage: Stage | null
+  progress?: { step: 'CHECKING' | 'REPAIRING' | 'FINAL_REVIEW'; round: number } | null // where a long check is (works)
   paymentStatus: PaymentStatus
   selection: ServiceSelection
   services: ServiceId[]

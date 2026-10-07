@@ -15,6 +15,7 @@ from typing import Any, Literal
 from pydantic import Field, field_validator
 
 from app.jobs.models import Camel, ReadinessItem, utcnow
+from app.proposals.ai import Figure
 
 WorkKind = Literal["CONCEPT_NOTE", "COURSEWORK", "FUNDING_PROPOSAL"]
 Variant = Literal[
@@ -380,6 +381,8 @@ class WorkSection(Camel):
     paragraphs: list[str]  # evidence tokens ⟦E…⟧ and number tokens ⟦N:…⟧ stay as tokens until rendered
     table: list[list[str]] | None = None
     table_caption: str = ""
+    table_illustrative: bool = False  # a worked example: its caption says "illustrative values" (code)
+    figure: Figure | None = None  # a graph PaperAid draws from the writer's data
     field_id: str = ""
     reviewed: bool = True
 

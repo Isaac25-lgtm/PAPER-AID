@@ -14,7 +14,7 @@ import logging
 from app.ai import costs
 from app.ai.orchestration import SIGNOFF, current_engine, vertex_settings
 from app.ai.providers import ModelResult
-from app.ai.vertex import VertexGeminiProvider
+from app.ai.vertex import VertexGeminiProvider, resolve_sources
 from app.core.config import get_settings
 from app.core.errors import StageError
 
@@ -98,6 +98,8 @@ def main() -> int:
         result = provider.search_json("research", model, "Find one authoritative source. Give its URL exactly as the search provides it "
                                       "and a short verbatim quote.", {"claim": "WHO estimated 597,000 malaria deaths worldwide in 2023."},
                                       FOUND, 6000, 2, thinking=thinking)
+        if not result.error_code:
+            resolve_sources(result, "")
         found = json.loads(result.text).get("findings", []) if not result.error_code else []
         ok = not result.error_code and bool(result.queries) and bool(result.sources) and all(f["url"] in result.sources for f in found)
         print(json.dumps(_line("research (grounded)", model, thinking, result, settings)))

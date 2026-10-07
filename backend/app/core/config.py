@@ -69,11 +69,11 @@ class Settings(BaseSettings):
     planner_model: str = "gemini-3.8-flash"  # plans, briefs, evidence needs, rule specs
     planner_thinking: Thinking = "HIGH"
     research_model: str = "gemini-3.8-flash"  # grounded search and evidence extraction
-    research_thinking: Thinking = "MEDIUM"
+    research_thinking: Thinking = "LOW"  # live 2026-10-07: MEDIUM spent 3,000-12,000 thinking tokens a search
     execution_model: str = "gemini-3.8-flash"  # writes: rewrites, drafts, chapters, reports, themes
     execution_thinking: Thinking = "MEDIUM"
     first_audit_model: str = "gemini-3.8-flash"  # independent checks: AI check, integrity, sections, critiques
-    first_audit_thinking: Thinking = "HIGH"
+    first_audit_thinking: Thinking = "MEDIUM"  # live 2026-10-07: HIGH made each section check 35-85 s
     second_check_model: str = "gemini-3.5-flash-lite"  # the AI check's second, independent assessor
     second_check_thinking: Thinking = "MEDIUM"
     premium_audit_model: str = "gemini-3.1-pro-preview"  # the approval review of every deliverable (first round)
@@ -81,7 +81,7 @@ class Settings(BaseSettings):
     fix_model: str = "gemini-3.8-flash"  # targeted repairs of what an audit named
     fix_thinking: Thinking = "MEDIUM"
     final_signoff_model: str = "gemini-3.8-flash"  # re-review after a repair: were the findings resolved?
-    final_signoff_thinking: Thinking = "HIGH"
+    final_signoff_thinking: Thinking = "MEDIUM"  # it checks named findings; the premium audit keeps HIGH
     # A stage's fallback stages, used only when its model is unavailable, rate-limited or timing out, and
     # only if they cost no more in any billing dimension. The premium auditor is a preview model on shared
     # capacity: a live run was rate-limited four times in five minutes, so its review goes to the first
@@ -140,7 +140,7 @@ class Settings(BaseSettings):
     # account, paid from that account's credits. Off until the account is set up.
     # The terms people accept (owner decision 2026-10-04): a new version is asked for again before the
     # next paid step or Data Lab upload. The lawyer's wording replaces the plain one under a new version.
-    terms_version: str = "2026-10-04"
+    terms_version: str = "2026-10-07"  # qualitative transcripts disclosed (Codex audit 2026-10-07, finding 8)
     canary_enabled: bool = False
     canary_uid: str = ""
     canary_email: str = ""
@@ -157,6 +157,11 @@ class Settings(BaseSettings):
     processing_enabled: bool = True
     queue_concurrency: int = 5
     max_active_jobs_per_user: int = 3
+    # The flood guard in front of the public API, per instance (requests per second, and the burst allowed).
+    flood_client_rate: float = 10.0
+    flood_client_burst: float = 40.0
+    flood_instance_rate: float = 150.0
+    flood_instance_burst: float = 300.0
     quotes_per_hour: int = 40
     submits_per_hour: int = 10
     uploads_per_hour: int = 20  # feedback, guides, rebuilt downloads and PDFs, per student (Codex audit 56c4f83 M21)

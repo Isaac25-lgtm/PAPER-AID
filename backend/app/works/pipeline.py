@@ -14,6 +14,7 @@ repairs fails without charge; nothing half-checked is delivered (Codex review 20
 
 import hashlib
 import json
+import math
 import re
 from typing import TYPE_CHECKING, Any
 
@@ -21,10 +22,10 @@ from app.ai.orchestration import FINAL_PART_WORDS, REVIEW_REPAIRS, check_content
 from app.analysis import fetch, research
 from app.core.errors import PermanentStageError
 from app.jobs import state
-from app.jobs.models import Job, JobStatus, ReadinessItem, Stage, Wallet, utcnow
+from app.jobs.models import Job, JobStatus, Progress, ReadinessItem, Stage, Wallet, utcnow
 from app.pricing.billing import settle_completed
 from app.proposals import evidence as ev
-from app.proposals.ai import SectionText, Table
+from app.proposals.ai import Figure, SectionText, Table
 from app.proposals.models import EvidenceItem, EvidenceSource
 from app.proposals.pipeline import _from_literature, _from_web, load_library
 from app.rules import compliance, library
@@ -120,6 +121,40 @@ def _allowed_text(inp: WorkStepInput) -> str:
     return " ".join([json.dumps(_student(inp), ensure_ascii=False), " ".join(r.value + " " + r.quote for r in spec.requirements), str(spec.duration_months or "")])
 
 
+ILLUSTRATIVE = "(illustrative values)"
+
+
+def _figure_problems(figure: Figure | None) -> list[str]:
+    """A graph PaperAid can draw: 1 to 6 labelled lines of 2 to 60 finite points, a caption and both axes."""
+    if figure is None:
+        return []
+    problems = []
+    if not figure.caption.strip() or not figure.x_axis.strip() or not figure.y_axis.strip():
+        problems.append("The figure needs a caption and a label for each axis.")
+    if not 1 <= len(figure.series) <= 6:
+        problems.append("The figure needs between one and six lines.")
+    for line in figure.series:
+        if not line.label.strip() or not 2 <= len(line.points) <= 60 or not all(math.isfinite(p.x) and math.isfinite(p.y) for p in line.points):
+            problems.append(f"Each line of the figure needs a label and 2 to 60 points ({line.label or 'unlabelled'}).")
+    return problems
+
+
+def _kept(old: SectionText, new: SectionText) -> SectionText:
+    """A section's graph survives a rewrite that leaves it out (compression's format has no figure; a repair
+    that does not mention it): only a new figure replaces it."""
+    return new if new.figure is not None or old.figure is None else new.model_copy(update={"figure": old.figure})
+
+
+def _illustrative(text: SectionText) -> str:
+    """A section's own worked example and graph: their numbers are illustrative by construction (labelled
+    as such by code), so the same numbers in its text are not unsupported figures (2026-10-07: a worked
+    example was blanked cell by cell and the question's "numerical illustrations" failed)."""
+    parts = [" ".join(c for row in text.table.rows for c in row)] if text.table.illustrative else []
+    if text.figure is not None and not _figure_problems(text.figure):
+        parts += [f"{p.x:g} {p.y:g}" for line in text.figure.series for p in line.points]
+    return " ".join(parts)
+
+
 def _tokens(inp: WorkStepInput) -> dict[str, tuple[str, str]]:
     return numbers.values(_spec(inp), inp.results, inp.budget, inp.inputs)
 
@@ -210,6 +245,27 @@ def _relevant_chunks(text: str, need: str) -> list[str]:
     return [chunks[n] for n in sorted(ranked[:READING_CHUNKS])]
 
 
+def _earlier_research(ctx: "StageContext", inp: WorkStepInput) -> list[dict[str, Any]] | None:
+    """The checked sources of the latest attempt at this same step, on this same approved plan, that
+    failed after its research (Codex 2026-10-07: a retry researched everything again, about 7 minutes)."""
+    work = ctx.rt.store.get_work(inp.work_id)
+    for job_id in reversed(work.jobs if work else []):
+        if job_id == ctx.job.id:
+            continue
+        job = ctx.rt.store.get(job_id)
+        if job is None or job.status != JobStatus.FAILED or job.selection.work != inp.step or Stage.RESEARCHING not in job.completed_stages:
+            continue
+        paths = (f"{job.storage_prefix()}/internal/{INPUT}", f"{job.storage_prefix()}/internal/evidence.json")
+        if not all(ctx.rt.files.exists(path) for path in paths):
+            return None
+        before = WorkStepInput.model_validate(json.loads(ctx.rt.files.get(paths[0])))
+        found = json.loads(ctx.rt.files.get(paths[1]))
+        if before.plan_version != inp.plan_version or before.plan != inp.plan:
+            return None
+        return found
+    return None
+
+
 def stage_researching(ctx: "StageContext") -> None:
     """Research needs are planned from the specification and plan; each is answered from the
     student's readings (always first), and, unless the sources are closed, from scholarly abstracts
@@ -222,6 +278,10 @@ def stage_researching(ctx: "StageContext") -> None:
     existing = load_library(ctx.rt.files, inp.evidence_files)
     if spec.variant == "REFLECTIVE" and spec.source_policy != "CLOSED" and not spec.required_readings and inp.step == "PLAN":
         ctx.put_json("evidence.json", [])
+        return
+    earlier = _earlier_research(ctx, inp)
+    if earlier is not None:  # a retry of a failed attempt reuses the sources it already found and checked
+        ctx.put_json("evidence.json", earlier)
         return
     limit = 5 if inp.step == "PLAN" else 8
     payload = {
@@ -645,7 +705,8 @@ def _checks(inp: WorkStepInput, section: PlanSection, text: SectionText, library
     """Code checks on one section: citations, figures, number tokens, length, and the source rule."""
     spec = _spec(inp)
     usable = {i for i, item in library_items.items() if item.usable}
-    problems: list[str] = []
+    allowed = allowed + " " + _illustrative(text)
+    problems: list[str] = list(_figure_problems(text.figure))
     for paragraph in [*text.paragraphs, *(_cells(text) if text.table.rows else [])]:
         plain = numbers.strip(paragraph)
         problems += ev.citation_problems(plain, usable)
@@ -688,6 +749,7 @@ def _review_items(inp: WorkStepInput, sections: dict[str, PlanSection], current:
         {
             "key": k, "heading": sections[k].heading, "brief": sections[k].brief, "words": sections[k].words, "text": current[k].paragraphs,
             "table": current[k].table.model_dump() if current[k].table.rows else None,
+            **({"figure": current[k].figure.model_dump()} if current[k].figure else {}),
             "rules": [{"rule": r["id"], "requirement": r["requirement"], "severity": r["severity"]} for r in _rules_for(spec, k)],
             "coverage": [coverage[c] for c in sections[k].coverage if c in coverage], "paperaidChecks": problems.get(k, []),
             "_words": " ".join(current[k].paragraphs),
@@ -722,6 +784,16 @@ def _issues_from(evaluation: Evaluation | None, integrity: Any) -> list[str]:
     return list(dict.fromkeys(i for i in issues if i.strip()))
 
 
+def progress(ctx: "StageContext", step: str, round_: int) -> None:
+    """Shows the student whether PaperAid is checking, repairing or giving its final review, and the round."""
+
+    def mark(j: Job) -> Job:
+        j.progress = Progress(step=step, round=round_)
+        return j
+
+    ctx.update(mark)
+
+
 def _audit(ctx: "StageContext", runner: WorkRunner, inp: WorkStepInput, current: dict[str, SectionText], targets: list[str], rounds: int | None = None) -> dict[str, Any]:
     """Code checks, integrity and evaluation on `targets`; the writer repairs only what fails; at most
     `rounds` repair rounds (the configured number unless given). Returns what is known about each
@@ -738,15 +810,20 @@ def _audit(ctx: "StageContext", runner: WorkRunner, inp: WorkStepInput, current:
     integrity: dict[str, Any] = {}
     unresolved: dict[str, list[str]] = {}
     pending = [k for k in targets if k in current]
+    repairs = 0
     for round_ in range(rounds + 1):
+        progress(ctx, "CHECKING", round_ + 1)
         for key in pending:  # verdicts on earlier wording never carry over to repaired text (Codex audit, second round)
             integrity.pop(key, None)
             evaluations.pop(key, None)
         problems = {k: _checks(inp, sections[k], current[k], library_items, allowed, tokens) for k in pending}
         items = _review_items(inp, sections, current, problems, pending)
-        integrity.update(runner.integrity([{**i, "lockedFacts": common["student"]} for i in items], {"spec": common["spec"], "student": common["student"]}))
         judged = [i for i in items if i["rules"] or premium or _risk(sections[i["key"]], current[i["key"]]) != "low"]
-        evaluations.update(runner.evaluate(judged, {**common, "tier": runner._engine.tier}))
+        checked, evaluated = runner.together(
+            lambda items=items: runner.integrity([{**i, "lockedFacts": common["student"]} for i in items], {"spec": common["spec"], "student": common["student"]}),
+            lambda judged=judged: runner.evaluate(judged, {**common, "tier": runner._engine.tier}))
+        integrity.update(checked)
+        evaluations.update(evaluated)
         unresolved = {}
         for key in pending:
             issues = [*problems[key], *_issues_from(evaluations.get(key), integrity.get(key))]
@@ -766,16 +843,29 @@ def _audit(ctx: "StageContext", runner: WorkRunner, inp: WorkStepInput, current:
                         unresolved[key].append(decision.instruction)
         if not unresolved or runner.budget_reached or round_ == rounds:
             break
+        progress(ctx, "REPAIRING", round_ + 1)
         for key, fixed in runner.repair(_repair_items(inp, current, library_items, unresolved, problems), common).items():
-            current[key] = fixed
+            current[key] = _kept(current[key], fixed)
+        repairs += 1
         pending = list(unresolved)
-    return {"unresolved": unresolved, "evaluations": evaluations, "integrity": integrity, "library": library_items, "tokens": tokens, "allowed": allowed}
+    return {"unresolved": unresolved, "evaluations": evaluations, "integrity": integrity, "library": library_items, "tokens": tokens, "allowed": allowed,
+            "repairs": repairs}
+
+
+def _blocking(final: "Final", doc_rules: list[dict[str, Any]]) -> frozenset[str]:
+    """What blocks a final review: failed blocking rules, unanswered question parts, unaddressed priorities."""
+    blocking_ids = {r["id"] for r in doc_rules if r["severity"] == "BLOCKING"}
+    return frozenset([*(f"rule:{r.rule}" for r in final.rules if r.status == "FAIL" and r.rule in blocking_ids),
+                      *(f"part:{c.id}" for c in final.coverage if not c.answered),
+                      *(f"priority:{p.priority}" for p in final.priorities if not p.addressed)])
 
 
 def _strip(inp: WorkStepInput, text: SectionText, library_items: dict[str, EvidenceItem], allowed: str) -> SectionText:
     """The last line of defence: a sentence (or table cell) that still carries an untraceable
-    citation or figure is withheld whole, never left without its support (Codex review 2026-09-30 #3)."""
+    citation or figure is withheld whole, never left without its support (Codex review 2026-09-30 #3).
+    A section's own illustrative worked example and graph are not untraceable (`_illustrative`)."""
     usable = {i for i, item in library_items.items() if item.usable}
+    allowed = allowed + " " + _illustrative(text)
 
     def clean(paragraph: str) -> str:
         # Placeholders without digits: a digit in one would read as an unsupported figure.
@@ -793,7 +883,7 @@ def _strip(inp: WorkStepInput, text: SectionText, library_items: dict[str, Evide
             "paragraphs": [p for p in (clean(p) for p in text.paragraphs) if p],
             # Table cells and the caption are delivered like prose, so they are held to the same rule
             # (Codex audit 2026-09-30 #6); a withheld cell stays as an empty cell.
-            "table": Table(caption=clean(text.table.caption), rows=[[clean(c) for c in row] for row in text.table.rows]),
+            "table": text.table.model_copy(update={"caption": clean(text.table.caption), "rows": [[clean(c) for c in row] for row in text.table.rows]}),
         })
         if tidy == text:
             break
@@ -840,9 +930,9 @@ def deliverable(inp: WorkStepInput, document: WorkDocument, library_items: dict[
             out["sections"].append(by_key[b.section])
         elif b.kind in ("paragraph", "count"):
             by_key[b.section]["text"].append(b.text)
-        elif b.kind == "table":
+        elif b.kind in ("table", "figure"):  # a figure is read as its data: the axes, then each line's points
             target = by_key[b.section]["tables"] if b.section in by_key else out["tables"]
-            target.append({"caption": b.text, "rows": [list(r) for r in b.rows]})
+            target.append({"caption": ("Figure (drawn by PaperAid from this data): " if b.kind == "figure" else "") + b.text, "rows": [list(r) for r in b.rows]})
         elif b.kind == "reference":
             out["references"].append(b.text)
         elif b.kind == "note":
@@ -1084,7 +1174,7 @@ def _compress_to_limits(ctx: "StageContext", runner: WorkRunner, inp: WorkStepIn
         items = [{"key": k, "heading": next(s.heading for s in inp.plan.sections if s.key == k), "text": current[k].paragraphs,
                   "table": current[k].table.model_dump(), "targetWords": w, "_words": " ".join(current[k].paragraphs)} for k, w in over.items()]
         for key, shorter in runner.compress(items, _common(inp)).items():
-            current[key] = shorter
+            current[key] = _kept(current[key], shorter)
 
 
 def _document(inp: WorkStepInput, current: dict[str, SectionText], reviewed: set[str]) -> WorkDocument:
@@ -1102,7 +1192,9 @@ def _document(inp: WorkStepInput, current: dict[str, SectionText], reviewed: set
         table = rows if len(rows) >= 2 and width >= 2 else None
         for field in [*text.paragraphs, *(_cells(text) if table else [])]:
             cited += [i for i in ev.cited_ids(field) if i not in cited]
+        figure = text.figure if text.figure is not None and not _figure_problems(text.figure) else None
         sections.append(WorkSection(key=s.key, heading=s.heading, paragraphs=text.paragraphs, table=table, table_caption=text.table.caption if table else "",
+                                    table_illustrative=bool(table) and text.table.illustrative, figure=figure,
                                     field_id=s.field_id, reviewed=s.key in reviewed))
     note = ""
     if spec.kind == "COURSEWORK":
@@ -1171,11 +1263,19 @@ def stage_auditing(ctx: "StageContext") -> None:
     reviewed_text: dict[str, SectionText] = {}  # each section's text when it was last reviewed
     reverted: list[str] = list(unchanged)
 
+    # One repair limit for the whole draft (Codex 2026-10-07): section checks and the final review share it.
+    # Engines priced before the Gemini workflow keep their own allowances, as priced.
+    shared = bool(runner._engine.vertex_routes)
+    repairs_left = [ctx.rt.settings.repair_attempts + 1]
+
     def review(keys: list[str], rounds: int | None = None) -> None:
         keys = [k for k in dict.fromkeys(keys) if k in current and k in editable]
         if not keys:
             return
+        if shared:
+            rounds = min(ctx.rt.settings.repair_attempts if rounds is None else rounds, repairs_left[0])
         known = _audit(ctx, runner, inp, current, keys, rounds)
+        repairs_left[0] -= known["repairs"]
         for k in keys:
             unresolved.pop(k, None)
             evaluations.pop(k, None)
@@ -1221,8 +1321,11 @@ def stage_auditing(ctx: "StageContext") -> None:
         texts = {c.id: c.text for c in spec.coverage}
         for c in final.coverage:
             if not c.answered:
-                for key in fixable([s.key for s in inp.plan.sections if c.id in s.coverage] or _where_keys(c.where, inp.plan.sections)):
-                    fix.setdefault(key, []).append(f"Answer this part of the question explicitly: {texts.get(c.id, c.id)}")
+                named = [k for k in _where_keys(c.where, inp.plan.sections) if k in editable]
+                planned = [s for s in inp.plan.sections if c.id in s.coverage and s.key in editable]
+                keys = named or ([max(planned, key=lambda s: s.words).key] if planned and shared else [s.key for s in planned])
+                for key in fixable(keys):
+                    fix.setdefault(key, []).append(f"Answer this part of the question explicitly and completely in this section: {texts.get(c.id, c.id)}")
         for pr in final.priorities:  # a funder priority not addressed is repaired too, not only reported (Codex audit 2026-10-01)
             if not pr.addressed:
                 for key in fixable(_where_keys(pr.where, inp.plan.sections)):
@@ -1248,8 +1351,10 @@ def stage_auditing(ctx: "StageContext") -> None:
         final: Final | None = None
         doc_rules = _document_rules(spec)
         rounds_seen: list[dict[str, Any]] = []
+        previous_failing: frozenset[str] = frozenset()
         for round_ in runner.audit_rounds(REVIEW_REPAIRS + 1):
             settle_wording()
+            progress(ctx, "FINAL_REVIEW", round_ + 1)
             final = _final_review(runner, inp, _document(inp, current, set()), library_items, tokens, doc_rules)
             if final is None:
                 raise PermanentStageError(
@@ -1260,13 +1365,20 @@ def stage_auditing(ctx: "StageContext") -> None:
             fix = repair_for(final, doc_rules)
             rounds_seen.append({"round": round_, "final": final.model_dump(), "fix": fix, "text": {k: v.paragraphs for k, v in current.items()}})
             ctx.put_json("final_review.json", rounds_seen)  # what the final reviewer objected to each round (admin diagnosis; never logged)
-            if not fix or round_ == REVIEW_REPAIRS or runner.budget_reached:
+            failing = _blocking(final, doc_rules)
+            # The same objections after a repair: another round would only repeat it (live 2026-10-07).
+            repeated = round_ > 0 and failing == previous_failing
+            previous_failing = failing
+            if not fix or round_ == REVIEW_REPAIRS or runner.budget_reached or repeated or (shared and repairs_left[0] <= 0):
                 break
             fix_notes.append(f"round {round_ + 1}: " + ", ".join(fix))
+            progress(ctx, "REPAIRING", round_ + 1)
             repaired = runner.repair(
                 _repair_items(inp, current, library_items, fix), _common(inp))
-            current.update({k: v for k, v in repaired.items() if k in fix})
-            review(list(fix))
+            current.update({k: _kept(current[k], v) for k, v in repaired.items() if k in fix})
+            repairs_left[0] -= 1
+            # One check of what was repaired, no section repair loop: the final sign-off judges it next.
+            review(list(fix), rounds=0)
     else:
         # Older engines: the whole-document review and its repair, as they were priced.
         final, doc_rules = _final(ctx, runner, inp, current, library_items, tokens)
@@ -1276,7 +1388,7 @@ def stage_auditing(ctx: "StageContext") -> None:
             if fix:
                 repaired = runner.repair(
                     _repair_items(inp, current, library_items, fix), _common(inp))
-                current.update({k: v for k, v in repaired.items() if k in fix})
+                current.update({k: _kept(current[k], v) for k, v in repaired.items() if k in fix})
                 review(list(fix))
         settle_wording()
         if current != judged_document:

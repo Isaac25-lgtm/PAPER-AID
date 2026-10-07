@@ -624,6 +624,7 @@ class ModelCall(Camel):
     error_code: str = ""
     fallback_attempt: int = 0
     estimated_cost_usd: float = 0.0
+    reserved_usd: float = 0.0  # held against the job's cap for a call that may have been billed (its answer was lost)
     pricing_status: str = ""  # VERIFIED for Vertex execution; legacy entries remain readable
     model_version: str = ""  # version actually reported by Vertex; billing still uses the priced model ref
     at: datetime = Field(default_factory=utcnow)
@@ -638,6 +639,13 @@ class AdminAction(Camel):
     at: datetime = Field(default_factory=utcnow)
     actor: str
     action: str
+
+
+class Progress(Camel):
+    """Where a long check is (Codex 2026-10-07: show whether it is checking or repairing, and the round)."""
+
+    step: Literal["CHECKING", "REPAIRING", "FINAL_REVIEW"]
+    round: int = 1
 
 
 class JobView(Camel):
@@ -678,6 +686,7 @@ class JobView(Camel):
     datalab_id: str | None = None  # a Data Lab report: its result is saved to the Data Lab project
     outputs: list[OutputFile] = []
     failure: JobFailure | None = None
+    progress: Progress | None = None  # the check in progress while AUDITING (works)
     created_at: datetime = Field(default_factory=utcnow)
     queued_at: datetime | None = None
     completed_at: datetime | None = None
@@ -700,6 +709,7 @@ class Job(JobView):
     attempts: int = 0
     lease_until: datetime | None = None
     cost_usd: float = 0.0  # every model call, estimate included
+    reserved_usd: float = 0.0  # calls whose billing is unknown, held against the cap apart from confirmed cost
     estimate_cost_usd: float = 0.0
     refine_cost_usd: float = 0.0  # job-phase spend on planning, refining and auditing (scaled for partial results)
     budget_usd: float = 0.0  # provider-spend cap for the job phase: the quote's AI part / rate / multiplier

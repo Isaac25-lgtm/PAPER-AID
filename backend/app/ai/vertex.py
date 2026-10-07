@@ -13,6 +13,7 @@ import atexit
 import json
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor, wait
 from threading import Lock
 from typing import Any
 from urllib.parse import urlsplit
@@ -78,6 +79,12 @@ MEDIA_TYPES = {
 }
 
 
+# Many students share Gemini's capacity (owner, 2026-10-07: 20 at once). A throttled (429) or briefly
+# unavailable (503) request is retried here within seconds, with jitter, before the stage fails and waits for
+# the queue's backoff: Google bills neither, and nothing else is retried here (a timeout may have been billed).
+THROTTLE_RETRY = types.HttpRetryOptions(attempts=4, initial_delay=2.0, max_delay=20.0, exp_base=2.0, jitter=1.0, http_status_codes=[429, 503])
+
+
 def _vertex_client(project: str, location: str, timeout: float) -> genai.Client:
     """One client per server-configured project/location/timeout, including concurrent cold starts.
 
@@ -91,7 +98,7 @@ def _vertex_client(project: str, location: str, timeout: float) -> genai.Client:
                 credentials, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"], quota_project_id=project)
                 _CLIENTS[key] = genai.Client(vertexai=True, project=project, location=location, credentials=credentials,
                                             http_options=types.HttpOptions(api_version="v1", timeout=int(timeout * 1000),
-                                                                           retry_options=types.HttpRetryOptions(attempts=1)))
+                                                                           retry_options=THROTTLE_RETRY))
             return _CLIENTS[key]
     except (auth_errors.DefaultCredentialsError, auth_errors.RefreshError):
         raise PermanentStageError("VERTEX_AUTH", MISCONFIGURED, "Vertex ADC unavailable") from None
@@ -170,11 +177,19 @@ REDIRECT_HOST = "vertexaisearch.cloud.google.com"
 _REDIRECT = re.compile(r"https://vertexaisearch\.cloud\.google\.com/grounding-api-redirect/[A-Za-z0-9_\-=]+")
 
 
+# Resolving grounding links is bounded (Codex audit 2026-10-07, finding 3): at most this many links, each
+# within its own timeout, all within a total deadline, so a long answer can't hold a stage past its task
+# deadline. The runner records the call's usage and keeps the raw answer before resolving.
+MAX_LINKS = 20
+LINK_TIMEOUT_S = 5.0
+RESOLVE_DEADLINE_S = 25.0
+
+
 def _resolve(link: str) -> str | None:
     """The page a grounding redirect stands for: Google answers a link it issued with a redirect, and
     one it did not issue with 404. Only the Location header is read; the page itself is not fetched."""
     try:
-        response = httpx.get(link, follow_redirects=False, timeout=10)
+        response = httpx.get(link, follow_redirects=False, timeout=LINK_TIMEOUT_S)
     except httpx.HTTPError:
         return None
     location = response.headers.get("location", "")
@@ -183,13 +198,44 @@ def _resolve(link: str) -> str | None:
     return location
 
 
-def _resolve_sources(result: ModelResult) -> None:
-    """Replace every grounding redirect in the answer with the page it resolves to, and make the
-    resolved pages the sources the search opened. A link that does not resolve stays in the answer,
-    where the caller's source check drops it (it is not among the sources)."""
+def _strings(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        return [s for v in value for s in _strings(v)]
+    if isinstance(value, dict):
+        return [s for v in value.values() for s in _strings(v)]
+    return []
+
+
+def resolve_sources(result: ModelResult, request_text: str) -> None:
+    """Replace the grounding redirects in a searched answer with the pages they stand for, and record
+    which pages count as sources of THIS search (`result.sources`).
+
+    Provenance (Codex audit 2026-10-07, finding 7): with a JSON answer Vertex returns the queries it ran
+    but no source list, so the only evidence is the redirect links the model wrote. A link counts only if
+    a search actually ran, Google resolves it (an invented one does not), and it was not already in the
+    request (a link copied from the input is not something this search returned). That shows the page
+    came through Google's grounding; it does not show the quotation is on it: the callers' existing checks
+    (the page fetched, the quotation found on it, the second model's reading) still decide. Where Google
+    returns source metadata, those pages are the sources; `grounding["provenance"]` says which.
+    Links are looked for in the DECODED answer (finding 6: valid JSON may escape a slash)."""
+    try:
+        decoded: Any = json.loads(result.text)
+    except json.JSONDecodeError:
+        decoded = result.text
     chunks = [s["url"] for s in result.grounding.get("sources", [])]
-    links = list(dict.fromkeys([*_REDIRECT.findall(result.text), *(u for u in chunks if _REDIRECT.fullmatch(u))]))
-    resolved = {link: page for link in links if (page := _resolve(link))}
+    found = [m for text in _strings(decoded) for m in _REDIRECT.findall(text)]
+    links = list(dict.fromkeys([*found, *(u for u in chunks if _REDIRECT.fullmatch(u))]))
+    supplied = {link for link in links if link in request_text}
+    candidates = [link for link in links if link not in supplied][:MAX_LINKS] if result.queries else []
+    resolved: dict[str, str] = {}
+    if candidates:
+        pool = ThreadPoolExecutor(max_workers=min(8, len(candidates)))
+        futures = {pool.submit(_resolve, link): link for link in candidates}
+        done, _ = wait(futures, timeout=RESOLVE_DEADLINE_S)
+        pool.shutdown(wait=False, cancel_futures=True)
+        resolved = {futures[f]: page for f in done if (page := f.result())}
 
     def swap(value: Any) -> Any:
         if isinstance(value, str):
@@ -200,13 +246,13 @@ def _resolve_sources(result: ModelResult) -> None:
             return {k: swap(v) for k, v in value.items()}
         return value
 
-    try:
-        result.text = json.dumps(swap(json.loads(result.text)), ensure_ascii=False)
-    except json.JSONDecodeError:
-        result.text = swap(result.text)
-    result.sources = list(dict.fromkeys([*resolved.values(), *(u for u in chunks if not _REDIRECT.fullmatch(u))]))
-    result.grounding["resolvedSources"] = len(result.sources)
-    result.grounding["unresolvedLinks"] = len(links) - len(resolved)
+    swapped = swap(decoded)
+    result.text = swapped if isinstance(swapped, str) else json.dumps(swapped, ensure_ascii=False)
+    metadata_pages = [u for u in chunks if not _REDIRECT.fullmatch(u)]
+    result.sources = list(dict.fromkeys([*resolved.values(), *metadata_pages]))
+    result.grounding.update({"provenance": "provider_metadata" if chunks else "resolved_answer_links", "resolvedSources": len(resolved),
+                             "unresolvedLinks": len(candidates) - len(resolved), "linksFromRequest": len(supplied),
+                             "linksOverLimit": max(0, len(links) - len(supplied) - MAX_LINKS)})
 
 
 def _model_id(value: str) -> str:
@@ -372,22 +418,24 @@ class VertexGeminiProvider:
             response = client.models.generate_content(model=model, contents=contents, config=config)
         except errors.APIError as exc:
             raise _error(exc, search) from None
-        except httpx.TimeoutException:
+        except (httpx.ConnectError, httpx.ConnectTimeout):  # never reached Google: nothing billed
+            raise RetryableStageError("PROVIDER_UNAVAILABLE", UNAVAILABLE, "vertex unreachable") from None
+        except httpx.TimeoutException:  # sent, answer not received: Google may have billed it
             raise RetryableStageError("VERTEX_TIMEOUT", UNAVAILABLE, "vertex transport timeout") from None
-        except httpx.TransportError:
-            raise RetryableStageError("PROVIDER_UNAVAILABLE", UNAVAILABLE, "vertex transport unavailable") from None
+        except httpx.TransportError:  # the connection broke after sending: Google may have billed it
+            raise RetryableStageError("VERTEX_CONNECTION_LOST", UNAVAILABLE, "vertex connection lost after sending") from None
         except (auth_errors.DefaultCredentialsError, auth_errors.RefreshError):
             raise PermanentStageError("VERTEX_AUTH", MISCONFIGURED, "Vertex ADC authentication failed") from None
         except auth_errors.TransportError:
             raise RetryableStageError("PROVIDER_UNAVAILABLE", UNAVAILABLE, "Vertex ADC transport unavailable") from None
-        except (SDKValidationError, json.JSONDecodeError):
-            raise RetryableStageError("MALFORMED_OUTPUT", UNAVAILABLE, "vertex malformed response envelope; usage unknown") from None
+        except (SDKValidationError, json.JSONDecodeError):  # a successful (billed) answer the SDK could not read
+            raise RetryableStageError("VERTEX_MALFORMED_ENVELOPE", UNAVAILABLE, "vertex malformed response envelope; usage unknown") from None
         except (ValueError, TypeError):
             raise PermanentStageError("VERTEX_REQUEST_UNSUPPORTED", MISCONFIGURED, "SDK rejected Vertex request configuration") from None
         try:
             response = types.GenerateContentResponse.model_validate(response)
         except SDKValidationError:
-            raise RetryableStageError("MALFORMED_OUTPUT", UNAVAILABLE, "vertex malformed response envelope; usage unknown") from None
+            raise RetryableStageError("VERTEX_MALFORMED_ENVELOPE", UNAVAILABLE, "vertex malformed response envelope; usage unknown") from None
         result = self._result(response, model, started, search)
         if result.tool_calls and any(c["name"] not in names for c in result.tool_calls):
             result.error_code = "VERTEX_TOOL_ERROR"
@@ -402,9 +450,9 @@ class VertexGeminiProvider:
                         Draft202012Validator(options.response_json_schema).validate(data)
                     except ValidationError:
                         result.error_code, result.error_retryable = "SCHEMA_VALIDATION_FAILED", True
-        if search and result.stop == "end_turn" and not result.error_code:
-            _resolve_sources(result)
-            # Queries beyond the allowance were run and are charged; the answer is still usable.
+        if search:
+            # Queries beyond the allowance were run and are charged; the runner caps what follows. The
+            # answer's links are resolved by the caller AFTER the call's usage is recorded (resolve_sources).
             result.grounding["queriesOverAllowance"] = max(0, len(result.queries) - (options.max_grounding_queries or 0))
         return result
 

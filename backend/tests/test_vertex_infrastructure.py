@@ -334,7 +334,7 @@ def test_truncation_and_missing_usage_and_invalid_envelope(sdk):
     p = vertex.VertexGeminiProvider(settings())
     assert p.json("caller_label", MODEL, "s", {}, SCHEMA, 512).stop == "max_tokens"
     assert p.json("caller_label", MODEL, "s", {}, SCHEMA, 512).error_code == "VERTEX_USAGE_MISSING"
-    with pytest.raises(RetryableStageError, match="MALFORMED_OUTPUT") as err:
+    with pytest.raises(RetryableStageError, match="VERTEX_MALFORMED_ENVELOPE") as err:
         p.json("caller_label", MODEL, "s", {}, SCHEMA, 512)
     assert "private sentinel" not in str(err.value) and len(calls) == 3
 
@@ -409,7 +409,7 @@ def test_client_reuse_thread_safety_and_teardown(monkeypatch):
         assert clients[0]["credentials"] is credentials and clients[0]["vertexai"]
         assert clients[0]["project"] == accounts[0]["quota_project_id"] == "paperaid"
         assert clients[0]["location"] == "global" and "api_key" not in clients[0]
-        assert clients[0]["http_options"].retry_options.attempts == 1
+        assert clients[0]["http_options"].retry_options.http_status_codes == [429, 503]  # throttling only (2026-10-07)
         vertex._vertex_client("paperaid", "global", 60)
         assert len(clients) == 2  # timeout is server config, not a per-model selection
     finally:

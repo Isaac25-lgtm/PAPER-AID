@@ -848,6 +848,7 @@ class RenderedSection(Camel):
     paragraphs: list[str]
     table: list[list[str]] | None = None
     table_caption: str = ""
+    figure: dict[str, Any] | None = None  # a graph drawn from the writer's data: caption, xAxis, yAxis, series
     field_limit: str = ""
     field_count: str = ""
 
@@ -867,6 +868,8 @@ class DocumentView(Camel):
 
 
 def document(rt: Runtime, user: User, work_id: str, version: int | None = None) -> DocumentView:
+    from app.works.export import ILLUSTRATIVE
+
     k = _owned(rt, user, work_id)
     doc = _doc(rt, k, version)
     if doc is None:
@@ -884,7 +887,10 @@ def document(rt: Runtime, user: User, work_id: str, version: int | None = None) 
         text = " ".join(paragraphs)
         sections.append(RenderedSection(
             key=s.key, heading=s.heading, paragraphs=paragraphs,
-            table=[[numbers.render(citer.render(c), tokens)[0] for c in row] for row in s.table] if s.table else None, table_caption=s.table_caption,
+            table=[[numbers.render(citer.render(c), tokens)[0] for c in row] for row in s.table] if s.table else None,
+            table_caption=f"{s.table_caption} {ILLUSTRATIVE}" if s.table and s.table_illustrative and ILLUSTRATIVE not in s.table_caption else s.table_caption,
+            figure={"caption": f"{s.figure.caption} {ILLUSTRATIVE}", "xAxis": s.figure.x_axis, "yAxis": s.figure.y_axis,
+                    "series": [{"label": line.label, "points": [{"x": p.x, "y": p.y} for p in line.points]} for line in s.figure.series]} if s.figure else None,
             field_limit=(f"{field.max_characters:,} characters" if field.max_characters else f"{field.max_words:,} words") if field else "",
             field_count=(f"{len(text):,} characters" if field.max_characters else f"{len(text.split()):,} words") if field else "",
         ))

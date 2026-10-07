@@ -15,6 +15,7 @@ from app.api.routes import api, tasks
 from app.api.works import router as work_routes
 from app.core.config import get_settings
 from app.core.errors import AppError
+from app.core.flood import FloodGuard, client_address
 from app.core.logging import log, request_id, setup_logging
 from app.jobs import service
 from app.runtime import get_runtime
@@ -53,6 +54,16 @@ def create_app() -> FastAPI:
         allow_headers=["Authorization", "Content-Type", "X-Firebase-AppCheck"],
     )
     if role in ("api", "all"):
+        guard = FloodGuard(settings.flood_client_rate, settings.flood_client_burst, settings.flood_instance_rate, settings.flood_instance_burst)
+
+        @app.middleware("http")
+        async def flood_guard(request: Request, call_next):
+            # Refused before sign-in or any database read (owner, 2026-10-07). The worker is not public.
+            if request.url.path.startswith("/api/") and not guard.allow(client_address(request.headers.get("x-forwarded-for"), request.client.host if request.client else None)):
+                return JSONResponse({"code": "RATE_LIMITED", "message": "Too many requests at once. Please wait a moment and try again.", "requestId": request_id.get()},
+                                    status_code=429, headers={"Retry-After": "2"})
+            return await call_next(request)
+
         app.include_router(api)
         app.include_router(project_routes)
         app.include_router(work_routes)

@@ -39,13 +39,13 @@ workflow only decides which model executes each step. Every step in `STEPS` belo
 |---|---|---|---|
 | intake | `gemini-3.5-flash-lite` | LOW | reading a brief (`w_read`), finding a paper's checkable claims (`claims`) |
 | planner | `gemini-3.8-flash` | HIGH | plans, briefs, evidence needs, results models, formatting and institution specs |
-| research | `gemini-3.8-flash` + Google Search | MEDIUM | source check, proposal and works research, evidence extraction |
+| research | `gemini-3.8-flash` + Google Search | LOW | source check, proposal and works research, evidence extraction |
 | execution | `gemini-3.8-flash` | MEDIUM | rewrites, redrafts, chapters, works drafts, Data Lab reports, qualitative coding and themes |
-| first audit | `gemini-3.8-flash` | HIGH | AI check, academic review, evidence verification, integrity, section evaluation, readiness, plan critiques |
+| first audit | `gemini-3.8-flash` | MEDIUM | AI check, academic review, evidence verification, integrity, section evaluation, readiness, plan critiques |
 | second check | `gemini-3.5-flash-lite` | MEDIUM | the AI check's independent second assessor |
 | premium audit | `gemini-3.1-pro-preview` | HIGH | the approval review of every deliverable; review of an uploaded proposal; premium-tier section evaluation |
 | fix | `gemini-3.8-flash` | MEDIUM | targeted repairs of what an audit named |
-| final sign-off | `gemini-3.8-flash` | HIGH | every re-review after a repair |
+| final sign-off | `gemini-3.8-flash` | MEDIUM | every re-review after a repair |
 
 **Audit → repair → sign-off.** Every approval review runs in PaperAid's bounded loop
 (`REVIEW_REPAIRS = 2`). `AIRunner.audit_rounds` numbers the rounds: round 0 is the premium audit; each
@@ -141,10 +141,18 @@ job while the workflow is on: every step of a new engine has a frozen Vertex rou
    `VERTEX_LOCATION=global`; every other setting, secret and identity is kept;
 4. prints the new and previous revisions and the rollback commands.
 
-Rollback: `gcloud run services update-traffic SERVICE --project paperaid-ca172 --region europe-west1
---to-revisions=PREVIOUS=100` for the worker and the API. A job quoted on the new release keeps its
-Vertex engine and still runs after a rollback only if the older revision understands it; quote
-afresh after rolling back.
+Rollback is a controlled operation (Codex audit 2026-10-07, finding 4):
+1. Pause processing (admin console, or `POST /api/admin/processing {"enabled": false}`) and let
+   running stages finish.
+2. `gcloud run services update-traffic SERVICE --project paperaid-ca172 --region europe-west1
+   --to-revisions=PREVIOUS=100` for the worker and the API.
+3. Resume processing.
+
+Every quote freezes the fingerprint of every prompt and rule file it runs (`priced_engine`). An older
+image reads a Gemini-priced engine without its Vertex routes, but its own prompts differ, so it refuses
+the job before any call (ENGINE_CHANGED: failed, not charged) rather than running it on other models.
+Jobs priced on `50dd7a7` itself (Paper Check before this fix carried no fingerprint) must not be left
+queued if you roll back further than `50dd7a7`: pause first, then cancel them.
 
 Live check of the deployed identity (a few cents; synthetic text only):
 ```bash
@@ -190,3 +198,47 @@ account): all nine stages and one grounded search succeeded, $0.075. The tempora
 Gemini wrote a 1,500-word essay about 10% short (PaperAid flagged it "ready with warnings");
 web research is the largest cost of a research step (thinking plus $0.014 a query); whether Google's
 50% introductory credit-back applies while the $300 credit pays the bill shows only on the invoice.
+
+## 8. Codex's audit of the integration, fixed (2026-10-07)
+
+| # | Finding | Fix |
+|---|---|---|
+| 1 | Grounding has no hard query cap, so one call could spend past the job's cap | Spend is reserved for 3 queries per allowed search (`SEARCH_RESERVE_FACTOR`; live calls ran 2 to 3). A call that runs more is charged as run; the job then buys nothing more (`budget_reached`, next call refused). The student is never charged above the quote. |
+| 2 | Only timeouts reserved spend | A request that may have been billed although its answer was lost (timeout, connection broken after sending, unreadable answer) records `reservedUsd` = its estimate and `pricingStatus: UNKNOWN_BILLING`; the job's cap counts reservations (`Job.reservedUsd`), kept apart from confirmed cost. Connection refused or an HTTP error is never billed by Google. |
+| 3 | Link resolution unbounded and before the cost was saved | The call's usage is recorded first, the raw answer is saved (`…-raw`), then at most 20 links are resolved, 8 at a time, 5 s each, 25 s in total. A retry after a crash resolves the saved answer again and never buys it twice. |
+| 4 | A rollback could run Gemini-priced jobs on the old models | Every priced quote carries its content fingerprint; controlled rollback procedure above. |
+| 5 | Sign-off history mixed document parts and bypassed the size bound | Earlier answers are kept per document part; a pipeline that passes its own findings (`previousIssues`) gets no second copy; history is at most 1,200 words and keeps a review part within `FINAL_PART_WORDS`. |
+| 6 | Links escaped as `\/` in valid JSON were missed | Links are found in the decoded answer. |
+| 7 | A resolvable link was treated as returned by this search | A link counts only if a search ran, it resolves, and it was not in the request; `grounding.provenance` says whether the sources came from Google's metadata or from resolved answer links. The quotation checks still decide. |
+| 8 | Terms said the AI never sees individual records; transcripts are sent | Terms and privacy summary now say: numbers, only calculated results; transcripts, the passages analysed after listed names and contact details are replaced. Terms version `2026-10-07`: everyone accepts again, and the step they were taking carries on as soon as they do. |
+
+Tests: `backend/tests/test_audit_20261007.py`, one regression per finding.
+
+## 9. Coursework that took 44 minutes and failed, fixed (2026-10-07)
+
+A live coursework draft (an economics question asking for "graphical and numerical illustrations") ran
+43 minutes 42 seconds and failed. Seventy-two AI requests: 21 integrity checks, 21 section evaluations,
+12 repairs and 3 final reviews. Two causes:
+1. **It asked for something PaperAid could not make.** The writer could not draw a graph, and the guard
+   against invented statistics emptied the worked example cell by cell. The final reviewer rightly failed
+   the draft every round. Now the writer gives a graph as data (`figure`: caption, axes, labelled lines of
+   points) and PaperAid's code draws it (Word: matplotlib; the app: an SVG chart); a worked example is a
+   table marked `illustrative`. Both are labelled "(illustrative values)" by code, and only their own
+   numbers count as allowed in that section. Prompts `w-draft-v2` and `w-repair-v3`; the answer format with
+   figures applies only to steps priced on them. The final reviewer reads a figure as its data.
+2. **Nested loops.** Each final-review round re-ran the whole section repair loop. Now one repair limit
+   (repair_attempts + 1) covers the section checks and the final review together; after a final-review
+   repair, the repaired sections get one check and go to the sign-off; the loop stops when the final
+   review repeats the same blocking objections; a missing part of the question is repaired in the section
+   the reviewer named (or the plan's main one), not in every section mapped to it; integrity and evaluation
+   run at the same time; research thinks LOW, checks and the sign-off MEDIUM.
+
+Also: the progress screen shows "Checking each section / Fixing what the checks found / Final check of
+the whole document · round N"; a retry of a failed step on the same approved plan reuses that attempt's
+checked sources instead of researching again.
+
+**Capacity for many students at once.** Twenty steps run at the same time (queue `paper-jobs`
+`maxConcurrentDispatches` 20, worker `--max-instances` 20, one step per instance); more wait in the queue.
+A Gemini call throttled (429) or briefly unavailable (503) retries itself within seconds with jitter
+(`THROTTLE_RETRY`), before the step's own retry; Google bills neither. The premium audit falls back to
+3.8 Flash when the preview Pro model stays busy.

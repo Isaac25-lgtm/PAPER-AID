@@ -17,7 +17,18 @@ from datetime import timedelta
 from pathlib import PurePosixPath
 from typing import Any, Literal
 
-from app.ai.orchestration import NOT_RETURNED, AIRunner, ClaimCandidate, FoundSource, PlanItem, ResearchAnswer, ReviewOutcome, Revision, Target, current_engine
+from app.ai.orchestration import (
+    NOT_RETURNED,
+    AIRunner,
+    ClaimCandidate,
+    FoundSource,
+    PlanItem,
+    ResearchAnswer,
+    ReviewOutcome,
+    Revision,
+    Target,
+    priced_engine,
+)
 from app.ai.styles import writing_brief
 from app.analysis import fetch, paper_checks, references, research, signals, structure
 from app.core.errors import InvalidDocument, PermanentStageError, StageError
@@ -147,6 +158,7 @@ class StageContext:
             def add(j: Job) -> Job:
                 j.model_calls = (j.model_calls + [call])[-200:]
                 j.cost_usd = round(j.cost_usd + call.cost_usd, 6)
+                j.reserved_usd = round(j.reserved_usd + call.reserved_usd, 6)
                 if call.phase == "estimate":
                     j.estimate_cost_usd = round(j.estimate_cost_usd + call.cost_usd, 6)
                 elif call.stage in REFINE_STAGES:
@@ -162,8 +174,8 @@ class StageContext:
             if current is None:
                 return 0.0
             if estimate is not None:
-                return current.estimate_cost_usd - estimate.cost_base_usd
-            return current.cost_usd - current.estimate_cost_usd
+                return current.estimate_cost_usd - estimate.cost_base_usd + current.reserved_usd
+            return current.cost_usd - current.estimate_cost_usd + current.reserved_usd
 
         budget = estimate.budget_usd if estimate is not None else self.job.budget_usd
         # The run executes with the engine it was priced with (its estimate's, then its quote's).
@@ -628,7 +640,7 @@ def _finish_estimate(rt: Runtime, job_id: str, run_id: str, passages: list[Passa
             run.selection,
             run.source_sha256,
             j.source.word_count,
-            run.engine or current_engine(settings),
+            run.engine or priced_engine(settings),
             run.guideline_sha256,
             guide_words,
             passages,

@@ -9,7 +9,7 @@ import { walletChanged } from '../../lib/use-wallet'
 import type { ReadinessItem } from '../../lib/proposal-types'
 import type { Budget, ResultsModel, Work, WorkDocumentView } from '../../lib/work-types'
 import { StartProgress, StoppedCard, type Phase } from '../start/progress'
-import { ChangeBox, ChecksList, DocTable, ErrorNote, PanelSection, Paper, Para, Versions, WorkspaceHeader, type CheckLine, type WorkspaceStatus } from '../workspace/parts'
+import { ChangeBox, ChecksList, DocFigure, DocTable, ErrorNote, PanelSection, Paper, Para, Versions, WorkspaceHeader, type CheckLine, type WorkspaceStatus } from '../workspace/parts'
 import { KIND_LABELS, VARIANT_LABELS } from './shared'
 import { LegacyWorkPage } from './work-page'
 
@@ -185,6 +185,7 @@ function Workspace({ work, onChange, onReload }: { work: Work; onChange: (w: Wor
                 ))}
                 {s.fieldLimit && <p className="mt-1 text-xs italic">{s.fieldCount} (limit {s.fieldLimit})</p>}
                 {s.table && <DocTable caption={s.tableCaption || s.heading} rows={s.table} />}
+                {s.figure && <DocFigure figure={s.figure} />}
               </section>
             ))}
             {doc.tables.map((t) => (

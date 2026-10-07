@@ -5,6 +5,7 @@ import { Link } from 'react-router'
 import { Button } from '../../components/ui/button'
 import { Select, TextArea } from '../../components/ui/field'
 import { Alert } from '../../components/ui/primitives'
+import type { DocFigureData } from '../../lib/work-types'
 
 /** The workspace (owner decision 2026-10-01): the document on the left as it reads on paper, and on
  *  the right what the student can do with it: what still needs them, asking for changes (with a
@@ -81,6 +82,51 @@ export function Paper({ children }: { children: ReactNode }) {
     >
       {children}
     </article>
+  )
+}
+
+const LINE_COLOURS = ['#1f3a8a', '#c2410c', '#15803d', '#7c3aed', '#0e7490', '#b45309']
+
+/** A graph PaperAid drew from the writer's data (the Word file has the same figure, drawn by the server). */
+export function DocFigure({ figure }: { figure: DocFigureData }) {
+  const points = figure.series.flatMap((s) => s.points)
+  if (points.length < 2) return null
+  const [w, h, left, bottom, top, right] = [560, 320, 56, 44, 16, 16]
+  const xs = points.map((p) => p.x)
+  const ys = points.map((p) => p.y)
+  const [x0, x1] = [Math.min(...xs), Math.max(...xs)]
+  const [y0, y1] = [Math.min(0, ...ys), Math.max(...ys)]
+  const sx = (x: number) => left + ((x - x0) / (x1 - x0 || 1)) * (w - left - right)
+  const sy = (y: number) => h - bottom - ((y - y0) / (y1 - y0 || 1)) * (h - top - bottom)
+  const ticks = (a: number, b: number) => [0, 0.25, 0.5, 0.75, 1].map((t) => a + t * (b - a))
+  const fmt = (v: number) => (Math.abs(v) >= 100 ? Math.round(v).toLocaleString() : Number(v.toPrecision(3)).toString())
+  return (
+    <figure className="my-5">
+      <svg viewBox={`0 0 ${w} ${h}`} className="w-full max-w-xl" role="img" aria-label={figure.caption}>
+        <line x1={left} y1={h - bottom} x2={w - right} y2={h - bottom} stroke="#9ca3af" />
+        <line x1={left} y1={top} x2={left} y2={h - bottom} stroke="#9ca3af" />
+        {ticks(x0, x1).map((v) => (
+          <text key={`x${v}`} x={sx(v)} y={h - bottom + 16} fontSize="11" textAnchor="middle" fill="#374151">{fmt(v)}</text>
+        ))}
+        {ticks(y0, y1).map((v) => (
+          <text key={`y${v}`} x={left - 6} y={sy(v) + 4} fontSize="11" textAnchor="end" fill="#374151">{fmt(v)}</text>
+        ))}
+        <text x={(left + w - right) / 2} y={h - 6} fontSize="12" textAnchor="middle" fill="#111827">{figure.xAxis}</text>
+        <text x={14} y={(top + h - bottom) / 2} fontSize="12" textAnchor="middle" fill="#111827" transform={`rotate(-90 14 ${(top + h - bottom) / 2})`}>{figure.yAxis}</text>
+        {figure.series.map((s, i) => {
+          const sorted = [...s.points].sort((a, b) => a.x - b.x)
+          return (
+            <g key={s.label}>
+              <polyline fill="none" stroke={LINE_COLOURS[i % LINE_COLOURS.length]} strokeWidth="2" points={sorted.map((p) => `${sx(p.x)},${sy(p.y)}`).join(' ')} />
+              {figure.series.length > 1 && (
+                <text x={w - right} y={top + 14 * (i + 1)} fontSize="11" textAnchor="end" fill={LINE_COLOURS[i % LINE_COLOURS.length]}>{s.label}</text>
+              )}
+            </g>
+          )
+        })}
+      </svg>
+      <figcaption className="mt-1 text-sm italic">{figure.caption}</figcaption>
+    </figure>
   )
 }
 

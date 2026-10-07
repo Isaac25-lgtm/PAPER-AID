@@ -34,6 +34,17 @@ export async function fetchPublicConfig(headers: Record<string, string> = {}): P
   return (await res.json()) as PublicConfig
 }
 
+/** Opens the terms dialog (`TermsDialog`) and resolves once the person accepts (true) or closes it (false). */
+export function termsAccepted(): Promise<boolean> {
+  return new Promise((resolve) => {
+    // The dialog claims the request (preventDefault); with no dialog on the page the step fails as before.
+    const taken = !window.dispatchEvent(new CustomEvent<TermsAsk>('paperaid:terms', { detail: { resolve }, cancelable: true }))
+    if (!taken) resolve(false)
+  })
+}
+
+export type TermsAsk = { resolve: (accepted: boolean) => void }
+
 function query(params: Record<string, string | number | null | undefined>) {
   const search = new URLSearchParams()
   for (const [key, value] of Object.entries(params)) if (value !== undefined && value !== null && value !== '' && value !== 'ALL') search.set(key, String(value))
@@ -42,7 +53,7 @@ function query(params: Record<string, string | number | null | undefined>) {
 }
 
 export function createApiSource({ config, getAuthHeaders }: Options): DataSource {
-  async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  async function request<T>(path: string, init: RequestInit = {}, askedForTerms = false): Promise<T> {
     let res: Response
     try {
       res = await fetch(path, { ...init, headers: { ...(init.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }), ...(await getAuthHeaders()), ...init.headers } })
@@ -53,7 +64,9 @@ export function createApiSource({ config, getAuthHeaders }: Options): DataSource
     const body = await res.json().catch(() => null)
     if (!res.ok) {
       const { message, code } = (body ?? {}) as { message?: string; code?: string }
-      if (code === 'TERMS_REQUIRED') window.dispatchEvent(new CustomEvent('paperaid:terms')) // the terms dialog asks, then the person tries again
+      // The step waits while the terms dialog asks; once they are accepted it goes ahead by itself (owner, 2026-10-07).
+      // The server refused it before doing anything, so sending it again is safe.
+      if (code === 'TERMS_REQUIRED' && !askedForTerms && (await termsAccepted())) return request<T>(path, init, true)
       throw new DataError(message ?? 'Something went wrong. Please try again.', res.status, code)
     }
     return body as T

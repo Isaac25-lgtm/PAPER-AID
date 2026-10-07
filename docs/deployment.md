@@ -84,10 +84,10 @@ done
 
 ```bash
 gcloud tasks queues create paper-jobs --location=europe-west1 \
-  --max-concurrent-dispatches=5 --max-attempts=3 --min-backoff=10s --max-backoff=300s
+  --max-concurrent-dispatches=20 --max-attempts=3 --min-backoff=10s --max-backoff=300s
 ```
 
-PaperAid handles its own retries, so the queue only retries failed deliveries. To raise concurrency later, increase `--max-concurrent-dispatches` together with the worker's `--max-instances`.
+PaperAid handles its own retries, so the queue only retries failed deliveries. Twenty steps run at once (2026-10-07, for 20 students working together; it was 5): `--max-concurrent-dispatches` and the worker's `--max-instances` change together, one step per worker instance. A step beyond that waits in the queue; a Gemini call throttled by Google's shared capacity retries itself within seconds before the step's own retry.
 
 ## 5. Backend (one image, two services)
 
@@ -102,7 +102,7 @@ COMMON="ENV=production,AUTH_MODE=firebase,STORE_BACKEND=firestore,STORAGE_BACKEN
 
 gcloud run deploy paperaid-worker --image $IMAGE --region europe-west1 --no-allow-unauthenticated --ingress internal \
   --service-account paperaid-worker@PROJECT.iam.gserviceaccount.com --concurrency 1 --cpu 2 --memory 2Gi \
-  --timeout 1800 --max-instances 5 \
+  --timeout 1800 --max-instances 20 \
   --set-env-vars "SERVICE_ROLE=worker,$COMMON,WORKER_URL=https://placeholder" \
   --set-secrets ANTHROPIC_API_KEY=anthropic-api-key:latest,OPENAI_API_KEY=openai-api-key:latest
 WORKER_URL=$(gcloud run services describe paperaid-worker --region europe-west1 --format='value(status.url)')

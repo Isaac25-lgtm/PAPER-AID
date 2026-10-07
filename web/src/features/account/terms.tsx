@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { Button } from '../../components/ui/button'
 import { Dialog } from '../../components/ui/overlays'
 import { Alert, Card } from '../../components/ui/primitives'
+import type { TermsAsk } from '../../lib/api-source'
 import { DataError, useData } from '../../lib/data'
 import { useTitle } from '../../lib/use-title'
 import { PageHero } from '../marketing/info-pages'
@@ -11,7 +12,7 @@ import { PageHero } from '../marketing/info-pages'
 const TERMS = [
   { title: 'What PaperAid does', body: 'PaperAid checks, formats, writes and analyses your work for you, using its own code and AI models. You remain the author and are responsible for what you submit, and for following your institution’s and funder’s rules about AI.' },
   { title: 'Your data and your participants', body: 'You may upload only data you have the right to use: with your participants’ consent and any ethics approval your study needs. Remove names, phone numbers and ID numbers before you upload, or let PaperAid remove or leave out the columns it recognises. PaperAid can’t guarantee it finds every identifier.' },
-  { title: 'What we do with it', body: 'PaperAid uses your files and data only to produce your results. Our AI providers (OpenAI, Anthropic and Google) see what a job needs, never your data’s individual records, and never use it to train their models. Files are deleted automatically after the period shown on each page, and you can delete them, or your account, at any time.' },
+  { title: 'What we do with it', body: 'PaperAid uses your files and data only to produce your results. The AI service PaperAid uses sees only what each step needs. For numbers, that is the results PaperAid’s own code has calculated, never your dataset’s individual records. For interviews and other transcripts, it reads the passages it analyses, after the names and contact details you listed are replaced. It never uses any of it to train its models. Files are deleted automatically after the period shown on each page, and you can delete them, or your account, at any time.' },
   { title: 'Credits', body: 'Credits are reserved when a step starts and charged only for what is delivered. A step that can’t be finished is not charged.' },
   { title: 'Changes', body: 'When these terms change, we ask you to accept the new version before your next paid step or data upload.' },
 ]
@@ -36,28 +37,42 @@ export function TermsPage() {
   )
 }
 
-/** Asked when the server needs the current terms accepted (a new account by Google, or new terms). */
+/** Asked when the server needs the current terms accepted (a new account by Google, or new terms). The
+ *  step that asked waits: accepting carries it on at once, "Not now" stops it (owner, 2026-10-07). */
 export function TermsDialog() {
   const data = useData()
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [done, setDone] = useState(false)
+  const waiting = useRef<TermsAsk['resolve'][]>([])
+  const settle = (accepted: boolean) => {
+    for (const resolve of waiting.current.splice(0)) resolve(accepted)
+  }
   useEffect(() => {
-    const ask = () => {
-      setDone(false)
+    const ask = (event: Event) => {
+      event.preventDefault() // claimed: the step waits for the answer here
+      const detail = (event as CustomEvent<TermsAsk | null>).detail
+      if (detail) waiting.current.push(detail.resolve)
       setError(null)
       setOpen(true)
     }
     window.addEventListener('paperaid:terms', ask)
-    return () => window.removeEventListener('paperaid:terms', ask)
+    return () => {
+      window.removeEventListener('paperaid:terms', ask)
+      settle(false)
+    }
   }, [])
+  const close = (next: boolean) => {
+    setOpen(next)
+    if (!next) settle(false)
+  }
   const accept = async () => {
     setBusy(true)
     setError(null)
     try {
       await data.acceptTerms(data.config.termsVersion)
-      setDone(true)
+      setOpen(false)
+      settle(true)
     } catch (e) {
       setError(e instanceof DataError ? e.message : 'That did not work. Try again.')
     } finally {
@@ -65,20 +80,17 @@ export function TermsDialog() {
     }
   }
   return (
-    <Dialog open={open} onOpenChange={setOpen} title={done ? 'Thank you' : 'Please accept PaperAid’s terms'}
-      description={done ? 'You can now try that again.' : 'Before your next paid step or data upload.'}
-      footer={done ? <Button onClick={() => setOpen(false)}>Close</Button> : (
+    <Dialog open={open} onOpenChange={close} title="Please accept PaperAid’s terms" description="Before your next paid step or data upload. Your step carries on as soon as you accept."
+      footer={(
         <>
-          <Button variant="secondary" onClick={() => setOpen(false)}>Not now</Button>
+          <Button variant="secondary" onClick={() => close(false)}>Not now</Button>
           <Button loading={busy} onClick={accept}>I accept</Button>
         </>
       )}>
-      {!done && (
-        <div className="space-y-2 text-sm text-fg-muted">
-          {TERMS.slice(1, 3).map((t) => <p key={t.title}><span className="font-medium text-fg">{t.title}.</span> {t.body}</p>)}
-          <p>Read the full <Link to="/terms" target="_blank" className="font-medium text-brand-700 underline">terms</Link> and the <Link to="/privacy" target="_blank" className="font-medium text-brand-700 underline">privacy summary</Link>.</p>
-        </div>
-      )}
+      <div className="space-y-2 text-sm text-fg-muted">
+        {TERMS.slice(1, 3).map((t) => <p key={t.title}><span className="font-medium text-fg">{t.title}.</span> {t.body}</p>)}
+        <p>Read the full <Link to="/terms" target="_blank" className="font-medium text-brand-700 underline">terms</Link> and the <Link to="/privacy" target="_blank" className="font-medium text-brand-700 underline">privacy summary</Link>.</p>
+      </div>
       {error && <Alert tone="danger" className="mt-3">{error}</Alert>}
     </Dialog>
   )

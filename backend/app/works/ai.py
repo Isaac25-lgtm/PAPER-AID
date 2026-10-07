@@ -18,6 +18,7 @@ from app.proposals.ai import (
     NEEDS_SCHEMA,
     SEARCH_SCHEMA,
     SECTIONS_SCHEMA,
+    WORK_SECTIONS_SCHEMA,
     Extracted,
     Need,
     Searched,
@@ -334,7 +335,9 @@ class WorkRunner(AIRunner):
     def _sections(self, task: str, items: list[dict[str, Any]], common: dict[str, Any]) -> dict[str, SectionText]:
         known = {i["key"] for i in items}
         out: dict[str, SectionText] = {}
-        for answer in self._batched(task, items, lambda b: {**common, "sections": b}, SECTIONS_SCHEMA, _Sections, stop_on_budget=True):
+        # The answer format of the prompt version the step was priced with: figures from w-draft-v2 / w-repair-v3.
+        schema = WORK_SECTIONS_SCHEMA if self._prompt_for(task) in ("w-draft-v2", "w-repair-v3") else SECTIONS_SCHEMA
+        for answer in self._batched(task, items, lambda b: {**common, "sections": b}, schema, _Sections, stop_on_budget=True):
             out.update({s.key: s for s in answer.sections if s.key in known})
         return out
 

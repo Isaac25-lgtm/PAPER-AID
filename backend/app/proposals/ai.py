@@ -85,6 +85,10 @@ PLAN_SCHEMA_V2 = _obj(
 CRITIQUE_SCHEMA = _obj({"items": _list(_obj({"field": _S, "problem": _S, "proposal": _S})), "overall": _S})
 BRIEFS_SCHEMA = _obj({"sections": _list(_obj({"key": _S, "points": _STRS, "evidence": _STRS}))})
 SECTIONS_SCHEMA = _obj({"sections": _list(_obj({"key": _S, "paragraphs": _STRS, "table": _obj({"caption": _S, "rows": _list(_STRS)})}))})
+_FIGURE = _obj({"caption": _S, "x_axis": _S, "y_axis": _S, "series": _list(_obj({"label": _S, "points": _list(_obj({"x": _N, "y": _N}))}))})
+# Works sections from w-draft-v2 / w-repair-v3: an illustrative table and an optional figure (2026-10-07).
+WORK_SECTIONS_SCHEMA = _obj({"sections": _list(_obj({"key": _S, "paragraphs": _STRS, "table": _obj({"caption": _S, "rows": _list(_STRS), "illustrative": {"type": "boolean"}}),
+                                                      "figure": {"anyOf": [_FIGURE, {"type": "null"}]}}))})
 REVIEW_SCHEMA = _obj({"results": _list(_obj({"key": _S, "grade": _enum("PASS", "PASS_WITH_WARNINGS", "REPAIR"), "issues": _STRS, "note": _S}))})
 READINESS_SCHEMA = _obj(
     {
@@ -162,12 +166,34 @@ class _Briefs(BaseModel):
 class Table(BaseModel):
     caption: str
     rows: list[list[str]]
+    illustrative: bool = False  # a worked example's hypothetical numbers, labelled as such by code (works, 2026-10-07)
+
+
+class FigurePoint(BaseModel):
+    x: float
+    y: float
+
+
+class FigureSeries(BaseModel):
+    label: str
+    points: list[FigurePoint]
+
+
+class Figure(BaseModel):
+    """A graph the writer gives as data and PaperAid's code draws (works, 2026-10-07: a coursework question
+    asking for "graphical illustrations" could not be answered by text alone)."""
+
+    caption: str
+    x_axis: str
+    y_axis: str
+    series: list[FigureSeries]
 
 
 class SectionText(BaseModel):
     key: str
     paragraphs: list[str]
     table: Table
+    figure: Figure | None = None
 
 
 class _Sections(BaseModel):

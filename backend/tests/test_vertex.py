@@ -78,7 +78,7 @@ def sdk(monkeypatch):
 
 def runner(s, engine=None, cache=None, budget=5):
     records = []
-    ai = AIRunner(s, records.append, lambda: sum(r.cost_usd for r in records), budget, cache=cache, engine=engine)
+    ai = AIRunner(s, records.append, lambda: sum(r.cost_usd + r.reserved_usd for r in records), budget, cache=cache, engine=engine)
     return ai, records
 
 
@@ -106,8 +106,8 @@ def test_every_step_has_a_stage_and_new_engines_route_all_of_them_to_vertex():
     assert e.vertex_routes["review"] == e.vertex_routes["w_final"] == ["vertex:gemini-3.1-pro-preview", REF]  # Pro, then Flash if Pro is busy
     assert e.vertex_routes["analyse"] == [REF] and e.vertex_routes["analyse_peer"] == ["vertex:gemini-3.5-flash-lite"]
     assert e.vertex_signoff == [REF]
-    assert e.vertex_thinking == {"intake": "LOW", "planner": "HIGH", "research": "MEDIUM", "execution": "MEDIUM", "first_audit": "HIGH",
-                                 "second_check": "MEDIUM", "premium_audit": "HIGH", "fix": "MEDIUM", "final_signoff": "HIGH"}
+    assert e.vertex_thinking == {"intake": "LOW", "planner": "HIGH", "research": "LOW", "execution": "MEDIUM", "first_audit": "MEDIUM",
+                                 "second_check": "MEDIUM", "premium_audit": "HIGH", "fix": "MEDIUM", "final_signoff": "MEDIUM"}
     assert e.vertex_project == "paperaid" and e.vertex_location == "global"
 
 
@@ -186,7 +186,8 @@ def test_adc_client_reused_and_no_keys_passed(monkeypatch):
         assert clients[0]["vertexai"] and clients[0]["credentials"] is credentials
         assert clients[0]["project"] == "paperaid" and clients[0]["location"] == "global"
         assert "api_key" not in clients[0]
-        assert clients[0]["http_options"].retry_options.attempts == 1
+        retry = clients[0]["http_options"].retry_options  # only throttling and brief unavailability, never a timeout
+        assert retry.attempts == 4 and retry.http_status_codes == [429, 503]
     finally:
         vertex.close_vertex_clients()
 
@@ -456,14 +457,14 @@ def test_no_fallback_on_billed_invalid_response(sdk):
     assert len(calls) == 1 and records[0].cost_usd > 0
 
 
-def test_a_timeout_counts_against_the_cap_at_its_estimate(sdk):
+def test_a_timeout_reserves_its_estimate_against_the_cap(sdk):
     calls, answers = sdk
     answers[:] = [httpx.ReadTimeout("slow"), httpx.ReadTimeout("slow")]
     ai, records = runner(fallback_settings())
     with pytest.raises(RetryableStageError, match="VERTEX_TIMEOUT"):
         ai._call("plan", {}, SCHEMA, Answer)
     assert len(calls) == len(records) == 2
-    assert all(r.cost_usd == r.estimated_cost_usd > 0 and r.pricing_status == "ESTIMATED_TIMEOUT" for r in records)
+    assert all(r.cost_usd == 0 and r.reserved_usd == r.estimated_cost_usd > 0 and r.pricing_status == "UNKNOWN_BILLING" for r in records)
 
 
 def test_more_expensive_or_unverified_fallback_refused():

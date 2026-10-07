@@ -60,8 +60,10 @@ Spend guarantees:
 
 import hashlib
 import json
+import threading
 import time
 from collections.abc import Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Protocol
@@ -69,7 +71,7 @@ from typing import Any, Literal, Protocol
 from pydantic import BaseModel, Field, StrictBool, ValidationError
 
 from app.ai import costs
-from app.ai.providers import UNAVAILABLE, ModelResult, parse, provider_for
+from app.ai.providers import UNAVAILABLE, ModelResult, Usage, parse, provider_for
 from app.analysis import research
 from app.analysis.signals import MODEL_SCORE
 from app.core.config import Settings
@@ -164,10 +166,10 @@ STEPS: dict[str, Step] = {
     "w_plan_review": Step("EVALUATOR", Stage.PLANNING, "w-plan-review-v2", 6000),  # v2: blocking issues apart from suggestions; a repair is checked against the earlier issues (live funding runs 2026-10-03)
     "w_results": Step("WRITER", Stage.PLANNING, "w-results-v3", 16000),  # v2: says the Results Model is internal (Codex audit of 9239dd0); v3: measurement rules (live funding runs 2026-10-03)
     "w_results_review": Step("EVALUATOR", Stage.PLANNING, "w-results-review-v4", 8000),  # v2: blocking issues apart from suggestions; a repair is checked against the earlier issues
-    "w_draft": Step("WRITER", Stage.DRAFTING, "w-draft-v1", 16000),
+    "w_draft": Step("WRITER", Stage.DRAFTING, "w-draft-v2", 16000),  # v2: graphs as data, illustrative worked examples (2026-10-07)
     "w_integrity": Step("INTEGRITY", Stage.AUDITING, "w-integrity-v1", 6000),
     "w_evaluate": Step("EVALUATOR", Stage.AUDITING, "w-evaluate-v1", 8000),
-    "w_repair": Step("WRITER", Stage.AUDITING, "w-repair-v2", 16000),  # v2: repairs with the section's evidence, as drafting has
+    "w_repair": Step("WRITER", Stage.AUDITING, "w-repair-v3", 16000),  # v3: graphs and illustrative examples repaired as data (v2: with the section's evidence)
     "w_adjudicate": Step("ADJUDICATOR", Stage.AUDITING, "w-adjudicate-v1", 4000),
     "w_final": Step("EVALUATOR", Stage.AUDITING, "w-final-v2", 8000),  # v2: the exact deliverable, every verdict required (Sol with one final reviewer)
     "w_compress": Step("WRITER", Stage.AUDITING, "w-compress-v1", 12000),
@@ -249,6 +251,66 @@ def work_engine(settings: Settings, service: str) -> Engine:
 
 
 SIGNOFF = "final_signoff"
+# A request that may have been billed although its answer was lost (Codex audit 2026-10-07, finding 2).
+UNKNOWN_BILLING = frozenset({"VERTEX_TIMEOUT", "VERTEX_CONNECTION_LOST", "VERTEX_MALFORMED_ENVELOPE"})
+# Payload keys by which a pipeline passes a review its own earlier findings (scoped and size-checked there).
+OWN_HISTORY = frozenset({"previousIssues", "previousAudit"})
+HISTORY_WORDS = 1_200  # the most earlier findings a sign-off is shown
+
+
+def _words(value: Any) -> int:
+    return len(json.dumps(value, ensure_ascii=False).split())
+
+
+def _history_room(payload: dict[str, Any]) -> int:
+    """Words left for earlier findings: a bounded review part (it has a "part") stays within
+    FINAL_PART_WORDS once they are added (Codex audit 2026-10-07, finding 5)."""
+    if "part" in payload:
+        return max(0, min(HISTORY_WORDS, FINAL_PART_WORDS - _words(payload)))
+    return HISTORY_WORDS
+
+
+def _history(prior: list[Any], limit: int) -> list[Any]:
+    """The most recent earlier answers that fit in `limit` words, oldest first; the latest one shortened
+    when even it does not fit."""
+    kept: list[Any] = []
+    used = 0
+    for answer in reversed(prior):
+        words = _words(answer)
+        if used + words > limit:
+            if not kept and limit > 0:
+                kept.append(_shortened(answer, limit))
+            break
+        kept.insert(0, answer)
+        used += words
+    return kept
+
+
+def _shortened(value: Any, limit: int) -> Any:
+    left = [limit]
+
+    def walk(v: Any) -> Any:
+        if isinstance(v, str):
+            words = v.split()[: max(0, left[0])]
+            left[0] -= len(words) + 1
+            return " ".join(words)
+        if isinstance(v, list):
+            out = []
+            for item in v:
+                if left[0] <= 0:
+                    break
+                out.append(walk(item))
+            return out
+        if isinstance(v, dict):
+            return {k: walk(item) for k, item in v.items()}
+        return v
+
+    return walk(value)
+
+
+def _saved_result(saved: str) -> ModelResult:
+    raw = json.loads(saved)
+    return ModelResult(text=raw["text"], usage=Usage(0, 0, 0, 0), provider="vertex", model=raw["model"], queries=raw["queries"], grounding=raw["grounding"])
 # Instructions added to a released prompt on Vertex, versioned and frozen like the prompts themselves.
 VERTEX_ADDENDA = {"signoff": "signoff-v1", "search": "vertex-search-v1"}
 
@@ -351,6 +413,14 @@ def check_content(engine: Engine | None) -> None:
     if changed:
         raise PermanentStageError("ENGINE_CHANGED", "PaperAid was updated after this step was priced. Nothing was charged; please start it again.",
                                   "content changed: " + ", ".join(changed)[:300])
+
+
+def priced_engine(settings: Settings) -> Engine:
+    """The engine frozen into a quote: today's routes plus the fingerprint of every prompt and rule file
+    the run executes. A release that does not run exactly these (an older image after a rollback among
+    them) refuses the job before any call instead of running it on other models (Codex audit
+    2026-10-07, finding 4: an older image reads a Gemini-priced engine without its Vertex routes)."""
+    return current_engine(settings).model_copy(update={"content": content_now()})
 
 
 def current_engine(settings: Settings) -> Engine:
@@ -733,10 +803,20 @@ class AIRunner:
         # to a fresh delivery (which replays the calls already made from the cache, at no cost).
         self._heartbeat = heartbeat or (lambda: None)
         self._round = 0  # the round of the review loop in progress (audit_rounds)
+        self._inflight = 0.0  # estimates of calls under way in other threads (together), held against the cap
+        self._inflight_lock = threading.Lock()
         self._audits: dict[str, list[Any]] = {}  # this loop's earlier answers of each approval review
 
     def model_for(self, task: str) -> str:
         return model_for_engine(self._engine, task)
+
+    def together[A, B](self, first: Callable[[], A], second: Callable[[], B]) -> tuple[A, B]:
+        """Two independent steps at the same time (a section's integrity check and its evaluation). Both
+        always finish (each paid answer is recorded and saved) before an error from either is raised."""
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            a, b = pool.submit(first), pool.submit(second)
+            wait([a, b])
+        return a.result(), b.result()
 
     def audit_rounds(self, count: int, start: int = 0) -> Iterator[int]:
         """The rounds of one review → targeted repair → review loop. On the Gemini workflow the first
@@ -789,11 +869,13 @@ class AIRunner:
         stage = self._engine.vertex_stages.get(task, "")
         prior: list[Any] = []
         if task in SIGNOFF_TASKS and self._engine.vertex_signoff:
-            prior = self._audits.setdefault(task, [])
+            # Earlier answers are kept per document part: a part's sign-off sees only that part's findings.
+            prior = self._audits.setdefault(f"{task}|{payload.get('part', '')}", [])
             if self._round > 0:  # a re-review after a repair: the final sign-off, shown the earlier rounds' answers
                 refs, stage = self._engine.vertex_signoff, SIGNOFF
                 system += "\n\n" + PROMPTS[self._engine.vertex_addenda["signoff"]]
-                payload = {**payload, "previousAudit": list(prior)}
+                if not OWN_HISTORY & payload.keys():  # a pipeline that passes its own findings has bounded them already
+                    payload = {**payload, "previousAudit": _history(prior, _history_room(payload))}
         if max_searches and refs[0].startswith("vertex:"):
             system += "\n\n" + PROMPTS[self._engine.vertex_addenda["search"]].replace("{max_searches}", str(max_searches))
         model_ref = refs[0]
@@ -810,6 +892,11 @@ class AIRunner:
             else:
                 prior.append(answer.model_dump(mode="json"))
                 return answer
+
+        raw_key = key + "-raw"
+        saved = self._cache.get(raw_key) if (self._cache and max_searches and model_ref.startswith("vertex:")) else None
+        if saved is not None:
+            return self._finish(task, shape, accept, key, prior, _saved_result(saved), system, payload, max_searches)
 
         self._heartbeat()
         prices = self.settings.model_prices
@@ -833,34 +920,44 @@ class AIRunner:
                                               "frozen Vertex token-rate period is no longer current")
             provider, model = provider_for(ref, self.settings)
             provider_name = provider.name
-            fee = costs.search_fee_usd(provider_name, max_searches, self.settings.model_unit_prices, model) if max_searches else 0.0
-            spent = self._spent()
+            # Vertex has no hard query cap: reserve for the queries a search really runs, not just those allowed.
+            reserve = max_searches * (costs.SEARCH_RESERVE_FACTOR if provider_name == "vertex" else 1)
+            fee = costs.search_fee_usd(provider_name, reserve, self.settings.model_unit_prices, model) if max_searches else 0.0
             estimate = costs.estimate_usd(provider_name, model, prompt_chars, limit, prices, table, long_prices, thinking_tokens) + fee
-            costs.ensure_within_budget(spent, estimate, self._budget)
-            max_tokens = costs.affordable_output_tokens(provider_name, model, prompt_chars, limit, self._budget - spent - fee, prices, table, long_prices)
-            if max_tokens < min(costs.MIN_OUTPUT_TOKENS, limit):
-                costs.ensure_within_budget(spent, float("inf"), self._budget)
+            with self._inflight_lock:  # a call running alongside (together) counts at its estimate until recorded
+                spent = self._spent() + self._inflight
+                costs.ensure_within_budget(spent, estimate, self._budget)
+                max_tokens = costs.affordable_output_tokens(provider_name, model, prompt_chars, limit, self._budget - spent - fee, prices, table, long_prices)
+                if max_tokens < min(costs.MIN_OUTPUT_TOKENS, limit):
+                    costs.ensure_within_budget(spent, float("inf"), self._budget)
+                self._inflight += estimate
             options = {"thinking": thinking} if provider_name == "vertex" and thinking else {}
             started = time.monotonic()
             try:
                 result: ModelResult = (provider.search_json(task, model, system, payload, schema, max_tokens, max_searches, **options)
                                        if max_searches else provider.json(task, model, system, payload, schema, max_tokens, **options))
             except (RetryableStageError, PermanentStageError) as exc:
+                with self._inflight_lock:
+                    self._inflight -= estimate
                 if provider_name == "vertex":
-                    # Google charges only requests that succeed; one we stopped waiting for may still have been
-                    # billed, so a timeout counts against the job's cap at its estimate.
-                    timed_out = exc.code == "VERTEX_TIMEOUT"
+                    # Google bills only requests that succeed. A request that may have succeeded before its answer
+                    # was lost (timeout, broken connection, unreadable answer) reserves its estimate against the
+                    # job's cap: kept apart from confirmed cost, so reports never show it as spent.
+                    unknown = exc.code in UNKNOWN_BILLING
                     self._record(ModelCall(stage=step.stage, phase=self._phase, provider=provider_name, model=model,
                                            prompt_version=prompt, input_tokens=0, output_tokens=0, cached_tokens=0,
-                                           latency_ms=int((time.monotonic() - started) * 1000), cost_usd=estimate if timed_out else 0,
+                                           latency_ms=int((time.monotonic() - started) * 1000), cost_usd=0, reserved_usd=estimate if unknown else 0,
                                            task=task, role=step.role, workflow_stage=stage, thinking_level=thinking,
                                            error_code=exc.code, fallback_attempt=attempt, estimated_cost_usd=estimate,
-                                           pricing_status="ESTIMATED_TIMEOUT" if timed_out else "NOT_CHARGED"))
-                fallback_ok = provider_name == "vertex" and exc.code in {"PROVIDER_UNAVAILABLE", "VERTEX_TIMEOUT", "VERTEX_RATE_LIMIT", "VERTEX_MODEL_UNAVAILABLE"}
+                                           pricing_status="UNKNOWN_BILLING" if unknown else "NOT_CHARGED"))
+                fallback_ok = provider_name == "vertex" and exc.code in {"PROVIDER_UNAVAILABLE", "VERTEX_TIMEOUT", "VERTEX_CONNECTION_LOST",
+                                                                          "VERTEX_RATE_LIMIT", "VERTEX_MODEL_UNAVAILABLE"}
                 if fallback_ok and attempt + 1 < len(refs):
                     self._heartbeat()
                     continue
                 raise
+            with self._inflight_lock:
+                self._inflight -= estimate
             break
         u = result.usage
         error_code = result.error_code
@@ -889,6 +986,10 @@ class AIRunner:
                 model_version=result.model_version,
             )
         )
+        if self._spent() > self._budget:
+            # A search that ran more queries than reserved can pass the cap: what it bought is used, nothing
+            # more is bought (the next call refuses), and the student is never charged above the quote.
+            self.budget_reached = True
         if error_code:
             retryable = result.error_retryable or error_code in ("MALFORMED_OUTPUT", "SCHEMA_VALIDATION_FAILED")
             error = RetryableStageError if retryable else PermanentStageError
@@ -899,6 +1000,18 @@ class AIRunner:
             raise PermanentStageError("MODEL_REFUSED", "We couldn't process this document with our AI provider.", f"{result.provider} refusal on {task}")
         if result.stop == "max_tokens":
             return None
+        if self._cache and max_searches and result.provider == "vertex":
+            # Paid and recorded: keep the raw answer before its links are resolved, so a retry never buys it again.
+            self._cache.put(raw_key, json.dumps({"text": result.text, "model": result.model, "queries": result.queries, "grounding": result.grounding}))
+        return self._finish(task, shape, accept, key, prior, result, system, payload, max_searches)
+
+    def _finish[T: BaseModel](self, task: str, shape: type[T], accept: Callable[[T, ModelResult], T] | None, key: str, prior: list[Any],
+                              result: ModelResult, system: str, payload: dict[str, Any], max_searches: int) -> T:
+        """A usable answer: a grounded one's links resolved, then validated, accepted and saved."""
+        if max_searches and result.provider == "vertex":
+            from app.ai.vertex import resolve_sources
+
+            resolve_sources(result, system + json.dumps(payload))
         validated = self._validated(shape, parse(result.text, task), task)
         text = result.text
         if accept is not None:

@@ -27,7 +27,17 @@ from app.documents.intake import inspect_upload
 from app.formatting.guideline import MAX_GUIDE_WORDS
 from app.jobs import state
 from app.jobs.models import Job, JobEvent, JobStatus, JobView, Quote, QuoteLine, ReadinessItem, ServiceSelection, utcnow
-from app.jobs.service import ACCOUNT_CLOSING, User, _erase_project, _rate_limit, availability, current_engine, require_terms, step_running, submit
+from app.jobs.service import (
+    ACCOUNT_CLOSING,
+    User,
+    _erase_project,
+    _rate_limit,
+    availability,
+    priced_engine,
+    require_terms,
+    step_running,
+    submit,
+)
 from app.latex.convert import convert as to_latex
 from app.latex.package import compile_pdf
 from app.latex.package import project as latex_project
@@ -687,7 +697,7 @@ def quote_step(rt: Runtime, user: User, project_id: str, step: Step, note: str, 
         events=[JobEvent(at=now, label=f"{'Plan' if chapter == 0 else 'Concept paper' if chapter == CONCEPT else f'Chapter {chapter} revision' if revising else f'Chapter {chapter} finish' if completing else f'Chapter {chapter}'} step priced for proposal {p.id}")],
     )
     rt.files.put(f"{job.storage_prefix()}/internal/{INPUT}", data, "application/json")
-    job.quote = bound_quote(rt.settings, selection, sha, words, current_engine(rt.settings), part=part, cap=remaining)
+    job.quote = bound_quote(rt.settings, selection, sha, words, priced_engine(rt.settings), part=part, cap=remaining)
     state.transition(job, JobStatus.QUOTED, "Quote issued")
     if not rt.store.create_if_open(job):
         rt.files.delete_prefix(job.storage_prefix())
@@ -723,7 +733,7 @@ def _quote_profile(rt: Runtime, user: User, p: Project) -> StepQuote:
         events=[JobEvent(at=now, label=f"Institution profile step priced for proposal {p.id}")],
     )
     rt.files.put(f"{job.storage_prefix()}/internal/{INPUT}", data, "application/json")
-    job.quote = bound_quote(rt.settings, selection, sha, 0, current_engine(rt.settings), guide_words=p.guide.words)
+    job.quote = bound_quote(rt.settings, selection, sha, 0, priced_engine(rt.settings), guide_words=p.guide.words)
     state.transition(job, JobStatus.QUOTED, "Quote issued")
     if not rt.store.create_if_open(job):
         rt.files.delete_prefix(job.storage_prefix())

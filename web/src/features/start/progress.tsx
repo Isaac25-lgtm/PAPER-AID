@@ -11,6 +11,11 @@ import { walletChanged } from '../../lib/use-wallet'
 export type Phase = 'read' | 'plan' | 'write'
 
 const STEPS = ['Reading your documents', 'Finding and checking sources', 'Planning', 'Writing', 'Checking every requirement']
+const CHECK: Record<'CHECKING' | 'REPAIRING' | 'FINAL_REVIEW', string> = {
+  CHECKING: 'Checking each section',
+  REPAIRING: 'Fixing what the checks found',
+  FINAL_REVIEW: 'Final check of the whole document',
+}
 
 /** Where a running job is in the whole journey: the plan step covers sources and planning, the
  *  writing step writing and checking (both research again before they write). */
@@ -81,6 +86,9 @@ export function StartProgress({ jobId, phase, title, estimate, onDone }: { jobId
               </span>
               <span className={clsx(now ? 'font-semibold text-fg' : done ? 'text-fg-muted' : 'text-fg-subtle')}>
                 {step}
+                {now && i === 4 && job?.progress && (
+                  <span className="ml-2 font-normal text-fg-muted">{CHECK[job.progress.step]} · round {job.progress.round}</span>
+                )}
                 {now && <span className="sr-only"> (in progress)</span>}
                 {done && <span className="sr-only"> (done)</span>}
               </span>

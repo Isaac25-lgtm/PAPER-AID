@@ -77,6 +77,10 @@ SEARCH_FEE_USD: dict[str, float] = {"openai": 0.01}
 # searches measured 13–17k tokens in total (2026-09-27); OpenAI states the setting "does not set an
 # exact token count", so this is a generous reserve, not a guarantee (Codex audit #6).
 SEARCH_INPUT_TOKENS_WORST = 20_000
+# Google Search grounding on Vertex has no hard query cap (Codex audit 2026-10-07, finding 1): live calls
+# allowed 2 queries ran 2 to 3. Spend is reserved for this many queries per one allowed; a call that runs
+# even more is charged as run, and the job then buys nothing further once its cap is passed.
+SEARCH_RESERVE_FACTOR = 3
 # Characters of request around the paper data that the character count does not see: the data
 # wrapper, the answer format (JSON schema) and message framing.
 REQUEST_OVERHEAD_CHARS = 2_000

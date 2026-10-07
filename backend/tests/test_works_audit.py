@@ -126,7 +126,8 @@ def test_a_draft_the_final_reviewer_still_objects_to_after_two_repairs_is_not_de
     client.models.overrides["w_repair"] = repair
     work = _approved(client, _coursework(client))
     _, job = _run(client, work["id"], "DRAFT")
-    assert len(finals) == 3 and job["status"] == "FAILED" and job["failure"]["code"] == "DOCUMENT_NOT_READY"
+    # The same objection after a repair ends the loop (2026-10-07): a third round would only repeat it.
+    assert len(finals) == 2 and job["status"] == "FAILED" and job["failure"]["code"] == "DOCUMENT_NOT_READY"
     assert get_runtime().store.get(job["id"]).billing.state == "RELEASED" and not _work(client, work["id"])["documents"]
     tasks = client.models.tasks
     assert tasks.index("w_compress") < tasks.index("w_final")  # reviewed after compression, on what would be delivered

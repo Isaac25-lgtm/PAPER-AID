@@ -12,6 +12,7 @@ import { useTitle } from '../../lib/use-title'
 import type { Budget, BudgetLine, Question, ResolvedSpec, ResultsModel, SourceRole, Work, WorkDocumentView, WorkPlan } from '../../lib/work-types'
 import { ReadinessList, ReviewNotice } from '../proposals/shared'
 import { KIND_LABELS, ReadinessBadge, SOURCE_ROLES, VARIANT_LABELS, WorkProgress, WorkStepRunner, money } from './shared'
+import { DocFigure } from '../workspace/parts'
 
 type Tab = 'documents' | 'understood' | 'plan' | 'results' | 'budget' | 'draft'
 const SKIPPED = 'SKIPPED'
@@ -736,6 +737,7 @@ function DocumentPanel({ work, onChange, onStarted }: { work: Work; onChange: (w
             ))}
             {s.fieldLimit && <p className="mt-1 text-xs text-fg-subtle">{s.fieldCount} (limit {s.fieldLimit})</p>}
             {s.table && <DataTable caption={s.tableCaption || s.heading} rows={s.table} />}
+            {s.figure && <DocFigure figure={s.figure} />}
           </section>
         ))}
         {doc.tables.map((t) => (

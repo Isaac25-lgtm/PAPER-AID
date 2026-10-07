@@ -28,7 +28,7 @@ COMMIT="$(git rev-parse --short HEAD)"
 
 echo "== checks for $COMMIT"
 (cd backend && .venv/Scripts/python -m ruff check app tests \
-  && .venv/Scripts/python -m pytest -q -p no:cacheprovider -n 4 --basetemp="$(mktemp -d)")
+  && .venv/Scripts/python -m pytest -q -p no:cacheprovider -n 2 --basetemp="$(mktemp -d)")
 (cd web && npm test && npx tsc --noEmit && npx vite build --mode production --outDir "$(mktemp -d)" --emptyOutDir)  # backend release: the build is a check
 [ "${1:-}" = "--check" ] && { echo "Checks passed; nothing built or deployed."; exit 0; }
 
@@ -53,6 +53,9 @@ done
 echo "== released $COMMIT"
 echo "worker: $(before paperaid-worker) (was $OLD_WORKER)"
 echo "api:    $(before paperaid-api) (was $OLD_API)"
-echo "Rollback:"
-echo "  gcloud run services update-traffic paperaid-worker --project $APP_PROJECT --region $REGION --to-revisions=$OLD_WORKER=100"
-echo "  gcloud run services update-traffic paperaid-api --project $APP_PROJECT --region $REGION --to-revisions=$OLD_API=100"
+echo "Rollback, controlled (Codex audit 2026-10-07, finding 4):"
+echo "  1. Pause processing (admin console, or POST /api/admin/processing {\"enabled\": false}) and wait for running stages to finish."
+echo "  2. gcloud run services update-traffic paperaid-worker --project $APP_PROJECT --region $REGION --to-revisions=$OLD_WORKER=100"
+echo "     gcloud run services update-traffic paperaid-api --project $APP_PROJECT --region $REGION --to-revisions=$OLD_API=100"
+echo "  3. Resume processing. Jobs priced on $COMMIT carry its content fingerprint: an older release refuses them"
+echo "     before any AI call (ENGINE_CHANGED: failed, not charged), so none runs on another release's models."

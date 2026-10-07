@@ -179,7 +179,7 @@ def test_work_services_are_offered_only_when_switched_on_priced_and_to_testers()
     from app.core.config import Settings
     from app.jobs.service import User, availability
 
-    keys = {"openai_api_key": "k", "anthropic_api_key": "k", "gemini_api_key": "k", "pricing_mode": "fixed", "works_public": True}
+    keys = {"vertex_project": "paperaid", "pricing_mode": "fixed", "works_public": True}  # the Gemini workflow's Vertex target, not a local .env
     assert availability(Settings(works_enabled=[], **keys))["COURSEWORK"] == "soon"
     unpriced = {k: v for k, v in Settings().fixed_tokens.items() if k != "CW_1500"}
     assert availability(Settings(fixed_tokens=unpriced, works_enabled=["COURSEWORK"], **keys))["COURSEWORK"] == "soon"

@@ -669,3 +669,27 @@ real calls, grant the worker's access, deploy and verify production. Architectur
 - **Not used:** `gemini-3.5-pro` answers in Vertex but has no published price.
 - **Access:** custom role `paperaidVertexInference` (`aiplatform.endpoints.predict`,
   `serviceusage.services.use`) in project `paperaid` for the worker's service account only.
+
+## 2026-10-07 — Codex's audit of the Gemini integration: eight findings fixed; terms re-accepted; no provider names (owner)
+
+- All eight findings confirmed and fixed (details and tests: handoff §8, `tests/test_audit_20261007.py`):
+  search spend reserved at 3 queries per allowed search and capped after an overrun; billing-unknown
+  calls reserve their estimate apart from confirmed cost; usage recorded and the raw answer saved
+  before bounded link resolution; every priced quote carries its content fingerprint so an older
+  image refuses it; sign-off history per part, not doubled, bounded; links found in decoded JSON;
+  provenance limited to what was shown; transcripts disclosed in the terms.
+- Owner: no AI provider or model names anywhere students look (terms, privacy summary). Admin views
+  keep the model of each call.
+- Owner: accepting the terms carries on the step that asked for them; "Not now" stops it. Terms
+  version `2026-10-07`, so everyone accepts once more.
+- Rollback is controlled: pause processing, switch traffic, resume (`release.sh` prints the steps).
+
+## 2026-10-07 — Coursework graphs, one repair limit, capacity for 20 students (owner: "a student can't sit for over 40 minutes")
+
+- A coursework question asking for graphs or numerical illustrations is answered with a graph PaperAid
+  draws from the writer's data and an illustrative worked-example table, both labelled by code
+  ("(illustrative values)"); prompts `w-draft-v2`, `w-repair-v3`.
+- One repair limit per draft across section checks and the final review; stop when the final review
+  repeats itself; targeted part repairs; parallel integrity and evaluation; lighter thinking for research
+  (LOW), checks and sign-off (MEDIUM); a visible checking/repairing round; retries reuse checked sources.
+- Twenty steps at once (queue and worker), throttled Gemini calls retried within seconds.

@@ -285,12 +285,20 @@ export interface WorkStepQuote {
   notice: string | null
 }
 
+export interface DocFigureData {
+  caption: string
+  xAxis: string
+  yAxis: string
+  series: { label: string; points: { x: number; y: number }[] }[]
+}
+
 export interface RenderedSection {
   key: string
   heading: string
   paragraphs: string[]
   table: string[][] | null
   tableCaption: string
+  figure?: DocFigureData | null // a graph PaperAid drew from the writer's data
   fieldLimit: string
   fieldCount: string
 }

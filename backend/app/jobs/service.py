@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from pathlib import PurePosixPath
 from typing import Literal
 
-from app.ai.orchestration import check_content, current_engine
+from app.ai.orchestration import check_content, priced_engine
 from app.analysis import signals
 from app.core.config import Settings
 from app.core.errors import AppError, Conflict, Forbidden, InvalidDocument, LimitExceeded, NotFound, PermanentStageError
@@ -511,7 +511,7 @@ def request_quote(rt: Runtime, user: User, job_id: str, selection: ServiceSelect
             selection,
             source_sha,
             words,
-            (run.engine if run else None) or current_engine(settings),
+            (run.engine if run else None) or priced_engine(settings),
             guideline_sha,
             run.guide_words if run else (j.guideline.word_count if guideline_sha and j.guideline else 0),
             run.passages if run else None,
@@ -577,7 +577,7 @@ def _start_estimate(rt: Runtime, user: User, job: Job, selection: ServiceSelecti
         source_sha256=job.source.sha256,
         guideline_sha256=guideline_sha,
         budget_usd=ai_cap_usd(fee_cap, settings),
-        engine=current_engine(settings),
+        engine=priced_engine(settings),
     )
 
     def start(j: Job, w: Wallet) -> tuple[Job, Wallet] | None:
@@ -985,7 +985,7 @@ SUPPORT_FIELDS = frozenset(
         "id", "status", "stage", "payment_status", "selection", "services", "pipeline", "source", "guideline", "logo", "quote", "estimate",
         "billing", "outcome", "warnings", "protected", "dismissed", "rejected_changes", "source_job", "latex", "formatting", "scope_words",
         "project_id", "work_id", "datalab_id", "outputs", "failure", "created_at", "queued_at", "completed_at", "expires_at",
-        "owner_uid", "owner_email", "completed_stages", "generation", "attempts", "lease_until", "cost_usd", "estimate_cost_usd",
+        "owner_uid", "owner_email", "completed_stages", "generation", "attempts", "lease_until", "cost_usd", "reserved_usd", "estimate_cost_usd", "progress",
         "refine_cost_usd", "budget_usd", "model_calls", "events", "admin_actions", "failure_detail", "files_deleted", "deleting", "retiring",
         "input_sha256", "delivery", "notice",
     }

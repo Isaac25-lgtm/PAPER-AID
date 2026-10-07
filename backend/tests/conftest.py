@@ -134,6 +134,8 @@ def _app_client(tmp_path, monkeypatch):
     monkeypatch.setenv("STAGE_MAX_ATTEMPTS", "4")  # production waits longer for an outage; tests keep their retries short
     monkeypatch.setenv("QUOTES_PER_HOUR", "500")
     monkeypatch.setenv("SUBMITS_PER_HOUR", "500")
+    monkeypatch.setenv("FLOOD_CLIENT_RATE", "100000")  # every test request comes from one address; tests/test_flood.py covers the guard
+    monkeypatch.setenv("FLOOD_INSTANCE_RATE", "100000")
     from app.core.config import get_settings
     from app.runtime import get_runtime
 

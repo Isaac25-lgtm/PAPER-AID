@@ -73,7 +73,8 @@ def _search_usd(settings: Settings, task: str, searches: int, engine: Engine) ->
     limit, thinking = output_allowance(engine, task)
     usd = costs.estimate_usd(provider, model, 1500 + costs.SEARCH_INPUT_TOKENS_WORST * 4 * searches, limit, settings.model_prices,
                              engine.price_table, settings.model_long_prices, thinking)
-    return usd + costs.search_fee_usd(provider, searches, settings.model_unit_prices, model)
+    reserve = searches * (costs.SEARCH_RESERVE_FACTOR if provider == "vertex" else 1)
+    return usd + costs.search_fee_usd(provider, reserve, settings.model_unit_prices, model)
 
 
 # --- projections (USD of provider spend) ------------------------------------------------------
