@@ -626,7 +626,11 @@ def test_start_after_an_outage_resumes_the_stopped_draft_where_it_stopped(works_
     stopped = store.get(work["jobs"][-1])
     assert stopped.selection.work == "DRAFT" and stopped.status == "FAILED" and stopped.failure.retryable
     finished_before = list(stopped.completed_stages)
-    plans_before = client.models.tasks.count("w_plan")
+
+    def plans(w):  # this work's own planner calls: a previous test's queue thread can still reach the shared stand-in
+        return sum(c.task == "w_plan" for j in w["jobs"] for c in store.get(j).model_calls)
+
+    plans_before = plans(work)
     outage["on"] = False
     assert client.post(f"/api/works/{work['id']}/start", headers=H).status_code == 200
     work = _settled(client, f"/api/works/{work['id']}", _done)
@@ -635,7 +639,7 @@ def test_start_after_an_outage_resumes_the_stopped_draft_where_it_stopped(works_
     resumed = store.get(stopped.id)
     assert resumed.status == "COMPLETED" and any(a.action == "Resumed by the student" for a in resumed.admin_actions)
     assert all(s in resumed.completed_stages for s in finished_before)
-    assert client.models.tasks.count("w_plan") == plans_before  # the plan was not made again
+    assert plans(work) == plans_before and len(work["jobs"]) == 2  # the plan was not made again
 
 
 def test_a_failure_that_is_not_temporary_starts_afresh(works_client):
