@@ -14,6 +14,17 @@ def test_a_client_gets_its_burst_then_its_rate_and_others_are_unaffected():
     assert guard.allow("1.1.1.1")  # it refills at its rate
 
 
+def test_a_clock_read_a_tick_early_never_empties_a_bucket():
+    """The release check 2026-10-07: a new client's bucket was stamped after `now` was read, and at a
+    high rate the negative interval took every token, refusing a first request."""
+    from app.core.flood import Bucket
+
+    bucket = Bucket(rate=100_000, burst=40, tokens=40, updated=10.016)
+    assert bucket.take(10.0) and bucket.tokens == 39 and bucket.updated == 10.016
+    guard = FloodGuard(per_client_rate=100_000, per_client_burst=40, instance_rate=100_000, instance_burst=300)
+    assert all(guard.allow(f"203.0.113.{i}") for i in range(200))
+
+
 def test_faked_addresses_still_meet_the_instance_ceiling():
     guard = FloodGuard(per_client_rate=100, per_client_burst=100, instance_rate=1, instance_burst=50)
     allowed = sum(guard.allow(f"10.0.{i // 250}.{i % 250}") for i in range(1000))

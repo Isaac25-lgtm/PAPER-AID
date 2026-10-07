@@ -19,8 +19,10 @@ class Bucket:
     updated: float = field(default_factory=time.monotonic)
 
     def take(self, now: float) -> bool:
-        self.tokens = min(self.burst, self.tokens + (now - self.updated) * self.rate)
-        self.updated = now
+        # Never backwards: a bucket made a tick after `now` was read must not lose tokens (Windows' clock
+        # moves in ~16 ms steps; at a high rate a negative interval emptied a new client's bucket).
+        self.tokens = min(self.burst, self.tokens + max(0.0, now - self.updated) * self.rate)
+        self.updated = max(self.updated, now)
         if self.tokens < 1:
             return False
         self.tokens -= 1
@@ -43,7 +45,7 @@ class FloodGuard:
                 if len(self._clients) >= self._max_clients:  # forget the quietest half rather than grow without bound
                     for key in sorted(self._clients, key=lambda k: self._clients[k].updated)[: self._max_clients // 2]:
                         del self._clients[key]
-                bucket = self._clients[client] = Bucket(*self._per_client, tokens=self._per_client[1])
+                bucket = self._clients[client] = Bucket(*self._per_client, tokens=self._per_client[1], updated=now)
             return bucket.take(now) and self._instance.take(now)
 
 

@@ -262,7 +262,12 @@ repository). Costs are actual Vertex spend.
 | Data Lab qualitative themes | 3 themes, codebook | 2.4 min | $0.17 |
 | Chapter Four from data (the proposal above) | By objective, 6 tables, 6 figures, approved first time | 2 min | $0.13 |
 | Paper Check redraft with source check | FULL; redraft, writing report, changes, APA copy | | $0.21 |
-| Paper Check "Ask for changes" on the result | Completed | | |
+| Paper Check "Ask for changes" on the result | FULL (10 passages; planner timed out 3× at the old 180 s first) | 34 min | $0.43 |
+| Paper Check light refine | FULL | 2.6 min | $0.17 |
+| Paper Check AI check (before it was hidden) | FULL | 0.8 min | $0.05 |
+| University template + LaTeX | PARTIAL, correctly: the test guide contradicts itself, so the warnings say what was assumed | 1.6 min | $0.08 |
+| Proposal review (uploaded proposal) | FULL; the thin test proposal's missing sections reported | <1 min | $0.11 |
+| Institution profile from a guide | Failed twice (see fix 2), then approved first time after the fix | 13 min | $0.24 |
 
 Fixed from these runs (tests in brackets):
 1. **A whole-chapter "Ask for changes" stayed open.** A request with no section picked covers every section;
@@ -272,8 +277,11 @@ Fixed from these runs (tests in brackets):
    standard profile (other levels' page ranges, the concept paper's layout, preliminary pages, words per
    page); the final reviewer rejected those three rounds running and no repair could change them. The
    profile now lists them (`from_standard`) and review prompt `p-profile-review-v2` judges them only where
-   the guide states something different. A guide's maximum alone ("no more than four objectives") is kept
-   instead of falling back to the standard 2–5 (`test_profiles.py`).
+   the guide states something different. A guide's maximum alone ("no more than four objectives", "must not
+   exceed 25 pages") is kept instead of falling back to the standard range; margins the profile cannot hold
+   (different per side, in cm) are told to the student in the institution notes; the never-used preliminary
+   pages are not shown to the reviewer (`test_profiles.py`). The second live run failed on exactly those
+   three; the third was approved first time.
 3. **HIGH-thinking calls were cut off at 180 seconds.** Thinking counts against the output limit, and a
    HIGH call thinking to its 32k room at Flash's measured 145–165 tokens a second needs about four minutes;
    the Paper Check planner timed out three times in a row (each possibly billed) before succeeding in 132
