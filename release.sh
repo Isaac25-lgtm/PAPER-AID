@@ -28,7 +28,7 @@ COMMIT="$(git rev-parse --short HEAD)"
 
 echo "== checks for $COMMIT"
 (cd backend && .venv/Scripts/python -m ruff check app tests \
-  && .venv/Scripts/python -m pytest -q -p no:cacheprovider -n 8 --basetemp="$(mktemp -d)")
+  && .venv/Scripts/python -m pytest -q -p no:cacheprovider -n 4 --basetemp="$(mktemp -d)")
 (cd web && npm test && npx tsc --noEmit && npx vite build --mode production --outDir "$(mktemp -d)" --emptyOutDir)  # backend release: the build is a check
 [ "${1:-}" = "--check" ] && { echo "Checks passed; nothing built or deployed."; exit 0; }
 
