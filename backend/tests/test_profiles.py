@@ -44,6 +44,29 @@ def test_a_profile_is_validated_into_a_rulebook_with_gaps_filled_from_the_defaul
     assert any("citation style" in u for u in book["unclear"]) and book["default_citation"] == "APA7"
 
 
+def test_a_maximum_alone_is_kept_and_what_code_fills_in_is_named_for_the_reviewer(client):
+    """Live run 2026-10-07: a guide saying objectives "number no more than four" lost its four (min 0 was
+    refused), and the final reviewer rejected the standard values code fills in three times over."""
+    answer = _answer()
+    answer["objectives"] = {"min": 0, "max": 4}
+    answer["formatting"] = {"font": "Times New Roman", "sizePt": 12, "lineSpacing": 1.5, "marginsIn": 0}  # 2.5 cm and 3.5 cm: no single margin
+    answer["levels"] = [{"level": "MASTERS", "pagesMin": 0, "pagesMax": 25}]  # "must not exceed 25 pages"
+    book = profile.build(answer, "guide.docx")
+    assert (book["objectives"]["min"], book["objectives"]["max"]) == (2, 4) and book["objectives"]["source"] != rulebook.load(rulebook.DEFAULT)["objectives"]["source"]
+    assert book["levels"]["MASTERS"]["pages"] == [15, 25]
+    standard = " | ".join(book["from_standard"])
+    assert "levels BACHELORS, PGD, PHD" in standard and "Chapter 4" in standard and "preliminary_pages" not in standard
+    assert "formatting margins_in: one margin" in standard and "formatting page_numbers" in standard and "size_pt" not in standard  # 12 pt was given
+    assert any("set them in Word" in u for u in book["unclear"])  # the student is told about the margins
+    assert "Trebuchet" not in book["words_per_page_source"]
+
+    project = _create(client)
+    client.post(f"/api/projects/{project['id']}/guide", headers=STUDENT, files={"file": ("KyU guide.docx", _guide(), "application/octet-stream")})
+    assert _run(client, project["id"], "PROFILE")["status"] == "COMPLETED"
+    review = next(r for t, r in zip(client.models.tasks, client.models.requests, strict=True) if t == "p_profile_review")
+    assert '"fromStandard"' in review and "concept note" in review and "preliminary_pages" not in review  # never used, never judged
+
+
 def test_a_text_that_is_not_a_guide_is_refused():
     with pytest.raises(profile.NotAGuide):
         profile.build({**_answer(), "chapters": []}, "notes.docx")

@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     # alike (6% each), so students get writing-pattern feedback only until a validated detector exists
     # (owner decision 2026-09-30). The score is still computed and kept for admins and calibration.
     show_ai_score: bool = False
+    # The "Check for AI" step itself (owner decision 2026-10-07): hidden until a validated detector is
+    # integrated. Paper Check stays open and starts at Redraft; a redraft still reads the paper the same
+    # way internally to choose what to change.
+    ai_check_enabled: bool = False
     model_prices: dict[str, tuple[float, float, float]] = {}  # "provider:model" → USD per 1M (input, output, cached input)
     anthropic_api_key: SecretStr | None = None
     openai_api_key: SecretStr | None = None

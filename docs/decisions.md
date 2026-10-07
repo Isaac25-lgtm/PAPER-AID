@@ -693,3 +693,19 @@ real calls, grant the worker's access, deploy and verify production. Architectur
   repeats itself; targeted part repairs; parallel integrity and evaluation; lighter thinking for research
   (LOW), checks and sign-off (MEDIUM); a visible checking/repairing round; retries reuse checked sources.
 - Twenty steps at once (queue and worker), throttled Gemini calls retried within seconds.
+
+## 2026-10-07 — The AI checker is hidden; live-test fixes (owner: "first hide AI checker")
+
+- The "Check for AI" step is hidden until a validated detector (for example ZeroGPT's API) is integrated:
+  `AI_CHECK_ENABLED` (default off) makes `AI_CHECK` "soon", so it is neither offered nor accepted by the
+  server. Paper Check stays open and starts at Redraft (light, standard, deep), with Ask for changes,
+  Check my sources and Format; while the check is hidden it takes Word files only (a PDF could only be
+  checked). A redraft still reads the paper internally to choose what to change.
+- Live tests on real Gemini (synthetic content) found and fixed: a whole-chapter "Ask for changes"
+  request is answered by revising the sections it concerns (it was left open and called a supervisor's
+  comment); an institution profile's final review is told which values PaperAid filled from the standard
+  profile (`from_standard`, prompt `p-profile-review-v2`) and a guide's "no more than four objectives"
+  is kept; each Vertex call's timeout follows its own token allowance (up to 290 seconds), so a
+  HIGH-thinking step is no longer cut off at 180 seconds and retried.
+- The admin job page shows each AI call's step, workflow stage, thinking level, fallback (for example a
+  premium review answered by Flash while Pro was busy), error and any reserved amount.

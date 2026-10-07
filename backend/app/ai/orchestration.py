@@ -150,8 +150,8 @@ STEPS: dict[str, Step] = {
     "p_profile_critique": Step("writer", Stage.PLANNING, "p-profile-critique-v1", 6000),
     "p_profile_guide": Step("writer", Stage.PLANNING, "p-profile-guide-v1", 6000),
     "p_profile_finalise": Step("lead", Stage.PLANNING, "p-profile-finalise-v3", 12000),
-    "p_profile_review": Step("lead", Stage.PLANNING, "p-profile-review-v1", 8000),
-    "p_profile_review_peer": Step("writer", Stage.PLANNING, "p-profile-review-v1", 8000),
+    "p_profile_review": Step("lead", Stage.PLANNING, "p-profile-review-v2", 8000),
+    "p_profile_review_peer": Step("writer", Stage.PLANNING, "p-profile-review-v2", 8000),
     # Review of an uploaded proposal: the lead audits it against the rulebook (it is never rewritten).
     "p_audit": Step("lead", Stage.ANALYSING, "p-audit-v1", 12000),
     # Works (rulebook v1.0; worker → evaluator → repair, owner decision 2026-09-30). Cheap models read

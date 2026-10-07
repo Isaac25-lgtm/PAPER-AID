@@ -136,6 +136,7 @@ def _app_client(tmp_path, monkeypatch):
     monkeypatch.setenv("SUBMITS_PER_HOUR", "500")
     monkeypatch.setenv("FLOOD_CLIENT_RATE", "100000")  # every test request comes from one address; tests/test_flood.py covers the guard
     monkeypatch.setenv("FLOOD_INSTANCE_RATE", "100000")
+    monkeypatch.setenv("AI_CHECK_ENABLED", "true")  # the check's own tests; tests/test_ai_check_hidden.py covers the default
     from app.core.config import get_settings
     from app.runtime import get_runtime
 

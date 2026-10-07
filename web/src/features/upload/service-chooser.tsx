@@ -34,7 +34,7 @@ const section = (info: SectionInfo, selection: Partial<ServiceSelection>): JobTy
   soon: info.soon,
 })
 const [PAPER_CHECK_INFO, PROPOSALS_INFO, FORMAT_INFO] = SECTIONS
-const PAPER_CHECK = section(PAPER_CHECK_INFO, { writing: 'AI_CHECK' })
+const PAPER_CHECK = section(PAPER_CHECK_INFO, { writing: 'REFINE' })
 const ACADEMIC_FORMAT = section(FORMAT_INFO, { writing: 'NONE', formatting: 'FORMAT' })
 
 // Three sections (owner decision 2026-09-29). Redraft, source check, university templates and LaTeX

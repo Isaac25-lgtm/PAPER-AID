@@ -32,7 +32,7 @@ const SECTIONS_NAV: NavItem[] = [
   { to: '/app/works', label: 'Coursework & funding', icon: NotebookPen, service: 'COURSEWORK', active: (p) => p.startsWith('/app/works') },
   { to: '/app/projects', label: 'Research proposals', icon: FilePen, service: 'PROPOSAL', active: (p) => p.startsWith('/app/projects') },
   { to: '/app/datalab', label: 'Data Lab', icon: ChartColumn, service: 'DATALAB', active: (p) => p.startsWith('/app/datalab') },
-  { to: '/app/new?service=PAPER_CHECK', label: 'Paper Check', icon: Search, service: 'AI_CHECK', active: (p, s) => p === '/app/new' && s.includes('PAPER_CHECK') },
+  { to: '/app/new?service=PAPER_CHECK', label: 'Paper Check', icon: Search, service: 'REFINE', active: (p, s) => p === '/app/new' && s.includes('PAPER_CHECK') },
   { to: '/app/new?service=ACADEMIC_FORMAT', label: 'Academic formatting', icon: FileCheck2, service: 'FORMAT', active: (p, s) => p === '/app/new' && s.includes('ACADEMIC_FORMAT') },
 ]
 

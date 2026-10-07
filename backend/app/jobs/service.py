@@ -72,7 +72,7 @@ SEARCHING = ("SOURCE_CHECK", "PROPOSAL", *WORKS)  # services with web research s
 
 
 def availability(settings: Settings, user: "User | None" = None) -> dict[str, str]:
-    """"soon" = not built yet, or (a work service) not switched on or not priced yet; "not_configured"
+    """"soon" = not built yet, switched off (the AI check), or (a work service) not switched on or not priced yet; "not_configured"
     = built, but the AI keys are not set; "invite_only" = testing is limited to invited testers and
     this user isn't one."""
     result = {}
@@ -81,7 +81,7 @@ def availability(settings: Settings, user: "User | None" = None) -> dict[str, st
         switched_on = settings.datalab_enabled if service == "DATALAB" else service in settings.works_enabled
         # Data Lab's analyses are code and free, so it opens without prices; its paid report checks its own (app.datalab.service).
         priced = service == "DATALAB" or work_prices_set(settings, service)
-        if service not in BUILT or (service in GATED and (not switched_on or not priced)):
+        if service not in BUILT or (service in GATED and (not switched_on or not priced)) or (service == "AI_CHECK" and not settings.ai_check_enabled):
             result[service] = "soon"  # no invented prices: a work service without its token prices is not offered
         elif ((service in GATED and not settings.roles_configured) or (service in NEEDS_AI and service not in GATED and not settings.ai_configured)
               or (service in SEARCHING and not search_ready)):

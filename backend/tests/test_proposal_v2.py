@@ -9,7 +9,7 @@ from docx import Document
 from pypdf import PdfReader
 
 from app.proposals import feedback
-from tests.test_api import STUDENT
+from tests.test_api import STUDENT, wait
 from tests.test_proposals import _approved, _create, _run
 
 WRITTEN = [
@@ -99,6 +99,28 @@ def test_feedback_revises_only_its_sections_and_the_report_says_what_was_done(cl
 
     nothing = client.post(f"/api/projects/{project_id}/steps", headers=STUDENT, json={"step": "REVISE_1"})
     assert nothing.status_code == 400 and nothing.json()["code"] == "NO_FEEDBACK"
+
+
+def test_a_request_about_the_whole_chapter_is_answered_by_revising_the_sections_it_concerns(client):
+    """Live run 2026-10-07: "Shorten the background and give the size of the problem", with no section
+    picked, was revised in the sections it concerned and still left open with a note about a supervisor."""
+    project_id = _with_chapter_one(client)
+    added = client.post(f"/api/projects/{project_id}/chapters/1/request", headers=STUDENT, json={"instruction": "Shorten the background.", "sections": []})
+    assert added.status_code == 200, added.json()
+    request = added.json()["feedback"][0]
+    assert request["by"] == "STUDENT" and len(request["sections"]) > 1  # nothing picked: every written section
+
+    def revise_background_only(payload):
+        return {"sections": [{"key": s["key"], "paragraphs": ["A shorter background."], "table": s["table"]} for s in payload["sections"] if s["key"] == "background"]}
+
+    client.models.overrides["p_fix"] = revise_background_only
+    quoted = client.post(f"/api/projects/{project_id}/steps", headers=STUDENT, json={"step": "REVISE_1", "comments": [request["id"]]}).json()
+    client.post(f"/api/projects/{project_id}/steps/{quoted['job']['id']}/submit", headers=STUDENT, json={"quoteId": quoted["quote"]["id"]})
+    job = wait(client, quoted["job"]["id"])
+    assert job["status"] == "COMPLETED", job
+    assert not any("stay open" in str(w) or "supervisor" in str(w) for w in job["warnings"]), job["warnings"]
+    project = client.get(f"/api/projects/{project_id}", headers=STUDENT).json()
+    assert project["feedback"][0]["status"] == "APPLIED" and project["feedback"][0]["appliedIn"] == 2
 
 
 def test_feedback_can_only_be_placed_on_written_sections(client):

@@ -35,19 +35,21 @@ export interface SectionInfo {
 export const SECTIONS: SectionInfo[] = [
   {
     id: 'PAPER_CHECK',
-    service: 'AI_CHECK',
+    // The writing check is hidden until a validated detector is integrated (owner decision 2026-10-07): the
+    // section opens on the redraft, which the check's own switch (AI_CHECK_ENABLED) never closes.
+    service: 'REFINE',
     name: 'Paper Check',
-    short: 'Check how your paper reads, then redraft it, ask for changes and finish it, all on one screen.',
+    short: 'Redraft your paper in your own voice, ask for changes, check its sources and finish it, all on one screen.',
     icon: Search,
-    accepts: 'DOCX or text-based PDF (a PDF can be checked only)',
+    accepts: 'DOCX',
     youGet: [
-      'Writing feedback: generic, formulaic or repetitive passages marked and explained',
       'A redraft (light, standard or deep) in your own voice: keep or undo every change',
-      'Changes in your own words or your supervisor\'s, your sources checked, and your paper finished in APA, Harvard, your institution\'s layout or LaTeX',
+      'Changes in your own words or your supervisor\'s',
+      'Your sources checked, and your paper finished in APA, Harvard, your institution\'s layout or LaTeX',
     ],
     untouched: ['Citations, quotations, numbers and URLs', 'Your argument and findings', 'Anything you choose to keep in your own words'],
     to: '/app/new?service=PAPER_CHECK',
-    soon: ['AI detection'],
+    soon: ['Writing check', 'AI detection'],
   },
   {
     id: 'PROPOSALS',
@@ -119,7 +121,7 @@ export const SERVICES: Record<ServiceId, ServiceInfo> = {
     name: 'Source check',
     short: 'Your key factual claims checked against current sources.',
     icon: BookCheck,
-    accepts: 'With a writing check or a redraft, or on its own from your results (DOCX or PDF)',
+    accepts: 'With a redraft, or on its own from your results (DOCX)',
     youGet: ['Each claim marked supported, partly supported, contradicted or not found', 'The sources, with the passage quoted and the date read', 'Sources you could cite for uncited claims'],
     untouched: ['Your paper: claims are reported, never changed'],
   },

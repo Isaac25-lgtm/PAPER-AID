@@ -290,7 +290,11 @@ def stage_planning(ctx: "StageContext") -> None:
             # reviewed again, at most twice (Codex audit 2026-10-01). A profile still not approved is never used:
             # proposals are built on it, so the step fails without charge.
             for round_ in runner.audit_rounds(REVIEW_REPAIRS + 1):
-                approved, objections = runner.review_profile({**payload, "finalProfile": book})  # the exact profile to be used
+                # the exact profile to be used, with what code filled from the standard profile (review v2 on)
+                v1 = runner._prompt_for("p_profile_review") == "p-profile-review-v1"
+                reviewed = book if v1 else {k: v for k, v in book.items() if k != "preliminary_pages"}  # never used in writing
+                shown = {} if v1 else {"fromStandard": book.get("from_standard", [])}
+                approved, objections = runner.review_profile({**payload, "finalProfile": reviewed, **shown})
                 if approved:
                     break
                 if round_ == REVIEW_REPAIRS or runner.budget_reached or not objections:
@@ -1210,7 +1214,11 @@ def stage_exporting(ctx: "StageContext") -> None:
                 if comment.id not in inp.comment_signatures or comment.status != "OPEN":
                     continue
                 answered = [k for k in comment.sections if k in inp.revise]
-                if comment.signature() == inp.comment_signatures[comment.id] and answered and all(k in document.revised for k in answered):
+                # A request about the whole chapter (no section picked) is answered by revising the sections
+                # it concerns, not every one (live run 2026-10-07: two of eleven revised, left open).
+                whole = {s.key for s in document.sections} <= set(comment.sections)
+                done = any if whole else all
+                if comment.signature() == inp.comment_signatures[comment.id] and answered and done(k in document.revised for k in answered):
                     comment.status, comment.applied_in = "APPLIED", version
                 else:
                     left_open.append(comment.text[:60])
@@ -1238,7 +1246,7 @@ def stage_exporting(ctx: "StageContext") -> None:
         if kept_choice:
             notes.append("You chose another version while PaperAid was revising, so the revision is saved as a new version without replacing your choice.")
         if left_open:
-            notes.append(f"{len(left_open)} of your supervisor's comments stay open because their sections were not revised or were changed meanwhile.")
+            notes.append(f"{len(left_open)} of the requested changes stay open because their sections were not revised or were changed meanwhile.")
         if written_meanwhile:
             notes.append("A chapter was written before your institution's profile was ready, so your proposal keeps its current structure.")
         j = _warn(j, notes if not already else [], partial=False)

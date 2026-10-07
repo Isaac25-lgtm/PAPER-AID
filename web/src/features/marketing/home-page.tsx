@@ -137,8 +137,8 @@ export function HomePage() {
               ))}
             </ul>
             <p className="border-t border-line bg-surface-subtle px-6 py-4 text-sm leading-relaxed text-fg-muted">
-              The writing check is feedback on how your paper reads, not an AI detector. No detector, ours or anyone else’s, can prove who wrote a text,
-              and PaperAid never promises a result on another service.
+              {config.availability.AI_CHECK === 'available' ? 'The writing check is feedback on how your paper reads, not an AI detector. ' : 'PaperAid does not detect AI. '}
+              No detector, ours or anyone else’s, can prove who wrote a text, and PaperAid never promises a result on another service.
             </p>
           </Reveal>
         </div>
@@ -183,7 +183,7 @@ export function HomePage() {
           <h2 id="faq-title" className="text-[2rem] leading-[1.15] tracking-[-0.025em] sm:text-[2.5rem]">Frequently asked questions</h2>
           <div className="mt-10 space-y-3">
             {[
-              ['Does PaperAid detect AI?', 'No. The writing check gives feedback on passages that read as generic, formulaic or repetitive, with reasons. No detector can prove who wrote a text, and PaperAid never promises a result on another service.'],
+              ['Does PaperAid detect AI?', `No.${config.availability.AI_CHECK === 'available' ? ' The writing check gives feedback on passages that read as generic, formulaic or repetitive, with reasons.' : ''} No detector can prove who wrote a text, and PaperAid never promises a result on another service.`],
               ['Where do the sources come from?', 'PaperAid searches for sources and cites only those it could confirm. A claim it can’t trace to a confirmed source is left out or marked for you.'],
               ['Is my work private?', `Your files are private to your account and deleted automatically after ${config.retentionDays} days. You can delete them sooner at any time.`],
               ['How are the numbers in my data analysis worked out?', 'By code, never by a model: PaperAid’s statistics engine calculates every number, and the writing explains them. Counts small enough to identify someone are hidden.'],

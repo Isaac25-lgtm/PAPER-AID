@@ -12,12 +12,14 @@ import type { JobType } from '../upload/service-chooser'
 import { JobOptions, startingSelection, type Mode } from './options'
 
 const ACCEPT = '.docx,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf'
+const WORD_ONLY = '.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document' // a PDF can only be checked
 
-/** The step a chosen job starts with, once the paper is uploaded. */
-export function modeFor(service: string | null): Mode {
+/** The step a chosen job starts with, once the paper is uploaded. Paper Check starts with the check
+ *  while it is offered, otherwise with the redraft (owner decision 2026-10-07: the check is hidden). */
+export function modeFor(service: string | null, checkOffered = true): Mode {
   if (service === 'REFINE' || service === 'REDRAFT') return 'redraft'
   if (service === 'ACADEMIC_FORMAT' || service === 'FORMAT' || service === 'TEMPLATE_FORMAT' || service === 'LATEX') return 'format'
-  return 'check' // Paper Check starts with the check
+  return checkOffered ? 'check' : 'redraft'
 }
 
 /** New job, step one: just the paper. It opens on its own page at once, with the next step beside it. */
@@ -27,15 +29,17 @@ export function QuickUpload({ type }: { type: JobType }) {
   const { user } = useAuth()
   const navigate = useNavigate()
   const [state, setState] = useState<{ name: string; progress: number; error: string | null } | null>(null)
+  const checkOffered = data.config.availability.AI_CHECK === 'available'
 
   const upload = async (file: File) => {
     const ext = file.name.split('.').pop()?.toLowerCase()
-    if (ext !== 'docx' && ext !== 'pdf') return setState({ name: file.name, progress: 100, error: 'Upload a Word document (.docx) or a text-based PDF.' })
+    if (ext !== 'docx' && (ext !== 'pdf' || !checkOffered))
+      return setState({ name: file.name, progress: 100, error: checkOffered ? 'Upload a Word document (.docx) or a text-based PDF.' : 'Upload a Word document (.docx).' })
     setState({ name: file.name, progress: 0, error: null })
     try {
       const id = await data.createDraft()
       await data.uploadFile(id, 'source', file, (progress) => setState((s) => s && { ...s, progress }))
-      navigate(`/app/jobs/${id}?next=${modeFor(type.id)}&service=${type.id}`)
+      navigate(`/app/jobs/${id}?next=${modeFor(type.id, checkOffered)}&service=${type.id}`)
     } catch (e) {
       setState({ name: file.name, progress: 100, error: e instanceof DataError ? e.message : 'Upload failed. Try again.' })
     }
@@ -68,7 +72,12 @@ export function QuickUpload({ type }: { type: JobType }) {
           </div>
         ) : (
           <>
-            <FileDropzone label="Choose your paper" hint="Word (.docx) or a text-based PDF · up to 20 MB" accept={ACCEPT} onFile={upload} />
+            <FileDropzone
+              label="Choose your paper"
+              hint={checkOffered ? 'Word (.docx) or a text-based PDF · up to 20 MB' : 'Word (.docx) · up to 20 MB'}
+              accept={checkOffered ? ACCEPT : WORD_ONLY}
+              onFile={upload}
+            />
             {state?.error && (
               <Alert tone="danger" className="mt-4" title={`We can't use “${state.name}”`}>
                 {state.error}
@@ -130,9 +139,12 @@ export function PaperPreview({ jobId, dim, children }: { jobId: string; dim?: bo
 /** A paper that has not been started: the paper on the left, the chosen step beside it. */
 export function DraftStudio({ job }: { job: Job }) {
   const [params] = useSearchParams()
+  const { config } = useData()
   const service = params.get('service')
   const prepared = (job.selection.onlyBlocks?.length ?? 0) > 0
-  const mode: Mode = prepared ? 'prepared' : ((params.get('next') as Mode | null) ?? 'check')
+  const checkOffered = config.availability.AI_CHECK === 'available'
+  const asked = (params.get('next') as Mode | null) ?? modeFor(service, checkOffered)
+  const mode: Mode = prepared ? 'prepared' : asked === 'check' && !checkOffered ? 'redraft' : asked
   const [initial] = useState(() => startingSelection(mode, job, service))
   return (
     <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_24rem]">

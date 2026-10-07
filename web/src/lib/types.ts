@@ -403,6 +403,14 @@ export interface ModelCall {
   searchCalls: number
   latencyMs: number
   costUsd: number
+  // The Gemini workflow (2026-10-07); older records carry empty values
+  task?: string
+  workflowStage?: string
+  thinkingLevel?: string
+  thinkingTokens?: number
+  errorCode?: string
+  fallbackAttempt?: number
+  reservedUsd?: number
 }
 
 export interface AdminJob {

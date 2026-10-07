@@ -83,6 +83,17 @@ MEDIA_TYPES = {
 # unavailable (503) request is retried here within seconds, with jitter, before the stage fails and waits for
 # the queue's backoff: Google bills neither, and nothing else is retried here (a timeout may have been billed).
 THROTTLE_RETRY = types.HttpRetryOptions(attempts=4, initial_delay=2.0, max_delay=20.0, exp_base=2.0, jitter=1.0, http_status_codes=[429, 503])
+# Each call gets the time its own token allowance needs: thinking counts against it, and a HIGH call that
+# thinks to its full room (32k) at Flash's measured 145-165 tokens a second needs about four minutes. A
+# fixed 180 seconds cut such calls off (live run 2026-10-07: three timeouts in a row, each possibly
+# billed, and the same retry each time). Never less than the configured timeout, never past the stage's
+# hand-over margin (STAGE_WORK_LIMIT 20 minutes inside the 25-minute lease).
+TOKENS_PER_SECOND = 120  # below the slowest rate measured, so a call that runs to its limit still ends in time
+CALL_SECONDS_CAP = 290
+
+
+def call_timeout(max_output_tokens: int | None, floor: float) -> float:
+    return min(CALL_SECONDS_CAP, max(floor, 30 + (max_output_tokens or 0) / TOKENS_PER_SECOND))
 
 
 def _vertex_client(project: str, location: str, timeout: float) -> genai.Client:
@@ -411,7 +422,9 @@ class VertexGeminiProvider:
                                              temperature=options.temperature, top_p=options.top_p, thinking_config=thinking,
                                              safety_settings=list(options.safety_settings) or None, tools=tools or None,
                                              tool_config=options.tool_config,
-                                             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True))
+                                             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+                                             http_options=types.HttpOptions(timeout=int(call_timeout(options.max_output_tokens, self.settings.provider_timeout_sec) * 1000),
+                                                                            retry_options=THROTTLE_RETRY))
         started = time.monotonic()
         client = _vertex_client(self.settings.vertex_project, self.settings.vertex_location, self.settings.provider_timeout_sec)
         try:

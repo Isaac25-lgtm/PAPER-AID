@@ -164,7 +164,7 @@ def test_single_legacy_provider_configuration_requires_only_its_key(provider):
 def test_search_switched_off_closes_only_the_searching_services():
     from app.jobs.service import availability
 
-    on, off = availability(settings()), availability(settings(vertex_search_enabled=False))
+    on, off = availability(settings(ai_check_enabled=True)), availability(settings(ai_check_enabled=True, vertex_search_enabled=False))
     assert on["SOURCE_CHECK"] == on["PROPOSAL"] == on["AI_CHECK"] == "available"
     assert off["SOURCE_CHECK"] == off["PROPOSAL"] == "not_configured" and off["AI_CHECK"] == "available"
 
@@ -333,6 +333,26 @@ def test_each_stage_sends_its_thinking_level_with_room_for_it(sdk):
     assert [(r.workflow_stage, r.thinking_level) for r in records] == [("planner", "HIGH"), ("execution", "MEDIUM")]
     assert output_allowance(current_engine(s), "plan") == (STEPS["plan"].max_tokens + 32_000, 16_000)
     assert output_allowance(current_engine(settings(gemini_workflow=False)), "plan") == (STEPS["plan"].max_tokens, costs.THINKING_ALLOWANCE_TOKENS)
+
+
+def test_each_call_has_the_time_its_token_allowance_needs_within_the_stage_margin(sdk):
+    """Live run 2026-10-07: a HIGH planner call thinking to its room was cut off at a fixed 180 seconds
+    three times (each possibly billed). The timeout now follows the call's own allowance, capped inside
+    the stage's hand-over margin, and keeps the throttling retries."""
+    calls, answers = sdk
+    answers[:] = [response(), response()]
+    s = flat()
+    ai, _ = runner(s, budget=50)
+    ai._call("plan", {}, SCHEMA, Answer)
+    ai._call("claims", {}, SCHEMA, Answer)
+    high, low = (c["config"].http_options for c in calls)
+    assert high.timeout == vertex.CALL_SECONDS_CAP * 1000  # 32k thinking + the answer: as long as a stage allows
+    assert 180_000 <= low.timeout < high.timeout  # never below the configured timeout
+    assert high.retry_options.http_status_codes == [429, 503]
+    assert vertex.call_timeout(40_000, 180) * vertex.TOKENS_PER_SECOND >= 40_000 * 0.85  # nearly the whole allowance fits
+    from app.jobs.pipeline import LEASE, STAGE_WORK_LIMIT
+
+    assert STAGE_WORK_LIMIT.total_seconds() + vertex.CALL_SECONDS_CAP < LEASE.total_seconds()
 
 
 def test_success_cache_uses_frozen_engine_after_settings_change(sdk):

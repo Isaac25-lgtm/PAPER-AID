@@ -27,7 +27,7 @@ def main() -> None:
             "ANTHROPIC_API_KEY": "sk-e2e",
             "GEMINI_API_KEY": "gm-e2e",
             "VERTEX_PROJECT": "paperaid",
-            "FLOOD_CLIENT_RATE": "100000", "FLOOD_INSTANCE_RATE": "100000",  # the journeys run from one address  # the Gemini workflow, as in production; the stand-in answers every stage
+            "FLOOD_CLIENT_RATE": "100000", "FLOOD_INSTANCE_RATE": "100000", "AI_CHECK_ENABLED": "true",  # the journeys run from one address  # the Gemini workflow, as in production; the stand-in answers every stage
             # Every work service on, with test prices, so the browser journeys can run them.
             "WORKS_ENABLED": '["CONCEPT_NOTE","COURSEWORK","FUNDING_PROPOSAL"]', "WORKS_PUBLIC": "true",
             "DATALAB_ENABLED": "true",

@@ -130,32 +130,56 @@ def build(answer: dict[str, Any], guide_name: str) -> dict[str, Any]:
         chapters.append({"number": n, "title": _text(spec.get("title"))[:120] or default["chapters"][n - 1]["title"], "share": round(share, 4),
                          "purpose": _text(spec.get("purpose"))[:300], "source": source, "sections": sections})
     chapters.append(copy.deepcopy(next(c for c in default["chapters"] if c.get("kind") == "CONCEPT")))  # the concept paper keeps the default layout
+    # What code takes from the standard profile because the guide does not give it: shown to the final
+    # reviewer as PaperAid's defaults, not claims about the guide (live run 2026-10-07: a reviewer rejected
+    # these three times, and no repair could change them).
+    standard = ["Chapter 4 (the concept paper's layout) and its vetting questions: used only for a concept note"]
 
     levels = copy.deepcopy(default["levels"])
     given = {_text(entry.get("level")): entry for entry in _dicts(answer.get("levels"))}
     for level in LEVELS:
         entry = given.get(level)
         low, high = (int(_num(entry.get("pagesMin"))), int(_num(entry.get("pagesMax")))) if entry else (0, 0)
+        if 0 < high <= 200 and low == 0:  # "must not exceed 25 pages": the guide's maximum, the standard minimum under it
+            low = min(levels[level]["pages"][0], high)
         if 0 < low <= high <= 200:
             levels[level] = {"label": levels[level]["label"], "pages": [low, high], "source": source}
     if not given:
         unclear.append("The guide gives no page range for a proposal, so a typical length is used.")
+    if defaulted := [level for level in LEVELS if levels[level].get("source") != source]:
+        standard.append(f"levels {', '.join(defaulted)}: page ranges the guide does not set")
 
     objectives = answer.get("objectives") if isinstance(answer.get("objectives"), dict) else {}
     low, high = int(_num(objectives.get("min"))), int(_num(objectives.get("max")))
-    counts = {"min": low, "max": high, "source": source} if 0 < low <= high <= 10 else dict(default["objectives"])
+    if 0 < high <= 10 and 0 <= low <= high:  # "no more than four" sets a maximum alone (min 0): keep it
+        counts = {"min": low or min(default["objectives"]["min"], high), "max": high, "source": source}
+    else:
+        counts = dict(default["objectives"])
+        standard.append("objectives and questions: the number expected, which the guide does not set")
 
     fmt = answer.get("formatting") if isinstance(answer.get("formatting"), dict) else {}
     formatting = dict(default["formatting"])
+    unset = {"font", "size_pt", "line_spacing", "margins_in", "page_numbers"}
     if isinstance(fmt.get("font"), str) and fmt["font"].strip():
         formatting["font"] = fmt["font"].strip()[:60]
+        unset.discard("font")
     if 9 <= _num(fmt.get("sizePt")) <= 16:
         formatting["size_pt"] = _num(fmt["sizePt"])
+        unset.discard("size_pt")
     if 1 <= _num(fmt.get("lineSpacing")) <= 3:
         formatting["line_spacing"] = _num(fmt["lineSpacing"])
+        unset.discard("line_spacing")
     if 0.5 <= _num(fmt.get("marginsIn")) <= 2:
         formatting["margins_in"] = _num(fmt["marginsIn"])
+        unset.discard("margins_in")
     formatting["source"] = source
+    if "margins_in" in unset:  # one margin for every side: a guide with other margins (or in cm, per side) is told to the student
+        unclear.append(f"PaperAid lays the proposal out with {formatting['margins_in']:g}-inch margins on every side. If your guide asks for other margins, set them in Word before you submit.")
+        unset.discard("margins_in")
+        standard.append(f"formatting margins_in: one margin ({formatting['margins_in']:g} inch) for every side, as the profile holds a single margin; "
+                        "the student is told to set the guide's margins in Word")
+    if unset:
+        standard.append(f"formatting {', '.join(sorted(unset))}: values the guide does not set")
 
     rules = [
         {"id": f"G-{i}", "requirement": str(r).strip()[:400], "interpretation": "", "enforcement": "REQUIRED", "type": "ai", "source": source}
@@ -168,12 +192,16 @@ def build(answer: dict[str, Any], guide_name: str) -> dict[str, Any]:
     for n, qs in questions.items():
         if not qs:  # no criteria for this chapter in the guide: general proposal questions
             questions[n] = copy.deepcopy(default["vetting"]["questions"][n])
+            standard.append(f"vetting questions for chapter {n}: general proposal questions, as the guide gives no criteria")
     questions["4"] = copy.deepcopy(default["vetting"]["questions"]["4"])
 
     citation = answer.get("citation")
     if citation == "OTHER":
         unclear.append("The guide asks for a citation style PaperAid does not produce; APA 7 is used.")
     default_citation = "APA6" if citation == "APA6" else "APA7"
+    if not rules:
+        standard.append("rules: general proposal rules, as the guide states none")
+    standard.append("words_per_page: PaperAid's estimate for turning page ranges into lengths")
     return {
         "id": f"custom-{secrets.token_hex(6)}",
         "institution": _text(answer.get("institution"))[:160] or "Your institution",
@@ -187,7 +215,7 @@ def build(answer: dict[str, Any], guide_name: str) -> dict[str, Any]:
         "default_citation": default_citation,
         "levels": levels,
         "words_per_page": default["words_per_page"],
-        "words_per_page_source": default["words_per_page_source"],
+        "words_per_page_source": "PaperAid's estimate of words on a page of the proposal",
         "objectives": counts,
         "questions": counts,
         "citation_style": {"style": "APA", "source": source},
@@ -196,6 +224,7 @@ def build(answer: dict[str, Any], guide_name: str) -> dict[str, Any]:
         "rules": rules or copy.deepcopy(default["rules"]),
         "chapters": chapters,
         "vetting": {"source": source, "note": "", "questions": questions},
+        "from_standard": standard,
     } | {"departures": departures({"chapters": chapters, "objectives": counts, "levels": levels, "formatting": formatting})}
 
 

@@ -225,6 +225,8 @@ def continue_from(rt: Runtime, user: User, job_id: str, origin: str, instruction
     instruction = " ".join(instruction.split())[:1000]
     _rate_limit(rt, user, "draft", rt.settings.quotes_per_hour)
     model = inspect_upload(data, name, rt.settings.max_upload_bytes, rt.settings.max_words, rt.settings.max_pdf_pages)
+    if model.format != "DOCX" and not rt.settings.ai_check_enabled:  # a PDF could only be checked, and the check is hidden
+        raise AppError("A new draft needs the Word file. Upload the .docx version of this paper.", code="PDF_AI_CHECK_ONLY")
     selection = ServiceSelection(writing="REFINE" if model.format == "DOCX" else "AI_CHECK", style=job.selection.style)
     notes: dict[str, list[str]] = {}
     if instruction:

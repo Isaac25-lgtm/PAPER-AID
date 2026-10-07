@@ -287,6 +287,7 @@ export function AdminJobPage() {
                   <thead className="text-left text-fg-subtle">
                     <tr>
                       <th className="py-2 pr-3 font-medium">Stage</th>
+                      <th className="py-2 pr-3 font-medium">Step</th>
                       <th className="py-2 pr-3 font-medium">Model</th>
                       <th className="py-2 pr-3 font-medium">Prompt</th>
                       <th className="py-2 pr-3 text-right font-medium">In / cached / out</th>
@@ -299,6 +300,19 @@ export function AdminJobPage() {
                       <tr key={i}>
                         <td className="py-2 pr-3">{STAGE_LABELS[c.stage]}</td>
                         <td className="py-2 pr-3 font-mono">
+                          {c.task || '—'}
+                          {c.workflowStage && (
+                            <span className="text-fg-subtle">
+                              {' '}
+                              · {c.workflowStage}
+                              {c.thinkingLevel && ` (${c.thinkingLevel})`}
+                            </span>
+                          )}
+                          {(c.fallbackAttempt ?? 0) > 0 && <span className="ml-1 text-amber-800">fallback {c.fallbackAttempt}</span>}
+                          {c.errorCode && <span className="ml-1 text-red-600">{c.errorCode}</span>}
+                          {(c.reservedUsd ?? 0) > 0 && <span className="ml-1 text-fg-subtle">reserved {usd(c.reservedUsd ?? 0)}</span>}
+                        </td>
+                        <td className="py-2 pr-3 font-mono">
                           {c.provider}/{c.model}
                         </td>
                         <td className="py-2 pr-3 font-mono">{c.promptVersion}</td>
@@ -310,7 +324,7 @@ export function AdminJobPage() {
                       </tr>
                     ))}
                     <tr className="font-semibold">
-                      <td className="py-2" colSpan={5}>
+                      <td className="py-2" colSpan={6}>
                         Job total
                       </td>
                       <td className="py-2 text-right">{usd(detail.costUsd)}</td>

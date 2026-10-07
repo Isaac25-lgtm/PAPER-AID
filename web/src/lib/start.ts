@@ -63,10 +63,10 @@ export const START_CHOICES: StartChoice[] = [
     benefits: ['Every quote checked word for word', 'A report and a codebook in Excel'],
   },
   {
-    id: 'PAPER_CHECK', service: 'AI_CHECK', group: 'Your own paper', name: 'Paper Check', icon: Search, to: '/app/new?service=PAPER_CHECK', action: 'Check my paper',
-    short: 'Writing feedback on your own paper, then a redraft in your voice if you want one.',
-    benefits: ['Generic or repetitive passages marked, with reasons', 'Citations, quotations and numbers kept'],
-    soon: ['AI detection'],
+    id: 'PAPER_CHECK', service: 'REFINE', group: 'Your own paper', name: 'Paper Check', icon: Search, to: '/app/new?service=PAPER_CHECK', action: 'Redraft my paper',
+    short: 'Your own paper redrafted in your voice, its sources checked and its layout finished.',
+    benefits: ['Keep or undo every change', 'Citations, quotations and numbers kept'],
+    soon: ['Writing check', 'AI detection'],
   },
   {
     id: 'ACADEMIC_FORMAT', service: 'FORMAT', group: 'Your own paper', name: 'Academic formatting', icon: FileCheck2, to: '/app/new?service=ACADEMIC_FORMAT', action: 'Format my paper',

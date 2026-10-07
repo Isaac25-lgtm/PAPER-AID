@@ -242,3 +242,52 @@ checked sources instead of researching again.
 A Gemini call throttled (429) or briefly unavailable (503) retries itself within seconds with jitter
 (`THROTTLE_RETRY`), before the step's own retry; Google bills neither. The premium audit falls back to
 3.8 Flash when the preview Pro model stays busy.
+
+## 10. Every section tested live on Gemini, and what that fixed (2026-10-07)
+
+Owner-authorised live runs on real Gemini (Vertex, `paperaid`/`global`) through PaperAid's real API and
+pipelines, with synthetic content only, credits off and throwaway data folders (driver kept outside the
+repository). Costs are actual Vertex spend.
+
+| Flow | Result | Time | Cost |
+|---|---|---|---|
+| Coursework essay (economics, graphs asked for) | Delivered: Figure 1 drawn by code, illustrative table | ~11 min | $0.61 |
+| Coursework report, brief bans AI (2,000 words) | Delivered; the "AI-assisted third party" last-page note present | 24 min | $0.53 |
+| Funding concept note | Plan and draft approved | ~10 min | $0.44 |
+| Funding proposal, standard (18 months) | 13 sections, 5,234 words; Results Model approved; indicator targets left as applicant gaps (FP-027) | 34 min | $1.22 |
+| Academic concept note | Plan, then concept paper (Pro review → fix → Flash sign-off) | 14.5 min | $0.80 |
+| Research proposal: plan + Chapters 1, 2, 3 | All FULL | 48 min | $2.08 |
+| Revise Chapter 1 from a request | Two sections revised | 5 min | $0.30 |
+| Data Lab quantitative report | 13 sections, 6 tables, 4 charts | 2 min | $0.14 |
+| Data Lab qualitative themes | 3 themes, codebook | 2.4 min | $0.17 |
+| Chapter Four from data (the proposal above) | By objective, 6 tables, 6 figures, approved first time | 2 min | $0.13 |
+| Paper Check redraft with source check | FULL; redraft, writing report, changes, APA copy | | $0.21 |
+| Paper Check "Ask for changes" on the result | Completed | | |
+
+Fixed from these runs (tests in brackets):
+1. **A whole-chapter "Ask for changes" stayed open.** A request with no section picked covers every section;
+   it is now answered when the sections it concerns are revised, and the note no longer calls the student's
+   own request a supervisor's comment (`test_proposal_v2.py`).
+2. **An institution profile could never be approved.** Code fills what a guide does not give from the
+   standard profile (other levels' page ranges, the concept paper's layout, preliminary pages, words per
+   page); the final reviewer rejected those three rounds running and no repair could change them. The
+   profile now lists them (`from_standard`) and review prompt `p-profile-review-v2` judges them only where
+   the guide states something different. A guide's maximum alone ("no more than four objectives") is kept
+   instead of falling back to the standard 2–5 (`test_profiles.py`).
+3. **HIGH-thinking calls were cut off at 180 seconds.** Thinking counts against the output limit, and a
+   HIGH call thinking to its 32k room at Flash's measured 145–165 tokens a second needs about four minutes;
+   the Paper Check planner timed out three times in a row (each possibly billed) before succeeding in 132
+   seconds with 20.8k thinking tokens. Each call's timeout now follows its own allowance
+   (`vertex.call_timeout`: 30 s + tokens/120 a second, at least `PROVIDER_TIMEOUT_SEC`, at most 290 s so it
+   stays inside the stage's hand-over margin) (`test_vertex.py`).
+4. **The admin job page** shows each call's step, workflow stage, thinking level, fallback, error and
+   reserved amount, so a premium review answered by Flash while Pro was busy is visible.
+5. **The AI checker is hidden** (owner decision): `AI_CHECK_ENABLED` off; Paper Check starts at Redraft and
+   takes Word files (`test_ai_check_hidden.py`).
+
+Observed, no change needed: Google returned 503 for 3.8 Flash across all jobs for about four minutes
+(08:40–08:44 UTC); every job retried and finished. The preview Pro model was busy several times; the premium
+audit fell back to 3.8 Flash at HIGH as designed. A dropped connection after sending reserves the call's
+estimate (unknown billing) and the stage retries.
+Suggested, not built: Data Lab headings use a variable's name until the researcher gives it a label
+(for example "knowledge_score by completed"); prompting for labels before a report would read better.
