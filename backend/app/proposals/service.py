@@ -26,7 +26,7 @@ from app.core.logging import log
 from app.documents.intake import inspect_upload
 from app.formatting.guideline import MAX_GUIDE_WORDS
 from app.jobs import state
-from app.jobs.models import Job, JobEvent, JobStatus, JobView, Quote, QuoteLine, ReadinessItem, ServiceSelection, utcnow
+from app.jobs.models import Camel, Job, JobEvent, JobStatus, JobView, Quote, QuoteLine, ReadinessItem, ServiceSelection, utcnow
 from app.jobs.service import (
     ACCOUNT_CLOSING,
     User,
@@ -61,6 +61,7 @@ from app.proposals.models import (
     StepInput,
     StoredChapterState,
     TitlePage,
+    Variables,
     WrittenSection,
     moved_path,
 )
@@ -163,6 +164,10 @@ def view(rt: Runtime, p: Project) -> ProjectView:
     out.guide_read = p.guide is not None and book.get("guide_sha256") == p.guide.sha256
     if p.plan is not None:
         out.plan_problems = plan_problems(p)
+        if p.plan_status == "APPROVED":
+            out.proposed = [name for name, given, planned in (("studyArea", p.inputs.study_area, p.plan.study_area),
+                                                              ("population", p.inputs.population, p.plan.population),
+                                                              ("studyType", p.inputs.study_type or "", p.plan.study_type)) if not given and planned]
         for chapter in out.chapters:
             doc = docs.get(chapter.number)
             if doc is None:
@@ -172,7 +177,8 @@ def view(rt: Runtime, p: Project) -> ProjectView:
             missing = [f"{s.number} {s.heading} (not written yet)" for s in expected if s.key not in written]
             chapter.needs_review = decisions.stale(doc, p.plan) + missing
     out.active_job = p.active_job if step_running(rt, p) else None
-    out.framework = framework.describe(p.plan.variables) if p.plan else ""
+    out.framework = framework.describe_plan(p.plan)
+    out.framework_note = framework.note(p.plan) if out.framework else ""
     first = CONCEPT if p.goal == "CONCEPT" else 1
     if p.auto and not p.chapter(first).versions and out.active_job is None and not p.auto_failure and p.jobs:
         last = rt.store.get(p.jobs[-1])
@@ -259,6 +265,31 @@ def update_details(rt: Runtime, user: User, project_id: str, inputs: ProposalInp
 
     def apply(p: Project) -> Project:
         p.inputs, p.title_page, p.citation = inputs, title_page, citation
+        return p
+
+    return view(rt, _change(rt, user, project_id, apply))
+
+
+def confirm_setting(rt: Runtime, user: User, project_id: str, study_area: str, population: str, base_version: int) -> ProjectView:
+    """The student confirms or corrects where the study takes place and who it studies, which PaperAid
+    proposed from the topic because they were left blank at Start (owner decision 2026-10-08), and with
+    them the design PaperAid recommended. A corrected value changes the approved plan: the student's own
+    edit, so it stays approved, and the sections built on it are marked for review (`decisions.stale`)."""
+    area, people = " ".join(study_area.split())[:200], " ".join(population.split())[:200]
+    if not area or not people:
+        raise AppError("Say where the study takes place and who it studies.", code="SETTING_INCOMPLETE")
+
+    def apply(p: Project) -> Project:
+        if p.plan is None or p.plan_status != "APPROVED":
+            raise AppError("Your study plan is not ready yet.", code="NO_PLAN")
+        if p.plan_version != base_version:
+            raise Conflict("Your proposal changed since you opened it. Reload it and confirm again.", code="PLAN_CHANGED")
+        if step_running(rt, p):
+            raise Conflict("PaperAid is working on this proposal. Confirm when it has finished.", code="STEP_RUNNING")
+        p.inputs = p.inputs.model_copy(update={"study_area": area, "population": people, "study_type": p.inputs.study_type or p.plan.study_type})
+        if (p.plan.study_area, p.plan.population) != (area, people):
+            p.plan = p.plan.model_copy(update={"study_area": area, "population": people})
+            p.plan_version += 1
         return p
 
     return view(rt, _change(rt, user, project_id, apply))
@@ -408,7 +439,7 @@ def set_chapter(rt: Runtime, user: User, project_id: str, number: int, version: 
     return view(rt, _change(rt, user, project_id, apply))
 
 
-class RenderedSection(BaseModel):
+class RenderedSection(Camel):
     key: str
     number: str
     heading: str
@@ -418,12 +449,12 @@ class RenderedSection(BaseModel):
     needs_review: bool = False
 
 
-class FrameworkColumn(BaseModel):
+class FrameworkColumn(Camel):
     label: str
     items: list[str]
 
 
-class ChapterView(BaseModel):
+class ChapterView(Camel):  # camelCase like every other view (the browser read tableCaption and needsReview, 2026-10-08)
     number: int
     title: str
     version: int
@@ -435,6 +466,7 @@ class ChapterView(BaseModel):
     references: list[str]
     framework: list[FrameworkColumn] = []  # Chapter One's conceptual framework figure, from the plan
     missing: list[str] = []  # sections not written yet ("1.3 Heading"): Finish chapter writes them
+    to_align: list[str] = []  # keys of the sections to revise to the student's institution guide
 
 
 def _citer(rt: Runtime, p: Project) -> evidence.Citer:
@@ -473,6 +505,7 @@ def chapter(rt: Runtime, user: User, project_id: str, number: int, version: int 
         framework=[FrameworkColumn(label=label, items=items) for label, items in proposal_export.framework_columns(p.plan)]
         if number in (1, CONCEPT) and any(s.key == "framework" for s in doc.sections) else [],
         missing=[f"{s.number} {s.heading}" for s in rulebook.sections(p.rulebook, number, p.inputs.level, p.plan) if s.key in doc.missing] if p.plan and doc.missing else [],
+        to_align=[s.key for s in doc.sections if s.key in doc.to_align],
     )
 
 
@@ -719,12 +752,11 @@ def quote_step(rt: Runtime, user: User, project_id: str, step: Step, note: str, 
 
 
 def _quote_profile(rt: Runtime, user: User, p: Project) -> StepQuote:
-    """Price reading the student's guide into an institution profile. Only before any chapter is
-    written: chapters follow one structure from start to finish."""
+    """Price reading the student's guide into an institution profile. Chapters already written are
+    restructured to it when it is read, each as a new version (`pipeline.align_document`; owner decision
+    2026-10-08: the guide is added after Chapter One to align the work)."""
     if p.guide is None:
         raise AppError("Upload your institution's research guide first.", code="NO_GUIDE")
-    if any(c.versions for c in p.chapters):
-        raise AppError("Your chapters already follow the current structure. Start a new proposal to use your institution's guide.", code="CHAPTERS_WRITTEN")
     _rate_limit(rt, user, "quote", rt.settings.quotes_per_hour)
     inp = StepInput(
         project_id=p.id, step="PROFILE", chapter=0, rulebook=p.rulebook, inputs=p.inputs, plan_version=p.plan_version,
@@ -754,8 +786,6 @@ def upload_guide(rt: Runtime, user: User, project_id: str, filename: str, data: 
     p = _owned(rt, user, project_id)
     if step_running(rt, p):
         raise Conflict("A proposal step is running. Upload the guide after it finishes.", code="STEP_RUNNING")
-    if any(c.versions for c in p.chapters):
-        raise AppError("Your chapters already follow the current structure. Start a new proposal to use your institution's guide.", code="CHAPTERS_WRITTEN")
     _rate_limit(rt, user, "guide", rt.settings.uploads_per_hour)
     model = inspect_upload(data, filename, rt.settings.max_upload_bytes, MAX_GUIDE_WORDS, rt.settings.max_pdf_pages, min_words=300)
     text = "\n".join(b.text for b in model.blocks if b.text.strip())
@@ -772,8 +802,6 @@ def upload_guide(rt: Runtime, user: User, project_id: str, filename: str, data: 
     def apply(q: Project) -> Project:
         if step_running(rt, q):
             raise Conflict("A proposal step is running. Upload the guide after it finishes.", code="STEP_RUNNING")
-        if any(c.versions for c in q.chapters):
-            raise AppError("Your chapters already follow the current structure. Start a new proposal to use your institution's guide.", code="CHAPTERS_WRITTEN")
         q.guide = guide
         return q
 
@@ -1215,13 +1243,13 @@ def continue_after_plan(rt: Runtime, project_id: str, plan_job: str) -> None:
         stop(NOT_FINISHED + (f" What it could not settle: {' '.join(why)[:400]}" if why else ""))
         return
     assert p.plan is not None
-    if p.plan.sampling_assumed and not p.sampling_consent:
-        stop(SAMPLING_NEEDED + " " + "; ".join(p.plan.sampling_assumed))
-        return
+    # Standard sample-size settings no longer stop a one-Start proposal (owner decision 2026-10-08): the chapter
+    # says where they were assumed and Chapter Three asks the student to confirm them (C3-ASSUMED). A consent
+    # given on the earlier Start page is still recorded as it was.
 
     def approve(q: Project) -> Project:
         assert q.plan is not None
-        if q.plan.sampling_assumed:  # the student was told the standard settings when they started
+        if q.plan.sampling_assumed and q.sampling_consent:  # the student agreed to the standard settings when they started
             q.acknowledgments.append(Acknowledgment(kind="SAMPLING", plan_version=q.plan_version, text_sha256=hashlib.sha256(SAMPLING_CONSENT.encode()).hexdigest()))
         q.plan_status = "APPROVED"
         q.auto_chapter_one = False  # started here, never again by an approval
@@ -1249,11 +1277,40 @@ def request_changes_with_document(rt: Runtime, user: User, project_id: str, numb
     return request_changes(rt, user, project_id, number, instruction, sections, filename.rsplit("/", 1)[-1], context)
 
 
+def edit_framework(rt: Runtime, user: User, project_id: str, base_version: int, style: framework.Style | None, variables: Variables | None) -> ProjectView:
+    """The student's own edit of the conceptual framework (owner decision 2026-10-08, from the workspace): its
+    style, which only redraws the figure, or its variables, which change the approved plan (their edit, so it
+    stays approved) and mark the sections built on them for review (`decisions.stale`)."""
+
+    def clean(items: list[str]) -> list[str]:
+        return list(dict.fromkeys(" ".join(i.split())[:300] for i in items if i.strip()))[:30]
+
+    def apply(p: Project) -> Project:
+        if style is not None:
+            p.framework_style = style
+        if variables is not None:
+            if p.plan is None or p.plan_status != "APPROVED":
+                raise AppError("Your study plan is not ready yet.", code="NO_PLAN")
+            if p.plan_version != base_version:
+                raise Conflict("Your proposal changed since you opened it. Reload it and edit again.", code="PLAN_CHANGED")
+            if step_running(rt, p):
+                raise Conflict("PaperAid is working on this proposal. Edit the framework when it has finished.", code="STEP_RUNNING")
+            edited = Variables(independent=clean(variables.independent), dependent=clean(variables.dependent), intervening=clean(variables.intervening))
+            if bool(edited.independent) != bool(edited.dependent):
+                raise AppError("A framework needs at least one independent and one dependent variable.", code="FRAMEWORK_INCOMPLETE")
+            if edited != p.plan.variables:
+                p.plan = p.plan.model_copy(update={"variables": edited})
+                p.plan_version += 1
+        return p
+
+    return view(rt, _change(rt, user, project_id, apply))
+
+
 def framework_png(rt: Runtime, user: User, project_id: str) -> bytes:
     """The conceptual framework figure drawn from the plan's variables (none for a study without
     independent and dependent variables)."""
     p = _owned(rt, user, project_id)
-    png = framework.draw(p.plan.variables) if p.plan else None
+    png = framework.figure(p.plan, p.framework_style)
     if png is None:
         raise NotFound("This study has no conceptual framework figure.")
     return png

@@ -52,7 +52,7 @@ export interface ServiceSelection {
   /** An institution logo at the top of the first page. */
   logo?: 'NONE' | 'CENTER' | 'LEFT'
   /** A proposal project's step, or REVIEW: an uploaded proposal checked against the rulebook. */
-  proposal?: 'NONE' | 'PLAN' | 'CHAPTER_1' | 'CHAPTER_2' | 'CHAPTER_3' | 'REVIEW'
+  proposal?: 'NONE' | 'PLAN' | 'CHAPTER_1' | 'CHAPTER_2' | 'CHAPTER_3' | 'CONCEPT' | 'REVISE_1' | 'REVISE_2' | 'REVISE_3' | 'REVISE_4' | 'PROFILE' | 'REVIEW'
   level?: Level
 }
 

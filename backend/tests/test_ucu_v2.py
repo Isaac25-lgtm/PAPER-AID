@@ -161,3 +161,23 @@ def test_an_introduction_naming_the_primary_question_is_not_taken_for_a_statemen
     assert _introduction(intro, stated)
     assert not _introduction(PLAN["primaryQuestion"], stated) and not _introduction(PLAN["purpose"], stated)
     assert not _introduction(f"The study asks: {PLAN['researchQuestions'][0]}", stated)
+
+
+def test_a_setting_left_blank_is_shown_as_proposed_until_the_student_confirms_it(client):
+    """Owner decision 2026-10-08: where and who are optional at Start. What PaperAid proposed stays marked as
+    proposed; a correction changes the approved plan and marks the sections built on it for review."""
+    blank = {**DETAILS, "inputs": {**DETAILS["inputs"], "studyArea": "", "population": ""}}
+    project = client.post("/api/projects", headers=STUDENT, json=blank).json()
+    _run(client, project["id"], "PLAN")
+    _approved(client, project["id"])
+    project = client.get(f"/api/projects/{project['id']}", headers=STUDENT).json()
+    assert {"studyArea", "population"} <= set(project["proposed"])
+    url = f"/api/projects/{project['id']}/setting"
+    stale = client.post(url, headers=STUDENT, json={"studyArea": "Wakiso District", "population": "Caregivers", "baseVersion": project["planVersion"] - 1})
+    assert stale.status_code == 409
+    confirmed = client.post(url, headers=STUDENT, json={"studyArea": "Wakiso District", "population": "Caregivers of children aged 6-24 months",
+                                                        "baseVersion": project["planVersion"]}).json()
+    assert confirmed["proposed"] == [] and confirmed["planStatus"] == "APPROVED"
+    assert confirmed["plan"]["studyArea"] == "Wakiso District" and confirmed["inputs"]["studyType"] == confirmed["plan"]["studyType"]
+    chapter_one = next(c for c in confirmed["chapters"] if c["number"] == 1)
+    assert any("Scope" in s or "Problem" in s for s in chapter_one["needsReview"])  # built on the setting: to review

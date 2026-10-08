@@ -30,6 +30,7 @@ from app.proposals.models import (
     ChapterSection,
     EvidenceItem,
     EvidenceSource,
+    Level,
     PlanReview,
     Project,
     ProposalPlan,
@@ -682,6 +683,60 @@ def _owned(inp: StepInput, items: dict[str, dict[str, Any]], current: dict[str, 
     return out
 
 
+ALIGNED_NOTE = "Restructured to your institution's guide"
+CONCEPT_NUMBER = 4  # the concept paper is stored as chapter 4 and keeps its own layout
+
+
+def align_document(doc: ChapterDocument, before: str, after: str, level: Level, plan: ProposalPlan) -> ChapterDocument:
+    """A written chapter in the structure of the student's institution guide (owner decision 2026-10-08):
+    the guide's order, numbering and headings; the text of every section the guide keeps, unchanged (the
+    approved statements placed again under their new numbers); sections the guide drops left out; sections
+    it adds still to write (`missing`, written by "Finish chapter"); and sections whose requirement differs
+    in the guide listed in `to_align`, to be revised to it. Code only: no model is called."""
+    old_briefs = {s.key: s.brief for s in rulebook.sections(before, doc.number, level, plan)}
+    planned = rulebook.sections(after, doc.number, level, plan)
+    earlier = {s.key: s for s in doc.sections}
+    sections = []
+    for spec in planned:
+        section = earlier.get(spec.key)
+        if section is None:
+            continue
+        paragraphs = section.paragraphs
+        if spec.from_plan:  # the writer's introduction, then the approved statements under their new numbers
+            stated = stated_fragments(plan, spec.number)
+            lead = [par for par in paragraphs if not evidence.SUBHEADING.match(par) and _introduction(par, stated)][:2]
+            paragraphs = [*lead, *plan_statements(plan, spec.from_plan, spec.number)]
+        sections.append(section.model_copy(update={"number": spec.number, "heading": spec.heading, "paragraphs": paragraphs}))
+    keys = {s.key for s in sections}
+    missing = [spec.key for spec in planned if spec.key not in keys]
+    to_align = [spec.key for spec in planned if spec.key in keys and not spec.from_plan and spec.brief != old_briefs.get(spec.key)]
+    dropped = [f"{s.number} {s.heading}" for s in doc.sections if s.key not in {spec.key for spec in planned}]
+    cited: list[str] = []
+    for section in sections:
+        for field in [*section.paragraphs, section.table_caption, *[c for row in section.table or [] for c in row]]:
+            cited += [i for i in evidence.cited_ids(field) if i not in cited]
+    words = sum(len(evidence.ANY_TOKEN.sub(" ", par).split()) for s in sections for par in s.paragraphs)
+    n = doc.number
+    readiness = [r for r in doc.readiness if not r.id.endswith("-WRITTEN") and r.id != f"C{n}-ALIGNED"]
+    readiness += [
+        ReadinessItem(id=f"C{n}-{spec.key}-WRITTEN", question=f"Is {spec.number} {spec.heading} written?", status="MISSING", basis="CODE",
+                      note="Your institution's guide adds this section. Write the new sections to add it.")
+        for spec in planned if spec.key in missing
+    ]
+    changes = []
+    if dropped:
+        changes.append("Left out because your guide does not include them: " + "; ".join(dropped) + ".")
+    if to_align:
+        changes.append("Your guide asks for something different in: " + "; ".join(f"{spec.number} {spec.heading}" for spec in planned if spec.key in to_align)
+                       + ". Revise them to your guide.")
+    readiness.append(ReadinessItem(
+        id=f"C{n}-ALIGNED", question="Does the chapter follow your institution's guide?", basis="CODE", chapter=n,
+        status="NEEDS_REVIEW" if (to_align or missing) else "PASS",
+        note=(" ".join(changes) or "Restructured to your guide's order, numbering and headings; the earlier version is kept.")[:600]))
+    return doc.model_copy(update={"sections": sections, "cited": cited, "words": words, "missing": missing, "to_align": to_align,
+                                  "readiness": readiness, "revised": [], "warnings": []})
+
+
 def _table_allowed(inp: StepInput, allowed: str) -> str:
     """A work-plan table may also number the months of the student's own timeline."""
     months = inp.plan.timeline_months if inp.plan else 0
@@ -986,7 +1041,7 @@ def _completed(inp: StepInput, base: ChapterDocument, written: ChapterDocument) 
     done = [k for k in base.missing if k in fresh]
     document = ChapterDocument(
         number=base.number, title=base.title, plan_version=base.plan_version, sections=sections, cited=cited, words=words,
-        missing=[k for k in base.missing if k not in fresh],
+        missing=[k for k in base.missing if k not in fresh], to_align=list(base.to_align),
     )
     return document, done
 
@@ -1040,7 +1095,8 @@ def _merge(base: ChapterDocument, revised: ChapterDocument, keys: set[str]) -> t
         for field in [*section.paragraphs, section.table_caption, *[c for row in section.table or [] for c in row]]:
             cited += [i for i in evidence.cited_ids(field) if i not in cited]
     words = sum(len(evidence.ANY_TOKEN.sub(" ", p).split()) for s in sections for p in s.paragraphs)
-    merged = ChapterDocument(number=base.number, title=base.title, plan_version=revised.plan_version, sections=sections, cited=cited, words=words)
+    merged = ChapterDocument(number=base.number, title=base.title, plan_version=revised.plan_version, sections=sections, cited=cited, words=words,
+                             to_align=[k for k in base.to_align if k not in fresh])
     return merged, [f"{s.number} {s.heading}" for s in base.sections if s.key in keys and s.key not in fresh]
 
 
@@ -1184,6 +1240,14 @@ def _readiness(
                     note=result.steps if has_source else "Add where your population figure comes from (for example district records) in the plan.",
                 )
             )
+        if inp.plan.sampling_assumed:  # no consent is asked at Start (owner decision 2026-10-08): confirmed here
+            items.append(
+                ReadinessItem(
+                    id="C3-ASSUMED", question="Do you confirm the sample-size settings PaperAid assumed?", basis="AUTHOR", chapter=3, status="NEEDS_REVIEW",
+                    note=("You gave no figures for these, so the standard settings were used and the chapter says so: "
+                          + "; ".join(inp.plan.sampling_assumed) + ". Confirm them with your supervisor, or set your own in the plan.")[:600],
+                )
+            )
     return items
 
 
@@ -1311,9 +1375,20 @@ def stage_exporting(ctx: "StageContext") -> None:
     plan = ProposalPlan.model_validate(planned["plan"]) if planned else None
     review = PlanReview.model_validate(planned["review"]) if planned and planned.get("review") else None  # None: an older engine's plan
     book = ctx.get_json("profile.json")["profile"] if inp.step == "PROFILE" else None
+    aligned: dict[int, tuple[int, str, ChapterDocument]] = {}  # chapter -> (the version it was made from, path, document)
     if book is not None:  # written once under its own id; a retry writes the same file again
         ctx.assert_owner()
         ctx.rt.files.put(rulebook.stored_path(book["id"]), json.dumps(book).encode(), "application/json")
+        if project.plan is not None:  # a guide read after chapters were written: each is restructured to it
+            for stored in project.chapters:
+                if stored.number == CONCEPT_NUMBER or not stored.current:
+                    continue
+                base_path = next(v.path for v in stored.versions if v.version == stored.current)
+                base_path = base_path if ctx.rt.files.exists(base_path) else moved_path(base_path)
+                doc = align_document(ChapterDocument.model_validate_json(ctx.rt.files.get(base_path)), project.rulebook, book["id"], project.inputs.level, project.plan)
+                path = f"{project.storage_prefix()}/chapters/{stored.number}/{job_id}-{ctx.owner}-aligned.json"
+                ctx.rt.files.put(path, doc.model_dump_json(by_alias=True).encode(), "application/json")
+                aligned[stored.number] = (stored.current, path, doc)
     written_meanwhile = False
     library_paths = list(dict.fromkeys([*project.evidence_files, *([evidence_path] if evidence_path else [])]))
     usable = sum(1 for i in load_library(ctx.rt.files, library_paths).values() if i.usable)
@@ -1336,11 +1411,22 @@ def stage_exporting(ctx: "StageContext") -> None:
         p.published.append(job_id)
         if book is not None:
             p.profiles = list(dict.fromkeys([*p.profiles, book["id"]]))
-            if any(c.versions for c in p.chapters):
-                written_meanwhile = True  # a chapter was written to the current structure: keep it
-            else:
-                p.rulebook = book["id"]
-                p.citation = book["default_citation"]
+            written = {c.number: c.current for c in p.chapters if c.current and c.number != CONCEPT_NUMBER}
+            if {n: v for n, (v, _, _) in aligned.items()} != written:
+                raise PermanentStageError(  # a chapter changed while the guide was read: nothing saved, nothing charged
+                    "INPUTS_CHANGED", "A chapter changed while PaperAid read your guide, so nothing was saved and nothing was charged. Start it again.",
+                    "chapter changed during the profile step",
+                )
+            p.rulebook = book["id"]
+            if not written:
+                p.citation = book["default_citation"]  # written chapters keep the style they were written in
+            for number, (_, path, doc) in sorted(aligned.items()):
+                chapter_state = p.chapter(number)
+                version = len(chapter_state.versions) + 1
+                chapter_state.versions.append(StoredChapterVersion(
+                    version=version, job_id=job_id, words=doc.words, plan_version=p.plan_version, path=path, note=ALIGNED_NOTE,
+                    passed=sum(1 for r in doc.readiness if r.status in ("PASS", "NOT_APPLICABLE")), total=len(doc.readiness)))
+                chapter_state.current, chapter_state.approved = version, False
         if evidence_path and evidence_path not in p.evidence_files:
             p.evidence_files.append(evidence_path)
         p.evidence_count = usable

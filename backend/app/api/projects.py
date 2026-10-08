@@ -13,7 +13,7 @@ from app.jobs.models import Camel, JobView
 from app.jobs.service import User
 from app.proposals import feedback, rulebook
 from app.proposals import service as projects
-from app.proposals.models import CitationStyle, EvidenceItem, FeedbackStatus, ProjectView, ProposalInputs, ProposalPlan, SampleSize, TitlePage
+from app.proposals.models import CitationStyle, EvidenceItem, FeedbackStatus, ProjectView, ProposalInputs, ProposalPlan, SampleSize, TitlePage, Variables
 from app.runtime import Runtime, get_runtime
 
 router = APIRouter(prefix="/api/projects")
@@ -102,6 +102,18 @@ def answer_guide(project_id: str, body: GuideAnswer, user: User = Depends(curren
 @router.post("/{project_id}/details", response_model=ProjectView)
 def details(project_id: str, body: Details, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> ProjectView:
     return projects.update_details(rt, user, project_id, body.inputs, body.title_page, body.citation)
+
+
+class Setting(Camel):
+    study_area: str = Field(max_length=200)
+    population: str = Field(max_length=200)
+    base_version: int
+
+
+@router.post("/{project_id}/setting", response_model=ProjectView)
+def confirm_setting(project_id: str, body: Setting, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> ProjectView:
+    """Where the study takes place and who it studies, as PaperAid proposed them or as the student corrects them."""
+    return projects.confirm_setting(rt, user, project_id, body.study_area, body.population, body.base_version)
 
 
 @router.delete("/{project_id}", status_code=204)
@@ -232,6 +244,18 @@ def start(project_id: str, accept_sampling: bool = Body(default=False, embed=Tru
     """One Start (owner decision 2026-10-01): plan, then the first chapter, by itself. `acceptSampling`:
     the student ticked the standard sample-size settings."""
     return projects.start(rt, user, project_id, accept_sampling)
+
+
+class FrameworkEdit(Camel):
+    base_version: int
+    style: Literal["MONO", "GREEN", "BLUE"] | None = None
+    variables: Variables | None = None
+
+
+@router.post("/{project_id}/framework", response_model=ProjectView)
+def edit_framework(project_id: str, body: FrameworkEdit, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> ProjectView:
+    """The student's edit of the conceptual framework: its style (only redraws it) or its variables."""
+    return projects.edit_framework(rt, user, project_id, body.base_version, body.style, body.variables)
 
 
 @router.get("/{project_id}/framework.png")

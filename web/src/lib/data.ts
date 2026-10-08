@@ -18,7 +18,7 @@ import type {
   WalletSummary,
 } from './types'
 import type { AnalysisResult, AnalysisSpec, DataPreview, DataProject, IdentifierRules, Places, ReportDocument, TranscriptChoice, UploadChoice, VariableKind } from './datalab-types'
-import type { ChapterView, CitationStyle, Comparison, EvidenceItem, FeedbackStatus, Project, ProposalInputs, ProposalPlan, Rulebook, SampleSize, StepId, StepQuote, TitlePage } from './proposal-types'
+import type { ChapterView, CitationStyle, Comparison, EvidenceItem, FeedbackStatus, FrameworkStyle, Project, ProposalInputs, ProposalPlan, Rulebook, SampleSize, StepId, StepQuote, TitlePage, Variables } from './proposal-types'
 import type { Budget, ResultsModel, SourceRole, Work, WorkCitation, WorkDocumentView, WorkInputs, WorkKind, WorkPlan, WorkStep, WorkStepQuote } from './work-types'
 
 export interface Notifications {
@@ -98,6 +98,8 @@ export interface DataSource {
     /** A concept-note project becomes a full proposal (nothing starts by itself). */
     continueToFull(id: string): Promise<Project>
     updateDetails(id: string, inputs: ProposalInputs, titlePage: TitlePage, citation: CitationStyle): Promise<Project>
+    /** Where the study takes place and who it studies, as PaperAid proposed them or as the student corrects them. */
+    confirmSetting(id: string, studyArea: string, population: string, baseVersion: number): Promise<Project>
     /** Keep the guide's version of a point where it departs from the standard guide, or take the standard one. */
     answerGuide(id: string, departureId: string, answer: 'KEEP' | 'STANDARD'): Promise<Project>
     /** `baseVersion` is the plan version the edit started from; a stale edit is refused (409). */
@@ -132,6 +134,8 @@ export interface DataSource {
     start(id: string, acceptSampling?: boolean): Promise<Project>
     /** The conceptual framework figure, as an image the page can show. */
     framework(id: string): Promise<Blob>
+    /** The student's edit of the framework: its style (only redraws it) or its variables. */
+    editFramework(id: string, baseVersion: number, change: { style?: FrameworkStyle; variables?: Variables }): Promise<Project>
     /** The institution's research guide, read into a profile by the PROFILE step. */
     uploadGuide(id: string, file: File): Promise<Project>
     useDefaultRulebook(id: string): Promise<Project>

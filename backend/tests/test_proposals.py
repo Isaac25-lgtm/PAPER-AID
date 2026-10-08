@@ -5,6 +5,7 @@ citations, author-owned facts, privacy of searches, deletion and expiry."""
 import io
 from datetime import timedelta
 
+import pytest
 from docx import Document
 
 from app.proposals import decisions, evidence, rulebook, sampling
@@ -528,3 +529,50 @@ def test_a_quantitative_plan_missing_its_sampling_settings_asks_the_student_to_c
     assert job["status"] == "COMPLETED", job
     plan = client.get(f"/api/projects/{project['id']}", headers=STUDENT).json()["plan"]
     assert any("margin of error of 5%" in q and "expected proportion of 0.5" in q for q in plan["questionsForStudent"])
+
+
+
+def _hanging_searches(client, lost: int):
+    from app.ai.providers import UNAVAILABLE
+    from app.core.errors import RetryableStageError
+
+    client.models.works = []  # no scholarly results: every need goes to the web search
+    client.models.overrides["p_needs"] = lambda payload: {"needs": [
+        {"id": f"n{i}", "need": f"Uptake factor {i}", "kind": "LITERATURE", "query": f"malaria vaccine uptake factor {i}"} for i in range(1, 5)]}
+    calls = {"n": 0}
+
+    def search(payload):
+        calls["n"] += 1
+        if calls["n"] <= lost:
+            raise RetryableStageError("VERTEX_TIMEOUT", UNAVAILABLE, "vertex transport timeout")
+        return {"findings": []}
+
+    client.models.overrides["p_search"] = search
+    project = _create(client)
+    return _run(client, project["id"], "PLAN"), calls
+
+
+def test_a_web_search_google_leaves_hanging_finds_nothing_and_research_goes_on(client):
+    """Live Chapter Two, 2026-10-08: one search of about twenty timed out and failed the whole research
+    stage, three times running. A lost search now finds nothing and research goes on."""
+    job, calls = _hanging_searches(client, lost=2)
+    assert job["status"] == "COMPLETED", job.get("failure")
+    assert calls["n"] == 4  # every need was still searched
+
+
+def test_repeated_lost_searches_still_stop_the_research():
+    """Google unwell: after the tolerated losses the stage stops (and is retried) rather than research with nothing."""
+    from app.ai.providers import UNAVAILABLE
+    from app.core.errors import RetryableStageError
+    from app.proposals.ai import LOST_SEARCHES_TOLERATED, ProposalRunner
+
+    runner = object.__new__(ProposalRunner)
+
+    def lost(*args, **kwargs):
+        raise RetryableStageError("VERTEX_TIMEOUT", UNAVAILABLE, "vertex transport timeout")
+
+    runner._call = lost
+    for _ in range(LOST_SEARCHES_TOLERATED):
+        assert runner.search("need", "query", 2, lambda q: True) == []
+    with pytest.raises(RetryableStageError):
+        runner.search("need", "query", 2, lambda q: True)

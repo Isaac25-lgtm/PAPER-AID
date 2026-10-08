@@ -134,27 +134,34 @@ try {
   // --- a research proposal: one Start to Chapter One with its framework figure ---------------------------------
   await page.goto(`${base}/app/start/proposal`)
   await page.getByLabel(/Working title or topic/).fill('Factors associated with malaria vaccine uptake among children aged 6–24 months in Lira District')
+  await page.getByText('PaperAid writes to the standard research structure.').waitFor() // owner decision 2026-10-08: one short line
   await page.getByRole('button', { name: 'Continue' }).click()
   await page.getByRole('heading', { name: 'About your study' }).waitFor()
   await page.getByRole('button', { name: 'Start', exact: true }).click()
-  await page.getByText('Say where the study will take place.').waitFor() // required fields say why, beside the field
-  await page.getByLabel(/Where will the study take place/).fill('Lira District, Northern Uganda')
-  await page.getByLabel(/Who will you study/).fill('Caregivers of children aged 6–24 months')
-  await page.getByLabel(/Your name/).fill('Grace Namukasa')
-  await page.getByLabel(/Registration number/).fill('M24/U001')
-  await page.getByLabel(/Faculty or school/).fill('Faculty of Public Health')
-  await page.getByRole('button', { name: 'Start', exact: true }).click()
-  await page.getByText(/Tick to use the standard settings/).waitFor() // assumed sample-size settings need the student's own tick
-  await page.getByLabel(/Use the standard sample-size settings/).check()
+  await page.getByText('Your name goes on the title page.').waitFor() // only the name is required
+  if (await page.getByText(/Use the standard sample-size settings/).count()) throw new Error('the sample-size tick is back on the Start page')
+  await page.getByLabel(/Your name/).fill('Grace Namukasa') // where, who, registration number and faculty left blank
   await shot('11-proposal-page2')
   await page.getByRole('button', { name: 'Start', exact: true }).click()
   await page.waitForURL(/\/app\/projects\//)
   await page.getByRole('button', { name: /Download Word/ }).waitFor(LONG)
   await page.getByRole('tab', { name: /Chapter One/ }).waitFor()
   await page.getByRole('img', { name: /The study will examine the association/ }).waitFor()
-  await page.getByRole('button', { name: /Continue to Chapter Two/ }).waitFor()
+  await page.getByRole('link', { name: 'Download the figure' }).waitFor()
+  await page.getByText('Confirm your study setting').waitFor() // what PaperAid proposed stays marked as proposed
+  await page.getByText("Align with my institution's guidelines").waitFor()
+  await page.getByText('Conceptual framework', { exact: true }).waitFor()
   await shot('12-proposal-workspace')
-  step('proposal: one Start to Chapter One with its framework figure')
+  await page.getByRole('button', { name: 'These are right' }).click()
+  await page.getByText('Confirm your study setting').waitFor({ state: 'detached' })
+  step('proposal: one Start (name only) to Chapter One with its framework figure; the proposed setting confirmed')
+
+  await page.getByRole('button', { name: /Continue to Chapter Two/ }).click()
+  await page.getByRole('tab', { name: /Chapter Two/, selected: true }).waitFor() // the chapter being written opens, as Chapter One did
+  await page.getByRole('tab', { name: /Chapter Two.*written/ }).waitFor(LONG)
+  await shot('12b-chapter-two')
+  if (await page.getByText(/Applying your changes/).count()) throw new Error('a chapter being written was shown as applying changes')
+  step('proposal: Continue to Chapter Two opens it, with its progress, until it is written')
 
   // Your work lists all three.
   await page.goto(`${base}/app/work`)

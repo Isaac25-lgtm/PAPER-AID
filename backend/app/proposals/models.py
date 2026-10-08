@@ -321,6 +321,9 @@ class ProjectView(Camel):
     # then is an assumed setting acknowledged for them.
     sampling_consent: bool = False
     framework: str = ""  # the conceptual framework figure in words (computed for the view; "" when the study has none)
+    framework_note: str = ""  # the note printed under it, the same in the app and the documents (computed for the view)
+    # Black and white unless the student chooses a muted colour (owner decision 2026-10-08): only redraws it.
+    framework_style: Literal["MONO", "GREEN", "BLUE"] = "MONO"
     plan_review: PlanReview | None = None  # the final reviewer's decision on the delivered plan (None: older plans)
     candidate_review: PlanReview | None = None  # the same for a candidate plan
     acknowledgments: list[Acknowledgment] = []  # what the student acknowledged when approving, per plan version
@@ -339,6 +342,9 @@ class ProjectView(Camel):
     guide_read: bool = False  # the current profile was read from the current guide (computed for the view)
     profile_missing: bool = False  # the institution profile could not be loaded (computed for the view)
     blockers: list[str] = []  # what stands between the project and a complete download (computed for the view)
+    # What PaperAid proposed because the student left it blank at Start (owner decision 2026-10-08): "studyArea",
+    # "population", "studyType"; shown as proposed until the student confirms them (computed for the view).
+    proposed: list[str] = []
     notice: str | None = None  # a one-off message for the student (not stored meaningfully; set on a response)
     chapters: list[ChapterState]
     evidence_count: int = 0
@@ -443,6 +449,9 @@ class ChapterDocument(Camel):
     warnings: list[str] = []
     revised: list[str] = []  # a revision: the sections it delivered new text for
     missing: list[str] = []  # sections not yet written (not approved in time): "Finish chapter" writes them
+    # Sections whose requirement in the student's institution guide differs from the one they were written to
+    # (owner decision 2026-10-08, guide alignment after Chapter One): revised to the guide on request.
+    to_align: list[str] = []
     full_price: int = 0  # a partly written chapter: its full price when first written (UGX)
     paid: int = 0  # what the draft and its finishes have been charged so far; a finish costs at most the rest
     words: int

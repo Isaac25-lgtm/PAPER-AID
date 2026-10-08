@@ -249,6 +249,8 @@ export function createApiSource({ config, getAuthHeaders }: Options): DataSource
         request<Project>(`/api/projects/${id}/guide-answers`, { method: 'POST', body: JSON.stringify({ id: departureId, answer }) }),
       updateDetails: (id, inputs, titlePage, citation) =>
         request<Project>(`/api/projects/${id}/details`, { method: 'POST', body: JSON.stringify({ inputs, titlePage, citation }) }),
+      confirmSetting: (id, studyArea, population, baseVersion) =>
+        request<Project>(`/api/projects/${id}/setting`, { method: 'POST', body: JSON.stringify({ studyArea, population, baseVersion }) }),
       savePlan: (id, plan, baseVersion) => request<Project>(`/api/projects/${id}/plan`, { method: 'POST', body: JSON.stringify({ plan, baseVersion }) }),
       approvePlan: (id, baseVersion, acknowledge = []) => request<Project>(`/api/projects/${id}/plan/approve`, { method: 'POST', body: JSON.stringify({ baseVersion, acknowledge }) }),
       takeCandidate: (id, accept) => request<Project>(`/api/projects/${id}/plan/candidate`, { method: 'POST', body: JSON.stringify({ accept }) }),
@@ -282,6 +284,8 @@ export function createApiSource({ config, getAuthHeaders }: Options): DataSource
         request<Project>(`/api/projects/${id}/chapters/${chapter}/request/with-document`, { method: 'POST', body: withDocument({ instruction, sections: sections.join(',') }, file) }),
       start: (id, acceptSampling = false) => request<Project>(`/api/projects/${id}/start`, { method: 'POST', body: JSON.stringify({ acceptSampling }) }),
       framework: (id) => blob(`/api/projects/${id}/framework.png`),
+      editFramework: (id, baseVersion, change) =>
+        request<Project>(`/api/projects/${id}/framework`, { method: 'POST', body: JSON.stringify({ baseVersion, ...change }) }),
       uploadGuide(id, file) {
         const form = new FormData()
         form.append('file', file)

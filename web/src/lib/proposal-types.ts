@@ -20,6 +20,12 @@ export type StepId =
   | 'COMPLETE_3'
   | 'COMPLETE_4'
   | 'PROFILE'
+export type FrameworkStyle = 'MONO' | 'GREEN' | 'BLUE'
+export interface Variables {
+  independent: string[]
+  dependent: string[]
+  intervening: string[]
+}
 export type ReadinessStatus = 'PASS' | 'NEEDS_REVIEW' | 'MISSING' | 'NOT_APPLICABLE' | 'BLOCKED'
 
 export interface ProposalInputs {
@@ -89,7 +95,7 @@ export interface ProposalPlan {
   sampling: string
   sampleSize: SampleSize
   inclusion: string
-  variables: { independent: string[]; dependent: string[]; intervening: string[] }
+  variables: Variables
   alignment: AlignmentRow[]
   theory: string
   scope: string
@@ -180,6 +186,10 @@ export interface Project {
   autoFailure: string
   /** The conceptual framework figure in words ('' when the study has none). */
   framework: string
+  /** The note printed under the figure, the same in the app and the documents. */
+  frameworkNote?: string
+  /** Black and white unless the student chose a muted colour. */
+  frameworkStyle?: FrameworkStyle
   /** CONCEPT: the concept paper first (Research Proposals → Concept note); FULL: the whole proposal. */
   goal: 'FULL' | 'CONCEPT'
   feedback: FeedbackComment[]
@@ -187,6 +197,8 @@ export interface Project {
   written: WrittenSection[]
   /** What stands between the proposal and a complete download. */
   blockers: string[]
+  /** What PaperAid proposed because it was left blank at Start, until the student confirms it. */
+  proposed?: ('studyArea' | 'population' | 'studyType')[]
   /** The institution the proposal is written for, what its guide left open, and the guide's file. */
   institution: string
   institutionNotes: string[]
@@ -236,6 +248,8 @@ export interface ChapterView {
   framework: { label: string; items: string[] }[]
   /** Sections not written yet ("1.3 Heading"): the chapter is a draft until they are finished. */
   missing?: string[]
+  /** Keys of the sections whose requirement in the student's institution guide differs: revised to it on request. */
+  toAlign?: string[]
 }
 
 export interface EvidenceItem {

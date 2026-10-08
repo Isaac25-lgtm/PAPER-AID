@@ -20,8 +20,10 @@ function work(id, version, running) {
 function project(id, version, running) {
   return { id, inputs: { topic: id, level: 'MASTERS' }, titlePage: {}, goal: 'FULL', plan: null, planStatus: 'APPROVED',
     planVersion: 1, auto: true, autoFailure: '', activeJob: running ? 'job_synthetic' : null, framework: '',
+    rulebook: 'ucu-2018-v2', institution: 'Standard guide', institutionNotes: [], guideQuestions: [], guideName: null, guideRead: false, profileMissing: false,
+    planProblems: [], blockers: [], proposed: [], written: [], acknowledgments: [],
     updatedAt: stamp(version), feedback: [], chapters: [1, 2, 3, 4].map((number) => ({ number,
-      current: number === 1 ? version : 0, approved: false, versions: number === 1 ? versions : [] })) }
+      current: number === 1 ? version : 0, approved: false, needsReview: [], versions: number === 1 ? versions : [] })) }
 }
 function document(name, version) {
   return { version, title: name, status: 'READY', exploratory: false, sections: [{ key: 'body', heading: 'Discussion',

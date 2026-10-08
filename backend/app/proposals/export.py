@@ -21,7 +21,7 @@ from docx.shared import Inches, Pt
 from app.formatting.apply import _page_field_paragraph, _set_font, _set_page_numbering
 from app.proposals import decisions, evidence, rulebook
 from app.proposals import framework as framework_figure
-from app.proposals.models import ChapterDocument, EvidenceItem, Project, ProposalPlan, Variables
+from app.proposals.models import ChapterDocument, EvidenceItem, Project, ProposalPlan
 
 ORDINALS = {1: "ONE", 2: "TWO", 3: "THREE"}
 
@@ -30,7 +30,8 @@ def final_blockers(project: Project, chapters: dict[int, ChapterDocument]) -> li
     """What must be resolved before a complete (submission) export."""
     problems = []
     page = project.title_page
-    for label, value in (("your name", page.student_name), ("your registration number", page.reg_number), ("your supervisor's name", page.supervisor), ("the submission date", page.submission_date)):
+    # The registration number is optional (owner decision 2026-10-08): left blank, its line is not printed.
+    for label, value in (("your name", page.student_name), ("your supervisor's name", page.supervisor), ("the submission date", page.submission_date)):
         if not value.strip():
             problems.append(f"Add {label} to the title page details.")
     if project.plan is None or project.plan_status != "APPROVED":
@@ -174,20 +175,20 @@ def _box_borders(cell) -> None:
     tcpr.append(parse_xml(f'<w:tcBorders {nsdecls("w")}>' + "".join(f'<w:{side} w:val="single" w:sz="8" w:color="000000"/>' for side in ("top", "left", "bottom", "right")) + "</w:tcBorders>"))
 
 
-def _framework(doc, columns: list[tuple[str, list[str]]], figure: str = "Figure 1.1", variables: Variables | None = None) -> None:
-    """The figure drawn from the plan's variables (owner request 2026-10-01), with its alternative text
-    and a note on what the arrows mean; the boxed table only if no figure can be drawn."""
+def _framework(doc, columns: list[tuple[str, list[str]]], figure: str = "Figure 1.1", plan: ProposalPlan | None = None, style: str = "MONO") -> None:
+    """The figure drawn from the plan (owner request 2026-10-01; the same drawing, note and style as the app
+    and its download, 2026-10-08), with its alternative text; the boxed table only if no figure can be drawn."""
     caption = doc.add_paragraph()
     caption.add_run(f"{figure}: Conceptual framework").bold = True
-    png = framework_figure.draw(variables) if variables is not None else None
+    png = framework_figure.figure(plan, style if style in framework_figure.STYLES else "MONO")  # type: ignore[arg-type]
     if png is not None:
         holder = doc.add_paragraph()
         holder.alignment = WD_ALIGN_PARAGRAPH.CENTER
         picture = holder.add_run().add_picture(io.BytesIO(png), width=Inches(6.2))
-        picture._inline.docPr.set("descr", framework_figure.describe(variables))  # read aloud in place of the image
+        picture._inline.docPr.set("descr", framework_figure.describe_plan(plan))  # read aloud in place of the image
         note = doc.add_paragraph()
         note.add_run("Note.").italic = True
-        note.add_run(" Arrows show the associations this study will examine; they do not imply proven causes. Source: Researcher's own conceptualisation.")
+        note.add_run(" " + framework_figure.note(plan))
         return
     grid = doc.add_table(rows=1, cols=len(columns) * 2 - 1)
     for i, (label, items) in enumerate(columns):
@@ -241,8 +242,8 @@ def build(project: Project, chapters: dict[int, ChapterDocument], library: dict[
         listing = evidence.Citer(library, project.citation)  # its own state: the body's first citations are unaffected (M19)
         for i, (n, s) in enumerate(tables, start=1):
             doc.add_paragraph(f"Table {n}.{i}: {listing.render(s.table_caption) or s.heading}")
-    columns = framework_columns(project.plan)
-    has_figure = bool(columns) and 1 in chapters and any(s.key == "framework" for s in chapters[1].sections)
+    has_figure = framework_figure.draw_kind(project.plan) != "NONE" if project.plan else False
+    has_figure = has_figure and 1 in chapters and any(s.key == "framework" for s in chapters[1].sections)
     if has_figure:
         doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
         doc.add_heading("List of Figures", level=1)
@@ -271,7 +272,7 @@ def build(project: Project, chapters: dict[int, ChapterDocument], library: dict[
                 p = doc.add_paragraph(citer.render(paragraph))
                 p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
             if n == 1 and s.key == "framework" and has_figure:
-                _framework(doc, columns, variables=project.plan.variables if project.plan else None)
+                _framework(doc, framework_columns(project.plan), plan=project.plan, style=project.framework_style)
             if s.table:
                 table_count += 1
                 for field in [s.table_caption, *[c for row in s.table for c in row]]:
@@ -322,8 +323,8 @@ def concept(project: Project, paper: ChapterDocument, library: dict[str, Evidenc
                 continue
             cited += [i for i in evidence.cited_ids(paragraph) if i not in cited]
             doc.add_paragraph(citer.render(paragraph)).alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-        if s.key == "framework" and columns:
-            _framework(doc, columns, "Figure 1", variables=plan.variables if plan else None)
+        if s.key == "framework" and (columns or (plan is not None and framework_figure.draw_kind(plan) != "NONE")):
+            _framework(doc, columns, "Figure 1", plan=plan, style=project.framework_style)
     sources = [library[i] for i in cited if i in library]
     if sources:
         doc.add_heading("Annotated References", level=2)

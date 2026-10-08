@@ -621,12 +621,14 @@ const DESIGNS: Record<StudyType, string> = {
   NON_EMPIRICAL: 'Non-empirical (desk review or theory)',
 }
 
-/** A study design suggested from the title's wording (the student confirms or changes it). */
-function suggestDesign(topic: string): StudyType | null {
-  const t = topic.toLowerCase()
-  if (/\b(experience|perception|lived|explor|views|meaning)/.test(t)) return 'QUALITATIVE'
-  if (/\b(factor|associat|prevalence|proportion|determinant|uptake|level of|effect of|relationship)/.test(t)) return 'QUANTITATIVE'
-  return null
+// A design the student's supervisor requires travels in the notes, on a line of its own, so the plan follows it
+// (owner decision 2026-10-08: PaperAid recommends the design unless the student or supervisor has chosen one).
+const REQUIRED = 'Study design required by my supervisor: '
+
+function splitNotes(notes: string): { notes: string; required: string } {
+  const lines = notes.split('\n')
+  const line = lines.find((l) => l.startsWith(REQUIRED))
+  return { notes: lines.filter((l) => l !== line).join('\n').trim(), required: line ? line.slice(REQUIRED.length).trim() : '' }
 }
 
 function ProposalStart({ concept }: { concept: boolean }) {
@@ -635,7 +637,7 @@ function ProposalStart({ concept }: { concept: boolean }) {
   const [params] = useSearchParams()
   // Once created, the proposal's id is kept in the address: a retried Start never creates a second one (Codex audit 2026-10-01).
   const [created, setCreated] = useState<string | null>(params.get('project'))
-  const [samplingOk, setSamplingOk] = useState(false)
+  const [required, setRequired] = useState('')
   const [page, setPage] = useState<1 | 2>(1)
   const [inputs, setInputs] = useState<ProposalInputs>({
     topic: '', level: 'MASTERS', programme: '', faculty: '', studyArea: '', population: '', studyType: null, notes: '',
@@ -653,29 +655,27 @@ function ProposalStart({ concept }: { concept: boolean }) {
     data.projects.get(created).then((p) => {
       if (!p) return
       if (p.auto && p.jobs.length) navigate(`/app/projects/${p.id}`, { replace: true }) // already started: its own page
-      setInputs(p.inputs)
+      const split = splitNotes(p.inputs.notes)
+      setInputs({ ...p.inputs, notes: split.notes })
+      setRequired(split.required)
       setCover(p.titlePage)
       setCitation(p.citation)
     })
   }, [created]) // eslint-disable-line react-hooks/exhaustive-deps
   const title = concept ? 'Your academic concept paper' : 'Your research proposal'
   const pageOneProblem = inputs.topic.trim().length < 10 ? 'Give your working title or topic (at least a few words).' : null
-  const pageTwo = {
-    studyArea: !inputs.studyArea.trim() ? 'Say where the study will take place.' : null,
-    population: !inputs.population.trim() ? 'Say who you will study.' : null,
-    name: !cover.studentName.trim() ? 'Your name goes on the title page.' : null,
-    reg: !cover.regNumber.trim() ? 'Your registration number goes on the title page.' : null,
-    faculty: !inputs.faculty.trim() ? 'Your faculty or school goes on the title page.' : null,
-  }
+  // Only the name is required (owner decision 2026-10-08): the rest can be added from the proposal afterwards,
+  // and what is left blank PaperAid proposes from the title, shown as proposed for the student to confirm.
+  const pageTwo = { name: !cover.studentName.trim() ? 'Your name goes on the title page.' : null }
 
-  const needsSampling = (inputs.studyType === null || inputs.studyType === 'QUANTITATIVE' || inputs.studyType === 'MIXED') && !inputs.populationSize
   const start = async () => {
     setTried(true)
-    if (Object.values(pageTwo).some(Boolean) || (needsSampling && !samplingOk)) return
+    if (Object.values(pageTwo).some(Boolean)) return
     setBusy(true)
     setError(null)
     try {
-      const details = { ...inputs, studyType: inputs.studyType ?? suggestDesign(inputs.topic) }
+      const notes = [inputs.notes.trim(), required.trim() ? REQUIRED + required.trim() : ''].filter(Boolean).join('\n\n').slice(0, 4000)
+      const details = { ...inputs, notes }
       let id = created
       if (id) await data.projects.updateDetails(id, details, cover, citation)
       else {
@@ -683,7 +683,7 @@ function ProposalStart({ concept }: { concept: boolean }) {
         setCreated(id)
         navigate(`?project=${id}`, { replace: true })
       }
-      await data.projects.start(id, needsSampling && samplingOk)
+      await data.projects.start(id)
       navigate(`/app/projects/${id}`)
     } catch (e) {
       setError(e instanceof DataError ? e.message : 'We could not start. Try again.')
@@ -715,9 +715,7 @@ function ProposalStart({ concept }: { concept: boolean }) {
               <option value="4">Four</option>
             </Select>
           )}
-          <Alert tone="info">
-            PaperAid writes to the standard guide’s structure. If your institution uses its own guide, you can add it from your proposal page afterwards.
-          </Alert>
+          <Alert tone="info">PaperAid writes to the standard research structure.</Alert>
           <TextArea label="What you already have (optional)" rows={4} maxLength={4000} value={inputs.notes} onChange={(e) => set({ notes: e.target.value })}
             hint="A concept summary, your supervisor’s guidance, decisions already made." />
           <div className="flex justify-end">
@@ -725,7 +723,6 @@ function ProposalStart({ concept }: { concept: boolean }) {
               setTried(true)
               if (pageOneProblem) return
               setTried(false)
-              set({ studyType: inputs.studyType ?? suggestDesign(inputs.topic) })
               setPage(2)
             }}>
               Continue
@@ -735,28 +732,29 @@ function ProposalStart({ concept }: { concept: boolean }) {
       </Shell>
     )
 
-  const suggested = suggestDesign(inputs.topic)
   return (
     <Shell title="About your study" step={2}>
       <div className="space-y-5">
         <Card className="space-y-4 p-5 sm:p-6">
-          <Input label="Where will the study take place?" required maxLength={200} value={inputs.studyArea} onChange={(e) => set({ studyArea: e.target.value })}
-            placeholder="e.g. Lira District, Northern Uganda" error={tried ? pageTwo.studyArea : null} />
-          <Input label="Who will you study?" required maxLength={200} value={inputs.population} onChange={(e) => set({ population: e.target.value })}
-            placeholder="e.g. Children aged 6–24 months and their caregivers" error={tried ? pageTwo.population : null} />
-          <Select label="Study design" required value={inputs.studyType ?? ''} onChange={(e) => set({ studyType: (e.target.value || null) as StudyType | null })}
-            hint={suggested ? 'Suggested from your title. Change it if your supervisor agreed another.' : undefined}>
-            <option value="">Let PaperAid propose one</option>
+          <Input label="Where will the study take place? (optional)" maxLength={200} value={inputs.studyArea} onChange={(e) => set({ studyArea: e.target.value })}
+            placeholder="e.g. Lira District, Northern Uganda" hint="Leave blank for PaperAid to suggest this from your topic." />
+          <Input label="Who or what will you study? (optional)" maxLength={200} value={inputs.population} onChange={(e) => set({ population: e.target.value })}
+            placeholder="e.g. Children aged 6–24 months and their caregivers" hint="Leave blank for PaperAid to suggest this from your topic." />
+          <Select label="Study design" value={inputs.studyType ?? ''} onChange={(e) => set({ studyType: (e.target.value || null) as StudyType | null })}
+            hint="PaperAid recommends a design from your topic and explains why. You can change it later.">
+            <option value="">Recommend an approach</option>
             {Object.entries(DESIGNS).map(([id, label]) => (
               <option key={id} value={id}>
                 {label}
               </option>
             ))}
           </Select>
+          <Input label="Design your supervisor requires (optional)" maxLength={200} value={required} onChange={(e) => setRequired(e.target.value)}
+            placeholder="e.g. A cross-sectional survey" hint="Only if your supervisor has already set one. PaperAid then plans around it." />
           <details className="rounded-xl border border-line p-4">
             <summary className="cursor-pointer text-sm font-semibold">Sample size (optional): PaperAid calculates it</summary>
             <p className="mt-2 text-xs text-fg-muted">
-              Give only figures you have. If you leave these empty, PaperAid uses the standard settings (95% confidence, 5% margin, 50% proportion) and says so in the chapter.
+              Give only figures you have. Where you give none, PaperAid uses the standard settings (95% confidence, 5% margin, 50% proportion) for a calculated sample, says so where the sample is worked out, and asks you to confirm them in Chapter Three. It never invents a population size.
             </p>
             <div className="mt-3 grid gap-4 sm:grid-cols-2">
               <Input label="Population size (if known)" type="number" min={1} value={inputs.populationSize ?? ''} onChange={(e) => set({ populationSize: e.target.value ? Number(e.target.value) : null })} />
@@ -771,8 +769,8 @@ function ProposalStart({ concept }: { concept: boolean }) {
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <Input label="Your name" required maxLength={120} value={cover.studentName} onChange={(e) => setCover({ ...cover, studentName: e.target.value })} error={tried ? pageTwo.name : null} />
-            <Input label="Registration number" required maxLength={60} value={cover.regNumber} onChange={(e) => setCover({ ...cover, regNumber: e.target.value })} error={tried ? pageTwo.reg : null} />
-            <Input label="Faculty or school" required maxLength={150} value={inputs.faculty} onChange={(e) => set({ faculty: e.target.value })} error={tried ? pageTwo.faculty : null} />
+            <Input label="Registration number (optional)" maxLength={60} value={cover.regNumber} onChange={(e) => setCover({ ...cover, regNumber: e.target.value })} />
+            <Input label="Faculty or school (optional)" maxLength={150} value={inputs.faculty} onChange={(e) => set({ faculty: e.target.value })} />
             <Input label="Your institution" maxLength={160} value={cover.institution ?? ''} onChange={(e) => setCover({ ...cover, institution: e.target.value })}
               hint="As it should appear on the title page." />
             <Input label="Supervisor" maxLength={160} value={cover.supervisor} onChange={(e) => setCover({ ...cover, supervisor: e.target.value })}
@@ -785,13 +783,6 @@ function ProposalStart({ concept }: { concept: boolean }) {
             </Select>
           </div>
         </Card>
-        {needsSampling && (
-          <Card className="p-5">
-            <Checkbox required checked={samplingOk} onChange={(e) => setSamplingOk(e.target.checked)}
-              label={<span className="text-fg">Use the standard sample-size settings where I have not given my own figures: 95% confidence, a 5% margin of error and a 50% expected proportion. The chapter says they were assumed. <span className="text-xs font-semibold text-red-700"><span aria-hidden>*</span> Required</span></span>} />
-            {tried && !samplingOk && <p className="mt-1.5 text-xs font-medium text-red-600">Tick to use the standard settings, or give your population size above.</p>}
-          </Card>
-        )}
         {error && <Alert tone="danger">{error}</Alert>}
         <div className="flex items-center justify-between gap-3">
           <button className="text-sm font-medium text-fg-muted hover:text-fg" onClick={() => setPage(1)}>

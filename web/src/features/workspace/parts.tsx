@@ -243,8 +243,10 @@ export function ChecksList({ lines }: { lines: CheckLine[] }) {
 }
 
 /** Ask for changes: the student's own words, which part, and an optional document for context. */
-export function ChangeBox({ parts, busy, running, onApply, whole = 'The whole document' }: {
+export function ChangeBox({ parts, busy, running, onApply, whole = 'The whole document', runningText = 'Applying your changes… this usually takes a few minutes. The new version opens here.' }: {
   parts: { key: string; label: string }[]; busy: boolean; running: boolean; onApply: (text: string, part: string, file: File | null) => Promise<boolean>; whole?: string
+  /** What is running, when it is not a change to this document (another chapter being written). */
+  runningText?: string
 }) {
   const [text, setText] = useState('')
   const [part, setPart] = useState('')
@@ -253,7 +255,7 @@ export function ChangeBox({ parts, busy, running, onApply, whole = 'The whole do
   if (running)
     return (
       <p className="flex items-center gap-2 rounded-lg bg-brand-50 p-3 text-sm font-medium text-brand-900" role="status">
-        <Loader2 className="size-4 animate-spin" aria-hidden /> Applying your changes… this usually takes a few minutes. The new version opens here.
+        <Loader2 className="size-4 shrink-0 animate-spin" aria-hidden /> {runningText}
       </p>
     )
   return (

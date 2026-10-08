@@ -347,19 +347,19 @@ def test_adding_figures_refuses_anything_but_figures_and_keeps_the_approval(work
     assert refused.status_code == 400 and refused.json()["code"] == "NOT_ONLY_FIGURES"
 
 
-def test_assumed_sample_settings_need_the_students_tick(client):
+def test_assumed_sample_settings_no_longer_stop_the_proposal(client):
+    """Owner decision 2026-10-08: no sample-size tick at Start. Assumed settings never stop Chapter One;
+    nothing is recorded as the student's consent, and Chapter Three asks them to confirm (C3-ASSUMED)."""
     from tests.fake_models import PLAN as BASE
 
     client.models.overrides["p_finalise"] = lambda payload: {**BASE, "sampleSize": {**BASE["sampleSize"], "margin": 7}} if "title" in payload["draft"] else payload["draft"]
     project = _create(client)
     client.post(f"/api/projects/{project['id']}/start", headers=H)
-    project = _settled(client, f"/api/projects/{project['id']}", lambda p: bool(p["autoFailure"]) or any(c["current"] for c in p["chapters"]), timeout=180)
+    project = _settled(client, f"/api/projects/{project['id']}", lambda p: bool(p["autoFailure"]) or any(c["number"] == 1 and c["current"] for c in p["chapters"]), timeout=180)
     if not project["plan"]["samplingAssumed"]:
         pytest.skip("this plan assumed no sample-size settings")
-    assert project["autoFailure"].startswith("PaperAid needs one answer") and not any(a["kind"] == "SAMPLING" for a in project["acknowledgments"])
-    client.post(f"/api/projects/{project['id']}/start", headers=H, json={"acceptSampling": True})
-    project = _settled(client, f"/api/projects/{project['id']}", lambda p: any(c["number"] == 1 and c["current"] for c in p["chapters"]) or bool(p["autoFailure"]), timeout=180)
-    assert not project["autoFailure"] and any(a["kind"] == "SAMPLING" for a in project["acknowledgments"])
+    assert not project["autoFailure"] and any(c["number"] == 1 and c["current"] for c in project["chapters"])
+    assert not any(a["kind"] == "SAMPLING" for a in project["acknowledgments"])
 
 
 def test_the_pdf_compiler_keeps_what_windows_needs():
@@ -573,20 +573,14 @@ def test_a_context_document_is_kept_in_file_storage_and_removed_with_its_request
     assert not rt.files.exists(stored.context_path)
 
 
-def test_a_resumed_proposal_continues_once_and_reserves_nothing(client):
-    """Codex's second look at 9239dd0: after the sample-size tick, a second Start at the same moment is
-    refused (it never marks the step pending again or stops the chapter), and nothing is left reserved."""
+def test_a_second_start_while_chapter_one_runs_is_refused_and_reserves_nothing(client):
+    """Codex's second look at 9239dd0, kept now the sample-size stop is gone: a Start while the proposal is
+    working is refused (it never marks a step pending again or stops the chapter), and nothing stays reserved."""
     from app.runtime import get_runtime
-    from tests.fake_models import PLAN as BASE
 
-    client.models.overrides["p_finalise"] = lambda payload: {**BASE, "sampleSize": {**BASE["sampleSize"], "margin": 7}} if "title" in payload["draft"] else payload["draft"]
     project = _create(client)
-    client.post(f"/api/projects/{project['id']}/start", headers=H)
-    project = _settled(client, f"/api/projects/{project['id']}", lambda p: bool(p["autoFailure"]) or any(c["current"] for c in p["chapters"]), timeout=180)
-    if not project["plan"]["samplingAssumed"]:
-        pytest.skip("this plan assumed no sample-size settings")
-    first = client.post(f"/api/projects/{project['id']}/start", headers=H, json={"acceptSampling": True})
-    second = client.post(f"/api/projects/{project['id']}/start", headers=H, json={"acceptSampling": True})
+    first = client.post(f"/api/projects/{project['id']}/start", headers=H)
+    second = client.post(f"/api/projects/{project['id']}/start", headers=H)
     assert first.status_code == 200 and second.status_code == 409 and second.json()["code"] == "STEP_RUNNING"
     project = _settled(client, f"/api/projects/{project['id']}", lambda p: any(c["number"] == 1 and c["current"] for c in p["chapters"]) or bool(p["autoFailure"]), timeout=180)
     assert not project["autoFailure"]

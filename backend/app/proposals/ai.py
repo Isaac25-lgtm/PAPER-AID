@@ -264,7 +264,16 @@ def _whole(answer: BaseModel | None, task: str) -> BaseModel:
     return answer
 
 
+# A web search Google left hanging or dropped (live Chapter Two, 2026-10-08: one hung search of about twenty
+# failed the whole research stage three times). Research is best-effort per need: such a search finds nothing,
+# its possible cost stays reserved against the job's cap, and only repeated losses (Google unwell) stop the stage.
+LOST_SEARCH = frozenset({"VERTEX_TIMEOUT", "VERTEX_CONNECTION_LOST", "PROVIDER_UNAVAILABLE"})
+LOST_SEARCHES_TOLERATED = 2
+
+
 class ProposalRunner(AIRunner):
+    lost_searches = 0
+
     # --- evidence ---------------------------------------------------------------------------
 
     def research_needs(self, payload: dict[str, Any]) -> list[Need]:
@@ -294,6 +303,11 @@ class ProposalRunner(AIRunner):
             if exc.code != "BUDGET_EXCEEDED":
                 raise
             self.budget_reached = True
+            return []
+        except RetryableStageError as exc:
+            if exc.code not in LOST_SEARCH or self.lost_searches >= LOST_SEARCHES_TOLERATED:
+                raise
+            self.lost_searches += 1
             return []
         return answer.findings if answer else []
 

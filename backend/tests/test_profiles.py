@@ -94,9 +94,6 @@ def test_the_proposal_follows_the_students_institution(client):
     doc = Document(io.BytesIO(client.get(f"/api/projects/{project['id']}/export", headers=STUDENT).content))
     assert any("OF KYAMBOGO UNIVERSITY" in p.text for p in doc.paragraphs) and doc.styles["Normal"].font.name == "Times New Roman"
 
-    refused = client.post(f"/api/projects/{project['id']}/steps", headers=STUDENT, json={"step": "PROFILE"})
-    assert refused.status_code == 400 and refused.json()["code"] == "CHAPTERS_WRITTEN"
-
     from app.runtime import get_runtime
 
     stored = rulebook.stored_path(project["rulebook"])
@@ -117,3 +114,42 @@ def test_a_profile_needs_a_guide_first(client):
     project = _create(client)
     refused = client.post(f"/api/projects/{project['id']}/steps", headers=STUDENT, json={"step": "PROFILE"})
     assert refused.status_code == 400 and refused.json()["code"] == "NO_GUIDE"
+
+
+def test_a_guide_added_after_chapter_one_restructures_it_and_keeps_the_earlier_version(client):
+    """Owner decision 2026-10-08: the institution's guide is added after Chapter One to align the work. Code
+    restructures the written chapter to the guide (order, numbering, headings; the approved statements under
+    their new numbers), keeps the earlier version, leaves the guide's new sections to write and lists those
+    whose requirement differs; writing and revising them follow as the student's own steps."""
+    from tests.fake_models import PLAN
+
+    project = _create(client)
+    _run(client, project["id"], "PLAN")
+    _approved(client, project["id"])
+    url = f"/api/projects/{project['id']}"
+    before = client.get(f"{url}/chapters/1", headers=STUDENT).json()
+    uploaded = client.post(f"{url}/guide", headers=STUDENT, files={"file": ("KyU guide.docx", _guide(), "application/octet-stream")})
+    assert uploaded.status_code == 200
+    assert _run(client, project["id"], "PROFILE")["status"] == "COMPLETED"
+    project = client.get(url, headers=STUDENT).json()
+    assert project["rulebook"].startswith("custom-") and project["citation"] == "APA6"  # written chapters keep their style
+    state = next(c for c in project["chapters"] if c["number"] == 1)
+    assert len(state["versions"]) == 2 and state["current"] == 2 and state["versions"][-1]["note"] == "Restructured to your institution's guide"
+    chapter = client.get(f"{url}/chapters/1", headers=STUDENT).json()
+    planned = rulebook.sections(project["rulebook"], 1, "MASTERS", __import__("app.proposals.models", fromlist=["ProposalPlan"]).ProposalPlan.model_validate(project["plan"]))
+    order = [s.key for s in planned]
+    keys = [s["key"] for s in chapter["sections"]]
+    assert keys == [k for k in order if k in keys]  # the guide's order
+    assert "1.4 Definition of Key Terms" in chapter["missing"] or any("Definition of Key Terms" in m for m in chapter["missing"])
+    objectives = next(s for s in chapter["sections"] if s["key"] == "objectives")
+    assert f"{objectives['number']}.1 General Objective" in objectives["paragraphs"] and PLAN["purpose"] in objectives["paragraphs"]
+    earlier = client.get(f"{url}/chapters/1?version=1", headers=STUDENT).json()
+    assert [s["key"] for s in earlier["sections"]] == [s["key"] for s in before["sections"]]  # the earlier version is kept
+    aligned = next(i for i in chapter["readiness"] if i["id"] == "C1-ALIGNED")
+    assert aligned["status"] == "NEEDS_REVIEW"
+
+    # the guide's new sections, written by finishing the chapter
+    assert _run(client, project["id"], "COMPLETE_1")["status"] == "COMPLETED"
+    finished = client.get(f"{url}/chapters/1", headers=STUDENT).json()
+    assert not finished["missing"] and any(s["heading"] == "Definition of Key Terms" for s in finished["sections"])
+    assert finished["toAlign"] == chapter["toAlign"]  # still to revise to the guide

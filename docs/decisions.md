@@ -804,3 +804,39 @@ The handbook takes precedence, with one deliberate exception set by the owner.
   placed statements, never to be changed or removed); a faculty guide's own brief gets the same note added by code. The
   writer's introduction (up to two paragraphs) is kept, including one that opens "To address these gaps, the study's
   objectives ..."; a line that lists or repeats an approved statement, or a bare "To ..." objective, is dropped.
+
+## 2026-10-08 — A simpler proposal Start, guide alignment after Chapter One, the conceptual framework reworked
+
+The owner approved Codex's recommendations on the proposal Start page, the institution guide and the conceptual framework.
+- **Start page.** One line: "PaperAid writes to the standard research structure." Only the student's name is required.
+  Where the study takes place and who it studies are optional ("Leave blank for PaperAid to suggest this from your
+  topic"); the design defaults to "Recommend an approach" (no guess from title keywords), with an optional "design your
+  supervisor requires" carried in the notes; registration number and faculty are optional (a blank one prints no line
+  and no longer blocks the complete proposal; supervisor and date still do). No sample-size tick: standard settings never
+  stop a proposal; the chapter says where they were assumed and Chapter Three asks the student to confirm them
+  (`C3-ASSUMED`, NEEDS_REVIEW). A consent given on the earlier page is still recorded as before.
+- **Proposed, until confirmed.** What the student left blank and PaperAid proposed (`ProjectView.proposed`: study area,
+  population, design) shows in a "Confirm your study setting" card beside the chapter. Confirming or correcting it
+  (`POST /projects/{id}/setting`) is the student's own edit: the plan stays approved, and a corrected value marks the
+  sections built on it for review. The design is changed in the plan (More tools).
+- **Align with my institution's guidelines.** A guide can be uploaded and read after chapters exist. Reading it
+  restructures every written chapter by code (`pipeline.align_document`), each as a new version with the earlier one
+  kept: the guide's order, numbering and headings; the approved statements placed again under their new numbers;
+  sections the guide drops left out (named in `C{n}-ALIGNED`); sections it adds left to write ("Write the sections your
+  guide adds", the finish step, priced as their share); sections whose requirement differs listed (`to_align`) and
+  revised on the student's request, priced before it starts. Written chapters keep their citation style. A chapter
+  changed while the guide is read fails the step without charge.
+- **Conceptual framework.** Black and white by default (muted green or blue on request; a style change only redraws
+  it). Every variable is drawn: the old silent limit of 10/3/6 is gone, the layout adapts. A qualitative study gets a
+  concept framework (the phenomenon and the areas the objectives explore, joined by plain lines claiming no cause).
+  One drawing, caption and note serve the app, the Word file, the PDF and a separate download. The variables are
+  edited from the workspace (rename, reorder, move between groups, remove, add; `POST /projects/{id}/framework`): the
+  plan stays approved and the sections built on them are marked for review. Edits in plain language through a model,
+  and checking the framework against a guide's figure rules, are not built.
+- **Fixes found in testing.** A chapter being written showed as "Applying your changes" on the chapter before it: the
+  page now opens the chapter being written with the same progress view as Chapter One (and why it stopped, if it
+  failed). One web search Google left hanging failed a whole research stage (live Chapter Two, three times): a lost
+  search now finds nothing and research goes on; repeated losses still stop the stage. Chapter views are sent in
+  camelCase like every other view (a table's own caption and the "needs review" badge were never shown).
+- **Old AI keys removed** (owner instruction): the OpenAI, Anthropic and Gemini API keys were unbound from both
+  services and deleted from Secret Manager. Revoking them at OpenAI and Anthropic is the owner's.
