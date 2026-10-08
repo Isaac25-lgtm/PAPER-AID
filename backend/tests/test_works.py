@@ -107,6 +107,14 @@ def test_a_request_to_paperaid_is_never_the_assignments_question(works_client):
 
     assert is_request("Solve this assignment for me?") and is_request("Please answer the questions below") and is_request("Do my coursework")
     assert not is_request("Write an essay on inflation in Uganda") and not is_request("Solve for x in the equation 2x + 3 = 11")
+    # a tester typed "Solve this question" and uploaded the paper (2026-10-08): pointing at the paper is a request too
+    for text in ("Solve this question", "Solve this", "Do the activity above", "Attempt the activity", "please help me with this", "Work on the attached",
+                 "solve the question in the context", "Answer the following questions", "Do it", "Help me", "Solve the problem I have pasted", "Do the exercise"):
+        assert is_request(text), text
+    for text in ("Solve the following: explain how TCP works", "What are input devices as used in computer", "Explain this", "Solve this equation: 2x + 3 = 7",
+                 "Do the following tasks: 1. define a database", "Help me understand how photosynthesis works", "Write the report on water access in Soroti",
+                 "Work out the area of a circle with radius 3", "Critically evaluate the task of the central bank", "Do all firms maximise profit?"):
+        assert not is_request(text), text
     client = works_client
     created = client.post("/api/works", headers=STUDENT, json={"kind": "COURSEWORK", "variant": "ESSAY",
                                                               "inputs": {"title": "Solve this assignment for me?", "description": "Solve this assignment for me?"}}).json()

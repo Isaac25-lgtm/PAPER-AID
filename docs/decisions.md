@@ -955,3 +955,7 @@ or approval changed.
   document's checks show "Every research topic was searched: needs review" with the topic named (`research_gaps`,
   `W-RESEARCH`, `C{n}-RESEARCH`), so the document reads "Ready with warnings". Too many requests is never treated as a
   lost search; nothing is written from a source that was not found and verified.
+- **More typed requests are recognised (a tester's draft, 2026-10-08):** an essay was refused for not answering
+  "Solve this question" (typed as the question, the paper uploaded as a file; not charged). The release already made
+  that sentence a request; requests that only point at the paper are now recognised too ("Solve this", "Do the activity
+  above", "Work on the attached", "Help me"), while anything that names its subject stays a question (`_REQUEST`).

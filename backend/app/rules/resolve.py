@@ -42,13 +42,18 @@ WORDS_PER_PAGE = {"single": 500, "one_and_half": 375, "double": 275}
 PLAN_SHARE_OF_LIMIT = 0.97  # a hard maximum is planned just under, so small differences never break it
 STYLES = {"APA7": "APA7", "APA 7": "APA7", "APA6": "APA6", "APA 6": "APA6", "HARVARD": "HARVARD"}
 # A request to PaperAid, not an assignment question: "Solve this assignment for me?", "Please answer the questions
-# below", "Do my coursework". "Write an essay on inflation" is a question (it names its subject) and never matches.
+# below", "Do my coursework", "Solve this", "Do the activity above" (a tester's essay was refused for not answering
+# "Solve this question", 2026-10-08). "Write an essay on inflation" and "Solve this equation: 2x + 3 = 7" are questions
+# (they name their subject) and never match.
+_REQUEST_NOUN = r"(?:assignment|course ?work|homework|questions?|work|task|paper|essay|test|exam|quiz|activity|activities|exercise|problem|practical|project|report)s?"
+_REQUEST_POINTER = r"(?:this|that|these|those|it|them|everything|all(?: of (?:it|them|this|these))?|(?:the )?(?:above|below|following|attached))"
 _REQUEST = re.compile(
-    r"^\W*(?:(?:please|kindly|hello|hi|can you|could you|i (?:want|need|would like) you to|help me(?: to)?)[\s,]+)*"
-    r"(?:solve|do|answer|write|complete|finish|attempt|handle|work on|help(?: me)?(?: with)?)\s+"
-    r"(?:(?:this|my|the|these|those|all|all the|all of the|all these)\s+)?"
-    r"(?:assignment|course ?work|homework|questions?|work|task|paper|essay|test|exam|quiz)s?"
-    r"(?:\s+(?:for me|please|above|below|attached|here|in the box|i (?:have )?pasted|provided))*\W*$", re.I)
+    r"^\W*(?:(?:please|kindly|hello|hi|hey|can you|could you|i (?:want|need|would like) you to|help me(?: to)?)[\s,]+)*"
+    r"(?:(?:solve|do|answer|write|complete|finish|attempt|handle|work on|work out|tackle|help(?: me)?(?: with)?)\s+"
+    r"(?:(?:(?:this|my|the|these|those|all|all the|all of the|all these|the following|the attached|the above|the below)\s+)?" + _REQUEST_NOUN + r"|" + _REQUEST_POINTER + r")"
+    r"|help(?: me)?(?: out)?)"
+    r"(?:\s+(?:for me|please|above|below|attached|here|in (?:the )?(?:box|context)(?: (?:above|below))?"
+    r"|(?:that |which )?i (?:have )?(?:pasted|provided|attached|given|uploaded)|provided|given|thanks|thank you))*\W*$", re.I)
 
 
 def is_request(text: str) -> bool:
