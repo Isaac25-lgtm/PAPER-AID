@@ -816,7 +816,7 @@ class AIRunner:
         self._heartbeat = heartbeat or (lambda: None)
         self._round = 0  # the round of the review loop in progress (audit_rounds)
         self._inflight = 0.0  # estimates of calls under way in other threads (together), held against the cap
-        self._inflight_lock = threading.Lock()
+        self._inflight_lock = threading.Condition()  # also signals when a call under way has been recorded
         self._audits: dict[str, list[Any]] = {}  # this loop's earlier answers of each approval review
         # The shared limit on Gemini calls (app.jobs.capacity): each call holds a slot while it runs. None: no limit
         # (estimates, Data Lab operations and tests run without one).
@@ -824,6 +824,12 @@ class AIRunner:
 
     def model_for(self, task: str) -> str:
         return model_for_engine(self._engine, task)
+
+    def _settled(self, estimate: float) -> None:
+        """Called holding the lock, before a call reserves its estimate: while it does not fit beside the calls under
+        way but would fit on what is really spent, wait for them to be recorded."""
+        while self._inflight > 0 and self._spent() + estimate <= self._budget < self._spent() + self._inflight + estimate:
+            self._inflight_lock.wait(timeout=5)
 
     def together[A, B](self, first: Callable[[], A], second: Callable[[], B]) -> tuple[A, B]:
         """Two independent steps at the same time (a section's integrity check and its evaluation). Both
@@ -945,9 +951,18 @@ class AIRunner:
             fee = costs.search_fee_usd(provider_name, reserve, self.settings.model_unit_prices, model) if max_searches else 0.0
             estimate = costs.estimate_usd(provider_name, model, prompt_chars, limit, prices, table, long_prices, thinking_tokens) + fee
             # The shared limit: wait for a slot first (or pause the stage), so nothing is reserved while waiting.
-            release, queued_ms = self._gate(model, bool(max_searches)) if self._gate and provider_name == "vertex" else ((lambda: None), 0)
+            release, queued_ms = self._gate(model, bool(max_searches)) if self._gate else ((lambda: None), 0)
             try:
+                if queued_ms:
+                    # The wait for a slot may have been long: the job may have been cancelled or handed on meanwhile
+                    # (Codex audit through ea0599e, finding 9). Nothing is sent, and the slot is freed, if so.
+                    self._heartbeat()
                 with self._inflight_lock:  # a call running alongside (together) counts at its estimate until recorded
+                    # Calls under way hold their whole estimate until they are recorded. When this call does not fit
+                    # beside them but would fit on what is really spent, the budget is not exhausted: wait for them to
+                    # settle at their real cost and look again (Codex audit, finding 1: research stopped although the
+                    # money was there).
+                    self._settled(estimate)
                     spent = self._spent() + self._inflight
                     costs.ensure_within_budget(spent, estimate, self._budget)
                     max_tokens = costs.affordable_output_tokens(provider_name, model, prompt_chars, limit, self._budget - spent - fee, prices, table, long_prices)
@@ -982,6 +997,7 @@ class AIRunner:
                 finally:  # released only once the record is saved: a call alongside never sees spending dip (Codex review 2026-10-07, finding 2)
                     with self._inflight_lock:
                         self._inflight -= estimate
+                        self._inflight_lock.notify_all()
                 fallback_ok = provider_name == "vertex" and exc.code in {"PROVIDER_UNAVAILABLE", "VERTEX_TIMEOUT", "VERTEX_CONNECTION_LOST",
                                                                           "VERTEX_RATE_LIMIT", "VERTEX_MODEL_UNAVAILABLE"}
                 if fallback_ok and attempt + 1 < len(refs):
@@ -1026,6 +1042,7 @@ class AIRunner:
         finally:
             with self._inflight_lock:
                 self._inflight -= estimate
+                self._inflight_lock.notify_all()
         if self._spent() > self._budget:
             # A search that ran more queries than reserved can pass the cap: what it bought is used, nothing
             # more is bought (the next call refuses), and the student is never charged above the quote.

@@ -63,6 +63,9 @@ ROLES = (
 )
 
 
+HYPOTHESES = re.compile(r"\bhypothes[ie]s\b", re.I)
+
+
 def role(key: str, heading: str) -> str:
     if key in ("purpose", "objectives", "questions"):
         return key
@@ -151,9 +154,13 @@ def build(answer: dict[str, Any], guide_name: str) -> dict[str, Any]:
             # The approved statements are placed by code, word for word (2026-10-08), by each section's role: the general
             # objective under Objectives unless the guide gives it a section of its own, then that section holds it.
             roles: dict[str, dict[str, Any]] = {}
+            # Questions and hypotheses as two sections (Codex audit through ea0599e, finding 7): the questions section
+            # holds the approved statements; the hypotheses section is an ordinary section the writer writes from the plan.
+            asked = [s for s in sections if role(s["key"], s["heading"]) == "questions"]
+            both = len(asked) == 2 and sum(bool(HYPOTHESES.search(s["heading"])) for s in asked) == 1
             for section in sections:
                 found = role(section["key"], section["heading"])
-                if not found:
+                if not found or (both and found == "questions" and HYPOTHESES.search(section["heading"])):
                     continue
                 if found in roles:
                     raise AmbiguousGuide(f"chapter 1 has two sections for {found}: {roles[found]['heading']!r} and {section['heading']!r}")
@@ -200,6 +207,8 @@ def build(answer: dict[str, Any], guide_name: str) -> dict[str, Any]:
     # specific objectives applies when the guide sets no number; the concept paper keeps the standard layout and its
     # three to five; a primary research question and paired hypotheses are required, as no guide field replaces them.
     kept: dict[str, Any] = {}
+    if counts.get("source") == source:
+        kept["objectives_enforced"] = True  # the guide states its number: it is checked, not advised (Codex audit, finding 6)
     if default.get("objectives_by_level") and counts.get("source") != source:
         kept["objectives_by_level"] = copy.deepcopy(default["objectives_by_level"])
         standard.append("objectives_by_level: three specific objectives for Bachelor's, Postgraduate Diploma and Master's (four when the student asks), "

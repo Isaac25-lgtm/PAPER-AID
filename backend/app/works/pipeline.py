@@ -28,7 +28,7 @@ from app.pricing.billing import settle_completed
 from app.proposals import evidence as ev
 from app.proposals.ai import Figure, SectionText, Table
 from app.proposals.models import EvidenceItem, EvidenceSource
-from app.proposals.pipeline import _from_literature, _from_web, checkpointed, load_library, research_topics
+from app.proposals.pipeline import _from_literature, _from_web, checkpointed, load_library, research_gap_items, research_gaps, research_topics
 from app.rules import compliance, library
 from app.rules.extract import KEYS, requirements_from
 from app.rules.resolve import PLAN_SHARE_OF_LIMIT
@@ -379,6 +379,7 @@ def stage_researching(ctx: "StageContext") -> None:
 
     needs = [n for n in runner.research_needs(payload) if safe(n.query) and not named(n.need)][:limit]
     found = ev.dedupe([*found, *research_topics(ctx, needs, answer, settings.research_parallel)])
+    unsearched = research_gaps(ctx, needs)
     checked = [i for i in found if i.verified]
     verdicts = runner.verify(
         [{"id": i.id, "claim": i.statement, "context": i.need, "sources": [{"title": i.source.title, "published": i.source.year, "access": i.access, "passage": i.passage, "scope": i.scope}]}
@@ -390,6 +391,8 @@ def stage_researching(ctx: "StageContext") -> None:
     ctx.put_json("evidence.json", [i.model_dump(by_alias=True) for i in found])
     if runner.budget_reached:
         ctx.update(lambda j: _warn(j, ["The research reached this step's spending limit, so fewer sources were gathered than planned."]))
+    if unsearched:
+        ctx.update(lambda j: _warn(j, [unsearched]))
 
 
 def _library(ctx: "StageContext", inp: WorkStepInput) -> dict[str, EvidenceItem]:
@@ -411,14 +414,14 @@ def _for_model(items: list[EvidenceItem], passages: bool = False) -> list[dict[s
 # --- PLANNING -----------------------------------------------------------------------------------------
 
 
-def _criteria(section: PlanSection, proposed: list[str], spec: ResolvedSpec) -> list[str]:
+def _criteria(section: PlanSection, proposed: list[str] | None, spec: ResolvedSpec) -> list[str]:
     """Which marking criteria a section serves. For coursework the writer's own choice stands where it gives one: the
     skeleton attaches a criterion that names no section ("Critical analysis") to every body section, the final reviewer
     then asked for "Theme 1: S1 to S3 only", and the writer could add criteria but never remove them, so no repair could
     satisfy it and the plan was refused twice (live, 2026-10-08). Other works keep the skeleton's criteria and add to them."""
-    if spec.kind == "COURSEWORK" and proposed:
+    if spec.kind == "COURSEWORK" and proposed is not None:  # an empty list is a choice too (Codex audit, finding 8)
         return list(dict.fromkeys(proposed))
-    return list(dict.fromkeys([*section.criteria, *proposed]))
+    return list(dict.fromkeys([*section.criteria, *(proposed or [])]))
 
 
 def _plan_from(answer: dict[str, Any], skeleton: list[PlanSection], spec: ResolvedSpec) -> WorkPlan:
@@ -438,7 +441,8 @@ def _plan_from(answer: dict[str, Any], skeleton: list[PlanSection], spec: Resolv
         sections.append(s.model_copy(update={
             "heading": heading, "words": words,
             "brief": " ".join(str(proposed.get("brief") or s.brief).split())[:1500],
-            "criteria": _criteria(s, [c for c in proposed.get("criteria", []) if c in criteria_ids], spec),
+            # None: the writer said nothing about this section's criteria (the skeleton's stand)
+            "criteria": _criteria(s, [c for c in proposed["criteria"] if c in criteria_ids] if isinstance(proposed.get("criteria"), list) else None, spec),
             "coverage": [c for c in proposed.get("coverage", []) if c in coverage_ids],
         }))
     if spec.kind == "COURSEWORK":
@@ -1335,7 +1339,12 @@ def _compress_to_limits(ctx: "StageContext", runner: WorkRunner, inp: WorkStepIn
         if not over:
             return
         items = [{"key": k, "heading": next(s.heading for s in inp.plan.sections if s.key == k), "text": current[k].paragraphs,
-                  "table": current[k].table.model_dump(), "targetWords": w, "_words": " ".join(current[k].paragraphs)} for k, w in over.items()]
+                  "table": current[k].table.model_dump(), "targetWords": w, "_words": " ".join(current[k].paragraphs),
+                  # Asked again after cutting too far: what the last answer was and what is needed. Without it the request
+                  # is the same and its saved answer is replayed (Codex audit through ea0599e, finding 4).
+                  **({"lastAttempt": {"words": _rendered_words(closest[k], tokens), "problem": "cut too far",
+                                      "minimumWords": int(COMPRESS_FLOOR * w), "maximumWords": w}} if k in closest else {})}
+                 for k, w in over.items()]
         for key, shorter in runner.compress(items, _common(inp)).items():
             attempt = _kept(current[key], shorter)
             if _rendered_words(attempt, tokens) >= COMPRESS_FLOOR * over[key]:
@@ -1604,6 +1613,7 @@ def stage_auditing(ctx: "StageContext") -> None:
     if concerns:
         items.append(ReadinessItem(id="W-OPEN", question="Points PaperAid's reviewers raised that still need your attention", status="NEEDS_REVIEW", basis="AI",
                                    note=" | ".join(concerns)[:600], severity="WARNING", reason="REVIEW_OBJECTION", action="Read each point and edit the text, or ask for changes."))
+    items += research_gap_items(ctx, "W-RESEARCH")
     unreviewed = [k for k, v in unresolved.items() if NOT_REVIEWED in v]
     if unreviewed or final is None:
         items.append(ReadinessItem(id="W-REVIEWED", question="Every section was reviewed after its last change", status="NEEDS_REVIEW", basis="CODE", severity="WARNING",

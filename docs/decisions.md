@@ -925,3 +925,33 @@ PaperAid wrote an essay it then refused for not answering that sentence (11 minu
   S4 to S6"; code let the writer add criteria but never remove them, so the plan was refused after two repairs (not
   charged). For coursework the writer's choice of criteria per section now stands (`_criteria`), and code only returns a
   criterion left out everywhere to the sections it was planned for. Other works keep the skeleton's criteria.
+
+## 2026-10-08 — Codex's audit through ea0599e: fourteen findings fixed; a search that never answers no longer holds a work
+
+Codex audited the speed release and the two coursework commits and found fourteen defects; each is fixed with the case
+that showed it (`tests/test_codex_20261008_audit3.py`). Nothing about models, thinking, prompts, verification, reviews
+or approval changed.
+- **Research budget (1, 2):** two topics running together each reserve their possible cost, so the second could be told
+  the budget was spent when nothing yet was. A call now waits for the calls under way to be recorded when it would fit
+  on what is really spent (`AIRunner._settled`). A topic already saved is read back even when nothing more may be spent.
+- **Academic alignment (3 to 7):** reading a guide again keeps a section still to revise (`to_align`); a section code
+  placed from the plan during alignment carries the plan's stamp, so a changed plan marks it; a revision keeps what the
+  chapter still lacks and has cost (`missing`, `full_price`, `paid`); a guide's own objective count is enforced
+  (`objectives_enforced`); a guide with research questions and hypotheses as two sections is accepted.
+- **Queue and limiter (8 to 11):** a retry and a capacity pause record when the job will next run (`ready_at`); a job
+  stopped while waiting for a slot sends nothing; a job stopped for capacity can be resumed with a fresh allowance
+  (`capacity_waits` reset); the paid estimate waits for capacity too; `CAPACITY_BUSY` can be tried again; the allowance
+  is about two hours (`capacity_max_waits` 130). Every call takes a slot of its model and a search also one of the
+  model's search slots, so the two no longer add up past the model's limit.
+- **Reporting and drawing (12 to 14):** "completed first try" leaves out jobs that had any lost call; several topics'
+  errors are settled by the most serious one, never hidden by a wait for capacity; every arrow of the conceptual
+  framework ends on a dependent variable's box (`arrow_ends`). A compression asked again is told what its last attempt
+  did (`lastAttempt`); a coursework writer's explicit "no criteria here" is honoured.
+- **A search that never answers (owner, 2026-10-08: "fix everything"; amends "never skipped" above).** A tester's essay
+  plan waited eighteen minutes because one web search of five timed out eight times while the other four topics had
+  their verified sources. A topic the search service leaves unanswered (timeout, connection lost, unavailable) still
+  fails its stage and is retried, but after two runs (four tries, about seven minutes) the work goes on without that one
+  topic (`LOST_TOPIC_RUNS`, `checkpointed`). It is never dropped silently: the job carries the warning, and the
+  document's checks show "Every research topic was searched: needs review" with the topic named (`research_gaps`,
+  `W-RESEARCH`, `C{n}-RESEARCH`), so the document reads "Ready with warnings". Too many requests is never treated as a
+  lost search; nothing is written from a source that was not found and verified.

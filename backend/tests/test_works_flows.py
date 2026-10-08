@@ -304,3 +304,38 @@ def test_a_failed_plans_research_is_reused_only_for_the_same_question(works_clie
     _, planned = _run(client, work["id"], "PLAN")
     assert planned["status"] == "COMPLETED", planned.get("failure")
     assert client.models.tasks.count("w_needs") > researched  # a new question is researched again
+
+
+def test_a_search_that_never_answers_is_left_out_after_two_runs_and_shown_in_the_documents_checks(works_client, monkeypatch):
+    """Owner decision 2026-10-08: a tester's essay waited half an hour on one search of five. After four tries (two
+    in each of two runs) the work goes on without that topic, and the document's checks say which."""
+    from app.core.errors import RetryableStageError
+    from app.works import pipeline
+
+    client = works_client
+    lost: dict = {"need": None, "asked": 0}
+
+    def unanswered(real):
+        def source(runner, need, *args, **kwargs):
+            lost["need"] = lost["need"] or need
+            if need == lost["need"]:
+                lost["asked"] += 1
+                raise RetryableStageError("VERTEX_TIMEOUT", "Unavailable.", "test: the search did not answer")
+            return real(runner, need, *args, **kwargs)
+        return source
+
+    work = _coursework(client)
+    _, planned = _run(client, work["id"], "PLAN")
+    assert planned["status"] == "COMPLETED", planned.get("failure")
+    work = _work(client, work["id"])
+    work = client.post(f"/api/works/{work['id']}/plan/approve", headers=STUDENT, json={"baseVersion": work["planVersion"]}).json()
+    monkeypatch.setattr(pipeline, "_from_literature", unanswered(pipeline._from_literature))
+    monkeypatch.setattr(pipeline, "_from_web", unanswered(pipeline._from_web))
+    _, drafted = _run(client, work["id"], "DRAFT")
+    assert drafted["status"] == "COMPLETED", drafted.get("failure")
+    assert lost["asked"] == 2  # once in each of two runs here (the model's own second try is inside the real call)
+    assert any(w.startswith("PaperAid could not search 1 of") and lost["need"][:60] in w for w in drafted["warnings"]), drafted["warnings"]
+    document = client.get(f"/api/works/{work['id']}/document", headers=STUDENT).json()
+    [item] = [i for i in document["readiness"] if i["id"] == "W-RESEARCH"]
+    assert item["status"] == "NEEDS_REVIEW" and lost["need"][:60] in item["note"]
+    assert document["status"] != "READY"

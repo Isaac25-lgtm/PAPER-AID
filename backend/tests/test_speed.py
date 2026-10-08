@@ -227,3 +227,88 @@ def test_the_speed_report_reads_what_jobs_record(client):
     out = report([stored.model_dump(mode="json", by_alias=True)])
     assert out["jobs"]["PLAN"]["completedFirstTry"] == 1 and any(k.startswith("p_needs") for k in out["calls"])
     assert client.get(f"/api/jobs/{job['id']}", headers=STUDENT).json().get("activity") is None
+
+
+# --- a search that never answers: four tries, then the work goes on and says so (owner decision 2026-10-08) -----------
+
+
+def _topic_fakes():
+    class Ctx:
+        def __init__(self):
+            self.files: dict = {}
+
+        def has(self, name):
+            return name in self.files
+
+        def get_json(self, name):
+            return self.files[name]
+
+        def put_json(self, name, value):
+            self.files[name] = value
+
+    class Runner:
+        budget_reached = False
+
+    class Need:
+        need, query, kind = "Classification of input devices", "input devices classification", "WEB"
+
+    return Ctx(), Runner(), Need()
+
+
+def test_a_search_lost_in_two_runs_is_left_out_and_reported_never_dropped_silently():
+    from app.core.errors import RetryableStageError
+    from app.proposals.pipeline import checkpointed, research_gap_items, research_gaps
+
+    ctx, runner, need = _topic_fakes()
+    calls = {"n": 0}
+
+    def search():
+        calls["n"] += 1
+        raise RetryableStageError("VERTEX_TIMEOUT", "Unavailable.", "test: the search did not answer")
+
+    with pytest.raises(RetryableStageError):  # the first run: the stage is retried, as before
+        checkpointed(ctx, runner, need, search)
+    assert research_gaps(ctx, [need]) == "" and research_gap_items(ctx, "W-RESEARCH") == []
+    assert checkpointed(ctx, runner, need, search) == []  # the second run: the work goes on without this topic
+    assert checkpointed(ctx, runner, need, search) == [] and calls["n"] == 2  # and it is not asked a third time
+    note = research_gaps(ctx, [need, need])
+    assert note.startswith("PaperAid could not search 2 of 2 research topics") and "Classification of input devices" in note
+    [item] = research_gap_items(ctx, "W-RESEARCH")
+    assert (item.status, item.basis, item.severity) == ("NEEDS_REVIEW", "CODE", "WARNING") and item.note == note
+
+
+@pytest.mark.parametrize("code", ["VERTEX_RATE_LIMIT", "CAPACITY_BUSY", "MODEL_ANSWER_INVALID"])
+def test_only_a_search_the_provider_left_unanswered_is_ever_left_out(code):
+    from app.core.errors import RetryableStageError
+    from app.proposals.pipeline import checkpointed, research_gaps
+
+    ctx, runner, need = _topic_fakes()
+
+    def search():
+        raise RetryableStageError(code, "Unavailable.", "test")
+
+    for _ in range(4):  # too many requests and every other error keep failing the stage: never a skipped topic
+        with pytest.raises(RetryableStageError):
+            checkpointed(ctx, runner, need, search)
+    assert research_gaps(ctx, [need]) == ""
+
+
+def test_a_topic_that_answers_on_the_second_run_is_kept_and_nothing_is_reported():
+    from app.core.errors import RetryableStageError
+    from app.proposals.models import EvidenceItem, EvidenceSource
+    from app.proposals.pipeline import checkpointed, research_gaps
+
+    ctx, runner, need = _topic_fakes()
+    item = EvidenceItem(id="E1", chapter=0, need=need.need, statement="s", passage="p", source=EvidenceSource(url="https://x.org", title="t"), retrieved_on="2026-10-08")
+    answers = iter([RetryableStageError("VERTEX_CONNECTION_LOST", "Unavailable.", "test"), [item]])
+
+    def search():
+        answer = next(answers)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    with pytest.raises(RetryableStageError):
+        checkpointed(ctx, runner, need, search)
+    assert [i.id for i in checkpointed(ctx, runner, need, search)] == ["E1"]
+    assert research_gaps(ctx, [need]) == ""

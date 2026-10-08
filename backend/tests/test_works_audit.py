@@ -434,6 +434,7 @@ def test_a_compression_that_cuts_too_far_is_asked_again_not_delivered_short(work
 
     def overshooting(payload):
         asked["n"] += 1
+        asked.setdefault("payloads", []).append(payload)
         answer = fake_works.compress(payload)
         if asked["n"] == 1:  # the first time, the model returns half of what it was asked for
             for section, given in zip(answer["sections"], payload["sections"], strict=True):
@@ -447,3 +448,6 @@ def test_a_compression_that_cuts_too_far_is_asked_again_not_delivered_short(work
     assert job["status"] == "COMPLETED", job.get("failure")
     doc = client.get(f"/api/works/{work['id']}/document", headers=STUDENT).json()
     assert asked["n"] >= 2 and 1500 * 0.85 <= doc["words"] <= 1500  # asked again, and delivered within its limit
+    again = [s for payload in asked["payloads"][1:] for s in payload["sections"] if "lastAttempt" in s]
+    # a different request, never the saved answer replayed (Codex audit through ea0599e, finding 4)
+    assert again and all(s["lastAttempt"]["problem"] == "cut too far" and s["lastAttempt"]["words"] < s["lastAttempt"]["minimumWords"] for s in again)

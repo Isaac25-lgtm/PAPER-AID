@@ -1098,6 +1098,7 @@ def _requeue(j: Job, w: Wallet, settings: Settings, actor: str, action: str, lab
         j.payment_status = PaymentStatus.NOT_REQUIRED
     j.generation += 1
     j.attempts = 0
+    j.capacity_waits = 0  # a fresh allowance of waits for capacity (Codex audit through ea0599e, finding 10)
     j.failure = None
     j.failure_detail = None
     j.admin_actions.append(AdminAction(actor=actor, action=action))

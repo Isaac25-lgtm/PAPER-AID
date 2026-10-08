@@ -52,7 +52,9 @@ def report(jobs: list[dict]) -> dict:
         if job.get("status") not in ("COMPLETED", "FAILED", "CANCELLED"):
             continue
         group = kinds.setdefault(kind, {"first": [], "eventual": [], "minutes": []})
-        retried = any(t.get("outcome") in ("RETRY", "WAITING") for t in job.get("timings") or [])
+        # first try: no stage was retried or paused, and no call was lost and asked again (Codex audit, finding 12)
+        retried = (any(t.get("outcome") in ("RETRY", "WAITING") for t in job.get("timings") or [])
+                   or any(c.get("errorCode") for c in job.get("modelCalls") or []))
         group["eventual"].append(job.get("status") == "COMPLETED")
         group["first"].append(job.get("status") == "COMPLETED" and not retried)
         if job.get("status") == "COMPLETED" and job.get("queuedAt") and job.get("completedAt"):

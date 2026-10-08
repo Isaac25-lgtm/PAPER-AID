@@ -265,8 +265,8 @@ def _whole(answer: BaseModel | None, task: str) -> BaseModel:
 
 
 # A web search Google left hanging or dropped (live Chapter Two, 2026-10-08). It is asked once more straight away;
-# lost again, the stage retries as before. A search is never skipped, so the evidence a chapter is written from is
-# never thinner because Google was slow (owner, 2026-10-08: integrity first). Its possible cost stays reserved.
+# lost again, the stage retries as before. A search is never skipped silently: one lost in two runs of its stage is
+# left out and named in the document's checks (`checkpointed`, owner 2026-10-08). Its possible cost stays reserved.
 LOST_SEARCH = frozenset({"VERTEX_TIMEOUT", "VERTEX_CONNECTION_LOST", "PROVIDER_UNAVAILABLE"})
 
 

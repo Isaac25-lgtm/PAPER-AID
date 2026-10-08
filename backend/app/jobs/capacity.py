@@ -32,7 +32,8 @@ def resource(settings: Settings, model: str, searching: bool) -> str:
 
 
 def slots_for(settings: Settings, model: str, searching: bool) -> int:
-    return max(1, settings.capacity_search if searching else settings.capacity_limits.get(model, settings.capacity_default))
+    whole = max(1, settings.capacity_limits.get(model, settings.capacity_default))
+    return max(1, min(whole, settings.capacity_search)) if searching else whole
 
 
 def gate(store: JobStore, settings: Settings, owner: str, sleep: Callable[[float], None] = time.sleep) -> Gate:
@@ -40,25 +41,37 @@ def gate(store: JobStore, settings: Settings, owner: str, sleep: Callable[[float
     or raises CapacityWait when none frees in time or the limiter cannot be reached."""
 
     def take(model: str, searching: bool) -> tuple[Release, int]:
-        name, slots = resource(settings, model, searching), slots_for(settings, model, searching)
+        # Every call holds a slot of its model: the model's limit covers searches too. A search also holds one of the
+        # model's (fewer) search slots (Codex audit through ea0599e, finding 11: the two pools added up).
+        wanted = [(resource(settings, model, False), slots_for(settings, model, False))]
+        if searching:
+            wanted.append((resource(settings, model, True), slots_for(settings, model, True)))
         holder = f"{owner}:{secrets.token_hex(6)}"  # this request's own identity
         started = time.monotonic()
+        held: list[tuple[str, int]] = []
+
+        def release() -> None:
+            for name, slot in reversed(held):
+                try:
+                    store.release_slot(name, slot, holder)
+                except LimiterUnavailable as exc:  # it frees itself when its time is up
+                    log(logger, logging.WARNING, "slot not released", error=str(exc))
+            held.clear()
+
         while True:
             try:
-                slot = store.take_slot(name, slots, holder, CALL_LIMIT_SEC + HOLD_MARGIN_SEC)
+                for name, slots in wanted[len(held):]:
+                    slot = store.take_slot(name, slots, holder, CALL_LIMIT_SEC + HOLD_MARGIN_SEC)
+                    if slot is None:
+                        break
+                    held.append((name, slot))
             except LimiterUnavailable as exc:
+                release()
                 log(logger, logging.WARNING, "limiter unavailable", error=str(exc))
                 raise CapacityWait("the limiter could not be reached") from exc
-            if slot is not None:
-                waited = int((time.monotonic() - started) * 1000)
-
-                def release(slot: int = slot) -> None:
-                    try:
-                        store.release_slot(name, slot, holder)
-                    except LimiterUnavailable as exc:  # it frees itself when its time is up
-                        log(logger, logging.WARNING, "slot not released", error=str(exc))
-
-                return release, waited
+            if len(held) == len(wanted):
+                return release, int((time.monotonic() - started) * 1000)
+            release()  # never wait holding one of the two: another call could be waiting for it
             if time.monotonic() - started >= settings.capacity_wait_sec:
                 raise CapacityWait("every slot is in use")
             sleep(1 + random.random())  # spread the waiters out

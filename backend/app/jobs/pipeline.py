@@ -216,7 +216,7 @@ class StageContext:
         engine = estimate.engine if estimate is not None else self.job.quote.engine if self.job.quote else None
         from app.jobs import capacity
 
-        gate = capacity.gate(self.rt.store, self.rt.settings, self.job.id) if self.phase == "job" and self.rt.settings.capacity_gate else None
+        gate = capacity.gate(self.rt.store, self.rt.settings, self.job.id) if self.rt.settings.capacity_gate else None  # estimates too (Codex audit, finding 11)
         return runner(self.rt.settings, record, spent, budget, cache=_ResponseCache(self), heartbeat=self.heartbeat, phase=self.phase, engine=engine, gate=gate)
 
     def activity(self, kind: str, done: int = 0, total: int = 0, note: str = "") -> None:
@@ -641,18 +641,19 @@ def _run_estimate_task(rt: Runtime, job_id: str) -> None:
     ctx = StageContext(rt, job, phase="estimate")
     try:
         passages, guide_words = run_estimate(ctx)
-    except StageContinues:
+    except (StageContinues, CapacityWait) as signal:
+        waiting = isinstance(signal, CapacityWait)  # no Gemini capacity free: the estimate continues a little later
 
         def release(j: Job) -> Job | None:
             if j.estimate is None or j.estimate.id != run_id or j.estimate.status != "RUNNING" or j.estimate.lease_owner != ctx.owner:
                 return None
             j.estimate.lease_until, j.estimate.lease_owner = None, ""
-            j.events.append(JobEvent(label="Continuing the estimate in a new task"))
+            j.events.append(JobEvent(label="Waiting for capacity to finish the estimate" if waiting else "Continuing the estimate in a new task"))
             return j
 
         released = rt.store.update(job_id, release)
         if released is not None:  # the model-call display is capped at 200; event count keeps increasing
-            rt.queue.enqueue(job_id, f"{job_id}-e{run_id}-h{len(released.events)}")
+            rt.queue.enqueue(job_id, f"{job_id}-e{run_id}-h{len(released.events)}", delay_sec=rt.settings.capacity_retry_sec if waiting else 0)
         return
     except StageError as exc:
         try:
@@ -1438,7 +1439,19 @@ def _run_step(rt: Runtime, job_id: str) -> None:
 
     result = rt.store.update_job_and_wallet(job_id, complete)
     if result is None:
-        _notify(rt, job_id)  # a step that completed itself (a work, proposal or Data Lab publication)
+        # A step that completed itself (a work, proposal or Data Lab publication): its last stage's timing is added
+        # here, or the reports would show the job without its final stage (Codex audit through ea0599e, finding 12).
+        done = timing("DONE")
+
+        def stamp(j: Job) -> Job | None:
+            if j.status != JobStatus.COMPLETED or any(t.stage == stage and t.outcome == "DONE" and t.started_at == done.started_at for t in j.timings):
+                return None
+            j.timings = [*j.timings, done][-80:]
+            j.activity = None
+            return j
+
+        rt.store.update(job_id, stamp)
+        _notify(rt, job_id)
         return
     job = result[0]
     if job.status == JobStatus.COMPLETED:
@@ -1467,8 +1480,8 @@ def _continue_later(rt: Runtime, job_id: str, stage: Stage, owner: str, timing: 
         rt.queue.enqueue(job_id, task_name(job, f"-c{len(job.events)}"))
 
 
-CAPACITY_BUSY = ("PaperAid is very busy right now, so this could not start in time. Nothing was charged and nothing you have "
-                 "is lost. Please start it again in a little while.")
+CAPACITY_BUSY = ("PaperAid is very busy right now, so this could not finish in time. Nothing was charged and what was done is "
+                 "saved. Please continue it in a little while.")
 
 
 def _wait_for_capacity(rt: Runtime, job_id: str, stage: Stage, owner: str, reason: str, timing: StageTiming) -> None:
@@ -1486,7 +1499,8 @@ def _wait_for_capacity(rt: Runtime, job_id: str, stage: Stage, owner: str, reaso
         j.timings = [*j.timings, timing][-80:]
         j.capacity_waits += 1
         if j.capacity_waits > settings.capacity_max_waits:
-            j.failure = JobFailure(code="CAPACITY_BUSY", user_message=CAPACITY_BUSY, retryable=False)
+            # retryable: the student can resume it, and its finished calls are reused (Codex audit, finding 10)
+            j.failure = JobFailure(code="CAPACITY_BUSY", user_message=CAPACITY_BUSY, retryable=True)
             j.failure_detail = f"stage={stage.value} capacity waits exhausted: {reason}"[:500]
             state.transition(j, JobStatus.FAILED, "Failed: CAPACITY_BUSY")
             refund_job(j, w, "Job failed, so nothing was charged")
@@ -1494,15 +1508,16 @@ def _wait_for_capacity(rt: Runtime, job_id: str, stage: Stage, owner: str, reaso
         if j.activity is None or j.activity.kind != "WAITING":
             j.events.append(JobEvent(label=f"Waiting for capacity during {stage.value.lower()}"))
         j.activity = Activity(kind="WAITING", note=reason)
-        j.ready_at = utcnow()
+        j.ready_at = utcnow() + timedelta(seconds=delay)  # due then: the pause itself is not time in the queue
         retry_again = True
         return j, w
 
+    delay = settings.capacity_retry_sec + random.randint(0, max(1, settings.capacity_retry_sec // 2))
     result = rt.store.update_job_and_wallet(job_id, pause)
     log(logger, logging.INFO, "stage paused for capacity", stage=stage.value, reason=reason, willRetry=retry_again)
     if result and retry_again:
         job = result[0]
-        rt.queue.enqueue(job_id, task_name(job, f"-w{job.capacity_waits}"), delay_sec=settings.capacity_retry_sec + random.randint(0, max(1, settings.capacity_retry_sec // 2)))
+        rt.queue.enqueue(job_id, task_name(job, f"-w{job.capacity_waits}"), delay_sec=delay)
     elif result:
         _notify(rt, job_id)
 
@@ -1535,6 +1550,10 @@ def _notify(rt: Runtime, job_id: str) -> None:
 PROVIDER_CODES = ("VERTEX_", "PROVIDER_UNAVAILABLE")
 
 
+def _retry_delay(code: str, attempts: int) -> int:
+    return min(240, 15 * 2 ** (attempts - 1)) if code.startswith(PROVIDER_CODES) else min(300, 10 * 2**attempts)
+
+
 def _handle_failure(rt: Runtime, job_id: str, stage: Stage, owner: str, code: str, message: str, detail: str, retryable: bool,
                     timing: StageTiming | None = None) -> None:
     settings = rt.settings
@@ -1552,7 +1571,7 @@ def _handle_failure(rt: Runtime, job_id: str, stage: Stage, owner: str, code: st
             j.attempts += 1
             j.events.append(JobEvent(label=f"Retrying {stage.value.lower()} after {code}"))
             j.activity = Activity(kind="RETRYING", note="PROVIDER" if code.startswith(PROVIDER_CODES) else "OTHER")
-            j.ready_at = utcnow()
+            j.ready_at = utcnow() + timedelta(seconds=_retry_delay(code, j.attempts))  # due then: the backoff is not queue time
             retry_again = True
             return j, w
         from app.ai.providers import UNAVAILABLE, UNAVAILABLE_FINAL
@@ -1568,7 +1587,7 @@ def _handle_failure(rt: Runtime, job_id: str, stage: Stage, owner: str, code: st
     job = result[0] if result else None
     log(logger, logging.WARNING, "stage failed", stage=stage.value, code=code, retryable=retryable, willRetry=retry_again)
     if job and retry_again:
-        delay = min(240, 15 * 2 ** (job.attempts - 1)) if code.startswith(PROVIDER_CODES) else min(300, 10 * 2**job.attempts)
+        delay = _retry_delay(code, job.attempts)
         rt.queue.enqueue(job_id, task_name(job, f"-a{job.attempts}"), delay_sec=delay)
     elif job is not None:
         _notify(rt, job_id)

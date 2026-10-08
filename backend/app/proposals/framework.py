@@ -151,6 +151,19 @@ def _size(count: int) -> int:
     return 30 if count <= 5 else 26 if count <= 8 else 22 if count <= 12 else 19
 
 
+def arrow_ends(arrows: int, boxes: list[tuple[int, int]]) -> list[float]:
+    """Where each arrow ends: on a dependent variable's box, never in the gap between two. The arrows are shared out
+    among the boxes in order and spread within the box they reach (they used to be spread over the whole column, gaps
+    included: Codex audit through ea0599e, finding 14)."""
+    ends = []
+    for n in range(arrows):
+        box = n * len(boxes) // arrows
+        mine = [i for i in range(arrows) if i * len(boxes) // arrows == box]
+        top, bottom = boxes[box]
+        ends.append(top + (bottom - top) * (mine.index(n) + 1) / (len(mine) + 1))
+    return ends
+
+
 def _png(image: Image.Image) -> bytes:
     out = io.BytesIO()
     image.save(out, format="PNG", optimize=True)
@@ -198,9 +211,7 @@ def draw(variables: Variables, style: Style = "MONO") -> bytes | None:
         targets.append((y, y + box.height))
         y += box.height + GAP
     first, last = targets[0][0], targets[-1][1]
-    for n, ay in enumerate(anchors):
-        share = (n + 1) / (len(anchors) + 1)
-        ty = first + (last - first) * share
+    for ay, ty in zip(anchors, arrow_ends(len(anchors), targets), strict=True):
         _arrow(d, MARGIN + COLUMN + 8, ay, rx - 10, ty, palette.arrow, width=4 if len(anchors) > 8 else 5)
     bottom = top + body
     if middle is not None:

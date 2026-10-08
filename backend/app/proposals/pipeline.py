@@ -20,13 +20,13 @@ from pydantic import ValidationError
 
 from app.ai.orchestration import REVIEW_REPAIRS
 from app.analysis import fetch, research
-from app.core.errors import PermanentStageError
+from app.core.errors import CapacityWait, PermanentStageError, RetryableStageError
 from app.jobs import state
 from app.jobs.models import Job, JobStatus, ReadinessItem, Stage, Wallet, utcnow
 from app.pricing.billing import settle_completed
 from app.pricing.quote import round_up
 from app.proposals import decisions, evidence, profile, rulebook, sampling
-from app.proposals.ai import Grade, ProposalRunner, SectionText, Table
+from app.proposals.ai import LOST_SEARCH, Grade, ProposalRunner, SectionText, Table
 from app.proposals.models import (
     ChapterDocument,
     ChapterSection,
@@ -136,6 +136,7 @@ def stage_researching(ctx: "StageContext") -> None:
 
     needs = [n for n in runner.research_needs(payload) if safe(n.query)][:limit]
     found = evidence.dedupe(research_topics(ctx, needs, answer, settings.research_parallel))
+    unsearched = research_gaps(ctx, needs)
     checked = [i for i in found if i.verified]
     verdicts = runner.verify_claims(
         [{"id": i.id, "claim": i.statement, "context": i.need, "sources": [{"title": i.source.title, "published": i.source.year, "access": i.access, "passage": i.passage, "scope": i.scope}]} for i in checked]
@@ -146,21 +147,70 @@ def stage_researching(ctx: "StageContext") -> None:
     ctx.put_json("evidence.json", [i.model_dump(by_alias=True) for i in found])
     if runner.budget_reached:
         ctx.update(lambda j: _warn(j, ["The research reached this step's spending limit, so fewer sources were gathered than planned."], partial=True))
+    if unsearched:
+        ctx.update(lambda j: _warn(j, [unsearched], partial=False))
+
+
+# A topic whose search the provider leaves unanswered fails its stage, which is retried. Each run asks twice
+# (searched_once_more); after this many runs (four tries, about seven minutes) the work goes on without that one topic
+# and says so in the document's checks (owner decision 2026-10-08, after a tester's essay waited half an hour on one
+# search of five while the verified sources for the other four were ready). Too many requests is never such a loss.
+LOST_TOPIC_RUNS = 2
+RESEARCH_GAPS = "research-gaps.json"
+
+
+def _topic(need) -> str:
+    """Within one job the topic (its need, query and kind) identifies it: the job's input is frozen."""
+    return hashlib.sha256(json.dumps([need.need, need.query, need.kind]).encode()).hexdigest()[:24]
+
+
+def _lost_runs(ctx: "StageContext", need) -> int:
+    name = f"research/lost-{_topic(need)}.json"
+    return int(ctx.get_json(name)["runs"]) if ctx.has(name) else 0
 
 
 def checkpointed(ctx: "StageContext", runner, need, search: Callable[[], list[EvidenceItem]]) -> list[EvidenceItem]:
     """A research topic answered in full is saved (speed plan 2026-10-08, Codex: checkpoints before anything else): a
-    retry of this stage reads it back instead of fetching its sources again. The job's input is frozen, so within one
-    job the topic (its need, query and kind) identifies it. A topic cut short by the spending cap is not saved."""
-    if runner.budget_reached:
-        return []
-    name = "research/" + hashlib.sha256(json.dumps([need.need, need.query, need.kind]).encode()).hexdigest()[:24] + ".json"
-    if ctx.has(name):
+    retry of this stage reads it back instead of fetching its sources again. A topic cut short by the spending cap is
+    not saved. A topic lost in LOST_TOPIC_RUNS runs is not asked again: it has no sources and is reported (research_gaps)."""
+    name = f"research/{_topic(need)}.json"
+    if ctx.has(name):  # already answered: read back even when nothing more may be spent (Codex audit, finding 1)
         return [EvidenceItem.model_validate(i) for i in ctx.get_json(name)]
-    items = search()
+    runs = _lost_runs(ctx, need)
+    if runner.budget_reached or runs >= LOST_TOPIC_RUNS:
+        return []
+    try:
+        items = search()
+    except RetryableStageError as exc:
+        if exc.code not in LOST_SEARCH:
+            raise
+        ctx.put_json(f"research/lost-{_topic(need)}.json", {"runs": runs + 1})
+        if runs + 1 < LOST_TOPIC_RUNS:
+            raise
+        return []
     if not runner.budget_reached:
         ctx.put_json(name, [i.model_dump(by_alias=True) for i in items])
     return items
+
+
+def research_gaps(ctx: "StageContext", needs: Sequence) -> str:
+    """What the student is told when topics went unsearched, saved for the stage that builds the document's checks.
+    Empty when every topic was searched."""
+    lost = [n.need.strip()[:200] for n in needs if _lost_runs(ctx, n) >= LOST_TOPIC_RUNS]
+    note = ""
+    if lost:
+        note = (f"PaperAid could not search {len(lost)} of {len(needs)} research topics because the search did not answer after several tries, "
+                f"so it went on without {'it' if len(lost) == 1 else 'them'}: " + "; ".join(f"“{t}”" for t in lost) + ".")
+    ctx.put_json(RESEARCH_GAPS, {"note": note})
+    return note
+
+
+def research_gap_items(ctx: "StageContext", item_id: str, chapter: int = 0) -> list[ReadinessItem]:
+    note = ctx.get_json(RESEARCH_GAPS)["note"] if ctx.has(RESEARCH_GAPS) else ""
+    if not note:
+        return []
+    return [ReadinessItem(id=item_id, question="Every research topic was searched", status="NEEDS_REVIEW", basis="CODE", chapter=chapter, severity="WARNING",
+                          note=note[:600], reason="SEARCH_UNAVAILABLE", action="Check that your document covers this, or ask for changes to add it.")]
 
 
 def research_topics[N](ctx: "StageContext", needs: Sequence[N], answer: Callable[[N], list[EvidenceItem]], parallel: int) -> list[EvidenceItem]:
@@ -180,7 +230,24 @@ def research_topics[N](ctx: "StageContext", needs: Sequence[N], answer: Callable
         futures = [pool.submit(answer, need) for need in needs]
         for done, _ in enumerate(as_completed(futures), start=1):
             ctx.activity("SOURCES", done, total)
+    errors = [error for future in futures if (error := future.exception()) is not None]
+    if errors:  # finished topics are saved; the most serious outcome decides (Codex audit, finding 13)
+        raise min(errors, key=_severity)
     return [item for future in futures for item in future.result()]
+
+
+def _severity(error: BaseException) -> int:
+    """Which of several topics' errors decides the stage: a job no longer ours first, then an error no retry can fix,
+    then one a retry may fix, and a wait for capacity last (it would hide a terminal problem already met)."""
+    from app.jobs.pipeline import StageContinues  # the stage runner's own signal (imported here: it imports this module)
+
+    if isinstance(error, StageContinues):
+        return 0
+    if isinstance(error, PermanentStageError):
+        return 1
+    if isinstance(error, CapacityWait):
+        return 3
+    return 2
 
 
 def _from_literature(runner: ProposalRunner, need: str, query: str, chapter: int, today: str, limit: int) -> list[EvidenceItem]:
@@ -760,14 +827,20 @@ def align_document(doc: ChapterDocument, before: str, after: str, level: Level, 
             stated = stated_fragments(plan, spec.number)
             lead = [par for par in paragraphs if not evidence.SUBHEADING.match(par) and _introduction(par, stated)][:2]
             paragraphs = [*lead, *plan_statements(plan, spec.from_plan, spec.number)]
+            # rebuilt from the plan as it is now: its decisions are the current ones (Codex audit, finding 3)
+            section = section.model_copy(update={"depends": decisions.stamp(doc.number, spec.key, plan)})
         sections.append(section.model_copy(update={"number": spec.number, "heading": spec.heading, "paragraphs": paragraphs}))
     for spec in planned:
         if spec.from_plan and spec.key not in earlier:  # the approved statements need no writer (Codex audit 29343c2 #2)
             sections.insert(next((i for i, s in enumerate(sections) if [p.key for p in planned].index(s.key) > [p.key for p in planned].index(spec.key)), len(sections)),
-                            ChapterSection(key=spec.key, number=spec.number, heading=spec.heading, paragraphs=plan_statements(plan, spec.from_plan, spec.number)))
+                            ChapterSection(key=spec.key, number=spec.number, heading=spec.heading, paragraphs=plan_statements(plan, spec.from_plan, spec.number),
+                                           depends=decisions.stamp(doc.number, spec.key, plan)))
     keys = {s.key for s in sections}
     missing = [spec.key for spec in planned if spec.key not in keys]
-    to_align = [spec.key for spec in planned if spec.key in keys and not spec.from_plan and spec.brief != old_briefs.get(spec.key)]
+    # A section still to revise stays so, whatever guide is read next (Codex audit, finding 2: reading the same guide
+    # again compared its brief with itself and cleared the flag, though the wording was never revised).
+    to_align = [spec.key for spec in planned if spec.key in keys and not spec.from_plan
+                and (spec.brief != old_briefs.get(spec.key) or spec.key in doc.to_align)]
     dropped = [f"{s.number} {s.heading}" for s in doc.sections if s.key not in {spec.key for spec in planned}]
     cited: list[str] = []
     for section in sections:
@@ -1010,7 +1083,8 @@ def stage_auditing(ctx: "StageContext") -> None:
             f"{s.number} {s.heading}" for s in rulebook.sections(inp.rulebook, inp.chapter, inp.inputs.level, inp.plan) if s.key in document.missing
         ]
         warnings.append(f"{STILL_MISSING} {', '.join(headings)}. Finish the chapter to write them; you are charged only for the sections delivered.")
-    document.readiness = _readiness(ctx, runner, inp, document, library, bool(stripped), unreviewed) + _missing_items(inp, document.missing)
+    document.readiness = (_readiness(ctx, runner, inp, document, library, bool(stripped), unreviewed) + _missing_items(inp, document.missing)
+                          + research_gap_items(ctx, f"C{inp.chapter}-RESEARCH", inp.chapter))
     document.warnings = warnings
     share: float | None = None
     if inp.step in ("CHAPTER", "COMPLETE") and runner._engine.require_dual_approval:
@@ -1157,7 +1231,9 @@ def _merge(base: ChapterDocument, revised: ChapterDocument, keys: set[str]) -> t
             cited += [i for i in evidence.cited_ids(field) if i not in cited]
     words = sum(len(evidence.ANY_TOKEN.sub(" ", p).split()) for s in sections for p in s.paragraphs)
     merged = ChapterDocument(number=base.number, title=base.title, plan_version=revised.plan_version, sections=sections, cited=cited, words=words,
-                             to_align=[k for k in base.to_align if k not in fresh])
+                             to_align=[k for k in base.to_align if k not in fresh],
+                             # what the chapter still lacks and has cost is not the revision's to forget (Codex audit, finding 5)
+                             missing=list(base.missing), full_price=base.full_price, paid=base.paid)
     return merged, [f"{s.number} {s.heading}" for s in base.sections if s.key in keys and s.key not in fresh]
 
 

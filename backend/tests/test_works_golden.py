@@ -164,6 +164,9 @@ def test_a_coursework_plan_keeps_the_writers_choice_of_criteria_and_every_criter
     assert sorted(plan["theme1"] + plan["theme2"]) == six  # every criterion still has a home
     silent = {"title": "Web applications", "sections": [{"key": "theme1"}, {"key": "theme2"}]}
     assert _plan_from(silent, skeleton, spec).sections[1].criteria == six  # no choice given: the skeleton's stands
+    moved = {"title": "Web applications", "sections": [{"key": "theme1", "criteria": []}, {"key": "theme2", "criteria": list(six)}]}
+    plan = {s.key: s.criteria for s in _plan_from(moved, skeleton, spec).sections}
+    assert plan["theme1"] == [] and plan["theme2"] == six  # an empty list is a choice too (Codex audit, finding 8)
 
     funding = _spec("FUNDING_PROPOSAL", "NGO_PROJECT").model_copy(update={"scoring": spec.scoring})
     kept = _plan_from(narrowed, skeleton, funding).sections[1].criteria

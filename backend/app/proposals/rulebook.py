@@ -141,8 +141,10 @@ def objective_range(rulebook_id: str, level: Level, four: bool = False, concept:
 
 
 def enforced_counts(rulebook_id: str) -> bool:
-    """Whether the rulebook's objective counts are rules (v2 on) rather than the handbook's general advice."""
-    return bool(load(rulebook_id).get("objectives_by_level"))
+    """Whether the rulebook's objective counts are rules rather than general advice: the standard guide v2 (the owner's
+    cap by level), and a student's own guide that states its number (Codex audit through ea0599e, finding 6)."""
+    book = load(rulebook_id)
+    return bool(book.get("objectives_by_level") or book.get("objectives_enforced"))
 
 
 # A research question asked in the past tense (owner, 2026-10-08: avoided unless the study is about past events).

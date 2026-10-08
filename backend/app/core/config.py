@@ -199,7 +199,9 @@ class Settings(BaseSettings):
     capacity_search: int = 6  # web-search calls in flight at once, per model
     capacity_wait_sec: float = 30  # how long a call waits for a slot before its stage pauses
     capacity_retry_sec: int = 20  # how long a paused stage waits before it is delivered again
-    capacity_max_waits: int = 360  # pauses allowed for one job (about two hours) before it stops, uncharged
+    # Pauses allowed for one job before it stops, uncharged and resumable: each is a wait of up to capacity_wait_sec
+    # and a pause of capacity_retry_sec or a little more, so 130 is about two hours (360 was five to six: Codex audit).
+    capacity_max_waits: int = 130
     research_parallel: int = 2  # research needs worked on at the same time inside one stage (each call takes a slot)
     research_call_floor_sec: float = 75  # time limit for a search or abstract reading (never below the token-rate rule)
     proposal_review_max_words: int = 20000
