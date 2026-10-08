@@ -423,3 +423,27 @@ def test_a_draft_well_under_its_word_limit_is_developed_before_delivery(works_cl
     doc = client.get(f"/api/works/{work['id']}/document", headers=STUDENT).json()
     length = next(i for i in doc["readiness"] if i["id"] == "CW-007")
     assert length["status"] == "PASS" and 1275 <= doc["words"] <= 1500, (length, doc["words"])
+
+
+def test_a_compression_that_cuts_too_far_is_asked_again_not_delivered_short(works_client):
+    """Live 2026-10-08: a 1,000-word essay over its limit was cut to 809 words and then refused for being well
+    under it. A section cut well below its target keeps its earlier text and is compressed again."""
+    client = works_client
+    client.models.overrides["w_draft"] = _long_draft
+    asked = {"n": 0}
+
+    def overshooting(payload):
+        asked["n"] += 1
+        answer = fake_works.compress(payload)
+        if asked["n"] == 1:  # the first time, the model returns half of what it was asked for
+            for section, given in zip(answer["sections"], payload["sections"], strict=True):
+                words = " ".join(given["text"]).split()[: max(10, int(given["targetWords"]) // 2)]
+                section["paragraphs"] = [" ".join(words).rstrip(".,;") + "."]
+        return answer
+
+    client.models.overrides["w_compress"] = overshooting
+    work = _approved(client, _coursework(client))
+    _, job = _run(client, work["id"], "DRAFT")
+    assert job["status"] == "COMPLETED", job.get("failure")
+    doc = client.get(f"/api/works/{work['id']}/document", headers=STUDENT).json()
+    assert asked["n"] >= 2 and 1500 * 0.85 <= doc["words"] <= 1500  # asked again, and delivered within its limit

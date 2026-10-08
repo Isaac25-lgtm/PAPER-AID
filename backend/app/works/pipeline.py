@@ -1282,14 +1282,25 @@ def _too_short(inp: WorkStepInput, current: dict[str, SectionText], library_item
     return fix
 
 
+# A compressed section is accepted only at 90% of its target or more. The targets bring the document to 95% of its
+# limit, so accepted compressions never take it under 85% (UNDER_LENGTH), where the length check refuses it.
+COMPRESS_FLOOR = 0.9
+COMPRESS_PASSES = 3
+
+
 def _compress_to_limits(ctx: "StageContext", runner: WorkRunner, inp: WorkStepInput, current: dict[str, SectionText], tokens: dict[str, tuple[str, str]],
                         library_items: dict[str, EvidenceItem], keys: list[str]) -> None:
     """Targeted compression for hard limits (§6.1): only the sections this step may change shrink,
-    each by its share of what the limit's whole scope is over."""
+    each by its share of what the limit's whole scope is over.
+
+    A model asked for 950 words can return 800 (live, 2026-10-08: a 1,000-word essay was cut to 809 and then
+    refused for being well under its limit). A section cut well below its target keeps its earlier text and is asked
+    again; if every pass overshoots, the closest attempt is used rather than leave the document over its limit."""
     spec = _spec(inp)
     assert inp.plan is not None
     fields = {f.id: f for f in spec.fields}
-    for _ in range(2):
+    closest: dict[str, SectionText] = {}  # each section's longest attempt that was cut too far
+    for _ in range(COMPRESS_PASSES):
         over: dict[str, int] = {}
         excess, covered = _word_excess(inp, current, library_items, tokens)
         if excess:
@@ -1309,7 +1320,15 @@ def _compress_to_limits(ctx: "StageContext", runner: WorkRunner, inp: WorkStepIn
         items = [{"key": k, "heading": next(s.heading for s in inp.plan.sections if s.key == k), "text": current[k].paragraphs,
                   "table": current[k].table.model_dump(), "targetWords": w, "_words": " ".join(current[k].paragraphs)} for k, w in over.items()]
         for key, shorter in runner.compress(items, _common(inp)).items():
-            current[key] = _kept(current[key], shorter)
+            attempt = _kept(current[key], shorter)
+            if _rendered_words(attempt, tokens) >= COMPRESS_FLOOR * over[key]:
+                current[key] = attempt
+                closest.pop(key, None)
+            elif key not in closest or _rendered_words(attempt, tokens) > _rendered_words(closest[key], tokens):
+                closest[key] = attempt  # cut too far: the earlier text stays and the next pass asks again
+    for key, attempt in closest.items():  # still over after every pass: the closest attempt, never an over-limit document
+        if _rendered_words(current[key], tokens) > _rendered_words(attempt, tokens):
+            current[key] = attempt
 
 
 def _document(inp: WorkStepInput, current: dict[str, SectionText], reviewed: set[str]) -> WorkDocument:

@@ -898,4 +898,8 @@ and nothing kept many jobs from calling Gemini at once.
   remove the placed sub-headings "Primary Research Question" and "Research Hypotheses". Every section whose statements
   code places now tells the writer and reviewer that the sub-headings and statements are the approved plan (`PLACED`,
   always added), for Chapter One, the concept paper and any guide.
+- **A coursework draft cut too far (a tester's job, 2026-10-08):** a 1,000-word essay over its limit was compressed to
+  809 words and then refused for being well under it (not charged; the rerun completed). A compressed section is now
+  accepted only at 90% of its target or more (`COMPRESS_FLOOR`); cut further, its earlier text stays and it is asked
+  again, up to three passes, and only if every pass overshoots is the closest attempt used.
 - **Testers:** oboireedison@gmail.com added (owner, 2026-10-08).
