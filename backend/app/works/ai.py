@@ -27,6 +27,7 @@ from app.proposals.ai import (
     _Needs,
     _Searched,
     _Sections,
+    searched_once_more,
 )
 from app.rules.extract import READ_SCHEMA
 
@@ -280,7 +281,7 @@ class WorkRunner(AIRunner):
             return _Searched(findings=[f for f in answer.findings if research.opened(f.url, result.sources)][:3])
 
         try:
-            answer = self._call("w_search", {"need": need, "query": query}, SEARCH_SCHEMA, _Searched, max_searches=max_searches, accept=accept)
+            answer = searched_once_more(lambda: self._call("w_search", {"need": need, "query": query}, SEARCH_SCHEMA, _Searched, max_searches=max_searches, accept=accept))
         except PermanentStageError as exc:
             if exc.code in SEARCH_DECLINED:
                 return []  # declined by the provider: nothing usable found for this need

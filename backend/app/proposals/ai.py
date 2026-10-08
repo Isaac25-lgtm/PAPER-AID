@@ -264,16 +264,23 @@ def _whole(answer: BaseModel | None, task: str) -> BaseModel:
     return answer
 
 
-# A web search Google left hanging or dropped (live Chapter Two, 2026-10-08: one hung search of about twenty
-# failed the whole research stage three times). Research is best-effort per need: such a search finds nothing,
-# its possible cost stays reserved against the job's cap, and only repeated losses (Google unwell) stop the stage.
+# A web search Google left hanging or dropped (live Chapter Two, 2026-10-08). It is asked once more straight away;
+# lost again, the stage retries as before. A search is never skipped, so the evidence a chapter is written from is
+# never thinner because Google was slow (owner, 2026-10-08: integrity first). Its possible cost stays reserved.
 LOST_SEARCH = frozenset({"VERTEX_TIMEOUT", "VERTEX_CONNECTION_LOST", "PROVIDER_UNAVAILABLE"})
-LOST_SEARCHES_TOLERATED = 2
+
+
+def searched_once_more[T](search: Callable[[], T]) -> T:
+    """A search Google lost is asked once more; lost again, the error stands (the stage retries)."""
+    try:
+        return search()
+    except RetryableStageError as exc:
+        if exc.code not in LOST_SEARCH:
+            raise
+        return search()
 
 
 class ProposalRunner(AIRunner):
-    lost_searches = 0
-
     # --- evidence ---------------------------------------------------------------------------
 
     def research_needs(self, payload: dict[str, Any]) -> list[Need]:
@@ -296,18 +303,13 @@ class ProposalRunner(AIRunner):
             return _Searched(findings=[f for f in answer.findings if research.opened(f.url, result.sources)][:3])
 
         try:
-            answer = self._call("p_search", {"need": need, "query": query}, SEARCH_SCHEMA, _Searched, max_searches=max_searches, accept=accept)
+            answer = searched_once_more(lambda: self._call("p_search", {"need": need, "query": query}, SEARCH_SCHEMA, _Searched, max_searches=max_searches, accept=accept))
         except PermanentStageError as exc:
             if exc.code in SEARCH_DECLINED:
                 return []  # declined by the provider: nothing usable found for this need
             if exc.code != "BUDGET_EXCEEDED":
                 raise
             self.budget_reached = True
-            return []
-        except RetryableStageError as exc:
-            if exc.code not in LOST_SEARCH or self.lost_searches >= LOST_SEARCHES_TOLERATED:
-                raise
-            self.lost_searches += 1
             return []
         return answer.findings if answer else []
 

@@ -12,6 +12,8 @@ project, and publishes to the project only at EXPORTING, in one transaction."""
 import hashlib
 import json
 import re
+from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
@@ -119,18 +121,21 @@ def stage_researching(ctx: "StageContext") -> None:
     def safe(query: str) -> bool:
         return research.query_safe(query, set(), private)
 
-    found: list[EvidenceItem] = []
     today = utcnow().date().isoformat()
-    for need in [n for n in runner.research_needs(payload) if safe(n.query)][:limit]:
-        items: list[EvidenceItem] = []
-        if need.kind == "LITERATURE":
-            items = _from_literature(runner, need.need, need.query, inp.chapter, today, settings.proposal_works_per_need)
-        if not items and not runner.budget_reached:
-            items = _from_web(runner, need.need, need.query, inp.chapter, today, settings.research_max_searches, safe)
-        found += items
-        if runner.budget_reached:
-            break
-    found = evidence.dedupe(found)
+
+    def answer(need) -> list[EvidenceItem]:
+        def search() -> list[EvidenceItem]:
+            items: list[EvidenceItem] = []
+            if need.kind == "LITERATURE":
+                items = _from_literature(runner, need.need, need.query, inp.chapter, today, settings.proposal_works_per_need)
+            if not items and not runner.budget_reached:
+                items = _from_web(runner, need.need, need.query, inp.chapter, today, settings.research_max_searches, safe)
+            return items
+
+        return checkpointed(ctx, runner, need, search)
+
+    needs = [n for n in runner.research_needs(payload) if safe(n.query)][:limit]
+    found = evidence.dedupe(research_topics(ctx, needs, answer, settings.research_parallel))
     checked = [i for i in found if i.verified]
     verdicts = runner.verify_claims(
         [{"id": i.id, "claim": i.statement, "context": i.need, "sources": [{"title": i.source.title, "published": i.source.year, "access": i.access, "passage": i.passage, "scope": i.scope}]} for i in checked]
@@ -141,6 +146,41 @@ def stage_researching(ctx: "StageContext") -> None:
     ctx.put_json("evidence.json", [i.model_dump(by_alias=True) for i in found])
     if runner.budget_reached:
         ctx.update(lambda j: _warn(j, ["The research reached this step's spending limit, so fewer sources were gathered than planned."], partial=True))
+
+
+def checkpointed(ctx: "StageContext", runner, need, search: Callable[[], list[EvidenceItem]]) -> list[EvidenceItem]:
+    """A research topic answered in full is saved (speed plan 2026-10-08, Codex: checkpoints before anything else): a
+    retry of this stage reads it back instead of fetching its sources again. The job's input is frozen, so within one
+    job the topic (its need, query and kind) identifies it. A topic cut short by the spending cap is not saved."""
+    if runner.budget_reached:
+        return []
+    name = "research/" + hashlib.sha256(json.dumps([need.need, need.query, need.kind]).encode()).hexdigest()[:24] + ".json"
+    if ctx.has(name):
+        return [EvidenceItem.model_validate(i) for i in ctx.get_json(name)]
+    items = search()
+    if not runner.budget_reached:
+        ctx.put_json(name, [i.model_dump(by_alias=True) for i in items])
+    return items
+
+
+def research_topics[N](ctx: "StageContext", needs: Sequence[N], answer: Callable[[N], list[EvidenceItem]], parallel: int) -> list[EvidenceItem]:
+    """The research topics, `parallel` at a time (speed plan 2026-10-08: they ran one after another, so every slow
+    source held up the rest). Every Gemini call still waits its turn under the shared limit. All topics finish before
+    an error from any is raised, and the results keep the topics' order, so the evidence and its order do not depend
+    on which finished first. The student sees "topic n of N"; only this thread writes it."""
+    total = len(needs)
+    ctx.activity("SOURCES", 0, total)
+    if parallel <= 1 or total <= 1:
+        out: list[EvidenceItem] = []
+        for done, need in enumerate(needs, start=1):
+            out += answer(need)
+            ctx.activity("SOURCES", done, total)
+        return out
+    with ThreadPoolExecutor(max_workers=parallel) as pool:
+        futures = [pool.submit(answer, need) for need in needs]
+        for done, _ in enumerate(as_completed(futures), start=1):
+            ctx.activity("SOURCES", done, total)
+    return [item for future in futures for item in future.result()]
 
 
 def _from_literature(runner: ProposalRunner, need: str, query: str, chapter: int, today: str, limit: int) -> list[EvidenceItem]:
@@ -601,6 +641,7 @@ def stage_drafting(ctx: "StageContext") -> None:
     library = _library(ctx, inp)
     sample = sampling.calculate(inp.plan.sample_size) if inp.chapter == 3 else None
     items = _section_items(inp, library, ctx.get_json("briefs.json")["briefs"])
+    ctx.activity("WRITING", 0, len(items))
     drafted = runner.draft(items, {**_common(inp, sample.steps if sample else ""), **_finish_context(ctx, inp)})
     ctx.put_json("drafted.json", {k: v.model_dump() for k, v in drafted.items()})
     missing = [i["heading"] for i in items if i["key"] not in drafted]
@@ -830,6 +871,7 @@ def stage_auditing(ctx: "StageContext") -> None:
     # review, fix, review ... review: the delivered text is always the reviewed text, with at most
     # `rounds` fixes, as priced (Codex audit 2026-09-28 #11).
     for round_ in runner.audit_rounds(rounds + 1):
+        ctx.activity("CHECKING", round_ + 1, rounds + 1)
         problems = {k: _checks(inp, k, t, library, allowed) for k, t in current.items()}
         review = [
             {**items[k], "text": t.paragraphs, "table": t.table.model_dump(), "paperaidChecks": problems[k], "_words": " ".join(t.paragraphs)}

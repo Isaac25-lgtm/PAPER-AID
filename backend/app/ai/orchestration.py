@@ -797,6 +797,7 @@ class AIRunner:
         heartbeat: Callable[[], None] | None = None,
         phase: Literal["estimate", "job"] = "job",
         engine: Engine | None = None,
+        gate: Callable[[str, bool], tuple[Callable[[], None], int]] | None = None,
     ):
         self.settings = settings
         self._engine = engine or current_engine(settings)
@@ -817,6 +818,9 @@ class AIRunner:
         self._inflight = 0.0  # estimates of calls under way in other threads (together), held against the cap
         self._inflight_lock = threading.Lock()
         self._audits: dict[str, list[Any]] = {}  # this loop's earlier answers of each approval review
+        # The shared limit on Gemini calls (app.jobs.capacity): each call holds a slot while it runs. None: no limit
+        # (estimates, Data Lab operations and tests run without one).
+        self._gate = gate
 
     def model_for(self, task: str) -> str:
         return model_for_engine(self._engine, task)
@@ -940,18 +944,27 @@ class AIRunner:
             reserve = max_searches * (costs.SEARCH_RESERVE_FACTOR if provider_name == "vertex" else 1)
             fee = costs.search_fee_usd(provider_name, reserve, self.settings.model_unit_prices, model) if max_searches else 0.0
             estimate = costs.estimate_usd(provider_name, model, prompt_chars, limit, prices, table, long_prices, thinking_tokens) + fee
-            with self._inflight_lock:  # a call running alongside (together) counts at its estimate until recorded
-                spent = self._spent() + self._inflight
-                costs.ensure_within_budget(spent, estimate, self._budget)
-                max_tokens = costs.affordable_output_tokens(provider_name, model, prompt_chars, limit, self._budget - spent - fee, prices, table, long_prices)
-                if max_tokens < min(costs.MIN_OUTPUT_TOKENS, limit):
-                    costs.ensure_within_budget(spent, float("inf"), self._budget)
-                self._inflight += estimate
+            # The shared limit: wait for a slot first (or pause the stage), so nothing is reserved while waiting.
+            release, queued_ms = self._gate(model, bool(max_searches)) if self._gate and provider_name == "vertex" else ((lambda: None), 0)
+            try:
+                with self._inflight_lock:  # a call running alongside (together) counts at its estimate until recorded
+                    spent = self._spent() + self._inflight
+                    costs.ensure_within_budget(spent, estimate, self._budget)
+                    max_tokens = costs.affordable_output_tokens(provider_name, model, prompt_chars, limit, self._budget - spent - fee, prices, table, long_prices)
+                    if max_tokens < min(costs.MIN_OUTPUT_TOKENS, limit):
+                        costs.ensure_within_budget(spent, float("inf"), self._budget)
+                    self._inflight += estimate
+            except BaseException:
+                release()
+                raise
             options = {"thinking": thinking} if provider_name == "vertex" and thinking else {}
             started = time.monotonic()
             try:
-                result: ModelResult = (provider.search_json(task, model, system, payload, schema, max_tokens, max_searches, **options)
-                                       if max_searches else provider.json(task, model, system, payload, schema, max_tokens, **options))
+                try:
+                    result: ModelResult = (provider.search_json(task, model, system, payload, schema, max_tokens, max_searches, **options)
+                                           if max_searches else provider.json(task, model, system, payload, schema, max_tokens, **options))
+                finally:
+                    release()  # the call is over, answered or not: its slot is free for the next
             except (RetryableStageError, PermanentStageError) as exc:
                 try:
                     if provider_name == "vertex":
@@ -964,7 +977,8 @@ class AIRunner:
                                                latency_ms=int((time.monotonic() - started) * 1000), cost_usd=0, reserved_usd=estimate if unknown else 0,
                                                task=task, role=step.role, workflow_stage=stage, thinking_level=thinking,
                                                error_code=exc.code, fallback_attempt=attempt, estimated_cost_usd=estimate,
-                                               pricing_status="UNKNOWN_BILLING" if unknown else "NOT_CHARGED"))
+                                               pricing_status="UNKNOWN_BILLING" if unknown else "NOT_CHARGED",
+                                               prompt_chars=prompt_chars, queued_ms=queued_ms))
                 finally:  # released only once the record is saved: a call alongside never sees spending dip (Codex review 2026-10-07, finding 2)
                     with self._inflight_lock:
                         self._inflight -= estimate
@@ -1005,6 +1019,8 @@ class AIRunner:
                     safety_block=result.safety_block, error_code=error_code, fallback_attempt=attempt, estimated_cost_usd=estimate,
                     pricing_status=("UNKNOWN_USAGE" if error_code == "VERTEX_USAGE_MISSING" else "VERIFIED") if result.provider == "vertex" else "",
                     model_version=result.model_version,
+                    prompt_chars=prompt_chars,
+                    queued_ms=queued_ms,
                 )
             )
         finally:

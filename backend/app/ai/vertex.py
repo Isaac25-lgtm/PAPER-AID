@@ -94,6 +94,8 @@ _pause = time.sleep  # tests replace it
 # fixed 180 seconds cut such calls off (live run 2026-10-07: three timeouts in a row, each possibly
 # billed, and the same retry each time). Never less than the configured timeout, never past the stage's
 # hand-over margin (STAGE_WORK_LIMIT 20 minutes inside the 25-minute lease).
+# Searching and reading sources: answers are short, so a call that runs long has hung (speed plan 2026-10-08).
+RESEARCH_CALL_TASKS = frozenset({"p_search", "w_search", "research", "p_extract", "w_extract"})
 TOKENS_PER_SECOND = 120  # below the slowest rate measured, so a call that runs to its limit still ends in time
 CALL_SECONDS_CAP = 290
 
@@ -362,18 +364,24 @@ class VertexGeminiProvider:
             raise PermanentStageError("AI_NOT_CONFIGURED", MISCONFIGURED, "Vertex project and location required")
         self.settings = settings
 
+    def _floor(self, task: str) -> float:
+        """A web search or an abstract reading gets a shorter time limit (speed plan 2026-10-08: one that hung held a
+        stage for three minutes); call_timeout still never goes below what its output allowance needs."""
+        return self.settings.research_call_floor_sec if task in RESEARCH_CALL_TASKS else self.settings.provider_timeout_sec
+
     def json(self, task: str, model: str, system: str, payload: dict[str, Any], schema: dict[str, Any], max_tokens: int,
              thinking: str | None = None) -> ModelResult:
         # task is caller metadata, not a provider routing/capability policy.
         return self.generate(model, system, render_user_message(payload),
                              {"response_mime_type": "application/json", "response_json_schema": schema, "max_output_tokens": max_tokens,
-                              "thinking_config": _thinking(thinking)})
+                              "thinking_config": _thinking(thinking), "time_floor_sec": self._floor(task)})
 
     def search_json(self, task: str, model: str, system: str, payload: dict[str, Any], schema: dict[str, Any], max_tokens: int, max_searches: int,
                     thinking: str | None = None) -> ModelResult:
         return self.generate(model, system, render_user_message(payload),
                              {"response_mime_type": "application/json", "response_json_schema": schema, "max_output_tokens": max_tokens,
-                              "grounding": types.GoogleSearch(), "max_grounding_queries": max_searches, "thinking_config": _thinking(thinking)})
+                              "grounding": types.GoogleSearch(), "max_grounding_queries": max_searches, "thinking_config": _thinking(thinking),
+                              "time_floor_sec": self._floor(task)})
 
     def _grounding_allowed(self) -> None:
         if not self.settings.vertex_search_enabled:
@@ -429,7 +437,7 @@ class VertexGeminiProvider:
                                              safety_settings=list(options.safety_settings) or None, tools=tools or None,
                                              tool_config=options.tool_config,
                                              automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
-                                             http_options=types.HttpOptions(timeout=int(call_timeout(options.max_output_tokens, self.settings.provider_timeout_sec) * 1000),
+                                             http_options=types.HttpOptions(timeout=int(call_timeout(options.max_output_tokens, options.time_floor_sec or self.settings.provider_timeout_sec) * 1000),
                                                                             retry_options=NO_SDK_RETRY))
         started = time.monotonic()
         client = _vertex_client(self.settings.vertex_project, self.settings.vertex_location, self.settings.provider_timeout_sec)

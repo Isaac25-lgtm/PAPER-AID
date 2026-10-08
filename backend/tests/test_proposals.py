@@ -552,27 +552,27 @@ def _hanging_searches(client, lost: int):
     return _run(client, project["id"], "PLAN"), calls
 
 
-def test_a_web_search_google_leaves_hanging_finds_nothing_and_research_goes_on(client):
-    """Live Chapter Two, 2026-10-08: one search of about twenty timed out and failed the whole research
-    stage, three times running. A lost search now finds nothing and research goes on."""
-    job, calls = _hanging_searches(client, lost=2)
+def test_a_web_search_google_leaves_hanging_is_asked_again_never_skipped(client):
+    """Live Chapter Two, 2026-10-08: one search of about twenty timed out and failed the whole research stage.
+    A lost search is now asked once more straight away, and never skipped (owner, 2026-10-08: integrity first)."""
+    job, calls = _hanging_searches(client, lost=1)
     assert job["status"] == "COMPLETED", job.get("failure")
-    assert calls["n"] == 4  # every need was still searched
+    assert calls["n"] == 5  # every need searched; the lost one asked again
 
 
-def test_repeated_lost_searches_still_stop_the_research():
-    """Google unwell: after the tolerated losses the stage stops (and is retried) rather than research with nothing."""
+def test_a_search_lost_twice_is_not_skipped_the_stage_retries():
     from app.ai.providers import UNAVAILABLE
     from app.core.errors import RetryableStageError
-    from app.proposals.ai import LOST_SEARCHES_TOLERATED, ProposalRunner
+    from app.proposals.ai import ProposalRunner
 
     runner = object.__new__(ProposalRunner)
+    tries = {"n": 0}
 
     def lost(*args, **kwargs):
+        tries["n"] += 1
         raise RetryableStageError("VERTEX_TIMEOUT", UNAVAILABLE, "vertex transport timeout")
 
     runner._call = lost
-    for _ in range(LOST_SEARCHES_TOLERATED):
-        assert runner.search("need", "query", 2, lambda q: True) == []
     with pytest.raises(RetryableStageError):
         runner.search("need", "query", 2, lambda q: True)
+    assert tries["n"] == 2  # asked once more, then the error stands and the stage retries

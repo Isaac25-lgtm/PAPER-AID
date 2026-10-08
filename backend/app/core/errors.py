@@ -35,6 +35,20 @@ class LimitExceeded(AppError):
     status, code = 429, "LIMIT_EXCEEDED"
 
 
+class CapacityWait(Exception):  # noqa: N818 - a signal, not an error
+    """No Gemini capacity is free right now (the shared limit is full, or the limiter cannot be reached): the stage
+    pauses, keeps everything it has done, and is delivered again after a short wait. It never uses up the stage's
+    retries for provider failures (speed plan 2026-10-08)."""
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
+class LimiterUnavailable(Exception):
+    """The shared Gemini limiter could not be read or written. Treated as "no capacity": nothing bypasses it."""
+
+
 class StageError(Exception):
     """Raised inside a processing stage. `retryable` decides whether the queue tries again."""
 

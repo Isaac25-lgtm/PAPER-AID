@@ -291,6 +291,8 @@ export interface Job {
   status: JobStatus
   stage: Stage | null
   progress?: { step: 'CHECKING' | 'REPAIRING' | 'FINAL_REVIEW'; round: number } | null // where a long check is (works)
+  /** What the running job is doing now (speed plan 2026-10-08): SOURCES, WRITING, CHECKING, WAITING or RETRYING. */
+  activity?: { kind: string; done: number; total: number; note: string } | null
   paymentStatus: PaymentStatus
   selection: ServiceSelection
   services: ServiceId[]
@@ -411,6 +413,20 @@ export interface ModelCall {
   errorCode?: string
   fallbackAttempt?: number
   reservedUsd?: number
+  promptChars?: number
+  queuedMs?: number
+  at?: string
+}
+
+/** One run of a stage: its start and end, how it ended and how long it waited in the queue first. */
+export interface StageTiming {
+  stage: Stage
+  attempt: number
+  startedAt: string
+  endedAt: string
+  outcome: string
+  code: string
+  queuedMs: number
 }
 
 export interface AdminJob {
@@ -422,6 +438,7 @@ export interface AdminJob {
   events: { at: string; label: string }[]
   adminActions: { at: string; actor: string; action: string }[]
   failureDetail?: string | null
+  timings?: StageTiming[]
 }
 
 export interface AdminSummary {

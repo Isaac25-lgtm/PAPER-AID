@@ -189,6 +189,19 @@ class Settings(BaseSettings):
     # works read per need, and the longest proposal the review service accepts.
     proposal_needs: dict[int, int] = {0: 6, 1: 8, 2: 12, 3: 5, 4: 4}  # 4: the concept paper
     proposal_works_per_need: int = 6
+    # Speed and rate limits (plan of 2026-10-08, Codex-reviewed). One shared limit on Gemini calls in flight across
+    # every worker, per Vertex project, location and model (a web-search call is its own resource): a call waits
+    # for a slot, and a stage that waits too long pauses and is delivered again, never sending more than the
+    # limit. The limiter failing pauses work; it is never bypassed.
+    capacity_gate: bool = True
+    capacity_default: int = 12  # calls in flight at once for a model not listed below
+    capacity_limits: dict[str, int] = {"gemini-3.1-pro-preview": 4}
+    capacity_search: int = 6  # web-search calls in flight at once, per model
+    capacity_wait_sec: float = 30  # how long a call waits for a slot before its stage pauses
+    capacity_retry_sec: int = 20  # how long a paused stage waits before it is delivered again
+    capacity_max_waits: int = 360  # pauses allowed for one job (about two hours) before it stops, uncharged
+    research_parallel: int = 2  # research needs worked on at the same time inside one stage (each call takes a slot)
+    research_call_floor_sec: float = 75  # time limit for a search or abstract reading (never below the token-rate rule)
     proposal_review_max_words: int = 20000
 
     # Invited testers (owner decision 2026-09-25): while set, only these emails (and admins) may use

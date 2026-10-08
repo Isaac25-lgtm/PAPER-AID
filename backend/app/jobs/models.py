@@ -628,6 +628,8 @@ class ModelCall(Camel):
     reserved_usd: float = 0.0  # held against the job's cap for a call that may have been billed (its answer was lost)
     pricing_status: str = ""  # VERIFIED for Vertex execution; legacy entries remain readable
     model_version: str = ""  # version actually reported by Vertex; billing still uses the priced model ref
+    prompt_chars: int = 0  # the size of what was sent (speed plan: time by task, model and size)
+    queued_ms: int = 0  # time spent waiting for a slot under the shared limit, before the call was sent
     at: datetime = Field(default_factory=utcnow)
 
 
@@ -640,6 +642,29 @@ class AdminAction(Camel):
     at: datetime = Field(default_factory=utcnow)
     actor: str
     action: str
+
+
+class Activity(Camel):
+    """What a running job is doing now, in the student's terms (speed plan 2026-10-08): finding sources (done of
+    total), writing, checking (round), waiting for capacity, or retrying after a provider problem. Plain strings,
+    so an older release can still read a job that carries a newer kind."""
+
+    kind: str  # SOURCES, WRITING, CHECKING, WAITING, RETRYING
+    done: int = 0
+    total: int = 0
+    note: str = ""
+
+
+class StageTiming(Camel):
+    """One run of a stage: when it started and ended, how it ended, and how long it waited in the queue first."""
+
+    stage: Stage
+    attempt: int = 0
+    started_at: datetime
+    ended_at: datetime
+    outcome: str  # DONE, RETRY, FAILED, CONTINUED, WAITING
+    code: str = ""
+    queued_ms: int = 0
 
 
 class Progress(Camel):
@@ -688,6 +713,7 @@ class JobView(Camel):
     outputs: list[OutputFile] = []
     failure: JobFailure | None = None
     progress: Progress | None = None  # the check in progress while AUDITING (works)
+    activity: Activity | None = None  # what the running job is doing now (speed plan 2026-10-08)
     created_at: datetime = Field(default_factory=utcnow)
     queued_at: datetime | None = None
     completed_at: datetime | None = None
@@ -728,6 +754,9 @@ class Job(JobView):
     # (service key → 0..1); settlement charges each fixed-price line by it (Codex audit 56c4f83 H05).
     delivery: dict[str, float] = {}
     notice: Notice | None = None
+    timings: list[StageTiming] = []  # each run of each stage (the last 80), for the admin timeline and speed reports
+    ready_at: datetime | None = None  # when the job's next stage was put on the queue (its queue wait starts here)
+    capacity_waits: int = 0  # pauses for Gemini capacity so far (never counted as provider-failure retries)
 
     def view(self) -> JobView:
         return JobView.model_validate(self.model_dump())
@@ -745,6 +774,7 @@ class AdminJob(Camel):
     events: list[JobEvent]
     admin_actions: list[AdminAction]
     failure_detail: str | None
+    timings: list[StageTiming] = []
 
 
 class AdminSummary(Camel):

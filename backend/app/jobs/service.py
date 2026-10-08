@@ -1044,6 +1044,7 @@ def _admin_view(job: Job) -> AdminJob:
         events=job.events,
         admin_actions=job.admin_actions,
         failure_detail=job.failure_detail,
+        timings=job.timings,
     )
 
 

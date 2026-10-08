@@ -28,7 +28,7 @@ from app.pricing.billing import settle_completed
 from app.proposals import evidence as ev
 from app.proposals.ai import Figure, SectionText, Table
 from app.proposals.models import EvidenceItem, EvidenceSource
-from app.proposals.pipeline import _from_literature, _from_web, load_library
+from app.proposals.pipeline import _from_literature, _from_web, checkpointed, load_library, research_topics
 from app.rules import compliance, library
 from app.rules.extract import KEYS, requirements_from
 from app.rules.resolve import PLAN_SHARE_OF_LIMIT
@@ -365,17 +365,20 @@ def stage_researching(ctx: "StageContext") -> None:
     def named(text: str) -> bool:  # the need's own words reach the searching model too
         return bool({w.lower() for w in re.findall(r"[A-Za-z'’-]+", text)} & private)
 
-    for need in [n for n in runner.research_needs(payload) if safe(n.query) and not named(n.need)][:limit]:
-        items = _reading_items(runner, inp, ctx, need.need, today)
-        if spec.source_policy != "CLOSED" and not runner.budget_reached:
-            if need.kind == "LITERATURE":
-                items += _from_literature(runner, need.need, need.query, 0, today, settings.proposal_works_per_need)  # type: ignore[arg-type]
-            if not items and not runner.budget_reached:
-                items += _from_web(runner, need.need, need.query, 0, today, settings.research_max_searches, safe)  # type: ignore[arg-type]
-        found += items
-        if runner.budget_reached:
-            break
-    found = ev.dedupe(found)
+    def answer(need) -> list[EvidenceItem]:
+        def search() -> list[EvidenceItem]:
+            items = _reading_items(runner, inp, ctx, need.need, today)
+            if spec.source_policy != "CLOSED" and not runner.budget_reached:
+                if need.kind == "LITERATURE":
+                    items += _from_literature(runner, need.need, need.query, 0, today, settings.proposal_works_per_need)  # type: ignore[arg-type]
+                if not items and not runner.budget_reached:
+                    items += _from_web(runner, need.need, need.query, 0, today, settings.research_max_searches, safe)  # type: ignore[arg-type]
+            return items
+
+        return checkpointed(ctx, runner, need, search)
+
+    needs = [n for n in runner.research_needs(payload) if safe(n.query) and not named(n.need)][:limit]
+    found = ev.dedupe([*found, *research_topics(ctx, needs, answer, settings.research_parallel)])
     checked = [i for i in found if i.verified]
     verdicts = runner.verify(
         [{"id": i.id, "claim": i.statement, "context": i.need, "sources": [{"title": i.source.title, "published": i.source.year, "access": i.access, "passage": i.passage, "scope": i.scope}]}

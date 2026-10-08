@@ -23,6 +23,8 @@ class VertexOptions(BaseModel):
     tool_config: types.ToolConfig | None = None
     grounding: types.GoogleSearch | None = None
     max_grounding_queries: int | None = Field(default=None, gt=0, strict=True)
+    # The shortest time limit the call may get (seconds); never below what its output allowance needs (call_timeout).
+    time_floor_sec: float | None = Field(default=None, gt=0, le=290)
 
     @model_validator(mode="after")
     def consistent(self) -> "VertexOptions":

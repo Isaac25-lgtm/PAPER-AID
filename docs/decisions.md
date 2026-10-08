@@ -853,3 +853,36 @@ The owner approved Codex's recommendations on the proposal Start page, the insti
   hypothesis pairs. (5) A plan changed while the guide is read aligns nothing (`INPUTS_CHANGED`, not charged).
   (6) Chapter Three's assumed sample-size settings can be confirmed where it asks (`POST /projects/{id}/sampling`).
 - **Testers:** attanborney458@gmail.com added (owner, 2026-10-08).
+
+## 2026-10-08 — Speed and rate limits, without touching the work's integrity
+
+The owner asked for faster jobs that never overload Gemini and never weaken the work ("it has to still be perfect, it
+has to be grounded"). Plan agreed with Codex's two critiques. Evidence: Google's answers varied from 3 s to over 100 s
+for the same task, hung searches waited 3 minutes and then restarted whole stages, research ran one topic at a time,
+and nothing kept many jobs from calling Gemini at once.
+- **Integrity first (owner):** models, thinking levels, prompts, research coverage, verification, reviews, repair
+  rounds and approval are unchanged. Research is never cut short by time, and a search Google loses is asked once
+  more straight away and never skipped (the tolerance of two skipped searches added earlier today is removed); lost
+  twice, the stage retries as before. Lower thinking for research planning is not adopted.
+- **One shared limit on Gemini calls** (`app/jobs/capacity.py`, `capacity_*` settings): every call of a job stage holds
+  a slot of its resource (Vertex project, location and model; a web-search call is its own resource) while it runs, so
+  all workers together never exceed it (Flash 12, Pro 4, searches 6 to start, as settings). Slots live in Firestore
+  (`capacity/{resource}/slots/{n}`), are taken in a transaction and freed only by the request that holds them; a
+  holder that vanished frees its slot when its time is up. A call waits up to 30 s; then the stage pauses
+  (`CapacityWait`): it keeps everything done, its lease is released and it is delivered again in about 20-30 s. Pauses
+  never use up provider-failure retries; after `capacity_max_waits` (about two hours) the job stops uncharged
+  (`CAPACITY_BUSY`). If the limiter cannot be reached, calls pause too: nothing bypasses it. The existing cap of three
+  active jobs per student, with two research topics at a time, bounds any one student to six calls.
+- **Research two topics at a time** (`research_parallel`), results kept in topic order, every call under the limit; each
+  topic answered in full is saved and read back by a retry (`checkpointed`).
+- **Shorter waits:** a search or abstract reading gets 75 s (never below the token-rate rule for its allowance) instead
+  of 180-290 s; retries after provider problems wait 15, 30, 60, 120, 240 s instead of 20 rising to 300. A lost call
+  keeps its unknown-cost reservation.
+- **Measured:** every call records its size and slot wait; every stage run its time, outcome and queue wait (admin
+  page); `speed_report.py` gives per-task times, timeouts, refusals and first-try and eventual completion.
+- **Students see** the topic in progress, waiting for capacity, and a provider retry with nothing lost.
+- **Not done, and why:** buying reserved Google capacity (after measurement), more servers or CPU (they wait on
+  Google), sending duplicate copies of slow calls (double billing), backup models (changes quality and price), lower
+  thinking or fewer research topics (quality), automatic limit adjustment (after the fixed limits are observed), a
+  large paid load test (needs the owner's spending cap; a small live check instead).
+- **Testers:** oboireedison@gmail.com added (owner, 2026-10-08).

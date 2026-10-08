@@ -17,6 +17,14 @@ const CHECK: Record<'CHECKING' | 'REPAIRING' | 'FINAL_REVIEW', string> = {
   FINAL_REVIEW: 'Final check of the whole document',
 }
 
+/** What the running step is doing now, in a few words (speed plan 2026-10-08). */
+function detail(activity: NonNullable<Job['activity']>): string {
+  if (activity.kind === 'SOURCES' && activity.total > 0) return `topic ${Math.min(activity.done + 1, activity.total)} of ${activity.total}`
+  if (activity.kind === 'WRITING' && activity.total > 0) return `${activity.total} sections`
+  if (activity.kind === 'CHECKING' && activity.done > 0) return `round ${activity.done}`
+  return ''
+}
+
 /** Where a running job is in the whole journey: the plan step covers sources and planning, the
  *  writing step writing and checking (both research again before they write). */
 function position(job: Job | null, phase: Phase): number {
@@ -24,6 +32,8 @@ function position(job: Job | null, phase: Phase): number {
   const stage = job?.stage
   if (phase === 'plan') return stage === 'PLANNING' ? 2 : 1
   if (stage === 'AUDITING' || stage === 'EXPORTING' || stage === 'FORMATTING') return 4
+  if (stage === 'RESEARCHING') return 1 // a chapter finds its own sources first
+  if (stage === 'PLANNING') return 2
   return 3
 }
 
@@ -89,6 +99,9 @@ export function StartProgress({ jobId, phase, title, estimate, onDone }: { jobId
                 {now && i === 4 && job?.progress && (
                   <span className="ml-2 font-normal text-fg-muted">{CHECK[job.progress.step]} · round {job.progress.round}</span>
                 )}
+                {now && !(i === 4 && job?.progress) && job?.activity && detail(job.activity) && (
+                  <span className="ml-2 font-normal text-fg-muted">{detail(job.activity)}</span>
+                )}
                 {now && <span className="sr-only"> (in progress)</span>}
                 {done && <span className="sr-only"> (done)</span>}
               </span>
@@ -96,6 +109,18 @@ export function StartProgress({ jobId, phase, title, estimate, onDone }: { jobId
           )
         })}
       </ol>
+      {job?.activity?.kind === 'WAITING' && (
+        <Alert tone="info" className="mt-4">
+          PaperAid is busy with other work, so yours is waiting for its turn. Everything done so far is saved, and it continues by itself.
+        </Alert>
+      )}
+      {job?.activity?.kind === 'RETRYING' && (
+        <Alert tone="info" className="mt-4">
+          {job.activity.note === 'PROVIDER'
+            ? 'The AI service had a temporary problem. PaperAid is trying again; nothing done so far is lost.'
+            : 'PaperAid hit a temporary problem and is trying again; nothing done so far is lost.'}
+        </Alert>
+      )}
       <p className="mt-6 text-sm text-fg-muted">
         {estimate} You can close this page: your work is saved and will be on your dashboard when it is ready.
       </p>

@@ -6,16 +6,17 @@ transaction (so credits can never be held twice or lost between them), and owner
 from __future__ import annotations  # the stores define a `list` method, which shadows the builtin in annotations
 
 import json
+import random
 import threading
 import time
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Protocol
 
 from pydantic import ValidationError
 
-from app.core.errors import PermanentStageError
+from app.core.errors import LimiterUnavailable, PermanentStageError
 from app.datalab.models import DataProject
 from app.jobs.models import Job, JobStatus, LedgerEntry, Wallet
 from app.proposals.models import Project
@@ -52,6 +53,12 @@ class JobStore(Protocol):
     def pending_notice_ids(self, limit: int) -> list[str]: ...  # jobs whose "ready" or "stopped" message is still to be sent
     def get_flag(self, name: str, default: bool) -> bool: ...
     def set_flag(self, name: str, value: bool) -> None: ...
+    # The shared Gemini limiter (speed plan 2026-10-08): `slots` slots per resource. take_slot returns the slot
+    # taken, or None when all are held; a slot is released only by the request that holds it (a late request
+    # whose slot expired and was taken over never frees its successor's). Both raise LimiterUnavailable when the
+    # store cannot be reached: callers pause instead of bypassing the limit.
+    def take_slot(self, resource: str, slots: int, holder: str, ttl_sec: float) -> int | None: ...
+    def release_slot(self, resource: str, slot: int, holder: str) -> None: ...
     def get_wallet(self, uid: str) -> Wallet | None: ...
     def update_wallet(self, uid: str, email: str, mutate: WalletMutator) -> Wallet | None: ...
     def update_job_and_wallet(self, job_id: str, mutate: PairMutator) -> tuple[Job, Wallet] | None: ...
@@ -149,6 +156,7 @@ class LocalJobStore:
         self._datalab.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._hits: dict[str, list[float]] = {}
+        self._slots: dict[str, dict[int, tuple[str, float]]] = {}  # resource -> slot -> (holder, expires at)
         with self._lock:
             self._recover()
 
@@ -252,6 +260,23 @@ class LocalJobStore:
 
     def pending_notice_ids(self, limit: int) -> list[str]:
         return [j.id for j in self._all() if j.notice is not None and j.notice.pending][:limit]
+
+    def take_slot(self, resource: str, slots: int, holder: str, ttl_sec: float) -> int | None:
+        now = time.time()
+        with self._lock:
+            held = self._slots.setdefault(resource, {})
+            for n in range(slots):
+                current = held.get(n)
+                if current is None or current[1] <= now:  # free, or its holder's time is up
+                    held[n] = (holder, now + ttl_sec)
+                    return n
+            return None
+
+    def release_slot(self, resource: str, slot: int, holder: str) -> None:
+        with self._lock:
+            held = self._slots.get(resource, {})
+            if held.get(slot, ("", 0.0))[0] == holder:
+                del held[slot]
 
     def get_flag(self, name: str, default: bool) -> bool:
         with self._lock:
@@ -680,6 +705,54 @@ class FirestoreJobStore:
 
     def pending_notice_ids(self, limit: int) -> list[str]:
         return [d.id for d in self._jobs.where(filter=self._fs.FieldFilter("notice.pending", "==", True)).select([]).limit(limit).stream()]
+
+    def _slots(self, resource: str):
+        return self._db.collection("capacity").document(resource.replace("/", "_")).collection("slots")
+
+    def take_slot(self, resource: str, slots: int, holder: str, ttl_sec: float) -> int | None:
+        from google.api_core.exceptions import GoogleAPIError
+
+        now = datetime.now(UTC)
+        collection = self._slots(resource)
+        try:
+            held = {d.id: (d.to_dict() or {}) for d in collection.stream()}
+            free = [n for n in range(slots) if str(n) not in held or not held[str(n)].get("holder")
+                    or held[str(n)].get("expiresAt") is None or held[str(n)]["expiresAt"] <= now]
+            random.shuffle(free)  # spread simultaneous takers over the free slots
+            for n in free:
+                ref = collection.document(str(n))
+
+                @self._fs.transactional
+                def claim(transaction, ref=ref) -> bool:
+                    snap = ref.get(transaction=transaction)
+                    data = (snap.to_dict() or {}) if snap.exists else {}
+                    expires = data.get("expiresAt")
+                    if data.get("holder") and expires is not None and expires > now:
+                        return False  # taken meanwhile
+                    transaction.set(ref, {"holder": holder, "expiresAt": now + timedelta(seconds=ttl_sec)})
+                    return True
+
+                if claim(self._db.transaction()):
+                    return n
+            return None
+        except GoogleAPIError as exc:
+            raise LimiterUnavailable(type(exc).__name__) from exc
+
+    def release_slot(self, resource: str, slot: int, holder: str) -> None:
+        from google.api_core.exceptions import GoogleAPIError
+
+        ref = self._slots(resource).document(str(slot))
+
+        @self._fs.transactional
+        def free(transaction) -> None:
+            snap = ref.get(transaction=transaction)
+            if snap.exists and (snap.to_dict() or {}).get("holder") == holder:  # only the current holder frees it
+                transaction.delete(ref)
+
+        try:
+            free(self._db.transaction())
+        except GoogleAPIError as exc:
+            raise LimiterUnavailable(type(exc).__name__) from exc
 
     def get_flag(self, name: str, default: bool) -> bool:
         snap = self._db.collection("config").document("runtime").get()

@@ -319,7 +319,10 @@ export function AdminJobPage() {
                         <td className="py-2 pr-3 text-right">
                           {formatNumber(c.inputTokens)} / {formatNumber(c.cachedTokens)} / {formatNumber(c.outputTokens)}
                         </td>
-                        <td className="py-2 pr-3 text-right">{(c.latencyMs / 1000).toFixed(1)}s</td>
+                        <td className="py-2 pr-3 text-right">
+                          {(c.latencyMs / 1000).toFixed(1)}s
+                          {(c.queuedMs ?? 0) > 0 && <span className="block text-fg-subtle">waited {((c.queuedMs ?? 0) / 1000).toFixed(1)}s</span>}
+                        </td>
                         <td className="py-2 text-right font-medium">{usd(c.costUsd)}</td>
                       </tr>
                     ))}
@@ -334,6 +337,35 @@ export function AdminJobPage() {
               </div>
             )}
           </Card>
+          {(detail.timings?.length ?? 0) > 0 && (
+            <Card className="p-5">
+              <h2 className="text-sm font-semibold">Stage timings</h2>
+              <div className="mt-3 overflow-x-auto">
+                <table className="w-full min-w-[32rem] text-xs">
+                  <thead className="text-left text-fg-subtle">
+                    <tr>
+                      <th className="py-2 pr-3 font-medium">Stage</th>
+                      <th className="py-2 pr-3 font-medium">Try</th>
+                      <th className="py-2 pr-3 font-medium">Outcome</th>
+                      <th className="py-2 pr-3 text-right font-medium">Queued</th>
+                      <th className="py-2 text-right font-medium">Ran</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-line">
+                    {detail.timings?.map((t, i) => (
+                      <tr key={i}>
+                        <td className="py-2 pr-3">{STAGE_LABELS[t.stage]}</td>
+                        <td className="py-2 pr-3">{t.attempt + 1}</td>
+                        <td className="py-2 pr-3">{t.outcome}{t.code && <span className="ml-1 text-fg-subtle">{t.code}</span>}</td>
+                        <td className="py-2 pr-3 text-right">{(t.queuedMs / 1000).toFixed(0)}s</td>
+                        <td className="py-2 text-right">{((Date.parse(t.endedAt) - Date.parse(t.startedAt)) / 1000).toFixed(0)}s</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          )}
           <Card className="p-5">
             <h2 className="text-sm font-semibold">Timeline</h2>
             <ol className="mt-3 space-y-2.5 border-l-2 border-line pl-4">

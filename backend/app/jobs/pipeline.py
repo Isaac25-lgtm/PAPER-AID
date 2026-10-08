@@ -12,6 +12,7 @@ being saved; the job's spend ceiling bounds even that."""
 import hashlib
 import json
 import logging
+import random
 import re
 import secrets
 from datetime import timedelta
@@ -32,7 +33,7 @@ from app.ai.orchestration import (
 )
 from app.ai.styles import writing_brief
 from app.analysis import fetch, paper_checks, references, research, signals, structure
-from app.core.errors import InvalidDocument, PermanentStageError, StageError
+from app.core.errors import CapacityWait, InvalidDocument, PermanentStageError, StageError
 from app.core.logging import job_id as job_id_var
 from app.core.logging import log
 from app.documents import groups as paragraph_groups
@@ -45,6 +46,7 @@ from app.formatting.guideline import MAX_GUIDE_WORDS, to_spec
 from app.formatting.presets import PRESETS, with_custom
 from app.jobs import state
 from app.jobs.models import (
+    Activity,
     AnalysisResult,
     ChangedBlock,
     CheckedClaim,
@@ -62,6 +64,7 @@ from app.jobs.models import (
     ServiceId,
     Source,
     Stage,
+    StageTiming,
     StoredOutput,
     Wallet,
     utcnow,
@@ -211,7 +214,14 @@ class StageContext:
         budget = estimate.budget_usd if estimate is not None else self.job.budget_usd
         # The run executes with the engine it was priced with (its estimate's, then its quote's).
         engine = estimate.engine if estimate is not None else self.job.quote.engine if self.job.quote else None
-        return runner(self.rt.settings, record, spent, budget, cache=_ResponseCache(self), heartbeat=self.heartbeat, phase=self.phase, engine=engine)
+        from app.jobs import capacity
+
+        gate = capacity.gate(self.rt.store, self.rt.settings, self.job.id) if self.phase == "job" and self.rt.settings.capacity_gate else None
+        return runner(self.rt.settings, record, spent, budget, cache=_ResponseCache(self), heartbeat=self.heartbeat, phase=self.phase, engine=engine, gate=gate)
+
+    def activity(self, kind: str, done: int = 0, total: int = 0, note: str = "") -> None:
+        """Tell the student what the stage is doing now (speed plan 2026-10-08). Never fails the stage."""
+        self.update(lambda j: _set(j, activity=Activity(kind=kind, done=done, total=total, note=note)))
 
 
 class _ResponseCache:
@@ -1358,6 +1368,9 @@ def _run_step(rt: Runtime, job_id: str) -> None:
         return
 
     started = utcnow()
+    attempt = job.attempts
+    since = job.ready_at or job.queued_at  # when its turn in the queue began
+    queued_ms = int((started - since).total_seconds() * 1000) if since else 0
     ctx = StageContext(rt, job)
     if job.selection.datalab != "NONE":
         from app.datalab import pipeline as datalab_pipeline  # Data Lab imports the job service, which the worker's module must not import first
@@ -1372,10 +1385,20 @@ def _run_step(rt: Runtime, job_id: str) -> None:
         run = proposal_pipeline.STAGES[stage]
     else:
         run = STAGES[stage]
+    def timing(outcome: str, code: str = "") -> StageTiming:
+        return StageTiming(stage=stage, attempt=attempt, started_at=started, ended_at=utcnow(), outcome=outcome, code=code, queued_ms=max(0, queued_ms))
+
     try:
         run(ctx)
     except StageContinues:
-        _continue_later(rt, job_id, stage, ctx.owner)
+        _continue_later(rt, job_id, stage, ctx.owner, timing("CONTINUED"))
+        return
+    except CapacityWait as exc:  # no Gemini capacity free: pause, keep everything done, come back shortly
+        try:
+            ctx.assert_owner()
+        except StageContinues:
+            return
+        _wait_for_capacity(rt, job_id, stage, ctx.owner, exc.reason, timing("WAITING", "CAPACITY"))
         return
     except StageError as exc:
         try:
@@ -1385,7 +1408,7 @@ def _run_step(rt: Runtime, job_id: str) -> None:
         from app import notify
 
         notify.provider_problem(rt, exc.code, exc.detail)  # a key or a provider balance the owner must fix
-        _handle_failure(rt, job_id, stage, ctx.owner, exc.code, exc.user_message, exc.detail, exc.retryable)
+        _handle_failure(rt, job_id, stage, ctx.owner, exc.code, exc.user_message, exc.detail, exc.retryable, timing("RETRY" if exc.retryable else "FAILED", exc.code))
         return
     except Exception as exc:  # unexpected: classify as retryable so a transient bug can recover
         try:
@@ -1393,7 +1416,7 @@ def _run_step(rt: Runtime, job_id: str) -> None:
         except StageContinues:
             return
         logger.exception("stage crashed", extra={"fields": {"stage": stage.value}})
-        _handle_failure(rt, job_id, stage, ctx.owner, "INTERNAL", GENERIC_FAILURE, f"{type(exc).__name__}: {exc}", True)
+        _handle_failure(rt, job_id, stage, ctx.owner, "INTERNAL", GENERIC_FAILURE, f"{type(exc).__name__}: {exc}", True, timing("RETRY", "INTERNAL"))
         return
 
     def complete(j: Job, w: Wallet) -> tuple[Job, Wallet] | None:
@@ -1404,6 +1427,9 @@ def _run_step(rt: Runtime, job_id: str) -> None:
         j.attempts = 0
         j.lease_until = None
         j.lease_owner = ""
+        j.timings = [*j.timings, timing("DONE")][-80:]
+        j.activity = None
+        j.ready_at = utcnow()
         j.stage = next((s for s in j.pipeline if s not in j.completed_stages), None)
         if j.stage is None:
             state.transition(j, JobStatus.COMPLETED, "Completed with warnings" if j.outcome == "PARTIAL" else "Completed")
@@ -1422,7 +1448,7 @@ def _run_step(rt: Runtime, job_id: str) -> None:
         rt.queue.enqueue(job_id, task_name(job))
 
 
-def _continue_later(rt: Runtime, job_id: str, stage: Stage, owner: str) -> None:
+def _continue_later(rt: Runtime, job_id: str, stage: Stage, owner: str, timing: StageTiming | None = None) -> None:
     """Release the lease and deliver the same stage again; its finished calls replay from the cache."""
 
     def release(j: Job) -> Job | None:
@@ -1430,12 +1456,55 @@ def _continue_later(rt: Runtime, job_id: str, stage: Stage, owner: str) -> None:
             return None  # cancelled or failed meanwhile: stop here
         j.lease_until = None
         j.lease_owner = ""
+        if timing is not None:
+            j.timings = [*j.timings, timing][-80:]
+        j.ready_at = utcnow()
         j.events.append(JobEvent(label=f"Continuing {stage.value.lower()} in a new task"))
         return j
 
     job = rt.store.update(job_id, release)
     if job is not None:
         rt.queue.enqueue(job_id, task_name(job, f"-c{len(job.events)}"))
+
+
+CAPACITY_BUSY = ("PaperAid is very busy right now, so this could not start in time. Nothing was charged and nothing you have "
+                 "is lost. Please start it again in a little while.")
+
+
+def _wait_for_capacity(rt: Runtime, job_id: str, stage: Stage, owner: str, reason: str, timing: StageTiming) -> None:
+    """No Gemini capacity was free (speed plan 2026-10-08): the stage keeps what it has done (its finished calls replay
+    from the cache), releases its lease and is delivered again after a short wait. These pauses never use up the
+    stage's retries for provider failures; after `capacity_max_waits` of them (about two hours) the job stops, uncharged."""
+    settings = rt.settings
+    retry_again = False
+
+    def pause(j: Job, w: Wallet) -> tuple[Job, Wallet] | None:
+        nonlocal retry_again
+        if j.status != JobStatus.PROCESSING or j.stage != stage or j.lease_owner != owner:
+            return None  # cancelled, failed or finished meanwhile
+        j.lease_until, j.lease_owner = None, ""
+        j.timings = [*j.timings, timing][-80:]
+        j.capacity_waits += 1
+        if j.capacity_waits > settings.capacity_max_waits:
+            j.failure = JobFailure(code="CAPACITY_BUSY", user_message=CAPACITY_BUSY, retryable=False)
+            j.failure_detail = f"stage={stage.value} capacity waits exhausted: {reason}"[:500]
+            state.transition(j, JobStatus.FAILED, "Failed: CAPACITY_BUSY")
+            refund_job(j, w, "Job failed, so nothing was charged")
+            return j, w
+        if j.activity is None or j.activity.kind != "WAITING":
+            j.events.append(JobEvent(label=f"Waiting for capacity during {stage.value.lower()}"))
+        j.activity = Activity(kind="WAITING", note=reason)
+        j.ready_at = utcnow()
+        retry_again = True
+        return j, w
+
+    result = rt.store.update_job_and_wallet(job_id, pause)
+    log(logger, logging.INFO, "stage paused for capacity", stage=stage.value, reason=reason, willRetry=retry_again)
+    if result and retry_again:
+        job = result[0]
+        rt.queue.enqueue(job_id, task_name(job, f"-w{job.capacity_waits}"), delay_sec=settings.capacity_retry_sec + random.randint(0, max(1, settings.capacity_retry_sec // 2)))
+    elif result:
+        _notify(rt, job_id)
 
 
 def _finish(rt: Runtime, job_id: str, owner: str) -> None:
@@ -1461,7 +1530,13 @@ def _notify(rt: Runtime, job_id: str) -> None:
         notify.after_job(rt, job)
 
 
-def _handle_failure(rt: Runtime, job_id: str, stage: Stage, owner: str, code: str, message: str, detail: str, retryable: bool) -> None:
+# Provider problems (Google slow, busy or unreachable) are retried sooner than other failures, within the same number
+# of attempts (speed plan 2026-10-08): 15, 30, 60, 120 then 240 seconds instead of 20 doubling to 300.
+PROVIDER_CODES = ("VERTEX_", "PROVIDER_UNAVAILABLE")
+
+
+def _handle_failure(rt: Runtime, job_id: str, stage: Stage, owner: str, code: str, message: str, detail: str, retryable: bool,
+                    timing: StageTiming | None = None) -> None:
     settings = rt.settings
     retry_again = False
 
@@ -1471,9 +1546,13 @@ def _handle_failure(rt: Runtime, job_id: str, stage: Stage, owner: str, code: st
             return None  # already finished (an error after the stage completed and settled it) or stopped: never refunded twice or after delivery
         j.lease_until = None
         j.lease_owner = ""
+        if timing is not None:
+            j.timings = [*j.timings, timing][-80:]
         if retryable and j.attempts + 1 < settings.stage_max_attempts:
             j.attempts += 1
             j.events.append(JobEvent(label=f"Retrying {stage.value.lower()} after {code}"))
+            j.activity = Activity(kind="RETRYING", note="PROVIDER" if code.startswith(PROVIDER_CODES) else "OTHER")
+            j.ready_at = utcnow()
             retry_again = True
             return j, w
         from app.ai.providers import UNAVAILABLE, UNAVAILABLE_FINAL
@@ -1489,7 +1568,7 @@ def _handle_failure(rt: Runtime, job_id: str, stage: Stage, owner: str, code: st
     job = result[0] if result else None
     log(logger, logging.WARNING, "stage failed", stage=stage.value, code=code, retryable=retryable, willRetry=retry_again)
     if job and retry_again:
-        delay = min(300, 10 * 2**job.attempts)
+        delay = min(240, 15 * 2 ** (job.attempts - 1)) if code.startswith(PROVIDER_CODES) else min(300, 10 * 2**job.attempts)
         rt.queue.enqueue(job_id, task_name(job, f"-a{job.attempts}"), delay_sec=delay)
     elif job is not None:
         _notify(rt, job_id)
