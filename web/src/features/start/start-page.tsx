@@ -59,7 +59,7 @@ const TITLES: Record<WorkKind, [string, string]> = {
 }
 /** Questions that decide the document, asked as required on page 2 (owner decision 2026-10-01). */
 const MUST_ANSWER: Record<WorkKind, string[]> = {
-  COURSEWORK: ['level', 'citation_style', 'ai_policy'],
+  COURSEWORK: ['level', 'citation_style'], // nothing about AI is asked (owner decision 2026-10-08)
   CONCEPT_NOTE: ['applicant', 'geography', 'duration_months', 'currency'],
   FUNDING_PROPOSAL: ['applicant', 'geography', 'amount_requested', 'duration_months', 'currency'],
 }
@@ -77,6 +77,9 @@ const COVER: [string, string][] = [
 ]
 
 const PASTED_CALL = 'The call (pasted)'
+// Coursework takes no files (owner decision 2026-10-08: a question paper put in the wrong upload box was read as a
+// reading and the essay refused): the question is typed or pasted, and the rest of the question paper is pasted as text.
+const PASTED_PAPER = 'The question paper (pasted)'
 
 interface Upload {
   file: File | null // null: saved before the page was reloaded (only its name is known here)
@@ -143,13 +146,16 @@ function WorkPageOne({ kind, draftId, onSaved, onCreated }: { kind: WorkKind; dr
   const [error, setError] = useState<string | null>(null)
   const [tried, setTried] = useState(false)
   const needsCall = !coursework
+  const pastedRole: SourceRole = coursework ? 'BRIEF' : 'CALL'
+  const pastedName = coursework ? PASTED_PAPER : PASTED_CALL
   const problems = {
-    description: description.trim().length < 15 ? (coursework ? 'Paste your question to continue.' : 'Describe the problem in a sentence or two.') : null,
+    description: description.trim().length < 15 ? (coursework ? 'Type or paste your question to continue.' : 'Describe the problem in a sentence or two.') : null,
+    context: coursework && pasted.trim() && pasted.trim().split(/\s+/).length < 5 ? 'Paste the text of your question paper, or leave this empty.' : null,
     title: !coursework && title.trim().length < 3 ? 'Give your project a short title.' : null,
     proposal: !coursework && proposal.trim().length < 15 ? 'Say what you propose to do, in a sentence or two.' : null,
     call: needsCall && !pastedKept && !uploads.some((u) => u.role === 'CALL') && pasted.trim().split(/\s+/).length < 10 ? 'Upload or paste the call or the funder’s guidelines.' : null,
   }
-  const ok = !problems.description && !problems.title && !problems.call && !problems.proposal
+  const ok = !problems.description && !problems.title && !problems.call && !problems.proposal && !problems.context
 
   // A work already saved from this page (reloaded, or back from page 2): its details and documents.
   useEffect(() => {
@@ -165,7 +171,7 @@ function WorkPageOne({ kind, draftId, onSaved, onCreated }: { kind: WorkKind; dr
         if (w.activeJob) return onCreated(w) // it is being read: page 2 shows that
         // The call pasted earlier is the pasted call, not a file in the list (Codex's second look at
         // 9239dd0): pasting again replaces it; leaving the box empty keeps it.
-        const earlier = w.sources.find((source) => source.role === 'CALL' && source.name === PASTED_CALL)
+        const earlier = w.sources.find((source) => (source.role === 'CALL' && source.name === PASTED_CALL) || (source.role === 'BRIEF' && source.name === PASTED_PAPER))
         saved.current = { id: w.id, pasted: earlier ? { id: earlier.id, text: '' } : null }
         setPastedKept(Boolean(earlier))
         setVariant(w.variant)
@@ -223,7 +229,7 @@ function WorkPageOne({ kind, draftId, onSaved, onCreated }: { kind: WorkKind; dr
       }
       if (text && !record.pasted) {
         const known = new Set(w.sources.map((source) => source.id))
-        w = await data.works.pasteSource(w.id, 'CALL', PASTED_CALL, text)
+        w = await data.works.pasteSource(w.id, pastedRole, pastedName, text)
         record.pasted = { id: w.sources.find((source) => !known.has(source.id))?.id ?? '', text }
       }
       setPastedKept(Boolean(record.pasted))
@@ -266,13 +272,13 @@ function WorkPageOne({ kind, draftId, onSaved, onCreated }: { kind: WorkKind; dr
           <Input label="Project title" required value={title} maxLength={300} onChange={(e) => setTitle(e.target.value)} error={tried ? problems.title : null} />
         )}
         <TextArea
-          label={coursework ? 'Your question or title' : 'The problem, and who it affects'}
+          label={coursework ? 'Your question' : 'The problem, and who it affects'}
           required
           rows={coursework ? 5 : 4}
           maxLength={8000}
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          hint={coursework ? 'Paste it exactly as your lecturer wrote it, every part of it.' : 'Your own words are enough. PaperAid finds the evidence.'}
+          hint={coursework ? 'Type or paste the question itself, exactly as your lecturer wrote it.' : 'Your own words are enough. PaperAid finds the evidence.'}
           error={tried ? problems.description : null}
         />
         {!coursework && (
@@ -280,11 +286,10 @@ function WorkPageOne({ kind, draftId, onSaved, onCreated }: { kind: WorkKind; dr
             hint="The activities, and the change they will bring." error={tried ? problems.proposal : null} />
         )}
         {coursework ? (
-          <div className="grid gap-3 sm:grid-cols-3">
-            <FileDropzone compact label="Brief (optional)" hint="Word or PDF" accept=".docx,.pdf" onFile={add('BRIEF')} disabled={busy} />
-            <FileDropzone compact label="Marking rubric (optional)" hint="Word or PDF" accept=".docx,.pdf" onFile={add('RUBRIC')} disabled={busy} />
-            <FileDropzone compact label="Set readings (optional)" hint="Word or PDF" accept=".docx,.pdf" onFile={add('READING')} disabled={busy} />
-          </div>
+          <TextArea label="More context (optional)" rows={6} maxLength={60000} value={pasted} onChange={(e) => setPasted(e.target.value)} error={tried ? problems.context : null}
+            hint={pastedKept && !pasted.trim()
+              ? 'What you pasted is saved. Paste again to replace it.'
+              : 'Copy and paste everything from the question paper: every question, the instructions, the marking guide, the word limit.'} />
         ) : (
           <div className="space-y-3">
             <div className="grid gap-3 sm:grid-cols-2">
@@ -333,7 +338,6 @@ function WorkPageTwo({ work, onChange, onBack }: { work: Work; onChange: (w: Wor
   const navigate = useNavigate()
   const [answers, setAnswers] = useState<Record<string, string>>({})
   const [confirmed, setConfirmed] = useState(false)
-  const [aiNote, setAiNote] = useState(work.aiNote)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [tried, setTried] = useState(false)
@@ -434,7 +438,6 @@ function WorkPageTwo({ work, onChange, onBack }: { work: Work; onChange: (w: Wor
       if (confirmAll) given['confirm:all'] = 'yes'
       const answered = await data.works.answer(work.id, given, work.specVersion, true)
       onChange(answered)
-      if (work.kind === 'COURSEWORK' && answered.spec?.aiPolicy !== 'BANNED' && aiNote !== answered.aiNote) await data.works.setAiNote(work.id, aiNote)
       await data.works.start(work.id)
       navigate(`/app/works/${work.id}`)
     } catch (e) {
@@ -494,12 +497,6 @@ function WorkPageTwo({ work, onChange, onBack }: { work: Work; onChange: (w: Wor
               ))}
             </div>
           </details>
-        )}
-        {work.kind === 'COURSEWORK' && ['', 'NOT_MENTIONED'].includes(value('ai_policy')) && spec.aiPolicy !== 'BANNED' && (
-          <Card className="p-5">
-            <Checkbox checked={aiNote} onChange={(e) => setAiNote(e.target.checked)}
-              label={<span>Add a note on the last page: “This document was drafted by an AI-assisted third party.” Your brief does not say whether AI tools are allowed, so this is on unless you untick it.</span>} />
-          </Card>
         )}
         {work.kind === 'COURSEWORK' && (
           <details className="rounded-2xl border border-line bg-white p-5 shadow-card">
@@ -594,11 +591,6 @@ function Answer({ spec, question: q, value, onChange, required, error, skippable
           ))}
         </Select>
         {error && <p className="mt-1.5 text-xs font-medium text-red-600">{error}</p>}
-        {q.id === 'ai_policy' && value === 'BANNED' && (
-          <p className="mt-1.5 rounded-lg bg-amber-50 p-2.5 text-xs text-amber-950">
-            Your document will end with: “This document was drafted by an AI-assisted third party.” This cannot be removed.
-          </p>
-        )}
       </div>
     )
   }

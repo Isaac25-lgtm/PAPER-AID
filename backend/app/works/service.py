@@ -42,7 +42,7 @@ from app.runtime import Runtime
 from app.works import budget as budget_engine
 from app.works import export, numbers
 from app.works.models import (
-    AI_NOTE,
+    AI_BANNED_NOTICE,
     KIND_MODES,
     KIND_VARIANTS,
     Budget,
@@ -330,11 +330,11 @@ def confirm_spec(rt: Runtime, user: User, work_id: str, base_version: int) -> Wo
 
 
 def set_ai_note(rt: Runtime, user: User, work_id: str, on: bool) -> WorkView:
-    """Coursework whose AI rule is unknown: the student may leave out the last-page note. When the
-    brief bans AI the note is always added (owner decision 2026-09-30)."""
+    """The student asks for the last-page note, or takes it off again. Nothing about AI is printed otherwise
+    (owner decision 2026-10-08, replacing the note a ban forced and the default note for an unknown policy)."""
 
     def apply(k: Work) -> Work:
-        k.ai_note = on
+        k.ai_note = k.ai_note_asked = on
         return k
 
     return view(rt, _change(rt, user, work_id, apply))
@@ -663,7 +663,7 @@ def quote_step(rt: Runtime, user: User, work_id: str, step: Step, note: str, bun
         sources=[s for s in k.sources if step == "READ" or s.role == "READING"], spec=spec if step != "READ" else None,
         plan=k.plan if step in ("DRAFT", "REVISE") else None, plan_version=k.plan_version, results=k.results if step in ("DRAFT", "REVISE") else None,
         results_version=k.results_version, budget=k.budget if step in ("DRAFT", "REVISE") else None, budget_version=k.budget_version,
-        evidence_files=list(k.evidence_files), note=note, ai_note=k.ai_note, exploratory=spec.exploratory,
+        evidence_files=list(k.evidence_files), note=note, ai_note=k.ai_note, ai_note_asked=k.ai_note_asked, exploratory=spec.exploratory,
         base=base, base_version=base_version, base_sha=base_sha, revise=revise, request_ids=request_ids,
         private=_private_words(rt, k, user) if step in ("PLAN", "DRAFT") else [],
     )
@@ -691,8 +691,7 @@ def quote_step(rt: Runtime, user: User, work_id: str, step: Step, note: str, bun
         raise NotFound("We couldn't find this work.")
     notice = None
     if step in ("DRAFT", "REVISE") and k.kind == "COURSEWORK" and spec.ai_policy == "BANNED":
-        notice = (f"Your assignment says AI tools are not allowed. Because of that, PaperAid adds a short note on the last page of your Word "
-                  f"document: \"{AI_NOTE}\"")
+        notice = AI_BANNED_NOTICE  # told on screen; nothing is printed in the document (owner decision 2026-10-08)
     elif step == "DRAFT" and spec.exploratory:
         notice = "You do not meet every eligibility criterion, so this is an exploratory draft: it is marked as not ready to submit."
     return WorkStepQuote(job=job.view(), quote=Quote.model_validate(job.quote.model_dump()), notice=notice)

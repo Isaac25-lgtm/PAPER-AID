@@ -135,14 +135,15 @@ try {
   await page.getByRole('button', { name: 'Approve the plan' }).click()
   await page.getByRole('button', { name: 'Approved' }).waitFor()
   step('an older plan is still approved on its own page')
-  await run('Write my draft', 'AI-assisted third party')
-  step('before buying, the student was told about the last-page note')
+  await run('Write my draft', 'AI tools are not allowed')
+  step('before buying, the student was told their assignment does not allow AI tools')
   await page.getByRole('button', { name: /Download Word/ }).waitFor() // a written document opens in the workspace
-  await page.getByText('This document was drafted by an AI-assisted third party.').waitFor()
+  await page.getByText(/AI tools are not allowed\. Check your institution/).first().waitFor() // told on screen
+  if (await page.getByText('This document was drafted by an AI-assisted third party.').count()) throw new Error('an AI note was printed without being asked for')
   const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: /Download Word/ }).click()])
   if (!download.suggestedFilename().endsWith('.docx')) throw new Error('no Word file')
   await shot('w2-coursework-document')
-  step('the coursework draft opens in the workspace with its last-page note, and downloads')
+  step('the coursework draft opens in the workspace with the on-screen notice and no printed note, and downloads')
 
   await olderWork({ kind: 'FUNDING_PROPOSAL', variant: 'NGO_PROJECT', mode: 'COMPACT', citation: 'APA7', inputs: { title: 'Safer deliveries in Kamuli',
     description: 'Too many mothers in Kamuli deliver at home without skilled care, and referrals are late.', answers: {}, experience: '' } },

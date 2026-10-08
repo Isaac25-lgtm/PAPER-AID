@@ -44,7 +44,9 @@ def _coursework(client, ai_answer="NOT_MENTIONED", variant="ESSAY", description=
     return work
 
 
-def test_coursework_essay_end_to_end_with_banned_ai_note(works_client):
+def test_coursework_essay_end_to_end_a_ban_on_ai_is_told_on_screen_and_never_printed(works_client):
+    """Owner decision 2026-10-08: nothing about AI is printed in the document unless the student asks; an assignment
+    that bans AI tools is told to the student on screen."""
     client = works_client
     work = _coursework(client, ai_answer="BANNED")
     spec = work["spec"]
@@ -58,33 +60,62 @@ def test_coursework_essay_end_to_end_with_banned_ai_note(works_client):
     work = client.post(f"/api/works/{work['id']}/plan/approve", headers=STUDENT, json={"baseVersion": work["planVersion"]}).json()
     assert work["planStatus"] == "APPROVED", work
     quote, job = _run(client, work["id"], "DRAFT")
-    assert "AI-assisted third party" in (quote["notice"] or "")
+    assert quote["notice"] == "Your assignment says AI tools are not allowed. Check your institution's rules before you submit this."
     assert job["status"] == "COMPLETED", (job.get("failure"), job.get("warnings"))
     work = _work(client, work["id"])
     assert work["current"] == 1 and work["status"] in ("READY", "READY_WITH_WARNINGS"), work["readiness"]
     doc = client.get(f"/api/works/{work['id']}/document", headers=STUDENT).json()
-    assert doc["aiNote"] == "This document was drafted by an AI-assisted third party."
+    assert doc["aiNote"] == ""
     assert doc["words"] <= 1500 and doc["references"]
+    assert any("AI tools are not allowed" in (i["note"] or "") for i in doc["readiness"])  # in the checks the student sees
     ids = {i["id"] for i in doc["readiness"]}
-    assert {"CW-047", "CW-007"} <= ids
+    assert "CW-007" in ids and "CW-047" not in ids  # the length is checked; no rule requires an AI note any more
     exported = client.get(f"/api/works/{work['id']}/export", headers=STUDENT)
     assert exported.status_code == 200
     paragraphs = [p.text for p in Document(io.BytesIO(exported.content)).paragraphs if p.text.strip()]
-    assert paragraphs[-1] == "This document was drafted by an AI-assisted third party."
+    assert not any("AI" in p and "third party" in p for p in paragraphs)
     assert client.get(f"/api/works/{work['id']}", headers=OTHER).status_code == 404
 
 
-def test_unknown_ai_policy_note_can_be_turned_off_but_a_ban_cannot(works_client):
+def test_the_last_page_note_is_added_only_when_the_student_asks_for_it(works_client):
     client = works_client
     work = _coursework(client)
-    work = client.post(f"/api/works/{work['id']}/ai-note", headers=STUDENT, json={"on": False}).json()
-    assert work["aiNote"] is False
+    assert work["aiNoteAsked"] is False  # nothing is asked, and nothing is on by default
     _run(client, work["id"], "PLAN")
     work = _work(client, work["id"])
     client.post(f"/api/works/{work['id']}/plan/approve", headers=STUDENT, json={"baseVersion": work["planVersion"]})
     quote, job = _run(client, work["id"], "DRAFT")
     assert quote["notice"] is None and job["status"] == "COMPLETED"
     assert client.get(f"/api/works/{work['id']}/document", headers=STUDENT).json()["aiNote"] == ""
+
+    asked = _coursework(client)
+    asked = client.post(f"/api/works/{asked['id']}/ai-note", headers=STUDENT, json={"on": True}).json()
+    assert asked["aiNoteAsked"] is True
+    _run(client, asked["id"], "PLAN")
+    asked = _work(client, asked["id"])
+    client.post(f"/api/works/{asked['id']}/plan/approve", headers=STUDENT, json={"baseVersion": asked["planVersion"]})
+    _, job = _run(client, asked["id"], "DRAFT")
+    assert job["status"] == "COMPLETED"
+    assert client.get(f"/api/works/{asked['id']}/document", headers=STUDENT).json()["aiNote"] == "This document was drafted by an AI-assisted third party."
+
+
+def test_a_request_to_paperaid_is_never_the_assignments_question(works_client):
+    """A tester's essay was refused (live, 2026-10-08) for not answering "Solve this assignment for me?": the sentence
+    they typed, while the question paper sat elsewhere. A request is not a question; with the paper pasted the questions
+    come from it, and with nothing else the student is asked for the question before any work starts."""
+    from app.rules.resolve import is_request
+
+    assert is_request("Solve this assignment for me?") and is_request("Please answer the questions below") and is_request("Do my coursework")
+    assert not is_request("Write an essay on inflation in Uganda") and not is_request("Solve for x in the equation 2x + 3 = 11")
+    client = works_client
+    created = client.post("/api/works", headers=STUDENT, json={"kind": "COURSEWORK", "variant": "ESSAY",
+                                                              "inputs": {"title": "Solve this assignment for me?", "description": "Solve this assignment for me?"}}).json()
+    answered = client.post(f"/api/works/{created['id']}/answers", headers=STUDENT,
+                           json={"answers": {"word_limit": "1500", "level": "LATER_UG"}, "skipRest": True, "baseVersion": created["specVersion"]}).json()
+    spec = answered["spec"]
+    assert spec["gate"] != "PASS" and not spec["coverage"]  # no question yet: asked for, nothing written
+    assert any(q["id"] == "task" for q in spec["questions"])
+    assert not any(q["id"] == "ai_policy" for q in spec["questions"])  # never asked
 
 
 def test_reflective_work_needs_the_students_own_experience(works_client):

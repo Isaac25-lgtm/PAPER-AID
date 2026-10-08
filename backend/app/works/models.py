@@ -40,6 +40,8 @@ AUTHORITY_ORDER: tuple[str, ...] = ("EXTERNAL_MANDATORY", "USER_EXPLICIT", "DOCU
 Readiness = Literal["NOT_READY", "READY_WITH_WARNINGS", "READY"]
 # The note a coursework draft carries on its last page when the brief bans AI (owner decision 2026-09-30).
 AI_NOTE = "This document was drafted by an AI-assisted third party."
+# Shown on screen, never printed in the document (owner decision 2026-10-08), when the assignment itself bans AI tools.
+AI_BANNED_NOTICE = "Your assignment says AI tools are not allowed. Check your institution's rules before you submit this."
 
 
 def _one_line(value: str) -> str:
@@ -499,7 +501,10 @@ class WorkView(Camel):
     documents: list[DocVersion] = []
     current: int = 0
     requests: list[ChangeRequest] = []
-    ai_note: bool = True  # an assignment whose AI policy is unknown: add the last-page note (the student may untick it)
+    ai_note: bool = True  # before 2026-10-08: the last-page note for an unknown AI policy (kept so older releases can read the record)
+    # The student asked for the last-page note (owner decision 2026-10-08: nothing about AI is asked or printed unless
+    # the student asks; an assignment that bans AI tools is told to the student on screen, never in the document).
+    ai_note_asked: bool = False
     exploratory: bool = False  # the student chose an exploratory draft although an eligibility criterion is not met
     readiness: list[ReadinessItem] = []  # the current document's compliance report (computed for the view)
     status: Readiness | None = None  # (computed for the view)
@@ -570,7 +575,8 @@ class WorkStepInput(Camel):
     budget_version: int = 0
     evidence_files: list[str] = []
     note: str = ""
-    ai_note: bool = True
+    ai_note: bool = True  # before 2026-10-08 (read by steps priced then)
+    ai_note_asked: bool = False  # the student asked for the last-page note
     exploratory: bool = False
     private: list[str] = []  # words that must never reach a search
     # REVISE: the version being revised and the requests by section key; every other section is kept.

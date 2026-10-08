@@ -55,13 +55,17 @@ try {
   await page.getByRole('link', { name: /Start coursework/ }).click()
   await page.getByRole('heading', { name: 'What is your coursework?' }).waitFor()
   await page.getByRole('button', { name: 'Continue' }).click()
-  await page.getByText('Paste your question to continue.').waitFor() // the error says what is needed, beside the field
-  await page.getByLabel(/Your question or title/).fill('Critically evaluate the effectiveness of community health workers in improving maternal health outcomes in rural Uganda since 2015.')
+  await page.getByText('Type or paste your question to continue.').waitFor() // the error says what is needed, beside the field
+  // Owner decision 2026-10-08: no files for coursework. The question is typed, the rest of the question paper pasted.
+  if (await page.getByText(/Brief \(optional\)|Set readings|Marking rubric/).count()) throw new Error('the coursework upload boxes are back')
+  await page.getByLabel(/^Your question/).fill('Critically evaluate the effectiveness of community health workers in improving maternal health outcomes in rural Uganda since 2015.')
+  await page.getByLabel(/More context/).fill('Instructions: answer in 1,500 words. Use APA 7 referencing. Marks are given for critical evaluation and for the use of recent evidence.')
   await shot('03-coursework-page1')
   await page.getByRole('button', { name: 'Continue' }).click()
   await page.getByRole('heading', { name: 'A few details' }).waitFor()
   await page.getByLabel(/^Word limit/).first().selectOption('1500')
-  for (const label of [/level is this work/i, /referencing style/i, /using AI/i]) {
+  if (await page.getByLabel(/using AI/i).count()) throw new Error('the AI question is asked again')
+  for (const label of [/level is this work/i, /referencing style/i]) {
     const field = page.getByLabel(label).first()
     if ((await field.count()) && (await field.evaluate((e) => e.tagName)) === 'SELECT') await field.selectOption({ index: 1 })
   }

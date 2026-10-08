@@ -1351,11 +1351,10 @@ def _document(inp: WorkStepInput, current: dict[str, SectionText], reviewed: set
                                     table_illustrative=bool(table) and text.table.illustrative and _examples_allowed(inp), figure=figure,
                                     field_id=s.field_id, reviewed=s.key in reviewed))
     note = ""
-    if spec.kind == "COURSEWORK":
-        if spec.ai_policy == "BANNED" or (spec.ai_policy == "UNKNOWN" and inp.ai_note):
-            note = AI_NOTE  # never removable for a banned policy (owner decision 2026-09-30)
-        elif spec.ai_policy == "ALLOWED_WITH_DISCLOSURE":
-            note = DISCLOSURE
+    if spec.kind == "COURSEWORK" and inp.ai_note_asked:
+        # Only when the student asked for it (owner decision 2026-10-08, replacing the note forced by a ban and the
+        # default note for an unknown policy): a disclosure statement where the assignment asks for one.
+        note = DISCLOSURE if spec.ai_policy == "ALLOWED_WITH_DISCLOSURE" else AI_NOTE
     return WorkDocument(kind=inp.kind, variant=inp.variant, title=inp.plan.title, spec_version=spec.version, plan_version=inp.plan_version,
                         results_version=inp.results_version, budget_version=inp.budget_version, sections=sections, cited=cited, exploratory=spec.exploratory, ai_note=note,
                         spec_snapshot=spec, results_snapshot=inp.results, budget_snapshot=inp.budget,

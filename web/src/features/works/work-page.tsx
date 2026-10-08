@@ -259,7 +259,7 @@ function UnderstoodPanel({ work, onChange }: { work: Work; onChange: (w: Work) =
     ['Referencing', { APA7: 'APA 7th edition', APA6: 'APA 6th edition', HARVARD: 'Harvard' }[spec.citationStyle]],
     ...(work.kind === 'COURSEWORK' ? [['Sources', spec.sourcePolicy === 'CLOSED' ? 'Only your set readings' : 'Independent research'] as [string, string]] : []),
     ...(work.kind === 'COURSEWORK'
-      ? [['Rule on AI', { BANNED: 'Not allowed: a note goes on the last page of your Word document', ALLOWED_WITH_DISCLOSURE: 'Allowed with a disclosure statement', ALLOWED: 'Allowed', UNKNOWN: 'Not mentioned' }[spec.aiPolicy]] as [string, string]]
+      ? [['Rule on AI', { BANNED: 'Your assignment says AI tools are not allowed: check your institution’s rules before you submit', ALLOWED_WITH_DISCLOSURE: 'Allowed if you say you used them', ALLOWED: 'Allowed', UNKNOWN: 'Not mentioned' }[spec.aiPolicy]] as [string, string]]
       : []),
     ...(spec.ceiling !== null ? [['Funding ceiling', money(spec.ceiling, spec.currency || '')] as [string, string]] : []),
     ...(spec.durationMonths ? [['Duration', `${spec.durationMonths} months`] as [string, string]] : []),
@@ -289,8 +289,9 @@ function UnderstoodPanel({ work, onChange }: { work: Work; onChange: (w: Work) =
             </ul>
           </Alert>
         )}
-        {work.kind === 'COURSEWORK' && spec.aiPolicy === 'UNKNOWN' && (
-          <Checkbox label="Add PaperAid's note on the last page of the Word document" checked={work.aiNote} onChange={(e) => run(() => data.works.setAiNote(work.id, e.target.checked))} />
+        {work.kind === 'COURSEWORK' && (
+          <Checkbox label="Add a last-page note that this was drafted with AI assistance (off unless you tick it)" checked={work.aiNoteAsked ?? false}
+            onChange={(e) => run(() => data.works.setAiNote(work.id, e.target.checked))} />
         )}
       </Card>
       {external.length > 0 && (

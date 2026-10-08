@@ -903,3 +903,20 @@ and nothing kept many jobs from calling Gemini at once.
   accepted only at 90% of its target or more (`COMPRESS_FLOOR`); cut further, its earlier text stays and it is asked
   again, up to three passes, and only if every pass overshoots is the closest attempt used.
 - **Testers:** oboireedison@gmail.com added (owner, 2026-10-08).
+
+## 2026-10-08 — Coursework: the question and the question paper are pasted (no uploads); nothing about AI unless the student asks
+
+A tester typed "Solve this assignment for me?" as the question and uploaded the real question paper as a "set reading";
+PaperAid wrote an essay it then refused for not answering that sentence (11 minutes, not charged). The owner's decision:
+- **No files on the coursework Start page.** "Your question" (typed or pasted) and "More context (optional)": everything
+  from the question paper, pasted, saved as the brief (`BRIEF`, "The question paper (pasted)"). The Brief, Marking rubric
+  and Set readings uploads are gone from the page; the reading and rubric code stays for works that have them and can be
+  shown again. Works that came with a data file (an Excel sheet to analyse) are an open question for later.
+- **A request to PaperAid is never the question** (`resolve.is_request`: "Solve this assignment for me?", "Answer the
+  questions below"): it is left out of the parts to answer, and when nothing else gives a question the student is asked
+  for it before any work starts.
+- **Nothing about AI is asked or printed** (replacing the decision of 2026-09-30): the question about the brief's AI rule
+  is never asked; the last-page note is added only when the student asks for it (`ai_note_asked`; a disclosure statement
+  where the assignment asks for one). An assignment whose own text bans AI tools is told to the student on screen
+  ("Your assignment says AI tools are not allowed. Check your institution's rules before you submit this."), in the
+  workspace, the price notice and the checks, never in the document (owner agreed to this safeguard). `validators-v4`.

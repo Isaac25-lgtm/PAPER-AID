@@ -228,6 +228,7 @@ def test_paper_check_rewrites_have_one_final_reviewer(client):
 
 def _drafted(client, ai="BANNED"):
     work = _coursework(client, ai_answer=ai)
+    client.post(f"/api/works/{work['id']}/ai-note", headers=STUDENT, json={"on": True})  # the student asked for the last-page note
     _run(client, work["id"], "PLAN")
     work = _work(client, work["id"])
     client.post(f"/api/works/{work['id']}/plan/approve", headers=STUDENT, json={"baseVersion": work["planVersion"]})

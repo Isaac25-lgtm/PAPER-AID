@@ -209,6 +209,9 @@ function Workspace({ work, onChange, onReload }: { work: Work; onChange: (w: Wor
         </div>
         <aside className="space-y-4 lg:sticky lg:top-20 lg:max-h-[calc(100dvh-6rem)] lg:overflow-y-auto">
           <ErrorNote text={error} />
+          {work.kind === 'COURSEWORK' && work.spec?.aiPolicy === 'BANNED' && (
+            <Alert tone="warning">Your assignment says AI tools are not allowed. Check your institution’s rules before you submit this.</Alert>
+          )}
           {doc.revised.length > 0 && <p className="rounded-lg bg-brand-50 p-3 text-xs text-brand-900">Highlighted on the page: what changed after your request.</p>}
           {(work.kind === 'FUNDING_PROPOSAL' || work.kind === 'CONCEPT_NOTE') && work.results && (
             <FiguresPanel work={work} onChange={onChange} disabled={running} />

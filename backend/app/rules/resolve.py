@@ -11,13 +11,14 @@ Every decision is recorded: the winning value, what it overrode, the assumptions
 question was skipped, and the questions still open. The result is a versioned `ResolvedSpec`."""
 
 import math
+import re
 from typing import Any
 
 from app.rules import library
 from app.rules.extract import first_number
 from app.works import directives
 from app.works.models import (
-    AI_NOTE,
+    AI_BANNED_NOTICE,
     CoverageItem,
     Criterion,
     FormField,
@@ -40,6 +41,20 @@ SINGLE = ("limit.words", "limit.words_min", "limit.pages", "limit.characters", "
 WORDS_PER_PAGE = {"single": 500, "one_and_half": 375, "double": 275}
 PLAN_SHARE_OF_LIMIT = 0.97  # a hard maximum is planned just under, so small differences never break it
 STYLES = {"APA7": "APA7", "APA 7": "APA7", "APA6": "APA6", "APA 6": "APA6", "HARVARD": "HARVARD"}
+# A request to PaperAid, not an assignment question: "Solve this assignment for me?", "Please answer the questions
+# below", "Do my coursework". "Write an essay on inflation" is a question (it names its subject) and never matches.
+_REQUEST = re.compile(
+    r"^\W*(?:(?:please|kindly|hello|hi|can you|could you|i (?:want|need|would like) you to|help me(?: to)?)[\s,]+)*"
+    r"(?:solve|do|answer|write|complete|finish|attempt|handle|work on|help(?: me)?(?: with)?)\s+"
+    r"(?:(?:this|my|the|these|those|all|all the|all of the|all these)\s+)?"
+    r"(?:assignment|course ?work|homework|questions?|work|task|paper|essay|test|exam|quiz)s?"
+    r"(?:\s+(?:for me|please|above|below|attached|here|in the box|i (?:have )?pasted|provided))*\W*$", re.I)
+
+
+def is_request(text: str) -> bool:
+    return bool(_REQUEST.match(" ".join(text.split())))
+
+
 AI_ANSWERS = {"BANNED": "BANNED", "ALLOWED_WITH_DISCLOSURE": "ALLOWED_WITH_DISCLOSURE", "ALLOWED": "ALLOWED", "NOT_MENTIONED": "UNKNOWN"}
 
 
@@ -161,11 +176,13 @@ def resolve(
         if spec_q.get("variants") and variant not in spec_q["variants"]:
             continue
         qid = spec_q["id"]
+        if qid == "ai_policy":
+            continue  # never asked (owner decision 2026-10-08): read from the student's text when it says so
         value = inputs.answers.get(qid, "").strip()
         answered = bool(value)
         if qid == "problem" and not answered and len(inputs.description.split()) >= 12:
             answered = True  # the description already gives it
-        if qid == "task" and not answered and len(inputs.description.split()) >= 4:
+        if qid == "task" and not answered and len(inputs.description.split()) >= 4 and not is_request(inputs.description):
             # A short question is still the question ("Discuss the impact of social media on youth"): a
             # tester was blocked three times by a 12-word minimum the page never showed (live, 2026-10-01).
             answered = True
@@ -294,16 +311,20 @@ def resolve(
         assumptions.append(f"Planned at about {target:,} words to fit {int(pages.number)} pages; the page count is checked on the formatted document.")
 
     # 8. Coursework: what the question asks.
-    question_text = " ".join([inputs.description, *[r.value for r in many("directive")], *[r.quote for r in many("directive")]])
-    ids = list(dict.fromkeys([*directives.find(" ".join(r.value for r in many("directive"))), *directives.find(inputs.description)])) if kind == "COURSEWORK" else []
+    # What the student typed is the question unless it is a request to PaperAid ("Solve this assignment for me?"): a
+    # tester's essay was refused for not answering that sentence, the question paper being elsewhere (live 2026-10-08).
+    described = "" if is_request(inputs.description) else inputs.description
+    question_text = " ".join([described, *[r.value for r in many("directive")], *[r.quote for r in many("directive")]])
+    ids = list(dict.fromkeys([*directives.find(" ".join(r.value for r in many("directive"))), *directives.find(described)])) if kind == "COURSEWORK" else []
     coverage: list[CoverageItem] = []
     if kind == "COURSEWORK":
-        for n, req in enumerate(many("subquestion"), start=1):
+        parts = [req for req in many("subquestion") if not is_request(req.value)]
+        for n, req in enumerate(parts, start=1):
             coverage.append(CoverageItem(id=f"Q{n}", text=req.value, directive=(directives.find(req.value) or [""])[0], requirement=req.id))
         if not coverage:
-            for n, (directive, clause) in enumerate(directives.clauses(inputs.description or question_text), start=1):
+            for n, (directive, clause) in enumerate(directives.clauses(described or question_text), start=1):
                 coverage.append(CoverageItem(id=f"Q{n}", text=clause[:500], directive=directive))
-        if not ids and inputs.description:
+        if not ids and described:
             assumptions.append("No command word found in the question: it is answered as a discussion.")
             ids = ["discuss"]
     scoring = [Criterion(id=f"S{n}", name=r.value[:200], weight=r.weight or r.number, descriptor=r.quote[:600], requirement=r.id) for n, r in enumerate(many("scoring"), start=1)]
@@ -363,7 +384,7 @@ def resolve(
     if not duration and inputs.answers.get("duration_months") == SKIPPED and variant in ("FUNDING_CONCEPT", "NGO_PROJECT", "RESEARCH_GRANT"):
         duration = 12  # the question's stated fallback, recorded as an assumption above
     if ai_policy == "BANNED":
-        assumptions.append(f"Your assignment does not allow AI tools, so the last page of your Word document says: \"{AI_NOTE}\"")
+        assumptions.append(AI_BANNED_NOTICE)
     for note in unclear or []:
         assumptions.append(f"Unclear in your documents: {note}")
 

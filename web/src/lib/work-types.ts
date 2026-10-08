@@ -261,6 +261,8 @@ export interface Work {
   current: number
   requests: ChangeRequest[]
   aiNote: boolean
+  /** The student asked for the last-page note (nothing about AI is printed otherwise). */
+  aiNoteAsked?: boolean
   exploratory: boolean
   readiness: ReadinessItem[]
   status: Readiness | null

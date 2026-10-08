@@ -16,7 +16,7 @@ from app.proposals.models import EvidenceItem
 from app.works import budget as budget_engine
 from app.works import numbers
 from app.works import results as results_engine
-from app.works.models import AI_NOTE, Budget, Limit, ResolvedSpec, ResultsModel, WorkDocument, WorkInputs, WorkPlan
+from app.works.models import AI_BANNED_NOTICE, Budget, Limit, ResolvedSpec, ResultsModel, WorkDocument, WorkInputs, WorkPlan
 
 Result = tuple[str, str, str] | None
 # The parts a limit's scope can name (rulebook §6.2), as the reader reports them.
@@ -557,19 +557,18 @@ def _ai_policy(ctx: Context, rule: dict[str, Any]) -> Result:
     policy = ctx.spec.ai_policy
     if ctx.doc is None:
         return None
+    # Owner decision 2026-10-08: nothing about AI is printed unless the student asks; a ban is told to the student.
+    asked = " The note you asked for is on the last page." if ctx.doc.ai_note else ""
     if policy == "BANNED":
-        return _ok("Your assignment does not allow AI tools; the note is on the last page.")
+        return _ok(AI_BANNED_NOTICE + asked)
     if policy == "ALLOWED_WITH_DISCLOSURE":
-        return _ok("A disclosure statement is on the last page.")
-    if policy == "UNKNOWN":
-        return _ok("Your assignment says nothing about AI; " + ("the note is on the last page." if ctx.doc.ai_note else "you chose to leave out the note."))
-    return None
+        return _ok("Your assignment allows AI tools if you say you used them." + (asked or " Add your own statement before you submit, or ask for the last-page note."))
+    return _ok(asked.strip()) if asked else None
 
 
 def _ai_note(ctx: Context, rule: dict[str, Any]) -> Result:
-    if ctx.doc is None or ctx.spec.ai_policy != "BANNED":
-        return None
-    return _ok(f"The last page says: \"{AI_NOTE}\"") if ctx.doc.ai_note == AI_NOTE else ("FAIL", "The last-page note is missing.", "")
+    """No longer required by a ban (owner decision 2026-10-08): the note is the student's choice."""
+    return None
 
 
 def _source_restriction(ctx: Context, rule: dict[str, Any]) -> Result:
