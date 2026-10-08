@@ -920,3 +920,8 @@ PaperAid wrote an essay it then refused for not answering that sentence (11 minu
   where the assignment asks for one). An assignment whose own text bans AI tools is told to the student on screen
   ("Your assignment says AI tools are not allowed. Check your institution's rules before you submit this."), in the
   workspace, the price notice and the checks, never in the document (owner agreed to this safeguard). `validators-v4`.
+- **A coursework plan the reviewer could never approve (a tester's work, 2026-10-08):** the skeleton attaches a marking
+  criterion that names no section to every body section; the final reviewer asked for "Theme 1: S1 to S3 only, Theme 2:
+  S4 to S6"; code let the writer add criteria but never remove them, so the plan was refused after two repairs (not
+  charged). For coursework the writer's choice of criteria per section now stands (`_criteria`), and code only returns a
+  criterion left out everywhere to the sections it was planned for. Other works keep the skeleton's criteria.

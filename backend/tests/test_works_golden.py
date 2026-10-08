@@ -137,3 +137,34 @@ def test_sections_a_call_requires_by_name_are_headed_with_that_name():
                        sections=[WorkSection(key=s.key, heading=s.heading, paragraphs=["Text."]) for s in templates.skeleton(spec)])
     result = VALIDATORS["structure.required_sections"](Context(spec=spec, stage="FINAL", inputs=WorkInputs(title="A work"), doc=doc), {"id": "SH-019"})
     assert result[0] == "PASS", result
+
+
+def test_a_coursework_plan_keeps_the_writers_choice_of_criteria_and_every_criterion_a_home():
+    """Live 2026-10-08: the skeleton put all six marking criteria on both themes; the final reviewer asked for Theme 1
+    to serve S1 to S3 only and Theme 2 S4 to S6; the writer could add criteria but never remove them, so the plan was
+    refused twice. The writer's choice now stands, and code only gives a criterion left out everywhere its home back."""
+    from app.works.models import Criterion, PlanSection
+    from app.works.pipeline import _plan_from
+
+    spec = _spec("COURSEWORK", "ESSAY", answers={"word_limit": "1500", "level": "LATER_UG"},
+                 description="Critically evaluate the design of modern web applications.")
+    six = [f"S{n}" for n in range(1, 7)]
+    spec = spec.model_copy(update={"scoring": [Criterion(id=c, name=f"Criterion {c}", weight=10) for c in six]})
+    skeleton = [PlanSection(key="introduction", heading="Introduction", words=150),
+                PlanSection(key="theme1", heading="Theme 1", words=600, criteria=list(six)),
+                PlanSection(key="theme2", heading="Theme 2", words=600, criteria=list(six)),
+                PlanSection(key="conclusion", heading="Conclusion", words=150)]
+    narrowed = {"title": "Web applications", "sections": [{"key": "theme1", "heading": "Architecture", "criteria": ["S1", "S2", "S3"]},
+                                                           {"key": "theme2", "heading": "Technologies", "criteria": ["S4", "S5", "S6"]}]}
+    plan = {s.key: s.criteria for s in _plan_from(narrowed, skeleton, spec).sections}
+    assert plan["theme1"] == ["S1", "S2", "S3"] and plan["theme2"] == ["S4", "S5", "S6"]  # as the reviewer asked: now possible
+
+    dropped = {"title": "Web applications", "sections": [{"key": "theme1", "criteria": ["S1"]}, {"key": "theme2", "criteria": ["S2"]}]}
+    plan = {s.key: s.criteria for s in _plan_from(dropped, skeleton, spec).sections}
+    assert sorted(plan["theme1"] + plan["theme2"]) == six  # every criterion still has a home
+    silent = {"title": "Web applications", "sections": [{"key": "theme1"}, {"key": "theme2"}]}
+    assert _plan_from(silent, skeleton, spec).sections[1].criteria == six  # no choice given: the skeleton's stands
+
+    funding = _spec("FUNDING_PROPOSAL", "NGO_PROJECT").model_copy(update={"scoring": spec.scoring})
+    kept = _plan_from(narrowed, skeleton, funding).sections[1].criteria
+    assert kept == six  # other works keep the skeleton's criteria and only add to them

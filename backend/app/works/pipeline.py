@@ -411,6 +411,16 @@ def _for_model(items: list[EvidenceItem], passages: bool = False) -> list[dict[s
 # --- PLANNING -----------------------------------------------------------------------------------------
 
 
+def _criteria(section: PlanSection, proposed: list[str], spec: ResolvedSpec) -> list[str]:
+    """Which marking criteria a section serves. For coursework the writer's own choice stands where it gives one: the
+    skeleton attaches a criterion that names no section ("Critical analysis") to every body section, the final reviewer
+    then asked for "Theme 1: S1 to S3 only", and the writer could add criteria but never remove them, so no repair could
+    satisfy it and the plan was refused twice (live, 2026-10-08). Other works keep the skeleton's criteria and add to them."""
+    if spec.kind == "COURSEWORK" and proposed:
+        return list(dict.fromkeys(proposed))
+    return list(dict.fromkeys([*section.criteria, *proposed]))
+
+
 def _plan_from(answer: dict[str, Any], skeleton: list[PlanSection], spec: ResolvedSpec) -> WorkPlan:
     """The writer's plan, held to the skeleton by code: every skeleton section stays, locked
     headings keep their wording, words stay within each section's range, and the total within the
@@ -428,9 +438,16 @@ def _plan_from(answer: dict[str, Any], skeleton: list[PlanSection], spec: Resolv
         sections.append(s.model_copy(update={
             "heading": heading, "words": words,
             "brief": " ".join(str(proposed.get("brief") or s.brief).split())[:1500],
-            "criteria": list(dict.fromkeys([*s.criteria, *[c for c in proposed.get("criteria", []) if c in criteria_ids]])),
+            "criteria": _criteria(s, [c for c in proposed.get("criteria", []) if c in criteria_ids], spec),
             "coverage": [c for c in proposed.get("coverage", []) if c in coverage_ids],
         }))
+    if spec.kind == "COURSEWORK":
+        # Every criterion the skeleton placed still has a home: one the writer left out of every section goes back to
+        # the sections it was planned for, in turn.
+        served = {c for s in sections for c in s.criteria}
+        for n, criterion in enumerate(c for c in dict.fromkeys(c for s in skeleton for c in s.criteria) if c not in served):
+            homes = [s for s, planned in zip(sections, skeleton, strict=True) if criterion in planned.criteria]
+            homes[n % len(homes)].criteria.append(criterion)
     total = sum(s.words for s in sections) or 1
     if total > spec.target_words:
         sections = [s.model_copy(update={"words": max(s.min_words, round(s.words * spec.target_words / total))}) for s in sections]
