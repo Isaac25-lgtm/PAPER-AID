@@ -310,6 +310,9 @@ def stage_planning(ctx: "StageContext") -> None:
     rules = rulebook.rules_for(inp.rulebook)
     if inp.step == "PLAN":
         payload = {"study": _study(inp), "level": inp.inputs.level, "rules": rules, "evidence": _for_model(usable), "note": inp.note}
+        if runner._prompt_for("p_plan") not in ("p-plan-v1", "p-plan-v2"):
+            low, high = rulebook.objective_range(inp.rulebook, inp.inputs.level, inp.inputs.four_objectives, inp.goal == "CONCEPT")
+            payload["objectiveCount"] = {"min": low, "max": high}
         final, draft, critique = runner.negotiate("plan", payload)
 
         def settled(answer: dict[str, Any]) -> ProposalPlan:
@@ -320,7 +323,8 @@ def stage_planning(ctx: "StageContext") -> None:
             runner.approve_plan({**payload, "finalPlan": plan.model_dump(by_alias=True)})
             ctx.put_json("plan.json", {"plan": plan.model_dump(by_alias=True), "draft": draft, "critique": critique.model_dump()})
             return
-        plan, review = _reviewed_plan(runner, payload, plan, usable, settled)
+        plan, review = _reviewed_plan(runner, payload, plan, usable, settled,
+                                      lambda answer: rulebook.plan_problems(inp.rulebook, answer, inp.inputs.level, inp.inputs.four_objectives, inp.goal == "CONCEPT"))
         ctx.put_json("plan.json", {"plan": plan.model_dump(by_alias=True), "draft": draft, "critique": critique.model_dump(), "review": review.model_dump(by_alias=True)})
         if review.outcome != "APPROVED":  # kept for the student to edit, never charged for (owner decision 2026-09-30)
             ctx.update(lambda j: _unapproved_plan(j, review))
@@ -346,12 +350,14 @@ def stage_planning(ctx: "StageContext") -> None:
 
 
 
-def _reviewed_plan(runner: ProposalRunner, payload: dict[str, Any], plan: ProposalPlan, usable: list[EvidenceItem], settled) -> tuple[ProposalPlan, PlanReview]:
+def _reviewed_plan(runner: ProposalRunner, payload: dict[str, Any], plan: ProposalPlan, usable: list[EvidenceItem], settled,
+                   rules=lambda answer: []) -> tuple[ProposalPlan, PlanReview]:
     """The one accountable final review of the exact plan (Sol), after code has converted any
     hand-typed citation it can match to confirmed evidence. An objection is repaired (Sonnet, only
     what was named) and the repaired plan reviewed again, at most twice. What remains is returned
     as objections; a review that could not complete is "not reviewed", never approval."""
     plan, code_issues = _typed_citations(plan, usable)
+    code_issues = [*code_issues, *rules(plan)]  # the guide's code-checkable rules (objective counts, primary question, hypothesis pairs)
     review = PlanReview(outcome="NOT_REVIEWED", reason="REVIEW_UNAVAILABLE")
     for round_ in runner.audit_rounds(REVIEW_REPAIRS + 1):
         approved, objections, reason = runner.review_plan({**payload, "finalPlan": _as_reviewed(plan)})
@@ -364,6 +370,7 @@ def _reviewed_plan(runner: ProposalRunner, payload: dict[str, Any], plan: Propos
             break
         plan = settled(runner.repair_plan(payload, plan.model_dump(by_alias=True), review.objections))
         plan, code_issues = _typed_citations(plan, usable)
+        code_issues = [*code_issues, *rules(plan)]
     return plan, review
 
 
@@ -554,6 +561,12 @@ def _common(inp: StepInput, sample_steps: str) -> dict[str, Any]:
     }
 
 
+# Told to the writer and the reviewer of a section whose statements code places from the approved plan, when
+# its brief (a faculty guide's own wording) does not say so: the live run 2026-10-08 had the reviewer ask to remove them.
+PLACED = (" PaperAid places the student's approved statements (objectives or questions) after the introduction word for word: "
+          "write only the introduction, and never ask to change, reword, shorten or remove the placed statements.")
+
+
 def _section_items(inp: StepInput, library: dict[str, EvidenceItem], briefs: dict[str, Any]) -> list[dict[str, Any]]:
     assert inp.plan is not None
     items = []
@@ -562,9 +575,10 @@ def _section_items(inp: StepInput, library: dict[str, EvidenceItem], briefs: dic
             continue
         brief = briefs.get(s.key, {"points": [], "evidence": []})
         assigned = [library[i] for i in brief["evidence"] if i in library and library[i].usable]
+        requirement = s.brief + PLACED if s.from_plan and "PaperAid places" not in s.brief else s.brief
         items.append(
             {
-                "key": s.key, "number": s.number, "heading": s.heading, "requirement": s.brief, "words": s.words, "table": s.table,
+                "key": s.key, "number": s.number, "heading": s.heading, "requirement": requirement, "words": s.words, "table": s.table,
                 "objective": s.objective, "points": brief["points"], "evidence": _for_model(assigned, passages=True),
                 "_words": " ".join(["w"] * s.words),  # batches are sized by the words each section will produce
             }
@@ -588,6 +602,84 @@ def stage_drafting(ctx: "StageContext") -> None:
 
 
 # --- AUDITING ------------------------------------------------------------------------------------
+
+
+ROMAN = ("i", "ii", "iii", "iv", "v", "vi", "vii", "viii")
+# A writer's line that lists or restates the plan's statements rather than introducing them: never kept.
+_LISTED = re.compile(r"^\s*(?:[ivx]{1,4}[.)]|\d{1,2}[.)]|h[0a]\d|to\s)", re.I)
+# "To address these gaps, the study's objectives are ..." introduces the statements: an objective never names
+# objectives, questions or the study itself (live runs 2026-10-08).
+_INTRODUCES = re.compile(r"\b(?:objectives?|questions?|hypothes[ie]s|propositions?|this study|the study)\b", re.I)
+
+
+def stated_fragments(plan: ProposalPlan, number: str) -> list[str]:
+    """The opening words of every approved statement, objectives and questions alike: a writer's line repeating
+    any of them is not an introduction. Sub-headings are left out: an introduction may name "the primary
+    research question" (live run 2026-10-08)."""
+    lines = [*plan_statements(plan, "objectives", number), *plan_statements(plan, "questions", number)]
+    return [line.split(" ", 1)[-1].strip().lower()[:40] for line in lines if len(line) > 20 and not evidence.SUBHEADING.match(line)]
+
+
+def _introduction(paragraph: str, stated: list[str]) -> bool:
+    if not paragraph.strip() or _restates(paragraph, stated):
+        return False
+    return not _LISTED.match(paragraph) or (paragraph.lstrip()[:3].lower() == "to " and bool(_INTRODUCES.search(paragraph)))
+
+
+def _owned_kinds(inp: StepInput) -> dict[str, str]:
+    """The sections whose statements code places from the approved plan (rulebook v2 on): key -> kind."""
+    assert inp.plan is not None
+    return {s.key: s.from_plan for s in rulebook.sections(inp.rulebook, inp.chapter, inp.inputs.level, inp.plan) if s.from_plan}
+
+
+def plan_statements(plan: ProposalPlan, kind: str, number: str) -> list[str]:
+    """The general and specific objectives, or the primary research question with the specific questions
+    (each null hypothesis with its alternative; or the propositions), as approved, under numbered sub-headings
+    (handbook §5.3.3-5.3.4; vetting form, p. 51)."""
+    specific = [f"{ROMAN[i]}. {o.strip()}" for i, o in enumerate(o for o in plan.specific_objectives if o.strip())]
+    if kind == "objectives":
+        return [f"{number}.1 General Objective", plan.purpose.strip(), f"{number}.2 Specific Objectives", *specific]
+    if kind == "specific_objectives":  # the guide (or the concept paper, §1.4) states the purpose in a section of its own
+        return specific
+    lines: list[str] = []
+    sub = 1
+    if plan.primary_question.strip():
+        lines += [f"{number}.1 Primary Research Question", plan.primary_question.strip()]
+        sub = 2
+    questions = [q.strip() for q in plan.research_questions if q.strip()]
+    label = {"QUESTIONS": "Specific Research Questions", "HYPOTHESES": "Research Hypotheses", "PROPOSITIONS": "Research Propositions"}[plan.questions_kind]
+    lines.append(f"{number}.{sub} {label}")
+    if plan.questions_kind == "HYPOTHESES":
+        alternatives = [a.strip() for a in plan.alternative_hypotheses if a.strip()]
+        for i, null in enumerate(questions, start=1):
+            lines.append(f"H0{i}: {null}")
+            if i <= len(alternatives):
+                lines.append(f"HA{i}: {alternatives[i - 1]}")
+    else:
+        lines += [f"{ROMAN[i]}. {q}" for i, q in enumerate(questions)]
+    return lines
+
+
+def _restates(paragraph: str, stated: list[str]) -> bool:
+    return any(fragment and fragment in paragraph.lower() for fragment in stated)
+
+
+def _owned(inp: StepInput, items: dict[str, dict[str, Any]], current: dict[str, SectionText]) -> dict[str, SectionText]:
+    """Each plan-owned section: the writer's short introduction (never its own list of the statements), then the
+    approved statements exactly as approved. Applied after drafting and after every repair, so no review or
+    repair can change them (Codex review 2026-10-08)."""
+    assert inp.plan is not None
+    kinds = _owned_kinds(inp)
+    out = dict(current)
+    for key, kind in kinds.items():
+        if key not in out or key not in items:
+            continue
+        statements = plan_statements(inp.plan, kind, items[key]["number"])
+        stated = stated_fragments(inp.plan, items[key]["number"])
+
+        lead = [p for p in out[key].paragraphs if _introduction(p, stated)][:2]  # the brief asks for one or two sentences
+        out[key] = out[key].model_copy(update={"paragraphs": [*lead, *statements]})
+    return out
 
 
 def _table_allowed(inp: StepInput, allowed: str) -> str:
@@ -664,6 +756,7 @@ def stage_auditing(ctx: "StageContext") -> None:
         current = {k: SectionText.model_validate(v) for k, v in ctx.get_json("drafted.json").items()}
         if inp.step == "COMPLETE":
             base = _base_document(ctx, inp)
+    current = _owned(inp, items, current)
     unresolved: dict[str, list[str]] = {}
     grades: dict[str, Grade] = {}
     rounds = settings.repair_attempts
@@ -690,6 +783,7 @@ def stage_auditing(ctx: "StageContext") -> None:
         for key, fixed in runner.fix(fixes, common).items():
             if key in unresolved:
                 current[key] = fixed
+        current = _owned(inp, items, current)
 
     stripped: list[str] = []
     if runner._engine.require_dual_approval:
@@ -1054,6 +1148,7 @@ def _readiness(
             note=f"Not reviewed: {', '.join(unreviewed)}." if unreviewed else "Each section's final text was reviewed.",
         )
     )
+    items += _core_checks(inp, document, others_words(ctx, inp) if n == 3 else 0)
     if n == 2:
         count = len(sources)
         items.append(
@@ -1089,6 +1184,69 @@ def _readiness(
                     note=result.steps if has_source else "Add where your population figure comes from (for example district records) in the plan.",
                 )
             )
+    return items
+
+
+def others_words(ctx: "StageContext", inp: StepInput) -> int:
+    """The words of the proposal's other chapters (One and Two), for the length check on Chapter Three."""
+    total = 0
+    for number, path in inp.chapters.items():
+        path = path if ctx.rt.files.exists(path) else moved_path(path)
+        if int(number) in (1, 2) and ctx.rt.files.exists(path):
+            total += ChapterDocument.model_validate_json(ctx.rt.files.get(path)).words
+    return total
+
+
+def _core_checks(inp: StepInput, document: ChapterDocument, other_words: int) -> list[ReadinessItem]:
+    """The handbook's core requirements, checked by code on the delivered text (rulebook v2 on): the general
+    and specific objectives and the questions exactly as approved and in the allowed number; questions in the
+    present or future where they can be; the proposal's length for the level. A failed core requirement is
+    MISSING and blocks a complete export; the rest are for the student to review."""
+    assert inp.plan is not None
+    plan, n, items = inp.plan, inp.chapter, []
+    kinds = _owned_kinds(inp)
+    by_key = {s.key: s for s in document.sections}
+    for key, kind in kinds.items():
+        section = by_key.get(key)
+        if section is None:
+            continue
+        expected = plan_statements(plan, kind, section.number)
+        present = all(line in section.paragraphs for line in expected)
+        if kind in ("objectives", "specific_objectives"):
+            low, high = rulebook.objective_range(inp.rulebook, inp.inputs.level, inp.inputs.four_objectives, inp.goal == "CONCEPT")
+            count = len([o for o in plan.specific_objectives if o.strip()])
+            within = low <= count <= high or not rulebook.enforced_counts(inp.rulebook)
+            ok = present and (bool(plan.purpose.strip()) or kind == "specific_objectives") and within
+            allowed = f"{low}" if low == high else f"{low} to {high}"
+            items.append(ReadinessItem(
+                id=f"C{n}-STATED-OBJECTIVES", question="Are the general objective and the specific objectives stated as approved?", basis="CODE", chapter=n,
+                status="PASS" if ok else "MISSING",
+                note=(f"The general objective and {count} specific objectives, word for word from the approved plan." if ok else
+                      "The general objective or a specific objective is missing or differs from the approved plan." if not present else
+                      f"This takes {allowed} specific objectives; the plan has {count}.")))
+        else:
+            aligned = len([q for q in plan.research_questions if q.strip()]) == len([o for o in plan.specific_objectives if o.strip()])
+            primary = bool(plan.primary_question.strip()) or not rulebook.load(inp.rulebook).get("primary_question")
+            ok = present and aligned and primary
+            items.append(ReadinessItem(
+                id=f"C{n}-STATED-QUESTIONS", question="Is there a primary research question, with one specific question per objective, as approved?", basis="CODE", chapter=n,
+                status="PASS" if ok else "MISSING",
+                note="Word for word from the approved plan, one per specific objective." if ok else "The primary question or a specific question is missing, or they do not match the objectives one to one."))
+            if plan.questions_kind == "QUESTIONS":
+                past = [q for q in [plan.primary_question, *plan.research_questions] if q.strip() and rulebook.past_tense(q)]
+                items.append(ReadinessItem(
+                    id=f"C{n}-QUESTION-TENSE", question="Are the research questions in the present or future tense?", basis="CODE", chapter=n,
+                    status="NEEDS_REVIEW" if past else "PASS",
+                    note=("Some questions are in the past tense; keep them in the present or future unless the study is about past events: " + " | ".join(past))[:400]
+                    if past else "No question is in the past tense."))
+    if n == 3 and rulebook.enforced_counts(inp.rulebook):
+        book = rulebook.load(inp.rulebook)
+        low, high = book["levels"][inp.inputs.level]["pages"]
+        pages = (other_words + document.words) / book["words_per_page"]
+        items.append(ReadinessItem(
+            id="C3-LENGTH", question=f"Is the proposal within {low} to {high} pages for its level?", basis="CODE", chapter=3,
+            status="PASS" if low <= pages <= high else "NEEDS_REVIEW",
+            note=f"About {pages:.0f} pages for Chapters One to Three, estimated at {book['words_per_page']} words a page; check the page count in Word."))
     return items
 
 
@@ -1220,7 +1378,9 @@ def stage_exporting(ctx: "StageContext") -> None:
                 # A chapter-wide request without named sections is not complete after one section changes.
                 # Every targeted section must change and pass its own review before it is marked applied.
                 whole = {s.key for s in document.sections} <= set(comment.sections)
-                targets = comment.required if whole and comment.required else comment.sections
+                # sections whose statements come from the approved plan change only with the plan, never by a revision
+                owned = _owned_kinds(inp)
+                targets = [k for k in (comment.required if whole and comment.required else comment.sections) if k not in owned]
                 done = bool(targets) and all(k in document.revised for k in targets)
                 if comment.signature() == inp.comment_signatures[comment.id] and answered and done:
                     comment.status, comment.applied_in = "APPLIED", version

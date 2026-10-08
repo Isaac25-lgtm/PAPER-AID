@@ -158,7 +158,7 @@ def test_the_research_gap_rests_only_on_confirmed_evidence_and_changing_it_flags
     assert "researchGap" in client.models.schemas["p_plan"]["properties"]  # p-plan-v2's schema
     _approved(client, project_id, researchGap={**gap, "missing": "Nothing is known about fathers as caregivers in Mukono."})
     review = next(c for c in client.get(f"/api/projects/{project_id}", headers=STUDENT).json()["chapters"] if c["number"] == 1)["needsReview"]
-    assert review == ["1.2 Statement of the Problem", "1.7 Justification of the Study"]
+    assert review == ["1.2 Statement of the Problem", "1.6 Justification of the Study"]  # standard guide v2: Purpose is now under Objectives (1.3)
 
 
 def test_the_concept_paper_is_written_from_the_plan_within_the_manuals_limits(client):

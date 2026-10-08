@@ -35,6 +35,8 @@ export interface ProposalInputs {
   populationSize: number | null
   populationSource: string
   expectedParticipants: number | null
+  /** Bachelor's, PGD and Master's: four specific objectives instead of the standard three (owner decision 2026-10-08). */
+  fourObjectives?: boolean
 }
 
 export interface TitlePage {

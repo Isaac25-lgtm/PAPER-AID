@@ -132,7 +132,7 @@ STEPS: dict[str, Step] = {
     "p_extract": Step("lead", Stage.RESEARCHING, "p-extract-v1", 4000),
     "p_search": Step("lead", Stage.RESEARCHING, "p-search-v1", 4000),
     # Plan, and each chapter's section briefs: lead drafts → writer critiques → lead finalises.
-    "p_plan": Step("lead", Stage.PLANNING, "p-plan-v2", 12000),  # v2: the research-gap builder
+    "p_plan": Step("lead", Stage.PLANNING, "p-plan-v3", 12000),  # v2: the research-gap builder; v3: objective count, primary question, hypothesis pairs, question tense (2026-10-08)
     "p_brief": Step("lead", Stage.PLANNING, "p-brief-v2", 12000),
     "p_critique": Step("writer", Stage.PLANNING, "p-critique-v1", 8000),
     "p_guide": Step("writer", Stage.PLANNING, "p-guide-v1", 8000),

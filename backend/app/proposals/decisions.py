@@ -32,6 +32,9 @@ def decisions(plan: ProposalPlan) -> dict[str, Any]:
         "questions_kind": plan.questions_kind,
         "gap": plan.research_gap.model_dump(),
     }
+    if plan.primary_question.strip() or plan.alternative_hypotheses:  # p-plan-v3 on: absent from older plans, so their hashes are unchanged
+        out["primary_question"] = plan.primary_question
+        out["alternatives"] = plan.alternative_hypotheses
     # The whole sets: a section covering every objective changes when one is added or removed, not
     # only when an existing one is edited (Codex audit 2026-09-28 #12).
     out["objectives_set"] = plan.specific_objectives
@@ -62,12 +65,13 @@ def depends_on(chapter: int, key: str, plan: ProposalPlan) -> list[str]:
         (1, "problem"): ["title", "problem", "area", "population", "gap"],
         (1, "purpose"): ["purpose"],
         (1, "objectives"): ["purpose", *objectives],
-        (1, "questions"): ["questions_kind", *questions],
+        (1, "questions"): ["questions_kind", "primary_question", "alternatives", *questions],
         (1, "scope"): ["scope", "area", "population"],
         (1, "justification"): ["problem", "purpose", "gap"],
         (1, "significance"): ["problem", "purpose"],
         (1, "framework"): ["theory", "variables", *objectives],
         (1, "synopsis"): ["title"],
+        (1, "conclusion"): ["problem", "purpose"],
         (2, "intro"): ["title", *objectives],
         (2, "theory"): ["theory", "variables"],
         (2, "gap"): ["problem", "gap", *objectives],

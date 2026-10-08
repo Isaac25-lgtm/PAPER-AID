@@ -52,6 +52,9 @@ class ProposalInputs(Camel):
     population_size: int | None = Field(default=None, ge=1, le=100_000_000)
     population_source: str = Field(default="", max_length=300)
     expected_participants: int | None = Field(default=None, ge=1, le=1_000_000)
+    # Bachelor's, Postgraduate Diploma and Master's: three specific objectives, four only when the student asks
+    # (owner decision 2026-10-08, the standard guide); PhD follows the handbook. Older releases ignore it.
+    four_objectives: bool = False
 
     @field_validator("topic", "programme", "faculty", "study_area", "population")
     @classmethod
@@ -126,6 +129,10 @@ class ProposalPlan(Camel):
     specific_objectives: list[str]
     questions_kind: QuestionsKind = "QUESTIONS"
     research_questions: list[str]  # or hypotheses / propositions, one per objective
+    # The primary research question the specific ones support (handbook vetting form, p. 51), and for
+    # hypotheses the alternative of each null in the same order (handbook §5.3.4, pp. 20-21). p-plan-v3 on.
+    primary_question: str = Field(default="", max_length=600)
+    alternative_hypotheses: list[str] = []
     study_type: StudyType
     design: str = Field(max_length=600)
     study_area: str = Field(default="", max_length=400)
@@ -404,6 +411,7 @@ class StepInput(Camel):
     note: str = ""  # the student's instruction for this run
     rulebook: str
     inputs: ProposalInputs
+    goal: Literal["FULL", "CONCEPT"] = "FULL"  # a concept note's plan takes the concept paper's objective counts (2026-10-08)
     plan: ProposalPlan | None = None  # the approved plan (chapters only)
     plan_version: int
     evidence_files: list[str] = []

@@ -15,7 +15,7 @@ from app.proposals import sampling
 from app.proposals.models import Level, ProposalPlan
 
 RULEBOOKS = Path(__file__).parent / "rulebooks"
-DEFAULT = "ucu-2018-v1"
+DEFAULT = "ucu-2018-v2"  # v2 (2026-10-08): the handbook's general objective, primary question, hypothesis pairs; v1 stays for proposals under way
 
 
 _stored: tuple[Callable[[str], bytes], Callable[[str], bool]] | None = None  # (read, exists) for saved profiles, set by the runtime
@@ -77,6 +77,7 @@ class SectionPlan:
     words: int
     table: bool = False
     objective: str = ""  # the specific objective an empirical-review section covers
+    from_plan: str = ""  # "objectives" or "questions": the approved statements are placed by code, word for word
 
 
 def sections(rulebook_id: str, number: int, level: Level, plan: ProposalPlan) -> list[SectionPlan]:
@@ -98,8 +99,8 @@ def sections(rulebook_id: str, number: int, level: Level, plan: ProposalPlan) ->
             for i, objective in enumerate(plan.specific_objectives, start=1):
                 out.append(SectionPlan(f"{section['key']}{i}", "", _objective_heading(objective), section["brief"], max(120, round(words / count / 10) * 10), objective=objective))
             continue
-        out.append(SectionPlan(section["key"], "", heading, section["brief"], words, bool(section.get("table"))))
-    return [SectionPlan(s.key, str(i + 1) if concept else f"{number}.{i}", s.heading, s.brief, s.words, s.table, s.objective) for i, s in enumerate(out)]
+        out.append(SectionPlan(section["key"], "", heading, section["brief"], words, bool(section.get("table")), from_plan=section.get("from_plan", "")))
+    return [SectionPlan(s.key, str(i + 1) if concept else f"{number}.{i}", s.heading, s.brief, s.words, s.table, s.objective, s.from_plan) for i, s in enumerate(out)]
 
 
 def _objective_heading(objective: str) -> str:
@@ -125,9 +126,46 @@ def rules_for(rulebook_id: str) -> list[dict[str, str]]:
 MAX_OBJECTIVES = 8  # a hard limit for the software; the manual's two to five is a recommendation
 
 
-def plan_problems(rulebook_id: str, plan: ProposalPlan) -> list[str]:
+def objective_range(rulebook_id: str, level: Level, four: bool = False, concept: bool = False) -> tuple[int, int]:
+    """How many specific objectives the guide allows for this student: the handbook's two to five (three to
+    five for a concept paper, §1.4), within the owner's cap for Bachelor's, PGD and Master's where the rulebook
+    sets it (three, four when the student asks; owner decision 2026-10-08)."""
+    book = load(rulebook_id)
+    counts = book.get("concept_objectives") if concept and book.get("concept_objectives") else book["objectives"]
+    low, high = int(counts["min"]), int(counts["max"])
+    cap = book.get("objectives_by_level", {}).get(level)
+    if cap:
+        high = min(high, int(cap["max_requested"] if four else cap["max"]))
+        low = min(low, high)
+    return low, high
+
+
+def enforced_counts(rulebook_id: str) -> bool:
+    """Whether the rulebook's objective counts are rules (v2 on) rather than the handbook's general advice."""
+    return bool(load(rulebook_id).get("objectives_by_level"))
+
+
+# A research question asked in the past tense (owner, 2026-10-08: avoided unless the study is about past events).
+_PAST_AUXILIARY = {"did", "was", "were", "had"}
+_PRESENT_AUXILIARY = {"is", "are", "does", "do", "will", "can", "could", "may", "might", "would", "should", "has", "have", "to"}
+_ADJECTIVAL = {"associated", "related", "based", "perceived", "used", "selected", "registered", "required", "skilled", "limited", "aged",
+               "advanced", "need", "needed", "exposed", "vaccinated", "infected", "married", "employed", "unemployed", "educated", "trained", "affected"}
+
+
+def past_tense(question: str) -> bool:
+    words = [w.strip(".,;:?!\"'()").lower() for w in question.split()[:8]]
+    if any(w in _PAST_AUXILIARY for w in words):
+        return True
+    if any(w in _PRESENT_AUXILIARY for w in words):
+        return False
+    return any(w.endswith("ed") and w not in _ADJECTIVAL for w in words[1:5])
+
+
+def plan_problems(rulebook_id: str, plan: ProposalPlan, level: Level | None = None, four: bool = False, concept: bool = False) -> list[str]:
     """What must be fixed before a plan can be approved: code-checkable structure only. The manual's
-    two-to-five guidance is a recommendation (`plan_advice`), not a blocker."""
+    two-to-five guidance is a recommendation (`plan_advice`), not a blocker; a rulebook with enforced counts
+    (v2: the owner's cap, the concept paper's three to five) makes them rules."""
+    book = load(rulebook_id)
     problems = []
     objectives = [o for o in plan.specific_objectives if o.strip()]
     questions = [q for q in plan.research_questions if q.strip()]
@@ -135,6 +173,17 @@ def plan_problems(rulebook_id: str, plan: ProposalPlan) -> list[str]:
         problems.append("Add at least one specific objective.")
     if len(objectives) > MAX_OBJECTIVES:
         problems.append(f"PaperAid supports up to {MAX_OBJECTIVES} specific objectives.")
+    if level is not None and enforced_counts(rulebook_id):
+        low, high = objective_range(rulebook_id, level, four, concept)
+        if objectives and not low <= len(objectives) <= high:
+            allowed = f"{low}" if low == high else f"{low} to {high}"
+            problems.append(f"This {'concept paper' if concept else 'proposal'} takes {allowed} specific objectives; the plan has {len(objectives)}.")
+    if book.get("primary_question") and not plan.primary_question.strip():
+        problems.append("The plan needs a primary research question that the specific questions support.")
+    if book.get("hypothesis_pairs") and plan.questions_kind == "HYPOTHESES":
+        alternatives = [a for a in plan.alternative_hypotheses if a.strip()]
+        if len(alternatives) != len(questions):
+            problems.append("Each null hypothesis needs its alternative hypothesis.")
     if len(questions) != len(objectives):
         problems.append(f"Each objective needs its own research question: {len(objectives)} objectives, {len(questions)} questions.")
     if len(objectives) != len(plan.specific_objectives) or len(questions) != len(plan.research_questions):
@@ -159,11 +208,16 @@ def plan_problems(rulebook_id: str, plan: ProposalPlan) -> list[str]:
 def plan_advice(rulebook_id: str, plan: ProposalPlan) -> list[str]:
     """The manual's recommendations the plan does not follow; shown, never blocking."""
     book = load(rulebook_id)
+    advice = []
     low, high = book["objectives"]["min"], book["objectives"]["max"]
     count = len([o for o in plan.specific_objectives if o.strip()])
-    if not low <= count <= high:
-        return [f"{low} to {high} specific objectives are generally expected; this plan has {count}."]
-    return []
+    if not enforced_counts(rulebook_id) and not low <= count <= high:
+        advice.append(f"{low} to {high} specific objectives are generally expected; this plan has {count}.")
+    if book.get("primary_question"):
+        past = [i for i, q in enumerate([plan.primary_question, *plan.research_questions]) if q.strip() and past_tense(q)]
+        if past and plan.questions_kind == "QUESTIONS":
+            advice.append("Some research questions are in the past tense; keep them in the present or future unless the study is about past events.")
+    return advice
 
 
 def chapter_blockers(plan: ProposalPlan, number: int) -> list[str]:

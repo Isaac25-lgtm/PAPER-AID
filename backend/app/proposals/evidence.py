@@ -223,12 +223,16 @@ REFERENCE = re.compile(r"\b(?:sections?|sub-?sections?|chapters?|tables?|figures
                        r"questions?|hypothes[ie]s|steps?|phases?|pages?|items?|§)\s*(?:\d+(?:\.\d+)*|[A-Z])(?:\s*(?:and|to|–|-)\s*\d+(?:\.\d+)*)?",
                        re.IGNORECASE)
 LIST_MARKER = re.compile(r"\(?(?:\d{1,2}|[a-z]|[ivx]{1,4})[.)]")
+# A numbered sub-heading line placed by code ("1.4.1 General Objective"): its number is the document's own.
+SUBHEADING = re.compile(r"^\d{1,2}(?:\.\d{1,2}){1,2} [A-Z][A-Za-z ]{2,60}$")
 
 
 def figure_problems(paragraph: str, library: dict[str, EvidenceItem], allowed_text: str) -> list[str]:
     """Figures must come from the evidence cited in the same paragraph, or from the student's
     own inputs and plan (`allowed_text`). References to the document's own sections, tables and
     figures are not figures."""
+    if SUBHEADING.match(paragraph.strip()):
+        return []
     cited = [library[i] for i in cited_ids(paragraph) if i in library]
     known = _figures(allowed_text)
     for item in cited:

@@ -127,6 +127,13 @@ def build(answer: dict[str, Any], guide_name: str) -> dict[str, Any]:
             if s.get("table"):
                 section["table"] = True
             sections.append(section)
+        if n == 1:
+            # The approved statements are placed by code, word for word (2026-10-08): the general objective goes under
+            # Objectives unless the guide gives it a section of its own, then that section holds it.
+            separate = any(s["key"] == "purpose" for s in sections)
+            for section in sections:
+                if section["key"] in ("objectives", "questions"):
+                    section["from_plan"] = "specific_objectives" if section["key"] == "objectives" and separate else section["key"]
         chapters.append({"number": n, "title": _text(spec.get("title"))[:120] or default["chapters"][n - 1]["title"], "share": round(share, 4),
                          "purpose": _text(spec.get("purpose"))[:300], "source": source, "sections": sections})
     chapters.append(copy.deepcopy(next(c for c in default["chapters"] if c.get("kind") == "CONCEPT")))  # the concept paper keeps the default layout

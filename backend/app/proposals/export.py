@@ -264,6 +264,9 @@ def build(project: Project, chapters: dict[int, ChapterDocument], library: dict[
         for s in chapter.sections:
             doc.add_heading(f"{s.number} {s.heading}", level=2)
             for paragraph in s.paragraphs:
+                if evidence.SUBHEADING.match(paragraph.strip()):  # "1.4.1 General Objective", placed by code
+                    doc.add_heading(paragraph.strip(), level=3)
+                    continue
                 cited += [i for i in evidence.cited_ids(paragraph) if i not in cited]
                 p = doc.add_paragraph(citer.render(paragraph))
                 p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
@@ -314,6 +317,9 @@ def concept(project: Project, paper: ChapterDocument, library: dict[str, Evidenc
     for s in paper.sections:
         doc.add_heading(f"{s.number}. {s.heading}", level=2)
         for paragraph in s.paragraphs:
+            if evidence.SUBHEADING.match(paragraph.strip()):
+                doc.add_heading(paragraph.strip(), level=3)
+                continue
             cited += [i for i in evidence.cited_ids(paragraph) if i not in cited]
             doc.add_paragraph(citer.render(paragraph)).alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         if s.key == "framework" and columns:

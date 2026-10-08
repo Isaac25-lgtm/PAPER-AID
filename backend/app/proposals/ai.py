@@ -82,6 +82,21 @@ PLAN_SCHEMA_V2 = _obj(
         "researchGap": _obj({"known": _S, "missing": _S, "contribution": _S, "evidence": _STRS}),
     }
 )
+# p-plan-v3 (the handbook's general objective, primary question and hypothesis pairs, 2026-10-08).
+PLAN_SCHEMA_V3 = _obj(
+    {
+        **PLAN_SCHEMA_V2["properties"],
+        "primaryQuestion": _S,
+        "alternativeHypotheses": _STRS,
+    }
+)
+
+
+def plan_schema(prompt: str) -> dict[str, Any]:
+    """The plan's answer format for the prompt version a step was priced with."""
+    return PLAN_SCHEMA if prompt == "p-plan-v1" else PLAN_SCHEMA_V2 if prompt == "p-plan-v2" else PLAN_SCHEMA_V3
+
+
 CRITIQUE_SCHEMA = _obj({"items": _list(_obj({"field": _S, "problem": _S, "proposal": _S})), "overall": _S})
 BRIEFS_SCHEMA = _obj({"sections": _list(_obj({"key": _S, "points": _STRS, "evidence": _STRS}))})
 SECTIONS_SCHEMA = _obj({"sections": _list(_obj({"key": _S, "paragraphs": _STRS, "table": _obj({"caption": _S, "rows": _list(_STRS)})}))})
@@ -286,8 +301,8 @@ class ProposalRunner(AIRunner):
 
     def negotiate(self, kind: Literal["plan", "briefs"], payload: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], Critique]:
         """Returns (final, draft, critique) as plain data; code validates the final version."""
-        plan_schema = PLAN_SCHEMA if self._prompt_for("p_plan") == "p-plan-v1" else PLAN_SCHEMA_V2  # the schema of the engine it was priced with
-        task, schema, shape = ("p_plan", plan_schema, None) if kind == "plan" else ("p_brief", BRIEFS_SCHEMA, _Briefs)
+        schema_of_plan = plan_schema(self._prompt_for("p_plan"))  # the schema of the engine it was priced with
+        task, schema, shape = ("p_plan", schema_of_plan, None) if kind == "plan" else ("p_brief", BRIEFS_SCHEMA, _Briefs)
         draft = self._raw(task, payload, schema, shape)
         critique = _whole(self._call("p_critique", {**payload, "kind": kind, "draft": draft}, CRITIQUE_SCHEMA, Critique), "p_critique")
         assert isinstance(critique, Critique)
@@ -379,7 +394,7 @@ class ProposalRunner(AIRunner):
     def repair_plan(self, payload: dict[str, Any], plan: dict[str, Any], objections: list[str]) -> dict[str, Any]:
         """A targeted repair of the plan for exactly the objections given (Sonnet finalises again with
         them as the critique); the repaired plan is then reviewed again."""
-        schema = PLAN_SCHEMA if self._prompt_for("p_plan") == "p-plan-v1" else PLAN_SCHEMA_V2
+        schema = plan_schema(self._prompt_for("p_plan"))
         critique = {"items": [{"issue": o, "fix": "Fix exactly this, changing nothing else."} for o in objections], "overall": "Repair only what these points name."}
         return self._raw("p_finalise", {**payload, "kind": "plan", "draft": plan, "critique": critique}, schema, None)
 

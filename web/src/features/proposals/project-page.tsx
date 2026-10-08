@@ -10,6 +10,7 @@ import { Alert, Badge, Card, PageHeader, Skeleton } from '../../components/ui/pr
 import { DataError, useData } from '../../lib/data'
 import { formatDate, formatTokens } from '../../lib/format'
 import { walletChanged } from '../../lib/use-wallet'
+import { SUBHEADING } from '../workspace/parts'
 import type { ChapterView, Comparison, EvidenceItem, Project, Rulebook, StepQuote } from '../../lib/proposal-types'
 import type { Job } from '../../lib/types'
 import { useTitle } from '../../lib/use-title'
@@ -219,11 +220,17 @@ function ChapterPanel({ project, number, running, onStarted, onChanged }: { proj
                   {s.number} {s.heading}
                   {s.needsReview && <Badge tone="warning">Needs review</Badge>}
                 </h3>
-                {s.paragraphs.map((p, i) => (
-                  <p key={i} className="mt-2 text-[15px] leading-relaxed text-fg">
-                    {p}
-                  </p>
-                ))}
+                {s.paragraphs.map((p, i) =>
+                  SUBHEADING.test(p.trim()) ? (
+                    <h4 key={i} className="mt-3 text-[15px] font-semibold">
+                      {p}
+                    </h4>
+                  ) : (
+                    <p key={i} className="mt-2 text-[15px] leading-relaxed text-fg">
+                      {p}
+                    </p>
+                  ),
+                )}
                 {s.key === 'framework' && chapter.framework.length > 0 && <Framework columns={chapter.framework} figure={concept ? 'Figure 1' : 'Figure 1.1'} />}
                 {s.table && (
                   <div className="mt-3 overflow-x-auto">

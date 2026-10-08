@@ -639,7 +639,7 @@ function ProposalStart({ concept }: { concept: boolean }) {
   const [page, setPage] = useState<1 | 2>(1)
   const [inputs, setInputs] = useState<ProposalInputs>({
     topic: '', level: 'MASTERS', programme: '', faculty: '', studyArea: '', population: '', studyType: null, notes: '',
-    populationSize: null, populationSource: '', expectedParticipants: null,
+    populationSize: null, populationSource: '', expectedParticipants: null, fourObjectives: false,
   })
   const [cover, setCover] = useState<TitlePage>({ studentName: '', regNumber: '', supervisor: '', submissionDate: '', institution: '' })
   const [citation, setCitation] = useState<CitationStyle>('APA6')
@@ -708,6 +708,13 @@ function ProposalStart({ concept }: { concept: boolean }) {
             </Select>
             <Input label="Programme (optional)" maxLength={150} value={inputs.programme} onChange={(e) => set({ programme: e.target.value })} placeholder="e.g. Master of Public Health" />
           </div>
+          {inputs.level !== 'PHD' && (
+            <Select label="Specific objectives" value={inputs.fourObjectives ? '4' : '3'} onChange={(e) => set({ fourObjectives: e.target.value === '4' })}
+              hint="Three is the standard. Choose four only if your supervisor asks for it.">
+              <option value="3">Three (standard)</option>
+              <option value="4">Four</option>
+            </Select>
+          )}
           <Alert tone="info">
             PaperAid writes to the standard guide’s structure. If your institution uses its own guide, you can add it from your proposal page afterwards.
           </Alert>

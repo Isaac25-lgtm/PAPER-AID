@@ -779,3 +779,28 @@ The owner asked Codex to implement the four confirmed remaining findings. Testin
 
 No deployment, commit, push or paid model request was performed for these corrections. Strict Data Lab
 disclosure is unchanged. Handoff: `docs/Codex_Handoff_20261008_Four_Fixes.md`.
+
+
+## 2026-10-08 — Research proposals follow the UCU handbook to the letter (standard guide v2); the owner's objective cap
+
+The handbook takes precedence, with one deliberate exception set by the owner.
+- **Owner's rule (overrides the handbook's two to five):** Bachelor's, Postgraduate Diploma and Master's proposals
+  take **three** specific objectives, **four only when the student asks** (a choice on the Start page). PhD follows the
+  handbook (two to five). Concept papers: the handbook's three to five within the same cap. Research questions avoid
+  the past tense unless the study is about past events (flagged for review, never blocked).
+- **Handbook fixes (rulebook `ucu-2018-v2`, the new default; v1 stays for proposals under way):** the general (main)
+  objective is stated under Objectives of the Study with the specific objectives (§5.3.3; no separate Purpose
+  section); a primary research question precedes the specific questions (vetting form, p. 51); hypotheses are stated
+  as null and alternative (§5.3.4); a short Chapter One conclusion (§5.3); a PhD states its original contribution.
+- **Code, not the writer, places the approved statements** (Codex review): the general objective, specific objectives,
+  primary question and specific questions (or hypothesis pairs, or propositions) are copied word for word from the
+  approved plan after drafting and after every repair; the writer adds only an introduction. Code checks them on the
+  delivered chapter; a missing or altered one blocks a complete export. The plan review repairs plans that break the
+  count, primary-question or hypothesis-pair rules (prompt `p-plan-v3`). A proposal's length for its level is checked
+  on Chapter Three (warning). Uploaded faculty guides get the same code placement for new profiles.
+- **The reviewer is told the placed statements are the approved plan** (live run 2026-10-08): with the brief "one short
+  introduction only", the final review asked to remove the placed objectives and questions, which code puts back, so
+  Chapter One could never be approved. The v2 briefs now describe both parts (the writer's introduction, then the
+  placed statements, never to be changed or removed); a faculty guide's own brief gets the same note added by code. The
+  writer's introduction (up to two paragraphs) is kept, including one that opens "To address these gaps, the study's
+  objectives ..."; a line that lists or repeats an approved statement, or a bare "To ..." objective, is dropped.

@@ -161,8 +161,12 @@ export function DocTable({ caption, rows }: { caption: string; rows: string[][] 
   )
 }
 
+/** A numbered sub-heading line placed by the server ("1.4.1 General Objective"). */
+export const SUBHEADING = /^\d{1,2}(?:\.\d{1,2}){1,2} [A-Z][A-Za-z ]{2,60}$/
+
 /** A paragraph, with any marked gap ("[target to be added]") highlighted for the student. */
 export function Para({ text, changed }: { text: string; changed?: boolean }) {
+  if (SUBHEADING.test(text.trim())) return <h3 className="mt-4 text-[15px] font-semibold">{text}</h3>
   const parts = text.split(/(\[[^\]]*to be added\])/)
   return (
     <p className={clsx('mt-3 text-justify', changed && '-mx-2 rounded bg-brand-50 px-2')}>

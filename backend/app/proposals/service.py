@@ -134,6 +134,12 @@ def _chapter_doc(rt: Runtime, state_: StoredChapterState, version: int | None = 
     return ChapterDocument.model_validate_json(rt.files.get(path))
 
 
+def plan_problems(p: Project) -> list[str]:
+    """What blocks the plan's approval, under the project's guide, level and the student's choice of four objectives."""
+    assert p.plan is not None
+    return rulebook.plan_problems(p.rulebook, p.plan, p.inputs.level, p.inputs.four_objectives, p.goal == "CONCEPT")
+
+
 def view(rt: Runtime, p: Project) -> ProjectView:
     """The browser's view, with what is computed from the current plan: what blocks approval and
     which written sections were built on decisions that have since changed."""
@@ -156,7 +162,7 @@ def view(rt: Runtime, p: Project) -> ProjectView:
     out.guide_name = p.guide.name if p.guide else None
     out.guide_read = p.guide is not None and book.get("guide_sha256") == p.guide.sha256
     if p.plan is not None:
-        out.plan_problems = rulebook.plan_problems(p.rulebook, p.plan)
+        out.plan_problems = plan_problems(p)
         for chapter in out.chapters:
             doc = docs.get(chapter.number)
             if doc is None:
@@ -312,7 +318,7 @@ def approve_plan(rt: Runtime, user: User, project_id: str, base_version: int, ac
             raise AppError("Create a plan first.", code="NO_PLAN")
         if p.plan_version != base_version:
             raise Conflict("Your plan changed since you opened it. Review the latest version before approving it.", code="PLAN_CHANGED")
-        problems = rulebook.plan_problems(p.rulebook, p.plan)
+        problems = plan_problems(p)
         if problems:
             raise AppError("Fix the plan before approving it: " + " ".join(problems), code="PLAN_INCOMPLETE")
         needed = needed_acknowledgments(p)
@@ -655,6 +661,7 @@ def quote_step(rt: Runtime, user: User, project_id: str, step: Step, note: str, 
         rulebook=p.rulebook,
         guide_sha256=p.guide.sha256 if p.guide else "",
         inputs=p.inputs,
+        goal=p.goal,
         plan=p.plan if chapter else None,
         plan_version=p.plan_version,
         evidence_files=list(p.evidence_files),
@@ -1200,10 +1207,10 @@ def continue_after_plan(rt: Runtime, project_id: str, plan_job: str) -> None:
         notify.stopped(rt, plan_job)  # recorded on the plan's job and delivered like any other message
 
     approved = (p.plan is not None and p.plan_review is not None and p.plan_review.outcome == "APPROVED"
-                and not rulebook.plan_problems(p.rulebook, p.plan))
+                and not plan_problems(p))
     if not approved:
         objections = list(p.plan_review.objections) if p.plan_review is not None else []
-        problems = rulebook.plan_problems(p.rulebook, p.plan) if p.plan is not None else []
+        problems = plan_problems(p) if p.plan is not None else []
         why = [*problems, *objections][:2]
         stop(NOT_FINISHED + (f" What it could not settle: {' '.join(why)[:400]}" if why else ""))
         return

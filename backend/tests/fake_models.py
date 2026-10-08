@@ -35,6 +35,8 @@ PLAN = {
     "specificObjectives": ["To assess the effect of distance on uptake", "To examine caregivers' attitudes towards the vaccine", "To determine the role of health workers in uptake"],
     "questionsKind": "QUESTIONS",
     "researchQuestions": ["How does distance affect uptake?", "What attitudes do caregivers hold?", "What role do health workers play?"],
+    "primaryQuestion": "What determines malaria vaccine uptake among caregivers in Mukono District?",
+    "alternativeHypotheses": [],
     "studyType": "QUANTITATIVE", "design": "A cross-sectional survey, because it measures uptake and its determinants at one time.",
     "studyArea": "Mukono District", "population": "Caregivers of children under two", "sampling": "Multi-stage cluster sampling of parishes and households.",
     "sampleSize": {"method": "YAMANE", "population": 2400, "populationSource": "", "margin": 0.05, "confidence": 95, "proportion": 0.5, "stated": None, "rationale": ""},
