@@ -5,6 +5,7 @@ import { Input } from '../../components/ui/field'
 import { Alert, Skeleton } from '../../components/ui/primitives'
 import { DataError, useData } from '../../lib/data'
 import { useTitle } from '../../lib/use-title'
+import { usePageRecord } from '../../lib/use-page-record'
 import { walletChanged } from '../../lib/use-wallet'
 import type { ReadinessItem } from '../../lib/proposal-types'
 import type { Budget, ResultsModel, Work, WorkDocumentView } from '../../lib/work-types'
@@ -25,20 +26,17 @@ const ESTIMATES: Record<Work['kind'], string> = {
  *  Works set up before one Start (owner decision 2026-10-01) keep their earlier page until written. */
 export function WorkPage() {
   const { workId = '' } = useParams()
+  return <SelectedWorkPage key={workId} workId={workId} />
+}
+
+function SelectedWorkPage({ workId }: { workId: string }) {
   const data = useData()
-  const [work, setWork] = useState<Work | null | undefined>(undefined)
-  const [error, setError] = useState<string | null>(null)
+  const read = useCallback(() => data.works.get(workId), [data, workId])
+  const { record: work, error, load, change: setWork } = usePageRecord(workId, read, 'We could not load this work.')
   const [retrying, setRetrying] = useState(false)
   const [retryError, setRetryError] = useState<string | null>(null)
   useTitle(work?.plan?.title ?? work?.inputs.title ?? 'Your work')
 
-  const load = useCallback(() => {
-    data.works
-      .get(workId)
-      .then(setWork)
-      .catch((e: unknown) => setError(e instanceof DataError ? e.message : 'We could not load this work.'))
-  }, [data, workId])
-  useEffect(load, [load])
   const onStepDone = useCallback(() => {
     walletChanged()
     window.setTimeout(load, 1200) // the next step (the draft after the plan) is claimed right after
@@ -46,7 +44,7 @@ export function WorkPage() {
 
   if (error && !work)
     return (
-      <Alert tone="danger" title="We could not load this work" action={<Button size="sm" variant="secondary" onClick={() => (setError(null), load())}>Try again</Button>}>
+      <Alert tone="danger" title="We could not load this work" action={<Button size="sm" variant="secondary" onClick={load}>Try again</Button>}>
         {error}
       </Alert>
     )

@@ -232,3 +232,28 @@ def test_a_whole_chapter_request_met_only_in_part_stays_open(client):
     assert any("stay open" in str(w) for w in job["warnings"])
     project = client.get(f"/api/projects/{project_id}", headers=STUDENT).json()
     assert project["feedback"][0]["status"] == "OPEN"
+
+
+@pytest.mark.parametrize("revise_all", [False, True])
+def test_an_unnamed_throughout_request_needs_every_section_revised(client, revise_all):
+    project_id = _with_chapter_one(client)
+    response = client.post(f"/api/projects/{project_id}/chapters/1/request", headers=STUDENT,
+                           json={"instruction": "Use future tense throughout.", "sections": []})
+    assert response.status_code == 200, response.json()
+    request = response.json()["feedback"][0]
+    assert len(request["sections"]) > 1 and not request["required"]
+
+    def revise(payload):
+        return {"sections": [{"key": s["key"], "paragraphs": [*s["text"], "This study will examine the stated research questions."],
+                              "table": s["table"]} for s in payload["sections"] if revise_all or s["key"] == "background"]}
+
+    client.models.overrides["p_fix"] = revise
+    quoted = client.post(f"/api/projects/{project_id}/steps", headers=STUDENT,
+                         json={"step": "REVISE_1", "comments": [request["id"]]}).json()
+    submitted = client.post(f"/api/projects/{project_id}/steps/{quoted['job']['id']}/submit", headers=STUDENT,
+                            json={"quoteId": quoted["quote"]["id"]})
+    assert submitted.status_code == 200, submitted.json()
+    job = wait(client, quoted["job"]["id"])
+    assert job["status"] == "COMPLETED", job
+    project = client.get(f"/api/projects/{project_id}", headers=STUDENT).json()
+    assert project["feedback"][0]["status"] == ("APPLIED" if revise_all else "OPEN")

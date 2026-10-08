@@ -759,3 +759,23 @@ full suite and the five browser journeys.
 - Owner decision pending: an analysis leaving out 1-4 people (for example a few missing values) is now withheld
   under the "leave out none or at least the threshold" rule. Real datasets with a few blanks will see more
   "cannot be shared" results.
+
+## 2026-10-08 — Four follow-up corrections (local; awaiting Claude's tests)
+
+The owner asked Codex to implement the four confirmed remaining findings. Testing remains with Claude.
+- Worked-example prose requires explicit hypothetical framing. "For example", "For illustration" and
+  "To illustrate" no longer exempt a factual sentence from numeric evidence checks. New prompts are
+  `w-draft-v4` and `w-repair-v5`; released older prompts stay intact.
+- Graph removal must target the graph itself. Instructions preserving the graph win over conflicting
+  removal wording; deleting a paragraph, table or graph caption does not remove the graph.
+- Data Lab's review manifest lists each original section once, with the range of parts it spans.
+  Exact request-size checks remain; genuinely oversized repeated context still fails safely.
+- Work and proposal pages reset on route-ID changes, reject responses older than the latest displayed
+  response or server record, and invalidate pending refreshes after a saved change. Slow polling may
+  still display useful progress while a newer request is pending.
+- Regression cases now include the unnamed "Use future tense throughout" request (partial and complete
+  revisions), long report/Chapter Four reviews, and deliberately reversed page responses in both unit
+  tests and a local synthetic browser journey. These additions have not been executed by Codex.
+
+No deployment, commit, push or paid model request was performed for these corrections. Strict Data Lab
+disclosure is unchanged. Handoff: `docs/Codex_Handoff_20261008_Four_Fixes.md`.

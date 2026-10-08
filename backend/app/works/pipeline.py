@@ -156,16 +156,27 @@ def _kept(old: SectionText, new: SectionText, *, remove_figure: bool = False) ->
 
 
 def _remove_figure_requested(requests: list[str]) -> bool:
-    """Only an explicit student instruction removes a previously delivered graph."""
-    for request in requests:
-        words = " ".join(request.casefold().split())
-        if re.search(r"\b(?:do not|don't|never|keep|retain)\s+(?:\w+\s+){0,3}(?:remove|delete|omit|drop)\b", words):
-            continue
-        if (re.search(r"\b(?:remove|delete|omit|drop|take out)\b.{0,70}\b(?:graph|figure|chart|diagram)\b", words)
-                or re.search(r"\b(?:graph|figure|chart|diagram)\b.{0,40}\b(?:removed|deleted|omitted|dropped)\b", words)
-                or re.search(r"\bwithout\s+(?:a |the )?(?:graph|figure|chart|diagram)\b", words)):
-            return True
-    return False
+    """Remove only a graph that is the instruction's object. Preservation wins if instructions conflict;
+    removing a paragraph near a mention of its graph is not permission to remove the graph too."""
+    figure = (r"(?:(?:a|an|the|this|that|my|our|existing|current|first|second|third|last|all|these|those)\s+)*"
+              r"(?:graphs?|figures?|charts?|diagrams?)\b(?!['’]s\b|\s+(?:caption|title|label|legend|axis|axes)\b)")
+    remove = r"(?:remove|delete|omit|drop|take out)"
+    texts = [" ".join(r.casefold().replace("’", "'").split()) for r in requests]
+    preserve = [
+        rf"\b(?:keep|retain|preserve|leave)\s+{figure}",
+        rf"\bnot\s+{figure}",
+        rf"\b{figure}\s+(?:(?:must|should|will|can)\s+)?(?:stay|stays|remain|remains|be kept|be retained|be preserved)\b",
+        rf"\b(?:do not|don't|never|not to)\s+{remove}\s+{figure}",
+        rf"\b(?:do not|don't|never|not)\s+(?:\w+\s+){{0,4}}without\s+{figure}",
+        rf"\b{figure}\s+(?:(?:must|should|will|can)\s+)?not\s+be\s+(?:removed|deleted|omitted|dropped)\b",
+    ]
+    if any(re.search(pattern, text) for text in texts for pattern in preserve):
+        return False
+    return any(re.search(pattern, text) for text in texts for pattern in (
+        rf"\b{remove}\s+{figure}",
+        rf"\bwithout\s+{figure}",
+        rf"\b{figure}\s+(?:(?:must|should)\s+be|to be)\s+(?:removed|deleted|omitted|dropped)\b",
+    ))
 
 
 def _examples_allowed(inp: WorkStepInput) -> bool:
@@ -189,8 +200,9 @@ def _illustrative(inp: WorkStepInput, text: SectionText) -> str:
 
 
 # A sentence that opens as a hypothetical: the only prose that may use a worked example's numbers.
-HYPOTHETICAL = re.compile(r"^\W*(?:suppose|supposing|assume|assuming|imagine|hypothetically|for (?:illustration|example)|to illustrate|"
-                          r"in (?:this|the|our) (?:worked |hypothetical |illustrative |numerical )?(?:example|illustration|scenario))\b", re.I)
+HYPOTHETICAL = re.compile(r"^\W*(?:suppose|supposing|assume|assuming|imagine|hypothetically|"
+                          r"in (?:this|our) (?:worked |hypothetical |illustrative |numerical )?(?:example|illustration|scenario)|"
+                          r"in the (?:worked |hypothetical |illustrative |numerical )(?:example|illustration|scenario))\b", re.I)  # "In the example of Kenya" is not hypothetical
 
 
 def _framed(example: str) -> Callable[[str], str] | None:

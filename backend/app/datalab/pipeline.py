@@ -228,7 +228,7 @@ def bounded_parts(entries: list[dict[str, Any]], repeated: Any, title: str = "",
     inputs and the manifest); the manifest names the part each section is in."""
     reserve = 100  # document title, subtitle, part labels and JSON envelope
     bound = FINAL_PART_WORDS - _words(repeated) - 12 * len(entries) - reserve
-    for _ in range(16):  # the manifest grows as long sections are split
+    for _ in range(16):
         if bound < 80:
             check_review_size({"context": repeated, "document": entries})
             raise PermanentStageError("REVIEW_INPUT_TOO_LARGE", "PaperAid could not fit the complete evidence into its review. Nothing was charged. Please use fewer analyses or shorter supporting material.")
@@ -242,7 +242,16 @@ def bounded_parts(entries: list[dict[str, Any]], repeated: Any, title: str = "",
                     words = 0
                 parts[-1].append(piece)
                 words += size
-        manifest = [{"key": e["key"], "heading": e["heading"], "part": n} for n, part in enumerate(parts, start=1) for e in part]
+        # One entry per original section, regardless of how many pieces it takes. Otherwise reducing
+        # the piece size grows the repeated manifest and can make a long report impossible to fit.
+        spans: dict[str, list[int]] = {}
+        for n, part in enumerate(parts, start=1):
+            for entry in part:
+                spans.setdefault(entry["key"], []).append(n)
+        manifest = [{"key": e["key"], "heading": e["heading"],
+                     "part": (str(spans[e["key"]][0]) if spans[e["key"]][0] == spans[e["key"]][-1]
+                              else f"{spans[e['key']][0]}-{spans[e['key']][-1]}")}
+                    for e in entries if e["key"] in spans]
         over = max(_words({**repeated, "manifest": manifest, "part": f"{n} of {len(parts)}",
                            "document": {"title": title, "subtitle": subtitle, "sections": part}})
                    for n, part in enumerate(parts, start=1)) - FINAL_PART_WORDS

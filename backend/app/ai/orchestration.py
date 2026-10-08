@@ -166,10 +166,10 @@ STEPS: dict[str, Step] = {
     "w_plan_review": Step("EVALUATOR", Stage.PLANNING, "w-plan-review-v2", 6000),  # v2: blocking issues apart from suggestions; a repair is checked against the earlier issues (live funding runs 2026-10-03)
     "w_results": Step("WRITER", Stage.PLANNING, "w-results-v3", 16000),  # v2: says the Results Model is internal (Codex audit of 9239dd0); v3: measurement rules (live funding runs 2026-10-03)
     "w_results_review": Step("EVALUATOR", Stage.PLANNING, "w-results-review-v4", 8000),  # v2: blocking issues apart from suggestions; a repair is checked against the earlier issues
-    "w_draft": Step("WRITER", Stage.DRAFTING, "w-draft-v3", 16000),  # v3: illustrative numbers only in table cells
+    "w_draft": Step("WRITER", Stage.DRAFTING, "w-draft-v4", 16000),  # v4: only explicitly hypothetical prose uses example numbers
     "w_integrity": Step("INTEGRITY", Stage.AUDITING, "w-integrity-v1", 6000),
     "w_evaluate": Step("EVALUATOR", Stage.AUDITING, "w-evaluate-v1", 8000),
-    "w_repair": Step("WRITER", Stage.AUDITING, "w-repair-v4", 16000),  # v4: protected illustrative prose and explicit graph removal
+    "w_repair": Step("WRITER", Stage.AUDITING, "w-repair-v5", 16000),  # v5: explicit hypothetical framing and graph preservation
     "w_adjudicate": Step("ADJUDICATOR", Stage.AUDITING, "w-adjudicate-v1", 4000),
     "w_final": Step("EVALUATOR", Stage.AUDITING, "w-final-v2", 8000),  # v2: the exact deliverable, every verdict required (Sol with one final reviewer)
     "w_compress": Step("WRITER", Stage.AUDITING, "w-compress-v1", 12000),

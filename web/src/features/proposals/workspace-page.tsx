@@ -8,6 +8,7 @@ import { Alert, Card, Skeleton } from '../../components/ui/primitives'
 import { DataError, useData } from '../../lib/data'
 import type { ChapterView, Project, ReadinessItem } from '../../lib/proposal-types'
 import { useTitle } from '../../lib/use-title'
+import { usePageRecord } from '../../lib/use-page-record'
 import { walletChanged } from '../../lib/use-wallet'
 import { StartProgress, StoppedCard } from '../start/progress'
 import { ChangeBox, ChecksList, DocTable, ErrorNote, PanelSection, Paper, Para, Versions, WorkspaceHeader, type CheckLine, type WorkspaceStatus } from '../workspace/parts'
@@ -22,21 +23,18 @@ const NAMES: Record<number, string> = { 1: 'Chapter One', 2: 'Chapter Two', 3: '
  *  before one Start keep their earlier page, and its full tools stay one click away ("More tools"). */
 export function ProjectPage() {
   const { projectId = '' } = useParams()
+  return <SelectedProjectPage key={projectId} projectId={projectId} />
+}
+
+function SelectedProjectPage({ projectId }: { projectId: string }) {
   const [params] = useSearchParams()
   const data = useData()
-  const [project, setProject] = useState<Project | null | undefined>(undefined)
-  const [error, setError] = useState<string | null>(null)
+  const read = useCallback(() => data.projects.get(projectId), [data, projectId])
+  const { record: project, error, load, change: setProject } = usePageRecord(projectId, read, 'We could not load this proposal.')
   const [retrying, setRetrying] = useState(false)
   const [retryError, setRetryError] = useState<string | null>(null)
   useTitle(project?.plan?.title ?? project?.inputs.topic ?? 'Research proposal')
 
-  const load = useCallback(() => {
-    data.projects
-      .get(projectId)
-      .then(setProject)
-      .catch((e: unknown) => setError(e instanceof DataError ? e.message : 'We could not load this proposal.'))
-  }, [data, projectId])
-  useEffect(load, [load])
   const onStepDone = useCallback(() => {
     walletChanged()
     window.setTimeout(load, 1200) // Chapter One is claimed right after the plan
@@ -45,7 +43,7 @@ export function ProjectPage() {
   if (params.get('tools')) return <LegacyProjectPage />
   if (error && !project)
     return (
-      <Alert tone="danger" title="We could not load this proposal" action={<Button size="sm" variant="secondary" onClick={() => (setError(null), load())}>Try again</Button>}>
+      <Alert tone="danger" title="We could not load this proposal" action={<Button size="sm" variant="secondary" onClick={load}>Try again</Button>}>
         {error}
       </Alert>
     )

@@ -241,7 +241,7 @@ class FeedbackComment(Camel):
     by: Literal["SUPERVISOR", "STUDENT"] = "SUPERVISOR"  # STUDENT: the student's own request (not in the response report)
     # A request about the whole chapter: the sections its own words name (placed by code, as supervisor comments
     # are), every one of which a revision must change before the request counts as applied (Codex review 2026-10-07,
-    # finding 6). Empty: it names none, and any revised section answers it.
+    # finding 6). Empty: it names none, so every targeted section must be revised before it is applied.
     required: list[str] = []
     context_name: str = Field(default="", max_length=120)  # a document the student added for context, given to the writer
     context: str = Field(default="", max_length=8000)  # older comments only: the text is now kept in file storage
