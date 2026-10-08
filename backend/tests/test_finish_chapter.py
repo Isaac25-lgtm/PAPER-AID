@@ -102,11 +102,17 @@ def test_nothing_to_finish_and_nothing_written_are_not_charged(fixed_client, par
     assert refused.status_code == 400 and refused.json()["code"] == "NOTHING_TO_FINISH"
 
 
-def test_a_changed_plan_needs_the_chapter_written_again(fixed_client, partial):
+def test_after_a_plan_change_the_finish_follows_the_new_plan_and_the_earlier_sections_stay_flagged(fixed_client, partial):
+    """Codex audit of 29343c2 #3: finishing used to be refused after any plan change (a confirmed setting, a framework
+    edit). The sections still to write follow the current plan; the sections written from the changed decision stay
+    marked for review and block the complete proposal."""
     from tests.test_proposals import _approved
 
     pid, _, _, _ = partial
     project = fixed_client.get(f"/api/projects/{pid}", headers=STUDENT).json()
     _approved(fixed_client, pid, title=project["plan"]["title"] + " in Mukono")
-    refused = fixed_client.post(f"/api/projects/{pid}/steps", headers=STUDENT, json={"step": "COMPLETE_1"})
-    assert refused.status_code == 400 and refused.json()["code"] == "PLAN_CHANGED"
+    quoted = fixed_client.post(f"/api/projects/{pid}/steps", headers=STUDENT, json={"step": "COMPLETE_1"})
+    assert quoted.status_code == 200, quoted.json()
+    project = fixed_client.get(f"/api/projects/{pid}", headers=STUDENT).json()
+    assert next(c for c in project["chapters"] if c["number"] == 1)["needsReview"]  # written from the earlier title
+    assert any("decisions you have since changed" in b for b in project["blockers"])
