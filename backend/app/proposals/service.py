@@ -426,6 +426,8 @@ def set_chapter(rt: Runtime, user: User, project_id: str, number: int, version: 
         doc = ChapterDocument.model_validate_json(rt.files.get(chosen.path if rt.files.exists(chosen.path) else moved_path(chosen.path))) if chosen else None
         if doc is not None and doc.missing:
             raise AppError("Finish this chapter before approving it: some sections are not written yet.", code="CHAPTER_INCOMPLETE")
+        if doc is not None and doc.to_align:  # Codex audit 29343c2 #1
+            raise AppError("Revise the sections your institution's guide asks for differently before approving this chapter.", code="CHAPTER_NOT_ALIGNED")
 
     def apply(p: Project) -> Project:
         chapter = p.chapter(number)
@@ -500,7 +502,9 @@ def chapter(rt: Runtime, user: User, project_id: str, number: int, version: int 
     sources = [citer.library[i].source for i in doc.cited if i in citer.library]
     return ChapterView(
         number=number, title=doc.title, version=version or stored.current, plan_version=doc.plan_version, sections=_render(doc, citer, p.plan),
-        readiness=doc.readiness, warnings=doc.warnings, words=doc.words,
+        readiness=[i.model_copy(update={"status": "PASS", "note": "You confirmed the standard sample-size settings PaperAid assumed."})
+                   if i.id == "C3-ASSUMED" and sampling_confirmed(p) else i for i in doc.readiness],
+        warnings=doc.warnings, words=doc.words,
         references=evidence.reference_list(sources, p.citation),
         framework=[FrameworkColumn(label=label, items=items) for label, items in proposal_export.framework_columns(p.plan)]
         if number in (1, CONCEPT) and any(s.key == "framework" for s in doc.sections) else [],
@@ -645,8 +649,9 @@ def quote_step(rt: Runtime, user: User, project_id: str, step: Step, note: str, 
         doc = _chapter_doc(rt, stored)
         if doc is None or not doc.missing:
             raise AppError("Every section of this chapter is written.", code="NOTHING_TO_FINISH")
-        if doc.plan_version != p.plan_version:
-            raise AppError("Your plan changed after this draft was written. Write the chapter again so all of it follows your current plan.", code="PLAN_CHANGED")
+        # The sections still to write follow the current approved plan; sections written from decisions changed since
+        # are marked for review and block the complete proposal (decisions.stale), so finishing is safe after an edit
+        # such as a confirmed setting or framework (Codex audit 29343c2 #3). A change after pricing is refused at submit.
         base = next(v.path for v in stored.versions if v.version == stored.current)
         base_version = stored.current
         base_sha = hashlib.sha256(rt.files.get(base if rt.files.exists(base) else moved_path(base))).hexdigest()
@@ -1301,6 +1306,33 @@ def edit_framework(rt: Runtime, user: User, project_id: str, base_version: int, 
             if edited != p.plan.variables:
                 p.plan = p.plan.model_copy(update={"variables": edited})
                 p.plan_version += 1
+        return p
+
+    return view(rt, _change(rt, user, project_id, apply))
+
+
+def sampling_confirmed(p: Project) -> bool:
+    """The student confirmed the standard sample-size settings PaperAid assumed for the current plan: here, or by the
+    tick on the earlier Start page."""
+    if p.plan is None or not p.plan.sampling_assumed:
+        return False
+    texts = {hashlib.sha256("; ".join(p.plan.sampling_assumed).encode()).hexdigest(), hashlib.sha256(SAMPLING_CONSENT.encode()).hexdigest()}
+    return any(a.kind == "SAMPLING" and a.text_sha256 in texts and a.plan_version == p.plan_version for a in p.acknowledgments)
+
+
+def confirm_sampling(rt: Runtime, user: User, project_id: str, base_version: int) -> ProjectView:
+    """The student confirms the standard sample-size settings PaperAid assumed (Codex audit 29343c2 #6): recorded as
+    their acknowledgment for this plan, so Chapter Three's check passes."""
+
+    def apply(p: Project) -> Project:
+        if p.plan is None or not p.plan.sampling_assumed:
+            raise AppError("Your plan assumes no sample-size settings.", code="NOTHING_TO_CONFIRM")
+        if p.plan_version != base_version:
+            raise Conflict("Your plan changed since you opened it. Reload it and confirm again.", code="PLAN_CHANGED")
+        if not sampling_confirmed(p):
+            text = "; ".join(p.plan.sampling_assumed)
+            p.acknowledgments.append(Acknowledgment(kind="SAMPLING", plan_version=p.plan_version, text_sha256=hashlib.sha256(text.encode()).hexdigest()))
+            p.acknowledgments = p.acknowledgments[-50:]
         return p
 
     return view(rt, _change(rt, user, project_id, apply))

@@ -246,6 +246,16 @@ def start(project_id: str, accept_sampling: bool = Body(default=False, embed=Tru
     return projects.start(rt, user, project_id, accept_sampling)
 
 
+class SamplingConfirmation(Camel):
+    base_version: int
+
+
+@router.post("/{project_id}/sampling", response_model=ProjectView)
+def confirm_sampling(project_id: str, body: SamplingConfirmation, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> ProjectView:
+    """The student confirms the standard sample-size settings PaperAid assumed where they gave no figures."""
+    return projects.confirm_sampling(rt, user, project_id, body.base_version)
+
+
 class FrameworkEdit(Camel):
     base_version: int
     style: Literal["MONO", "GREEN", "BLUE"] | None = None

@@ -352,14 +352,33 @@ def test_assumed_sample_settings_no_longer_stop_the_proposal(client):
     nothing is recorded as the student's consent, and Chapter Three asks them to confirm (C3-ASSUMED)."""
     from tests.fake_models import PLAN as BASE
 
-    client.models.overrides["p_finalise"] = lambda payload: {**BASE, "sampleSize": {**BASE["sampleSize"], "margin": 7}} if "title" in payload["draft"] else payload["draft"]
-    project = _create(client)
+    client.models.overrides["p_finalise"] = lambda payload: {**BASE, "sampleSize": {**BASE["sampleSize"], "margin": 7, "population": 4200, "populationSource": "District records, 2025"}} if "title" in payload["draft"] else payload["draft"]
+    from tests.test_proposals import DETAILS
+
+    figures = {**DETAILS["inputs"], "populationSize": 4200, "populationSource": "District records, 2025"}  # the student's own N
+    project = client.post("/api/projects", headers=H, json={**DETAILS, "inputs": figures}).json()
     client.post(f"/api/projects/{project['id']}/start", headers=H)
     project = _settled(client, f"/api/projects/{project['id']}", lambda p: bool(p["autoFailure"]) or any(c["number"] == 1 and c["current"] for c in p["chapters"]), timeout=180)
     if not project["plan"]["samplingAssumed"]:
         pytest.skip("this plan assumed no sample-size settings")
     assert not project["autoFailure"] and any(c["number"] == 1 and c["current"] for c in project["chapters"])
     assert not any(a["kind"] == "SAMPLING" for a in project["acknowledgments"])
+
+    # Chapter Three asks for the confirmation, and the student gives it there (Codex audit 29343c2 #6)
+    url = f"/api/projects/{project['id']}"
+    client.post(f"{url}/chapters/1", headers=H, json={"version": next(c for c in project["chapters"] if c["number"] == 1)["current"], "approved": True})
+    for step in ("CHAPTER_2", "CHAPTER_3"):
+        quoted = client.post(f"{url}/steps", headers=H, json={"step": step}).json()
+        assert "job" in quoted, quoted
+        client.post(f"{url}/steps/{quoted['job']['id']}/submit", headers=H, json={"quoteId": quoted["quote"]["id"]})
+        _settled(client, url, lambda p: not p["activeJob"], timeout=180)
+    item = next(i for i in client.get(f"{url}/chapters/3", headers=H).json()["readiness"] if i["id"] == "C3-ASSUMED")
+    assert item["status"] == "NEEDS_REVIEW"
+    project = client.get(url, headers=H).json()
+    confirmed = client.post(f"{url}/sampling", headers=H, json={"baseVersion": project["planVersion"]})
+    assert confirmed.status_code == 200
+    item = next(i for i in client.get(f"{url}/chapters/3", headers=H).json()["readiness"] if i["id"] == "C3-ASSUMED")
+    assert item["status"] == "PASS"
 
 
 def test_the_pdf_compiler_keeps_what_windows_needs():

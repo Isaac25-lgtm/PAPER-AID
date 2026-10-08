@@ -462,6 +462,7 @@ function Workspace({ project, onChange, onReload }: { project: Project; onChange
   const written = new Set(project.chapters.filter((c) => c.current).map((c) => c.number))
   const [shown, setShown] = useState<Num>(() => (concept ? CONCEPT : [...tabs].reverse().find((n) => written.has(n)) ?? 1))
   const [chapter, setChapter] = useState<ChapterView | null>(null)
+  const [refreshed, setRefreshed] = useState(0) // the chapter's checks read again after a confirmation
   const [figure, setFigure] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -505,7 +506,7 @@ function Workspace({ project, onChange, onReload }: { project: Project; onChange
       .then((value) => { if (current) setChapter(value) })
       .catch((e: unknown) => { if (current) setError(e instanceof DataError ? e.message : 'We could not load this chapter.') })
     return () => { current = false }
-  }, [data, project.id, shown, state?.current])
+  }, [data, project.id, shown, state?.current, refreshed])
 
   useEffect(() => {
     if (!project.framework) {
@@ -704,6 +705,16 @@ function Workspace({ project, onChange, onReload }: { project: Project; onChange
                 runningText={revising === shown ? undefined : `${writing !== null ? `PaperAid is writing ${NAMES[writing]}.` : reading ? "PaperAid is reading your institution's guide." : 'PaperAid is working on this proposal.'} You can ask for changes here when it has finished.`} />
             </PanelSection>
           )}
+          {chapter && chapter.readiness.some((i) => i.id === 'C3-ASSUMED' && i.status === 'NEEDS_REVIEW') && (
+            <Card className="space-y-2 p-5">
+              <p className="text-base font-semibold">Confirm the sample-size settings</p>
+              <p className="text-sm text-fg-muted">{chapter.readiness.find((i) => i.id === 'C3-ASSUMED')?.note}</p>
+              <Button size="sm" variant="secondary" disabled={running}
+                onClick={() => data.projects.confirmSampling(project.id, project.planVersion).then((p) => { onChange(p); setRefreshed((n) => n + 1) }).catch(failed)}>
+                I confirm these settings
+              </Button>
+            </Card>
+          )}
           {chapter && project.framework && chapter.sections.some((s) => s.key === 'framework') && (
             <FrameworkCard key={`${project.planVersion}-${project.frameworkStyle}`} project={project} running={running} onChange={onChange} />
           )}
@@ -730,7 +741,11 @@ function Workspace({ project, onChange, onReload }: { project: Project; onChange
               ) : (
                 <>
                   <p className="text-sm text-fg-muted">Happy with {NAMES[shown]} as it is? Approving it marks it final for your complete proposal; you can still ask for changes.</p>
-                  <Button variant="secondary" className="mt-3 w-full" disabled={running}
+                  {chapter && ((chapter.missing?.length ?? 0) > 0 || (chapter.toAlign?.length ?? 0) > 0) && (
+                    <p className="mt-2 text-xs text-fg-subtle">First write the sections still to write and revise those your guide asks for differently.</p>
+                  )}
+                  <Button variant="secondary" className="mt-3 w-full"
+                    disabled={running || !!chapter && ((chapter.missing?.length ?? 0) > 0 || (chapter.toAlign?.length ?? 0) > 0)}
                     onClick={() => data.projects.setChapter(project.id, shown, state.current, true).then(onChange).catch(failed)}>
                     Approve {NAMES[shown]}
                   </Button>

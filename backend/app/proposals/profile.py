@@ -49,6 +49,26 @@ class NotAGuide(ValueError):
     """The finalised profile cannot be used (no usable structure): the step fails without charge."""
 
 
+class AmbiguousGuide(NotAGuide):
+    """Two of the guide's Chapter One sections hold the same approved statements: refused for the student to check."""
+
+
+# The academic role of a Chapter One section, from its key or heading (Codex audit 29343c2 #2): a guide's "Study aims"
+# holds the objectives and its "Aim of the study" the general objective, whatever the model named their keys. Checked
+# in this order: a general objective is also an objective.
+ROLES = (
+    ("purpose", re.compile(r"\b(purpose|general objective|main objective|overall objective|broad objective|aim of the study|study aim)\b", re.I)),
+    ("objectives", re.compile(r"\b(objectives?|aims)\b", re.I)),
+    ("questions", re.compile(r"\b(research questions?|hypothes[ie]s|propositions?)\b", re.I)),
+)
+
+
+def role(key: str, heading: str) -> str:
+    if key in ("purpose", "objectives", "questions"):
+        return key
+    return next((name for name, words in ROLES if words.search(heading)), "")
+
+
 def reference() -> dict[str, Any]:
     """What the models see of the default: its structure, and what each known key means."""
     book = rulebook.load(rulebook.DEFAULT)
@@ -128,12 +148,25 @@ def build(answer: dict[str, Any], guide_name: str) -> dict[str, Any]:
                 section["table"] = True
             sections.append(section)
         if n == 1:
-            # The approved statements are placed by code, word for word (2026-10-08): the general objective goes under
-            # Objectives unless the guide gives it a section of its own, then that section holds it.
-            separate = any(s["key"] == "purpose" for s in sections)
+            # The approved statements are placed by code, word for word (2026-10-08), by each section's role: the general
+            # objective under Objectives unless the guide gives it a section of its own, then that section holds it.
+            roles: dict[str, dict[str, Any]] = {}
             for section in sections:
-                if section["key"] in ("objectives", "questions"):
-                    section["from_plan"] = "specific_objectives" if section["key"] == "objectives" and separate else section["key"]
+                found = role(section["key"], section["heading"])
+                if not found:
+                    continue
+                if found in roles:
+                    raise AmbiguousGuide(f"chapter 1 has two sections for {found}: {roles[found]['heading']!r} and {section['heading']!r}")
+                roles[found] = section
+            taken = {s["key"] for s in sections}
+            for found, section in roles.items():
+                if section["key"] != found and found not in taken:  # its role's key, so written work carries over to it
+                    taken.discard(section["key"])
+                    section["key"] = found
+                    taken.add(found)
+            separate = "purpose" in roles
+            for found, section in roles.items():
+                section["from_plan"] = "specific_objectives" if found == "objectives" and separate else found
         chapters.append({"number": n, "title": _text(spec.get("title"))[:120] or default["chapters"][n - 1]["title"], "share": round(share, 4),
                          "purpose": _text(spec.get("purpose"))[:300], "source": source, "sections": sections})
     chapters.append(copy.deepcopy(next(c for c in default["chapters"] if c.get("kind") == "CONCEPT")))  # the concept paper keeps the default layout
@@ -163,6 +196,19 @@ def build(answer: dict[str, Any], guide_name: str) -> dict[str, Any]:
     else:
         counts = dict(default["objectives"])
         standard.append("objectives and questions: the number expected, which the guide does not set")
+    # The standard guide's safeguards stay unless the guide replaces them (Codex audit 29343c2 #4): the owner's cap on
+    # specific objectives applies when the guide sets no number; the concept paper keeps the standard layout and its
+    # three to five; a primary research question and paired hypotheses are required, as no guide field replaces them.
+    kept: dict[str, Any] = {}
+    if default.get("objectives_by_level") and counts.get("source") != source:
+        kept["objectives_by_level"] = copy.deepcopy(default["objectives_by_level"])
+        standard.append("objectives_by_level: three specific objectives for Bachelor's, Postgraduate Diploma and Master's (four when the student asks), "
+                        "as the guide sets no number")
+    for name, why in (("concept_objectives", "the concept paper's three to five objectives"), ("primary_question", "a primary research question"),
+                      ("hypothesis_pairs", "each null hypothesis with its alternative")):
+        if name in default:
+            kept[name] = copy.deepcopy(default[name])
+            standard.append(f"{name}: {why}, as in the standard guide")
 
     fmt = answer.get("formatting") if isinstance(answer.get("formatting"), dict) else {}
     formatting = dict(default["formatting"])
@@ -232,7 +278,7 @@ def build(answer: dict[str, Any], guide_name: str) -> dict[str, Any]:
         "chapters": chapters,
         "vetting": {"source": source, "note": "", "questions": questions},
         "from_standard": standard,
-    } | {"departures": departures({"chapters": chapters, "objectives": counts, "levels": levels, "formatting": formatting})}
+    } | kept | {"departures": departures({"chapters": chapters, "objectives": counts, "levels": levels, "formatting": formatting})}
 
 
 # --- where a guide departs a lot from the standard guide (owner decision 2026-10-04) ------------------------------

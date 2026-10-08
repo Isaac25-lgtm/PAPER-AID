@@ -840,3 +840,16 @@ The owner approved Codex's recommendations on the proposal Start page, the insti
   camelCase like every other view (a table's own caption and the "needs review" badge were never shown).
 - **Old AI keys removed** (owner instruction): the OpenAI, Anthropic and Gemini API keys were unbound from both
   services and deleted from Secret Manager. Revoking them at OpenAI and Anthropic is the owner's.
+- **Codex's audit of 29343c2, fixed the same day.** (1) A section the guide asks for differently stays unresolved
+  until a revision changes it and passes review: the chapter cannot be approved (`CHAPTER_NOT_ALIGNED`) and the complete
+  proposal is blocked meanwhile. (2) A guide's Chapter One sections are matched to their role by key or heading
+  (purpose, objectives, questions; `profile.role`), so "Study aims" carries the objectives over and the approved
+  statements are placed by code there; a purpose section holds the general objective; two sections with one role are
+  refused for the student to check (`GUIDE_AMBIGUOUS`, not charged); a role section the earlier structure lacked is
+  placed by code when aligning, never left for a model. (3) Writing the sections a guide adds follows the current
+  approved plan, so it works after a confirmed setting or framework edit (sections from changed decisions stay flagged
+  and block the complete proposal). (4) A guide profile keeps the standard guide's safeguards it does not replace: the
+  owner's objective cap when the guide sets no number, the concept paper's three to five, the primary question and the
+  hypothesis pairs. (5) A plan changed while the guide is read aligns nothing (`INPUTS_CHANGED`, not charged).
+  (6) Chapter Three's assumed sample-size settings can be confirmed where it asks (`POST /projects/{id}/sampling`).
+- **Testers:** attanborney458@gmail.com added (owner, 2026-10-08).

@@ -47,6 +47,9 @@ def final_blockers(project: Project, chapters: dict[int, ChapterDocument]) -> li
             continue
         if decisions.stale(doc, project.plan):
             problems.append(f"Chapter {n} has sections written from decisions you have since changed; revise them.")
+        if doc.to_align:  # restructured to the student's guide, these still follow the earlier requirement (Codex audit 29343c2 #1)
+            headings = [f"{s.number} {s.heading}" for s in doc.sections if s.key in doc.to_align]
+            problems.append(f"Chapter {n}: revise to your institution's guide: {', '.join(headings)}.")
         # Structure and integrity block a complete export (Codex audit 2026-09-28 #8); the AI's
         # judgements and recommendations (such as 30 references) stay advisory.
         written = {s.key for s in doc.sections if any(p.strip() for p in s.paragraphs)}

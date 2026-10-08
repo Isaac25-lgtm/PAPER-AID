@@ -153,3 +153,141 @@ def test_a_guide_added_after_chapter_one_restructures_it_and_keeps_the_earlier_v
     finished = client.get(f"{url}/chapters/1", headers=STUDENT).json()
     assert not finished["missing"] and any(s["heading"] == "Definition of Key Terms" for s in finished["sections"])
     assert finished["toAlign"] == chapter["toAlign"]  # still to revise to the guide
+
+
+
+# --- Codex audit of 29343c2 (2026-10-08) -------------------------------------------------------------------------
+
+
+def _aligned(client):
+    project = _create(client)
+    _run(client, project["id"], "PLAN")
+    _approved(client, project["id"])
+    url = f"/api/projects/{project['id']}"
+    client.post(f"{url}/guide", headers=STUDENT, files={"file": ("KyU guide.docx", _guide(), "application/octet-stream")})
+    assert _run(client, project["id"], "PROFILE")["status"] == "COMPLETED"
+    return project["id"], url
+
+
+def test_a_chapter_still_to_align_with_the_guide_is_neither_approved_nor_exported_complete(client):
+    """#1: an ethics section written to the old requirement could be approved and exported as complete."""
+    project_id, url = _aligned(client)
+    _run(client, project_id, "COMPLETE_1")  # the guide's new sections
+    chapter = client.get(f"{url}/chapters/1", headers=STUDENT).json()
+    assert chapter["toAlign"] and not chapter["missing"]
+    state = next(c for c in client.get(url, headers=STUDENT).json()["chapters"] if c["number"] == 1)
+    refused = client.post(f"{url}/chapters/1", headers=STUDENT, json={"version": state["current"], "approved": True})
+    assert refused.status_code == 400 and refused.json()["code"] == "CHAPTER_NOT_ALIGNED"
+    assert any("revise to your institution's guide" in b for b in client.get(url, headers=STUDENT).json()["blockers"])
+
+    # revised to the guide on the student's request: what changed and passed review is aligned
+    project = client.get(url, headers=STUDENT).json()
+    before = {c["id"] for c in project["feedback"]}
+    asked = client.post(f"{url}/chapters/1/request", headers=STUDENT, json={"instruction": "Revise this section to my institution's guide.",
+                                                                            "sections": chapter["toAlign"]})
+    assert asked.status_code == 200, asked.json()
+    mine = next(c["id"] for c in asked.json()["feedback"] if c["id"] not in before)
+    quoted = client.post(f"{url}/steps", headers=STUDENT, json={"step": "REVISE_1", "comments": [mine]}).json()
+    client.post(f"{url}/steps/{quoted['job']['id']}/submit", headers=STUDENT, json={"quoteId": quoted["quote"]["id"]})
+    from tests.test_api import wait
+
+    assert wait(client, quoted["job"]["id"], STUDENT)["status"] == "COMPLETED"
+    revised = client.get(f"{url}/chapters/1", headers=STUDENT).json()
+    assert len(revised["toAlign"]) < len(chapter["toAlign"])
+
+
+def _with_chapter_one(answer, sections):
+    answer["chapters"][0]["sections"] = sections
+    return answer
+
+
+def test_guide_sections_are_matched_by_their_role_and_the_statements_placed_by_code():
+    """#2: "Study Aims" under another key lost the objectives and was left for a model to write."""
+    base = [s for s in _answer()["chapters"][0]["sections"] if s["key"] not in ("objectives", "questions")]
+    answer = _with_chapter_one(_answer(), [*base,
+        {"key": "aim", "heading": "Aim of the Study", "brief": "The aim.", "share": 0.05, "perObjective": False, "table": False},
+        {"key": "studyaims", "heading": "Study Aims", "brief": "The aims.", "share": 0.05, "perObjective": False, "table": False},
+        {"key": "rq", "heading": "Research Hypotheses", "brief": "The hypotheses.", "share": 0.05, "perObjective": False, "table": False}])
+    book = profile.build(answer, "guide.docx")
+    placed = {s["key"]: s.get("from_plan") for s in book["chapters"][0]["sections"] if s.get("from_plan")}
+    assert placed == {"purpose": "purpose", "objectives": "specific_objectives", "questions": "questions"}
+
+    twice = _with_chapter_one(_answer(), [*base,
+        {"key": "objectives", "heading": "Objectives of the Study", "brief": "x", "share": 0.05, "perObjective": False, "table": False},
+        {"key": "specific", "heading": "Specific Objectives", "brief": "y", "share": 0.05, "perObjective": False, "table": False}])
+    with pytest.raises(profile.AmbiguousGuide):
+        profile.build(twice, "guide.docx")
+
+
+def test_a_purpose_section_the_earlier_structure_lacked_is_placed_by_code_when_aligning(client, monkeypatch):
+    from app.proposals import pipeline
+    from app.proposals.models import ChapterDocument, ProposalPlan
+
+    project_id, url = _aligned(client)
+    from app.runtime import get_runtime
+
+    stored = get_runtime().store.get_project(project_id)
+    plan = stored.plan
+    assert isinstance(plan, ProposalPlan)
+    real = rulebook.sections
+
+    def with_purpose(rulebook_id, chapter, level, p):  # the guide's Chapter One gives the general objective a section of its own
+        out = real(rulebook_id, chapter, level, p)
+        if rulebook_id == stored.rulebook and chapter == 1:
+            purpose = rulebook.SectionPlan("purpose", "1.2", "Aim of the Study", "The aim.", 100, from_plan="purpose")
+            out = [*out[:2], purpose, *out[2:]]
+        return out
+
+    monkeypatch.setattr(rulebook, "sections", with_purpose)
+    doc = ChapterDocument(number=1, title="Introduction", plan_version=1, sections=[], cited=[], words=0)
+    aligned = pipeline.align_document(doc, "ucu-2018-v2", stored.rulebook, "MASTERS", plan)
+    purpose = next(s for s in aligned.sections if s.key == "purpose")
+    assert purpose.paragraphs == [plan.purpose] and "purpose" not in aligned.missing
+
+
+def test_a_guide_silent_on_objective_counts_keeps_the_owners_cap_and_the_handbook_safeguards():
+    """#4: a custom profile dropped the cap, the primary question and the hypothesis pairs."""
+    silent = {**_answer(), "objectives": {"min": 0, "max": 0}}
+    book = profile.build(silent, "guide.docx")
+    assert book["objectives_by_level"]["MASTERS"]["max"] == 3 and book["primary_question"] and book["hypothesis_pairs"]
+    assert book["concept_objectives"] == {"min": 3, "max": 5, "source": "§1.4, p. 4"}
+    stated = profile.build(_answer(), "guide.docx")  # the guide sets its own number: its rule replaces the cap
+    assert "objectives_by_level" not in stated and stated["primary_question"]
+
+
+def test_a_finish_follows_the_current_plan_after_a_confirmed_setting(client):
+    """#3: correcting a proposed setting after the guide made "write the sections your guide adds" refuse with PLAN_CHANGED."""
+    project_id, url = _aligned(client)
+    project = client.get(url, headers=STUDENT).json()
+    confirmed = client.post(f"{url}/setting", headers=STUDENT, json={"studyArea": "Wakiso District", "population": "Caregivers",
+                                                                    "baseVersion": project["planVersion"]})
+    assert confirmed.status_code == 200
+    assert _run(client, project_id, "COMPLETE_1")["status"] == "COMPLETED"
+    assert not client.get(f"{url}/chapters/1", headers=STUDENT).json()["missing"]
+
+
+def test_a_plan_changed_while_the_guide_is_read_aligns_nothing(client, monkeypatch):
+    """#5: the chapters would have been restructured with the earlier plan."""
+    from app.proposals import pipeline
+    from app.runtime import get_runtime
+
+    project = _create(client)
+    _run(client, project["id"], "PLAN")
+    _approved(client, project["id"])
+    url = f"/api/projects/{project['id']}"
+    client.post(f"{url}/guide", headers=STUDENT, files={"file": ("KyU guide.docx", _guide(), "application/octet-stream")})
+    store, real = get_runtime().store, pipeline.align_document
+
+    def edited_meanwhile(*args):  # the student saves a plan edit while the chapters are being restructured
+        def bump(p):
+            p.plan_version += 1
+            return p
+
+        store.update_project(project["id"], bump)
+        return real(*args)
+
+    monkeypatch.setattr(pipeline, "align_document", edited_meanwhile)
+    job = _run(client, project["id"], "PROFILE")
+    assert job["status"] == "FAILED" and job["failure"]["code"] == "INPUTS_CHANGED"
+    state = next(c for c in client.get(url, headers=STUDENT).json()["chapters"] if c["number"] == 1)
+    assert len(state["versions"]) == 1  # nothing aligned

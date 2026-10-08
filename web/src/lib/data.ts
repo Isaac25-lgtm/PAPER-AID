@@ -98,6 +98,8 @@ export interface DataSource {
     /** A concept-note project becomes a full proposal (nothing starts by itself). */
     continueToFull(id: string): Promise<Project>
     updateDetails(id: string, inputs: ProposalInputs, titlePage: TitlePage, citation: CitationStyle): Promise<Project>
+    /** The student confirms the standard sample-size settings PaperAid assumed where they gave no figures. */
+    confirmSampling(id: string, baseVersion: number): Promise<Project>
     /** Where the study takes place and who it studies, as PaperAid proposed them or as the student corrects them. */
     confirmSetting(id: string, studyArea: string, population: string, baseVersion: number): Promise<Project>
     /** Keep the guide's version of a point where it departs from the standard guide, or take the standard one. */

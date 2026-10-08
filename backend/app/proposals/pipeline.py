@@ -275,6 +275,12 @@ def stage_planning(ctx: "StageContext") -> None:
         def built(answer: dict[str, Any]) -> dict[str, Any]:
             try:
                 book = profile.build(answer, inp.guide_name)
+            except profile.AmbiguousGuide as exc:
+                raise PermanentStageError(
+                    "GUIDE_AMBIGUOUS", "Your guide's Chapter One seems to have two sections for the same objectives or questions, so PaperAid could not tell "
+                    "where your approved statements go. Nothing was charged. Check the guide's Chapter One headings, or keep the standard structure.",
+                    f"profile: {exc}",
+                ) from exc
             except profile.NotAGuide as exc:
                 raise PermanentStageError(
                     "NOT_A_GUIDE", "PaperAid could not find a proposal structure in this guide, so nothing was charged. Check it is your institution's research guide.", f"profile: {exc}"
@@ -642,6 +648,8 @@ def plan_statements(plan: ProposalPlan, kind: str, number: str) -> list[str]:
         return [f"{number}.1 General Objective", plan.purpose.strip(), f"{number}.2 Specific Objectives", *specific]
     if kind == "specific_objectives":  # the guide (or the concept paper, §1.4) states the purpose in a section of its own
         return specific
+    if kind == "purpose":  # that section: the general objective, as approved (Codex audit 29343c2 #2)
+        return [plan.purpose.strip()]
     lines: list[str] = []
     sub = 1
     if plan.primary_question.strip():
@@ -707,6 +715,10 @@ def align_document(doc: ChapterDocument, before: str, after: str, level: Level, 
             lead = [par for par in paragraphs if not evidence.SUBHEADING.match(par) and _introduction(par, stated)][:2]
             paragraphs = [*lead, *plan_statements(plan, spec.from_plan, spec.number)]
         sections.append(section.model_copy(update={"number": spec.number, "heading": spec.heading, "paragraphs": paragraphs}))
+    for spec in planned:
+        if spec.from_plan and spec.key not in earlier:  # the approved statements need no writer (Codex audit 29343c2 #2)
+            sections.insert(next((i for i, s in enumerate(sections) if [p.key for p in planned].index(s.key) > [p.key for p in planned].index(spec.key)), len(sections)),
+                            ChapterSection(key=spec.key, number=spec.number, heading=spec.heading, paragraphs=plan_statements(plan, spec.from_plan, spec.number)))
     keys = {s.key for s in sections}
     missing = [spec.key for spec in planned if spec.key not in keys]
     to_align = [spec.key for spec in planned if spec.key in keys and not spec.from_plan and spec.brief != old_briefs.get(spec.key)]
@@ -935,6 +947,8 @@ def stage_auditing(ctx: "StageContext") -> None:
                 "NOTHING_REVISED", "PaperAid could not resolve these comments this time, so your chapter is unchanged and nothing was charged.", "revise: nothing resolved"
             )
         document.revised = resolved
+        # a section to align with the student's guide is done only when its revision changed it and passed review
+        document.to_align = [k for k in base.to_align if k not in resolved]
         if kept:
             warnings.append(f"These sections could not be revised this time, so your earlier text is kept: {', '.join(kept)}.")
         # untouched sections keep what was known about them (Codex audit 56c4f83 H06)
@@ -1376,6 +1390,7 @@ def stage_exporting(ctx: "StageContext") -> None:
     review = PlanReview.model_validate(planned["review"]) if planned and planned.get("review") else None  # None: an older engine's plan
     book = ctx.get_json("profile.json")["profile"] if inp.step == "PROFILE" else None
     aligned: dict[int, tuple[int, str, ChapterDocument]] = {}  # chapter -> (the version it was made from, path, document)
+    aligned_plan = project.plan_version  # the plan the chapters were restructured with
     if book is not None:  # written once under its own id; a retry writes the same file again
         ctx.assert_owner()
         ctx.rt.files.put(rulebook.stored_path(book["id"]), json.dumps(book).encode(), "application/json")
@@ -1412,9 +1427,9 @@ def stage_exporting(ctx: "StageContext") -> None:
         if book is not None:
             p.profiles = list(dict.fromkeys([*p.profiles, book["id"]]))
             written = {c.number: c.current for c in p.chapters if c.current and c.number != CONCEPT_NUMBER}
-            if {n: v for n, (v, _, _) in aligned.items()} != written:
+            if {n: v for n, (v, _, _) in aligned.items()} != written or (aligned and p.plan_version != aligned_plan):  # Codex audit 29343c2 #5
                 raise PermanentStageError(  # a chapter changed while the guide was read: nothing saved, nothing charged
-                    "INPUTS_CHANGED", "A chapter changed while PaperAid read your guide, so nothing was saved and nothing was charged. Start it again.",
+                    "INPUTS_CHANGED", "A chapter or your plan changed while PaperAid read your guide, so nothing was saved and nothing was charged. Start it again.",
                     "chapter changed during the profile step",
                 )
             p.rulebook = book["id"]
