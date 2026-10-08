@@ -885,4 +885,17 @@ and nothing kept many jobs from calling Gemini at once.
   Google), sending duplicate copies of slow calls (double billing), backup models (changes quality and price), lower
   thinking or fewer research topics (quality), automatic limit adjustment (after the fixed limits are observed), a
   large paid load test (needs the owner's spending cap; a small live check instead).
+- **Load test on real Gemini (2026-10-08, local backend with the limiter, synthetic topics, $32.15 of a $60 cap):**
+  1 at once: plan and Chapter One in 18 min. 3 at once: proposal 16 min, coursework essay 11, concept paper 12; no
+  timeouts or refusals. 10 at once (limits as released): all 10 finished, proposal 23-28 min, essay 13-14, concept paper
+  20-29; 10 timeouts, all recovered; slot waits small (searches, at most 32 s). 20 at once (search limit tried at 10):
+  19 of 20 finished in 20-41 min, 32 timeouts and 2 refusals (both on the Pro reviewer), 151 capacity pauses (at most 12
+  for one job), none failed for capacity. Quality held: every Chapter One had its 11 sections and passed its code
+  checks. The slowdown under load is Google answering more slowly, most of all the Pro review model, not waiting for a
+  slot. More searches at once brought more timeouts (about 10% at a limit of 10, about 4% at 6): the released limits
+  stay (Flash 12, Pro 4, searches 6). The test ran the in-memory limiter; the Firestore one was checked in production.
+- **A bug the load test found:** a concept paper with hypotheses was refused (not charged) because the reviewer asked to
+  remove the placed sub-headings "Primary Research Question" and "Research Hypotheses". Every section whose statements
+  code places now tells the writer and reviewer that the sub-headings and statements are the approved plan (`PLACED`,
+  always added), for Chapter One, the concept paper and any guide.
 - **Testers:** oboireedison@gmail.com added (owner, 2026-10-08).

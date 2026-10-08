@@ -608,10 +608,15 @@ def _common(inp: StepInput, sample_steps: str) -> dict[str, Any]:
     }
 
 
-# Told to the writer and the reviewer of a section whose statements code places from the approved plan, when
-# its brief (a faculty guide's own wording) does not say so: the live run 2026-10-08 had the reviewer ask to remove them.
-PLACED = (" PaperAid places the student's approved statements (objectives or questions) after the introduction word for word: "
-          "write only the introduction, and never ask to change, reword, shorten or remove the placed statements.")
+# Told to the writer and the reviewer of every section whose statements code places from the approved plan. Live runs
+# 2026-10-08: the reviewer asked to remove the placed objectives (Chapter One), then the placed sub-headings of a
+# concept paper's hypotheses ("Remove the extra headings 5.1 Primary Research Question and 5.2 Research Hypotheses"),
+# which code puts back, so the document could never be approved. Always added, whatever the guide's own brief says.
+PLACED = (" PaperAid places the student's approved statements after the introduction, word for word, under numbered sub-headings where "
+          "they have them (such as \"General Objective\", \"Specific Objectives\", \"Primary Research Question\", \"Specific Research "
+          "Questions\" or \"Research Hypotheses\", each null hypothesis with its alternative). Those sub-headings and statements are the "
+          "approved plan and are correct as they stand: write only the introduction, and never ask to remove, merge, renumber, reword or "
+          "shorten them.")
 
 
 def _section_items(inp: StepInput, library: dict[str, EvidenceItem], briefs: dict[str, Any]) -> list[dict[str, Any]]:
@@ -622,7 +627,7 @@ def _section_items(inp: StepInput, library: dict[str, EvidenceItem], briefs: dic
             continue
         brief = briefs.get(s.key, {"points": [], "evidence": []})
         assigned = [library[i] for i in brief["evidence"] if i in library and library[i].usable]
-        requirement = s.brief + PLACED if s.from_plan and "PaperAid places" not in s.brief else s.brief
+        requirement = s.brief + PLACED if s.from_plan else s.brief
         items.append(
             {
                 "key": s.key, "number": s.number, "heading": s.heading, "requirement": requirement, "words": s.words, "table": s.table,

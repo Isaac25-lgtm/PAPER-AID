@@ -181,3 +181,29 @@ def test_a_setting_left_blank_is_shown_as_proposed_until_the_student_confirms_it
     assert confirmed["plan"]["studyArea"] == "Wakiso District" and confirmed["inputs"]["studyType"] == confirmed["plan"]["studyType"]
     chapter_one = next(c for c in confirmed["chapters"] if c["number"] == 1)
     assert any("Scope" in s or "Problem" in s for s in chapter_one["needsReview"])  # built on the setting: to review
+
+
+def test_every_plan_placed_section_tells_the_reviewer_its_sub_headings_are_the_approved_plan(client):
+    """Load test 2026-10-08: a concept paper with hypotheses was refused because the reviewer asked to remove the placed
+    sub-headings "5.1 Primary Research Question" and "5.2 Research Hypotheses", which code puts back."""
+    import json
+
+    from app.proposals.pipeline import PLACED
+
+    for goal in ("FULL", "CONCEPT"):
+        project = client.post("/api/projects", headers=STUDENT, json={**DETAILS, "goal": goal}).json()
+        _run(client, project["id"], "PLAN")
+        _approved(client, project["id"])
+        if goal == "CONCEPT":
+            _run(client, project["id"], "CONCEPT")
+    placed = 0
+    for task, request in zip(client.models.tasks, client.models.requests, strict=True):
+        if task not in ("p_draft", "p_review"):
+            continue
+        for section in json.loads(request[len(task):]).get("sections", []):
+            if section["key"] in ("objectives", "questions"):
+                placed += 1
+                assert section["requirement"].endswith(PLACED) and "sub-headings" in section["requirement"]
+            else:
+                assert PLACED not in section["requirement"]
+    assert placed >= 4  # Chapter One and the concept paper, written and reviewed
