@@ -990,6 +990,7 @@ SUPPORT_FIELDS = frozenset(
         "owner_uid", "owner_email", "completed_stages", "generation", "attempts", "lease_until", "lease_owner", "artifact_paths", "cost_usd", "reserved_usd", "estimate_cost_usd", "progress",
         "refine_cost_usd", "budget_usd", "model_calls", "events", "admin_actions", "failure_detail", "files_deleted", "deleting", "retiring",
         "input_sha256", "delivery", "notice",
+        "activity", "timings", "ready_at", "capacity_waits",  # speed plan 2026-10-08: timing and status only, no paper text
     }
 )
 
