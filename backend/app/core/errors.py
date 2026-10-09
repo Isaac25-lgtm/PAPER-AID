@@ -40,9 +40,11 @@ class CapacityWait(Exception):  # noqa: N818 - a signal, not an error
     pauses, keeps everything it has done, and is delivered again after a short wait. It never uses up the stage's
     retries for provider failures (speed plan 2026-10-08)."""
 
-    def __init__(self, reason: str):
+    def __init__(self, reason: str, delay_sec: int | None = None, kind: str = "CAPACITY"):
         super().__init__(reason)
         self.reason = reason
+        self.delay_sec = delay_sec  # how long to wait before the stage is delivered again (None: the usual short wait)
+        self.kind = kind  # CAPACITY, or REVIEW: the final editor's model cannot answer now (algorithm revision 2026-10-09)
 
 
 class LimiterUnavailable(Exception):

@@ -13,7 +13,7 @@ from typing import Literal
 
 from pydantic import Field, field_validator, model_validator
 
-from app.jobs.models import Camel, ReadinessItem, utcnow
+from app.jobs.models import Approval, Camel, ReadinessItem, utcnow
 
 Level = Literal["BACHELORS", "PGD", "MASTERS", "PHD"]
 StudyType = Literal["QUANTITATIVE", "QUALITATIVE", "MIXED", "SECONDARY", "NON_EMPIRICAL"]
@@ -454,4 +454,5 @@ class ChapterDocument(Camel):
     to_align: list[str] = []
     full_price: int = 0  # a partly written chapter: its full price when first written (UGX)
     paid: int = 0  # what the draft and its finishes have been charged so far; a finish costs at most the rest
+    approval: Approval | None = None  # workflow 2: the final editor's decision on the sections this version wrote
     words: int

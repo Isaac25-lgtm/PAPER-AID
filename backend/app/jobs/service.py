@@ -991,7 +991,7 @@ SUPPORT_FIELDS = frozenset(
         "refine_cost_usd", "budget_usd", "model_calls", "events", "admin_actions", "failure_detail", "files_deleted", "deleting", "retiring",
         "input_sha256", "delivery", "notice",
         "activity", "timings", "ready_at", "capacity_waits",  # speed plan 2026-10-08: timing and status only, no paper text
-        "topics",  # algorithm revision 2026-10-09: how each research topic was routed, labels and counts only
+        "topics", "waited_sec",  # algorithm revision 2026-10-09: how each research topic was routed; time spent waiting
     }
 )
 
@@ -1100,6 +1100,7 @@ def _requeue(j: Job, w: Wallet, settings: Settings, actor: str, action: str, lab
     j.generation += 1
     j.attempts = 0
     j.capacity_waits = 0  # a fresh allowance of waits for capacity (Codex audit through ea0599e, finding 10)
+    j.waited_sec = 0
     j.failure = None
     j.failure_detail = None
     j.admin_actions.append(AdminAction(actor=actor, action=action))

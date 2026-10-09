@@ -671,6 +671,21 @@ class StageTiming(Camel):
     queued_ms: int = 0
 
 
+class Approval(Camel):
+    """The final editor's decision bound to the exact text delivered (algorithm revision 2026-10-09): what it was
+    shown, what it corrected and the text that resulted. Admin and audit only; the student never sees it."""
+
+    reviewer: str  # the model that reviewed, as routed when the step was priced
+    reviewed_sha256: str  # the sections as the editor was shown them
+    accepted_sha256: str  # the sections as delivered, after its corrections
+    corrections: int = 0  # corrections applied
+    substantive: int = 0  # of them, changes to a claim, method or conclusion
+    flagged: int = 0  # corrections the support check could not confirm
+    resolved: bool = False  # the editor was asked once more and settled them
+    refused: int = 0  # corrections code would not apply (an unknown place, a section it may not change)
+    at: str = Field(default_factory=lambda: utcnow().isoformat())  # text: the document is saved as plain JSON
+
+
 class TopicRoute(Camel):
     """How one research topic was answered (algorithm revision 2026-10-09): labels and counts only, never the
     topic's words. Plain strings, so an older release can still read a job that carries a newer label."""
@@ -778,6 +793,7 @@ class Job(JobView):
     timings: list[StageTiming] = []  # each run of each stage (the last 80), for the admin timeline and speed reports
     ready_at: datetime | None = None  # when the job's next stage was put on the queue (its queue wait starts here)
     capacity_waits: int = 0  # pauses for Gemini capacity so far (never counted as provider-failure retries)
+    waited_sec: int = 0  # how long those pauses have added up to (the allowance is a time: capacity_wait_limit_sec)
     topics: list[TopicRoute] = []  # how each research topic of this step was answered (labels and counts only)
 
     def view(self) -> JobView:

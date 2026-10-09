@@ -922,13 +922,14 @@ def test_released_prompts_never_change():
     import hashlib
     from pathlib import Path
 
-    from app.ai.orchestration import STEPS
+    from app.ai.orchestration import STEPS, WORKFLOW_PROMPTS
 
     folder = Path(__file__).parents[1] / "app" / "ai" / "prompts"
     released = json.loads((folder / "released.json").read_text(encoding="utf-8"))
     current = {p.stem: hashlib.sha256(p.read_text(encoding="utf-8").replace("\r\n", "\n").encode()).hexdigest() for p in folder.glob("*.md")}
     assert {name: current.get(name) for name in released} == released  # none edited or deleted
     assert {step.prompt for step in STEPS.values()} <= set(released)
+    assert {prompt for swapped in WORKFLOW_PROMPTS.values() for prompt in swapped.values()} <= set(released)
 
 
 def test_admin_retry_follows_the_current_credit_mode(client, monkeypatch):

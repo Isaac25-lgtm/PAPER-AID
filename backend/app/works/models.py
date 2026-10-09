@@ -14,7 +14,7 @@ from typing import Any, Literal
 
 from pydantic import Field, field_validator
 
-from app.jobs.models import Camel, ReadinessItem, utcnow
+from app.jobs.models import Approval, Camel, ReadinessItem, utcnow
 from app.proposals.ai import Figure
 
 WorkKind = Literal["CONCEPT_NOTE", "COURSEWORK", "FUNDING_PROPOSAL"]
@@ -408,6 +408,7 @@ class WorkDocument(Camel):
     exploratory: bool = False
     ai_note: str = ""  # the last-page note, when it applies
     revised: list[str] = []  # a revision: the sections it delivered new text for
+    approval: Approval | None = None  # workflow 2: the final editor's decision on exactly this text
     # What it was written from, kept with it so every later download renders exactly this version.
     spec_snapshot: ResolvedSpec | None = None
     results_snapshot: ResultsModel | None = None

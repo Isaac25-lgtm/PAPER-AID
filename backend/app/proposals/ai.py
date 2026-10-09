@@ -8,10 +8,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
-from app.ai.orchestration import SEARCH_DECLINED, AIRunner
+from app.ai.orchestration import REVIEW_WAITS, SEARCH_DECLINED, AIRunner
 from app.ai.providers import UNAVAILABLE, ModelResult
 from app.analysis import research
-from app.core.errors import PermanentStageError, RetryableStageError
+from app.core.errors import CapacityWait, PermanentStageError, RetryableStageError
 
 
 def _obj(properties: dict[str, Any]) -> dict[str, Any]:
@@ -180,6 +180,36 @@ class _Searched(BaseModel):
     findings: list[Searched]
 
 
+# Workflow 2 (algorithm revision 2026-10-09): the final editor's corrections, and the check of them.
+EDIT_ACTIONS = ("REPLACE", "INSERT_AFTER", "DELETE", "REMOVE_TABLE", "REMOVE_FIGURE")
+EDIT_KINDS = ("WORDING", "CLAIM", "METHOD", "CONCLUSION")
+FLAG_SCHEMA = _obj({"results": _list(_obj({"id": _S, "supported": {"type": "boolean"}, "problem": _S}))})
+# A chapter's sections as its final editor answers: each section's corrections with its grade.
+CHAPTER_EDIT_SCHEMA = _obj({"results": _list(_obj({
+    "key": _S, "grade": _enum("PASS", "PASS_WITH_WARNINGS", "REPAIR"), "issues": _STRS, "note": _S,
+    "corrections": _list(_obj({"paragraph": _S, "action": _enum("REPLACE", "INSERT_AFTER", "DELETE", "REMOVE_TABLE"), "text": _S, "kind": _enum(*EDIT_KINDS), "reason": _S})),
+}))})
+
+
+class Correction(BaseModel):
+    section: str = ""  # a chapter's corrections come inside their section
+    paragraph: str
+    action: Literal["REPLACE", "INSERT_AFTER", "DELETE", "REMOVE_TABLE", "REMOVE_FIGURE"]
+    text: str = ""
+    kind: Literal["WORDING", "CLAIM", "METHOD", "CONCLUSION"] = "WORDING"
+    reason: str = ""
+
+
+class Flag(BaseModel):
+    id: str
+    supported: bool
+    problem: str = ""
+
+
+class _Flags(BaseModel):
+    results: list[Flag]
+
+
 class Critique(BaseModel):
     items: list[dict[str, str]]
     overall: str = ""
@@ -242,6 +272,14 @@ class Grade(BaseModel):
 class Permission(BaseModel):
     approved: StrictBool
     issues: list[str]
+
+
+class SectionEdit(Grade):
+    corrections: list[Correction] = []
+
+
+class _SectionEdits(BaseModel):
+    results: list[SectionEdit]
 
 
 class _Grades(BaseModel):
@@ -400,6 +438,29 @@ class ProposalRunner(AIRunner):
             grade = "REPAIR" if issues else "PASS_WITH_WARNINGS" if any(g.grade == "PASS_WITH_WARNINGS" for g in grades) else "PASS"
             out[key] = Grade(key=key, grade=grade, issues=issues, note=" ".join(dict.fromkeys(g.note for g in grades if g.note.strip())))
         return out
+
+    # --- workflow 2: the final editor reviews, corrects and grades each section ------------------
+    def edit(self, items: list[dict[str, Any]], common: dict[str, Any], resolve: bool = False) -> dict[str, SectionEdit]:
+        """Each section's corrections and grade from the final editor (`resolve`: its one last look at what was
+        flagged or found). A section without an answer was not reviewed. Its model has no stand-in: the stage waits."""
+        task = "p_resolve" if resolve else "p_edit"
+        known = {i["key"] for i in items}
+        out: dict[str, SectionEdit] = {}
+        try:
+            for batch, answer in self._batched_with_items(task, items, lambda b: {**common, "sections": b}, CHAPTER_EDIT_SCHEMA, _SectionEdits, stop_on_budget=True):
+                keys = {item["key"] for item in batch}
+                out.update({e.key: e for e in answer.results if e.key in keys & known})
+        except RetryableStageError as exc:
+            if exc.code not in REVIEW_WAITS:
+                raise
+            raise CapacityWait("FINAL_REVIEW", delay_sec=self.settings.review_wait_sec, kind="REVIEW") from exc
+        return out
+
+    def flag(self, items: list[dict[str, Any]], common: dict[str, Any]) -> dict[str, Flag]:
+        """Which corrected claims their evidence or the plan does not support. It only flags."""
+        answer = _whole(self._call("p_flag", {**common, "corrections": items}, FLAG_SCHEMA, _Flags), "p_flag")
+        known = {i["id"] for i in items}
+        return {r.id: r for r in answer.results if r.id in known}
 
     def readiness(self, payload: dict[str, Any]) -> Readiness:
         answer = _whole(self._call("p_readiness", payload, READINESS_SCHEMA, Readiness), "p_readiness")

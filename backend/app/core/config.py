@@ -219,6 +219,11 @@ class Settings(BaseSettings):
     # Pauses allowed for one job before it stops, uncharged and resumable: each is a wait of up to capacity_wait_sec
     # and a pause of capacity_retry_sec or a little more, so 130 is about two hours (360 was five to six: Codex audit).
     capacity_max_waits: int = 130
+    # The same allowance as time (Codex's plan 2026-10-09: a count only roughly corresponds to a duration): the waits of
+    # one job may add up to this before it stops, uncharged and resumable. The count above stays as a second bound.
+    capacity_wait_limit_sec: int = 7200
+    # The final editor has no stand-in: when its model cannot answer, the stage waits this long and asks again.
+    review_wait_sec: int = 90
     research_parallel: int = 2  # research needs worked on at the same time inside one stage (each call takes a slot)
     research_call_floor_sec: float = 75  # time limit for a search or abstract reading (never below the token-rate rule)
     proposal_review_max_words: int = 20000

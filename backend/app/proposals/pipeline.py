@@ -12,7 +12,7 @@ project, and publishes to the project only at EXPORTING, in one transaction."""
 import hashlib
 import json
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import TYPE_CHECKING, Any
 
@@ -22,11 +22,11 @@ from app.ai.orchestration import REVIEW_REPAIRS
 from app.analysis import fetch, research
 from app.core.errors import CapacityWait, PermanentStageError, RetryableStageError
 from app.jobs import state
-from app.jobs.models import Job, JobStatus, ReadinessItem, Stage, TopicRoute, Wallet, utcnow
+from app.jobs.models import Approval, Job, JobStatus, ReadinessItem, Stage, TopicRoute, Wallet, utcnow
 from app.pricing.billing import settle_completed
 from app.pricing.quote import round_up
 from app.proposals import decisions, evidence, profile, rulebook, sampling
-from app.proposals.ai import LOST_SEARCH, Grade, ProposalRunner, SectionText, Table
+from app.proposals.ai import LOST_SEARCH, Correction, Grade, ProposalRunner, SectionText, Table
 from app.proposals.models import (
     ChapterDocument,
     ChapterSection,
@@ -54,6 +54,16 @@ TENSE_SECTIONS = {1: {"purpose", "objectives", "questions", "scope", "synopsis"}
 
 def step_input(ctx: "StageContext") -> StepInput:
     return StepInput.model_validate(ctx.get_json(INPUT))
+
+
+def _runner(ctx: "StageContext", inp: StepInput) -> ProposalRunner:
+    runner = ctx.ai(ProposalRunner)
+    assert isinstance(runner, ProposalRunner)
+    if runner._engine.workflow >= 2 and inp.step in ("CHAPTER", "COMPLETE", "REVISE") and inp.plan is not None:
+        # A chapter's final review is paid for before research or drafting may spend its share (every stage of the step).
+        written = [s for s in rulebook.sections(inp.rulebook, inp.chapter, inp.inputs.level, inp.plan) if not inp.only or s.key in inp.only]
+        runner.keep_for_editor(8 * sum(s.words for s in written), "p")
+    return runner
 
 
 def load_library(files, paths: list[str]) -> dict[str, EvidenceItem]:
@@ -102,8 +112,7 @@ def stage_researching(ctx: "StageContext") -> None:
     """Plan the research needs, then answer each from scholarly abstracts (OpenAlex) or live web
     search; PaperAid confirms every quoted passage itself and the writer checks each finding."""
     inp, settings = step_input(ctx), ctx.rt.settings
-    runner = ctx.ai(ProposalRunner)
-    assert isinstance(runner, ProposalRunner)
+    runner = _runner(ctx, inp)
     library = load_library(ctx.rt.files, inp.evidence_files)
     limit = settings.proposal_needs.get(inp.chapter, 6)
     sections = rulebook.sections(inp.rulebook, inp.chapter, inp.inputs.level, inp.plan) if inp.plan and inp.chapter else []
@@ -834,8 +843,7 @@ def _section_items(inp: StepInput, library: dict[str, EvidenceItem], briefs: dic
 def stage_drafting(ctx: "StageContext") -> None:
     inp = step_input(ctx)
     assert inp.plan is not None
-    runner = ctx.ai(ProposalRunner)
-    assert isinstance(runner, ProposalRunner)
+    runner = _runner(ctx, inp)
     library = _library(ctx, inp)
     sample = sampling.calculate(inp.plan.sample_size) if inp.chapter == 3 else None
     items = _section_items(inp, library, ctx.get_json("briefs.json")["briefs"])
@@ -928,6 +936,78 @@ def _owned(inp: StepInput, items: dict[str, dict[str, Any]], current: dict[str, 
         lead = [p for p in out[key].paragraphs if _introduction(p, stated)][:2]  # the brief asks for one or two sentences
         out[key] = out[key].model_copy(update={"paragraphs": [*lead, *statements]})
     return out
+
+
+# --- workflow 2: the final editor's corrections, applied by paragraph (works and chapters alike) --------
+
+
+def numbered(text: SectionText) -> list[dict[str, str]]:
+    return [{"id": f"p{n}", "text": p} for n, p in enumerate(text.paragraphs, start=1)]
+
+
+def apply_corrections(current: dict[str, SectionText], corrections: list[Correction], editable: list[str]) -> tuple[list[dict[str, str]], dict[str, list[str]]]:
+    """Applies the final editor's corrections to `current`. A correction names its paragraph by the id it had when
+    reviewed; one that names an unknown place, a section this step may not change, or a paragraph already corrected is
+    refused, never guessed at. Returns the corrections applied (the text before and after, and the paragraph's id as
+    it now is) and, by section, why any was refused."""
+    rows = {k: [[p["id"], p["text"]] for p in numbered(current[k])] for k in editable if k in current}
+    removed: dict[str, set[str]] = {}
+    touched: set[tuple[str, str]] = set()
+    applied: list[dict[str, str]] = []
+    refused: dict[str, list[str]] = {}
+    for n, c in enumerate(corrections, start=1):
+        def refuse(why: str, c: Correction = c) -> None:
+            refused.setdefault(c.section if c.section in rows else "", []).append(f"A correction to paragraph {c.paragraph} could not be applied: {why}.")
+
+        if c.section not in rows:
+            refuse("that section may not be changed in this step")
+            continue
+        entry = {"id": f"c{n}", "key": c.section, "ref": c.paragraph, "kind": c.kind, "action": c.action, "before": "", "after": ""}
+        if c.action in ("REMOVE_TABLE", "REMOVE_FIGURE"):
+            removed.setdefault(c.section, set()).add(c.action)
+            applied.append(entry)
+            continue
+        index = next((i for i, row in enumerate(rows[c.section]) if row[0] == c.paragraph), None)
+        if index is None:
+            refuse("there is no such paragraph")
+            continue
+        text = " ".join(c.text.split())
+        if c.action == "INSERT_AFTER":
+            if not text:
+                refuse("no text was given")
+                continue
+            entry.update(ref=f"{c.paragraph}+{n}", after=text)
+            rows[c.section].insert(index + 1, [entry["ref"], text])
+            applied.append(entry)
+            continue
+        if (c.section, c.paragraph) in touched:
+            refuse("that paragraph was already corrected")
+            continue
+        entry["before"] = rows[c.section][index][1]
+        if c.action == "DELETE":
+            rows[c.section].pop(index)
+        elif not text:
+            refuse("no text was given")
+            continue
+        elif text == entry["before"]:
+            continue  # nothing changes
+        else:
+            entry["after"] = text
+            rows[c.section][index][1] = text
+        touched.add((c.section, c.paragraph))
+        applied.append(entry)
+    for key, section_rows in rows.items():
+        update: dict[str, Any] = {"paragraphs": [text for _, text in section_rows]}
+        if "REMOVE_TABLE" in removed.get(key, ()):
+            update["table"] = Table(caption="", rows=[])
+        if "REMOVE_FIGURE" in removed.get(key, ()):
+            update["figure"] = None
+        position = {ref: f"p{i}" for i, (ref, _) in enumerate(section_rows, start=1)}
+        for entry in applied:
+            if entry["key"] == key:
+                entry["paragraph"] = position.get(entry["ref"], "")
+        current[key] = current[key].model_copy(update=update)
+    return applied, refused
 
 
 ALIGNED_NOTE = "Restructured to your institution's guide"
@@ -1045,14 +1125,124 @@ def _strip_table(inp: StepInput, text: SectionText, library: dict[str, EvidenceI
     return Table(caption=clean(text.table.caption), rows=[[clean(c) for c in row] for row in text.table.rows])
 
 
+def _text_hash(current: dict[str, SectionText]) -> str:
+    return hashlib.sha256(json.dumps({k: v.model_dump() for k, v in sorted(current.items())}, sort_keys=True).encode()).hexdigest()
+
+
+UNTRACED = ("Paragraph {id} carries a citation or figure that cannot be traced to the section's evidence or the plan. Cite it with a token from "
+            "the evidence, or remove it.")
+
+
+def _edited(ctx: "StageContext", runner: ProposalRunner, inp: StepInput, items: dict[str, dict[str, Any]], current: dict[str, SectionText],
+            library: dict[str, EvidenceItem], allowed: str, common: dict[str, Any],
+            ) -> tuple[dict[str, SectionText], dict[str, Grade], dict[str, list[str]], list[str], Approval]:
+    """Workflow 2 (the owner's one fixed principle, 2026-10-09): the premium model reads each written section once,
+    corrects it itself and gives the final decision; no writer rewrites a section after it.
+
+    Before it, code withholds what it cannot trace and runs its checks (findings for the editor, never a repair round).
+    Its corrections are applied by paragraph, by code, and the plan's own statements are put back word for word. Then
+    code checks the corrected text and a standard-model check may flag a corrected claim its evidence does not support.
+    Only the sections with something flagged or found go to the editor once more, and that is the end: a section code
+    still finds a problem in, or the editor did not pass, is not approved (`unresolved`)."""
+    usable = {i for i, item in library.items() if item.usable}
+    current = dict(current)
+    stripped: list[str] = []
+    for key, text in list(current.items()):
+        tidy = _cleaned(inp, text, library, usable, allowed)
+        if tidy != text:
+            stripped.append(items[key]["heading"])
+            current[key] = tidy
+    reviewed = _text_hash(current)
+
+    def found(keys: Iterable[str]) -> dict[str, list[str]]:
+        out: dict[str, list[str]] = {}
+        for key in keys:
+            problems = _checks(inp, key, current[key], library, allowed)
+            traced = set(_cleaned(inp, current[key], library, usable, allowed).paragraphs)
+            problems += [UNTRACED.format(id=p["id"]) for p in numbered(current[key]) if p["text"] not in traced]
+            if problems:
+                out[key] = list(dict.fromkeys(problems))
+        return out
+
+    def request(checks: dict[str, list[str]], flagged: list[dict[str, str]] | None = None) -> list[dict[str, Any]]:
+        asked = list(current) if flagged is None else [k for k in current if checks.get(k) or any(f["key"] == k for f in flagged)]
+        out = []
+        for key in asked:
+            item = {**items[key], "paragraphs": numbered(current[key]), "table": current[key].table.model_dump(), "paperaidChecks": checks.get(key, []),
+                    "_words": " ".join(current[key].paragraphs)}
+            if flagged is not None:
+                item["flagged"] = [{"paragraph": f["paragraph"], "problem": f["problem"]} for f in flagged if f["key"] == key]
+            out.append(item)
+        return out
+
+    def apply(edits: dict[str, Any]) -> tuple[list[dict[str, str]], dict[str, list[str]]]:
+        corrections = [c.model_copy(update={"section": key}) for key, edit in edits.items() for c in edit.corrections]
+        applied, refused = apply_corrections(current, corrections, [k for k in edits if k in current])
+        current.update(_owned(inp, items, current))  # the plan's statements stay as approved, whatever was corrected
+        placed = []
+        for a in applied:  # a correction code undid (a placed statement) is no longer in the text: nothing to check
+            now = {p["text"]: p["id"] for p in numbered(current[a["key"]])}
+            if not a["after"] or a["after"] in now:
+                placed.append({**a, "paragraph": now.get(a["after"], a["paragraph"])})
+        return placed, {k: v for k, v in refused.items() if k}
+
+    def unsupported(applied: list[dict[str, str]]) -> list[dict[str, str]]:
+        asked = [a for a in applied if a["kind"] != "WORDING" and a["after"]]
+        if not asked:
+            return []
+        flags = runner.flag([{"id": a["id"], "before": a["before"], "after": a["after"],
+                              "evidence": _for_model([library[i] for i in dict.fromkeys(evidence.cited_ids(a["after"])) if i in library], passages=True)} for a in asked],
+                            {"plan": _plan(inp)})
+        return [{"key": a["key"], "paragraph": a["paragraph"],
+                 "problem": (flags[a["id"]].problem.strip() if a["id"] in flags else "") or "The check could not confirm this correction against its evidence."}
+                for a in asked if a["id"] not in flags or not flags[a["id"]].supported]
+
+    ctx.activity("CHECKING", 1, 2)
+    edits = runner.edit(request(found(current)), common)
+    applied, refused = apply(edits)
+    grades: dict[str, Grade] = {k: Grade(key=k, grade=e.grade, issues=e.issues, note=e.note) for k, e in edits.items() if k in current}
+    checks = found(grades)
+    for key, why in refused.items():
+        checks.setdefault(key, []).extend(why)
+    flagged = unsupported(applied)
+    refusals = sum(len(v) for v in refused.values())
+    resolved = bool(checks or flagged) and not runner.budget_reached
+    if resolved:
+        ctx.activity("CHECKING", 2, 2)
+        again = request(checks, flagged)
+        edits = runner.edit(again, common, resolve=True)
+        more, refused = apply(edits)
+        applied += more
+        refusals += sum(len(v) for v in refused.values())
+        for item in again:  # a section sent back has the editor's last answer, or none: its first grade was for other text
+            edit = edits.get(item["key"])
+            grades.pop(item["key"], None)
+            if edit is not None:
+                grades[item["key"]] = Grade(key=edit.key, grade=edit.grade, issues=edit.issues, note=edit.note)
+        checks = found(current)
+        for key, why in refused.items():
+            checks.setdefault(key, []).extend(why)
+    unresolved: dict[str, list[str]] = {}
+    for key in current:
+        grade = grades.get(key)
+        issues = [*checks.get(key, []), *((grade.issues or ["REVIEW_REJECTED"]) if grade and grade.grade == "REPAIR" else []), *([] if grade else [NOT_REVIEWED])]
+        if issues:
+            unresolved[key] = issues
+    approval = Approval(
+        reviewer=(runner._engine.vertex_routes.get("p_edit") or [runner.model_for("p_edit")])[0], reviewed_sha256=reviewed, accepted_sha256=_text_hash(current),
+        corrections=len(applied), substantive=sum(1 for a in applied if a["kind"] != "WORDING"), flagged=len(flagged), resolved=resolved, refused=refusals)
+    return current, grades, unresolved, stripped, approval
+
+
 def stage_auditing(ctx: "StageContext") -> None:
     """Code checks every section; the lead reviews with those results; the writer fixes what is
-    raised; bounded rounds. Whatever still breaks a code rule afterwards is removed, never shipped."""
+    raised; bounded rounds. Whatever still breaks a code rule afterwards is removed, never shipped.
+    Workflow 2: the final editor reviews, corrects and decides instead (`_edited`)."""
     inp = step_input(ctx)
     assert inp.plan is not None
     settings = ctx.rt.settings
-    runner = ctx.ai(ProposalRunner)
-    assert isinstance(runner, ProposalRunner)
+    runner = _runner(ctx, inp)
+    workflow2 = runner._engine.workflow >= 2
     library = _library(ctx, inp)
     usable = {i for i, item in library.items() if item.usable}
     sample = sampling.calculate(inp.plan.sample_size) if inp.chapter == 3 else None
@@ -1071,10 +1261,14 @@ def stage_auditing(ctx: "StageContext") -> None:
     current = _owned(inp, items, current)
     unresolved: dict[str, list[str]] = {}
     grades: dict[str, Grade] = {}
+    stripped: list[str] = []
+    approval: Approval | None = None
+    if workflow2:
+        current, grades, unresolved, stripped, approval = _edited(ctx, runner, inp, items, current, library, allowed, {**common, "vetting": vetting})
     rounds = settings.repair_attempts
     # review, fix, review ... review: the delivered text is always the reviewed text, with at most
     # `rounds` fixes, as priced (Codex audit 2026-09-28 #11).
-    for round_ in runner.audit_rounds(rounds + 1):
+    for round_ in ([] if workflow2 else runner.audit_rounds(rounds + 1)):
         ctx.activity("CHECKING", round_ + 1, rounds + 1)
         problems = {k: _checks(inp, k, t, library, allowed) for k, t in current.items()}
         review = [
@@ -1098,8 +1292,7 @@ def stage_auditing(ctx: "StageContext") -> None:
                 current[key] = fixed
         current = _owned(inp, items, current)
 
-    stripped: list[str] = []
-    if runner._engine.require_dual_approval:
+    if runner._engine.require_dual_approval and not workflow2:
         # Code removes what it cannot trace BEFORE the final approval, so both reviewers approve the
         # exact wording that is delivered (Codex, plan review 2026-09-29).
         cleaned = {key: tidy for key, text in current.items() if (tidy := _cleaned(inp, text, library, usable, allowed)) != text}
@@ -1125,7 +1318,8 @@ def stage_auditing(ctx: "StageContext") -> None:
                 else:
                     unresolved.pop(key, None)
     missing: list[str] = []
-    if runner._engine.require_dual_approval:
+    approved_only = runner._engine.require_dual_approval or workflow2  # workflow 2: nothing the final editor did not approve
+    if approved_only:
         # Only wording both reviewers approved is delivered. A revision keeps the earlier text of the
         # rest; a new chapter (or a finish) delivers what was approved and records the rest as not
         # written yet, for "Finish chapter" (owner decision 2026-09-29). Nothing approved: no document.
@@ -1147,7 +1341,7 @@ def stage_auditing(ctx: "StageContext") -> None:
         cleaned = [evidence.strip_unsupported(p, library, usable, allowed) for p in text.paragraphs]
         table = _strip_table(inp, text, library, usable, allowed)
         if cleaned != text.paragraphs or table != text.table:
-            if runner._engine.require_dual_approval:  # the final guard: nothing changes after approval
+            if approved_only:  # the final guard: nothing changes after approval
                 raise PermanentStageError(
                     "DOCUMENT_NOT_APPROVED", "PaperAid could not verify the final wording. No document was released and nothing was charged. Please try again.",
                     "post-review evidence cleanup would change approved wording",
@@ -1173,6 +1367,8 @@ def stage_auditing(ctx: "StageContext") -> None:
     document = _document(inp, current, items, library)
     for section in document.sections:
         section.reviewed = section.key in grades
+    if approval is not None:  # the text accepted is what is left to deliver: a section not approved is not in it
+        approval.accepted_sha256 = _text_hash(current)
     delivered: list[str] = []
     if base is not None and inp.step == "COMPLETE":
         document, delivered = _completed(inp, base, document)
@@ -1212,8 +1408,9 @@ def stage_auditing(ctx: "StageContext") -> None:
     document.readiness = (_readiness(ctx, runner, inp, document, library, bool(stripped), unreviewed) + _missing_items(inp, document.missing)
                           + research_gap_items(ctx, f"C{inp.chapter}-RESEARCH", inp.chapter))
     document.warnings = warnings
+    document.approval = approval
     share: float | None = None
-    if inp.step in ("CHAPTER", "COMPLETE") and runner._engine.require_dual_approval:
+    if inp.step in ("CHAPTER", "COMPLETE") and approved_only:
         written = delivered if inp.step == "COMPLETE" else [k for k in items if k not in missing]
         share = sum(total.get(k, 0) for k in written) / max(1, sum(total.values()))
     if document.missing or inp.step == "COMPLETE":
@@ -1340,7 +1537,14 @@ def _revision(
         {**items[k], "text": t.paragraphs, "table": t.table.model_dump(), "issues": inp.revise[k], "_words": " ".join(t.paragraphs)}
         for k, t in current.items()
     ]
-    for key, fixed in runner.fix(first, common).items():
+    kept = runner._engine.workflow >= 2
+    if kept and ctx.has("revised.json"):  # written before a wait for the final editor
+        fixes = {k: SectionText.model_validate(v) for k, v in ctx.get_json("revised.json").items()}
+    else:
+        fixes = runner.fix(first, common)
+        if kept:
+            ctx.put_json("revised.json", {k: v.model_dump() for k, v in fixes.items()})
+    for key, fixed in fixes.items():
         if key in current:
             current[key] = fixed
     return base, {k: v for k, v in items.items() if k in current}, current

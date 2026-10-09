@@ -1399,7 +1399,7 @@ def _run_step(rt: Runtime, job_id: str) -> None:
             ctx.assert_owner()
         except StageContinues:
             return
-        _wait_for_capacity(rt, job_id, stage, ctx.owner, exc.reason, timing("WAITING", "CAPACITY"))
+        _wait_for_capacity(rt, job_id, stage, ctx.owner, exc.reason, timing("WAITING", exc.kind), exc.delay_sec, exc.kind)
         return
     except StageError as exc:
         try:
@@ -1482,14 +1482,21 @@ def _continue_later(rt: Runtime, job_id: str, stage: Stage, owner: str, timing: 
 
 CAPACITY_BUSY = ("PaperAid is very busy right now, so this could not finish in time. Nothing was charged and what was done is "
                  "saved. Please continue it in a little while.")
+REVIEW_BUSY = ("PaperAid's final review was not available in time, so this could not finish. Nothing was charged and what was "
+               "done is saved. Please continue it in a little while.")
 
 
-def _wait_for_capacity(rt: Runtime, job_id: str, stage: Stage, owner: str, reason: str, timing: StageTiming) -> None:
-    """No Gemini capacity was free (speed plan 2026-10-08): the stage keeps what it has done (its finished calls replay
-    from the cache), releases its lease and is delivered again after a short wait. These pauses never use up the
-    stage's retries for provider failures; after `capacity_max_waits` of them (about two hours) the job stops, uncharged."""
+def _wait_for_capacity(rt: Runtime, job_id: str, stage: Stage, owner: str, reason: str, timing: StageTiming,
+                       delay_sec: int | None = None, kind: str = "CAPACITY") -> None:
+    """No Gemini capacity was free (speed plan 2026-10-08), or the final editor's model cannot answer now (kind REVIEW,
+    algorithm revision 2026-10-09: nothing else approves in its place): the stage keeps what it has done (its finished
+    calls replay from the cache), releases its lease and is delivered again after a wait. These pauses never use up the
+    stage's retries for provider failures. Their allowance is a time (`capacity_wait_limit_sec`, about two hours, with
+    `capacity_max_waits` as a second bound); past it the job stops, uncharged and resumable."""
     settings = rt.settings
     retry_again = False
+    base = delay_sec or settings.capacity_retry_sec
+    delay = base + random.randint(0, max(1, base // 2))
 
     def pause(j: Job, w: Wallet) -> tuple[Job, Wallet] | None:
         nonlocal retry_again
@@ -1498,21 +1505,22 @@ def _wait_for_capacity(rt: Runtime, job_id: str, stage: Stage, owner: str, reaso
         j.lease_until, j.lease_owner = None, ""
         j.timings = [*j.timings, timing][-80:]
         j.capacity_waits += 1
-        if j.capacity_waits > settings.capacity_max_waits:
+        # what this pause adds: the wait for a slot that ended in it (a capacity pause) and the delay before the next try
+        j.waited_sec += delay + (int(settings.capacity_wait_sec) if kind == "CAPACITY" else 0)
+        if j.capacity_waits > settings.capacity_max_waits or j.waited_sec > settings.capacity_wait_limit_sec:
             # retryable: the student can resume it, and its finished calls are reused (Codex audit, finding 10)
-            j.failure = JobFailure(code="CAPACITY_BUSY", user_message=CAPACITY_BUSY, retryable=True)
-            j.failure_detail = f"stage={stage.value} capacity waits exhausted: {reason}"[:500]
+            j.failure = JobFailure(code="CAPACITY_BUSY", user_message=REVIEW_BUSY if kind == "REVIEW" else CAPACITY_BUSY, retryable=True)
+            j.failure_detail = f"stage={stage.value} {kind.lower()} waits exhausted after {j.waited_sec}s: {reason}"[:500]
             state.transition(j, JobStatus.FAILED, "Failed: CAPACITY_BUSY")
             refund_job(j, w, "Job failed, so nothing was charged")
             return j, w
         if j.activity is None or j.activity.kind != "WAITING":
-            j.events.append(JobEvent(label=f"Waiting for capacity during {stage.value.lower()}"))
+            j.events.append(JobEvent(label=f"Waiting for {'the final review' if kind == 'REVIEW' else 'capacity'} during {stage.value.lower()}"))
         j.activity = Activity(kind="WAITING", note=reason)
         j.ready_at = utcnow() + timedelta(seconds=delay)  # due then: the pause itself is not time in the queue
         retry_again = True
         return j, w
 
-    delay = settings.capacity_retry_sec + random.randint(0, max(1, settings.capacity_retry_sec // 2))
     result = rt.store.update_job_and_wallet(job_id, pause)
     log(logger, logging.INFO, "stage paused for capacity", stage=stage.value, reason=reason, willRetry=retry_again)
     if result and retry_again:

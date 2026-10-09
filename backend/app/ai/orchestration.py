@@ -75,7 +75,7 @@ from app.ai.providers import UNAVAILABLE, ModelResult, Usage, parse, provider_fo
 from app.analysis import research
 from app.analysis.signals import MODEL_SCORE
 from app.core.config import Settings
-from app.core.errors import PermanentStageError, RetryableStageError
+from app.core.errors import CapacityWait, PermanentStageError, RetryableStageError
 from app.documents import protect
 from app.formatting.guideline import SPEC_SCHEMA
 from app.jobs.models import Engine, ModelCall, Stage
@@ -145,6 +145,10 @@ STEPS: dict[str, Step] = {
     "p_review_peer": Step("writer", Stage.AUDITING, "p-review-v3", 8000),
     "p_fix": Step("writer", Stage.AUDITING, "p-fix-v2", 16000),
     "p_readiness": Step("lead", Stage.AUDITING, "p-readiness-v1", 8000),
+    # Workflow 2 (algorithm revision 2026-10-09): the final editor of a chapter's sections, as for works (w_edit).
+    "p_edit": Step("lead", Stage.AUDITING, "p-edit-v1", 16000),
+    "p_flag": Step("writer", Stage.AUDITING, "p-flag-v1", 4000),
+    "p_resolve": Step("lead", Stage.AUDITING, "p-resolve-v1", 16000),
     # An institution profile from an uploaded guide (Proposal V2): lead drafts → writer critiques → lead finalises.
     "p_profile": Step("lead", Stage.PLANNING, "p-profile-v1", 12000),
     "p_profile_critique": Step("writer", Stage.PLANNING, "p-profile-critique-v1", 6000),
@@ -173,6 +177,13 @@ STEPS: dict[str, Step] = {
     "w_adjudicate": Step("ADJUDICATOR", Stage.AUDITING, "w-adjudicate-v1", 4000),
     "w_final": Step("EVALUATOR", Stage.AUDITING, "w-final-v2", 8000),  # v2: the exact deliverable, every verdict required (Sol with one final reviewer)
     "w_compress": Step("WRITER", Stage.AUDITING, "w-compress-v1", 12000),
+    # Workflow 2 (algorithm revision 2026-10-09, the owner's one fixed principle): the premium model reviews the
+    # finished document once, corrects it directly and gives the final decision (w_edit). A standard-model check may
+    # only flag a corrected claim its evidence does not support (w_flag: it never rewrites and never approves); what it
+    # flags, and what code finds in the corrected text, goes back to the editor once (w_resolve). Nothing else approves.
+    "w_edit": Step("EVALUATOR", Stage.AUDITING, "w-edit-v1", 16000),
+    "w_flag": Step("INTEGRITY", Stage.AUDITING, "w-flag-v1", 4000),
+    "w_resolve": Step("EVALUATOR", Stage.AUDITING, "w-resolve-v1", 16000),
     # Data Lab reports (owner decision 2026-10-03): code computes every number; the writer interprets
     # the results through number tokens, and the one final reviewer (Sol) approves the exact narrative.
     "d_report": Step("WRITER", Stage.DRAFTING, "d-report-v1", 16000),
@@ -196,7 +207,11 @@ DRAFTING_TASKS = {"critique", "refine", "repair", "redraft", "redraft_fix", "ver
 # Sonnet, so Sol never approves wording it finalised itself (owner decision 2026-09-30) ...
 FINALISED_BY_DRAFTER = {"p_finalise", "p_profile_finalise", "spec_finalise"}
 # ... and these works reviews are Sol's final decisions instead of the evaluator's.
-FINAL_REVIEW_TASKS = {"w_plan_review", "w_results_review", "w_final", "d_report_review", "q_review"}
+FINAL_REVIEW_TASKS = {"w_plan_review", "w_results_review", "w_final", "d_report_review", "q_review", "w_edit", "w_resolve"}
+# The final editor's steps (workflow 2): part of a job's cap is kept for them (AIRunner.hold_back).
+EDITOR_TASKS = frozenset({"w_edit", "w_flag", "w_resolve", "p_edit", "p_flag", "p_resolve"})
+# The final editor's model could not answer: the stage waits with its draft kept (nothing else approves in its place).
+REVIEW_WAITS = frozenset({"PROVIDER_UNAVAILABLE", "VERTEX_TIMEOUT", "VERTEX_CONNECTION_LOST", "VERTEX_RATE_LIMIT", "VERTEX_MODEL_UNAVAILABLE"})
 # A web search the provider declined to answer (a safety or recitation stop: Gemini stops rather than
 # repeat a web page word for word, live run 2026-10-07) found nothing usable: that need or claim has no
 # source, and the rest of the step goes on. It was still recorded and counts against the cap.
@@ -841,6 +856,32 @@ class AIRunner:
 
     def _cap(self, task: str) -> float:
         return self._budget if task in self._held_for else max(0.0, self._budget - self._held)
+
+    def worst_cost(self, task: str, prompt_chars: int) -> float:
+        """The most one call of a step could cost on its frozen route: its whole output allowance used."""
+        ref = (self._engine.vertex_routes.get(task) or [self.model_for(task)])[0]
+        provider, model = provider_for(ref, self.settings)
+        limit, thinking_tokens = output_allowance(self._engine, task, self._engine.vertex_stages.get(task, ""))
+        return costs.estimate_usd(provider.name, model, prompt_chars, limit, self.settings.model_prices, self._engine.price_table,
+                                  self.settings.model_long_prices, thinking_tokens)
+
+    def keep_for_editor(self, document_chars: int, service: str = "w") -> None:
+        """Keeps the cost of the final editor's review, its check and its one resolution out of every other step's
+        reach, up to half the job's cap (Codex's plan 2026-10-09: research must never spend the approval's money).
+        `service`: "w" for works, "p" for proposal chapters."""
+        request = 2 * document_chars + 60_000  # the document as printed and as written, with rules and evidence
+        needed = self.worst_cost(f"{service}_edit", request) + self.worst_cost(f"{service}_resolve", request) + self.worst_cost(f"{service}_flag", 30_000)
+        self.hold_back(min(needed, self._budget / 2), EDITOR_TASKS)
+
+    def ask_editor[T: BaseModel](self, task: str, payload: dict[str, Any], schema: dict[str, Any], shape: type[T]) -> T | None:
+        """A call to the final editor. Its model has no stand-in (owner, 2026-10-09): when it cannot answer, the stage
+        waits with everything it has done kept (CapacityWait, kind REVIEW) and asks again later; no retry is used up."""
+        try:
+            return self._call(task, payload, schema, shape)
+        except RetryableStageError as exc:
+            if exc.code not in REVIEW_WAITS:
+                raise
+            raise CapacityWait("FINAL_REVIEW", delay_sec=self.settings.review_wait_sec, kind="REVIEW") from exc
 
     def _must_wait(self, estimate: float, cap: float) -> bool:
         """The call does not fit beside the calls under way but would fit on what is really spent."""

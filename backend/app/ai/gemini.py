@@ -52,12 +52,13 @@ for _stage, _tasks in {
     "planner": "plan finalise p_plan p_brief p_finalise p_needs w_needs w_plan w_results spec_plan spec_finalise p_profile p_profile_finalise",
     "research": "research p_search w_search p_extract w_extract",
     "execution": "refine redraft p_draft w_draft w_compress d_report d_chapter4 q_code q_themes",
-    "first_audit": ("analyse analyse_after academic verify w_verify w_integrity w_evaluate p_readiness critique p_critique spec_critique "
+    "first_audit": ("analyse analyse_after academic verify w_verify w_integrity w_evaluate w_flag p_flag p_readiness critique p_critique spec_critique "
                     "p_profile_critique review_peer spec_review_peer p_plan_review_peer p_review_peer p_profile_review_peer"),
     "second_check": "analyse_peer analyse_after_peer",
     "premium_audit": ("review p_review p_plan_review p_profile_review spec_review w_plan_review w_results_review w_final d_report_review q_review "
                       "p_audit w_adjudicate guide spec_guide p_guide p_profile_guide"),
     "fix": "repair redraft_fix p_fix w_repair spec_fix",
+    "final_editor": "w_edit w_resolve p_edit p_resolve",
 }.items():
     TASK_STAGES.update(dict.fromkeys(_tasks.split(), _stage))
 

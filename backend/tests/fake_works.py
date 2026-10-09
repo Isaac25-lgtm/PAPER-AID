@@ -175,6 +175,13 @@ def answer(task: str, payload: dict[str, Any]) -> dict[str, Any]:
         return {"rules": [{"rule": r["rule"], "status": "PASS", "note": "Met across the document.", "where": ""} for r in payload["rules"]],
                 "coverage": [{"id": c["id"], "answered": True, "where": ""} for c in payload["coverage"]],
                 "priorities": [{"priority": p, "addressed": True, "where": ""} for p in payload["priorities"]]}
+    if task in ("w_edit", "w_resolve"):  # the final editor: nothing to correct, every verdict given
+        return {"corrections": [], "blockers": [],
+                "rules": [{"rule": r["rule"], "status": "PASS", "note": "Met across the document.", "where": ""} for r in payload["rules"]],
+                "coverage": [{"id": c["id"], "answered": True, "where": ""} for c in payload["coverage"]],
+                "priorities": [{"priority": p, "addressed": True, "where": ""} for p in payload["priorities"]]}
+    if task == "w_flag":
+        return {"results": [{"id": c["id"], "supported": True, "problem": ""} for c in payload["corrections"]]}
     if task == "w_compress":
         return compress(payload)
     raise KeyError(task)

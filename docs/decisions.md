@@ -959,3 +959,96 @@ or approval changed.
   "Solve this question" (typed as the question, the paper uploaded as a file; not charged). The release already made
   that sentence a request; requests that only point at the paper are now recognised too ("Solve this", "Do the activity
   above", "Work on the attached", "Help me"), while anything that names its subject stays a question (`_REQUEST`).
+
+## 2026-10-09 — Algorithm revision: research from the index first, one final editor (workflow 2, built and switched off)
+
+The owner, Codex and Claude reviewed the owner's redesign document and agreed not to rebuild: the platform and the
+academic rules stay, and two things change. Research was 56% of AI time and a fifth of web searches failed (32
+production jobs, 8 October), so research is planned and routed differently. And the owner's one fixed principle: the
+premium model reads the finished work at the end, corrects what needs correcting itself and gives the final approval;
+nothing else approves in its place. Codex wrote the implementation plan; Claude built it. Everything new is behind one
+switch, `WORKFLOW` (1 by default), frozen into each engine when it is priced (`Engine.workflow`), so a job always runs
+the way it was priced and switching back is one setting. **It is not switched on**: see "Trial" below.
+
+- **For every workflow (fixes):** a call waiting for other calls' costs to be recorded no longer holds a slot of the
+  shared limit (`AIRunner._call`); part of a job's cap can be kept for named steps (`hold_back`); a wait for capacity
+  is bounded by time as well as by count (`capacity_wait_limit_sec`, about two hours, `Job.waited_sec`); the scholarly
+  index is asked with PaperAid's own key (`OPENALEX_API_KEY`, Secret Manager only, sent only to api.openalex.org, never
+  logged, no redirect followed) and says what it came to (`IndexOutcome`: found, nothing, rate limited, allowance used,
+  access denied, unavailable); the speed report shows the time from a work's first step to its document.
+- **Research on workflow 2** (`w-needs-v2`, `p-needs-v2`, stage `topics`): each topic has a category (STUDY, METHOD,
+  STATISTIC, POLICY), whether the work depends on it (`essential`), a broader query, and the saved evidence that
+  already covers it (`coveredBy`: not searched again). Studies and methods are read from the scholarly index: a pool of
+  `index_candidates` (50) ranked in code for the need (`research.rank_works`: retracted and repeated works left out),
+  the best `index_abstracts` (8) read. Official figures and policy go to the web. The other route is used only when the
+  first could not be asked, or an essential topic is still unanswered (`gather`). An essential topic with no usable
+  evidence stops the step without charge (`EVIDENCE_MISSING`, `essential_answered`). Every topic's route is recorded on
+  the job as labels and counts (`TopicRoute`, `Job.topics`).
+- **The final editor on workflow 2** (stage `final_editor`: Gemini 3.1 Pro, HIGH; a fallback is refused by a settings
+  check). Works (`w_edit`, `_editorial`) and proposal chapters (`p_edit`, `_edited`):
+  1. Before it, the wording is settled: the writer develops a draft well under its limit and compresses one over it;
+     code withholds what it cannot trace; PaperAid's own checks run once, as findings for the editor (no repair round).
+  2. The editor reviews, gives corrections by paragraph id (replace, insert after, delete, remove a table or graph;
+     each marked WORDING, CLAIM, METHOD or CONCLUSION) and its verdicts. Code applies them (`apply_corrections`): a
+     correction that names an unknown place, a section this step may not change or a paragraph already corrected is
+     refused, never guessed at. For chapters the plan's own statements are put back word for word afterwards.
+  3. Code checks the corrected text. A standard-model check (`w_flag`, `p_flag`) says only whether each corrected
+     claim, method or conclusion is supported by its evidence: it never rewrites and never approves.
+  4. Only if something was flagged or found does the editor look once more (`w_resolve`, `p_resolve`), and that is the
+     end. Wording code still cannot trace is never released (works: `DOCUMENT_NOT_APPROVED`; chapters: that section is
+     not approved). No writer rewrites after the editor.
+  5. When the editor's model cannot answer, the stage waits with everything kept and asks again
+     (`CapacityWait` kind REVIEW, `review_wait_sec`); no retry is used up and nothing else approves.
+  The editor's share of the cap is kept from the first stage of the step (`keep_for_editor`, at most half the cap).
+  The decision is recorded with the document (`Approval`: the model, the hash of what it read, the hash of what was
+  delivered, corrections applied, flagged, refused; admins and audits only). A work's Word file is opened and read
+  back against the accepted text before it is published (`export.verify`).
+- **Coursework plans on workflow 2** are decided by code checks with one writer repair, not a premium review
+  (`ReviewDecision` APPROVED with reason `CODE_CHECKS`): the plan is internal and the document gets the editor.
+  Concept notes' and funding proposals' plans and Results Models keep their premium review.
+- **Decisions Claude took while building (for the owner and Codex to confirm):** a revision on workflow 2 has no
+  per-section revert after the editor (the editor corrects, or the step fails without charge); section rules are
+  judged by the editor, not the section evaluator; spending caps keep the older worst-case formulas (they cover the
+  editor many times over; a tighter cap is the owner's decision); the final editor is not extended to Data Lab reports
+  or Paper Check until coursework is proven.
+
+### Trial (real models, 2026-10-09; synthetic assignments; $15 cap approved by the owner)
+
+Six coursework assignments (four of 1,500 words, two of 1,000; one is a calculation) through both workflows at once.
+
+| | Workflow 1 | Workflow 2, first run |
+|---|---|---|
+| Delivered | 6 of 6 | 3 of 6 (three stopped without charge) |
+| First step to document | 8.0 to 8.4 min (four), 17.2 and 18.0 min (two with repair rounds) | 6.3, 10.0, 10.4 min |
+| Research calls per work | 17 to 21 | 8 to 14 |
+| Premium-model time per work | 30 to 75 s | 136 to 332 s |
+| AI spend | $3.00 | $2.69 |
+
+What the first run showed, and what was changed before the second:
+- On its second look the editor named sections by the headings it had been given in "flagged" and "checks", and code
+  refused every such correction. All three stops had this. Sections are now given by key everywhere, and a heading
+  still names its section.
+- Two drafts went to the editor well under their word limit (one written at 1,244 of 1,500 words) and nothing developed
+  them: an editor corrects, it does not write. The writer now develops such a draft first, and the editor is told the
+  minimum length.
+- In the calculation assignment the editor moved the worked example out of its table into ordinary sentences, and when
+  code could not trace the figures it spelled them as words and removed the tables. The editor's prompts now carry the
+  writer's rule on figures and say never to spell a number or remove a table to get past a check (`w-edit-v1`,
+  `w-resolve-v1`, not yet released when changed).
+- The premium model answered "unavailable" after a minute of its own retries in five of six works; each wait cost about
+  three minutes and no draft was lost. Its review with corrections takes two to five minutes where the older
+  verdict-only review takes about half a minute: this, not research, is now the largest part of workflow 2's time.
+- In the delivered drafts the editor's corrections were substantive: it removed inferences and specifics that the cited
+  sources did not give.
+
+**Second run, workflow 2 with those changes (the same six, alone, while the test suite ran on the same machine):**
+6 of 6 delivered, none refused a correction. First step to document: 9.5, 10.1, 10.6, 14.1, 14.3 and 26.0 minutes; AI
+spend $3.04 ($0.41 to $0.58 a work). The editor looked a second time in five of six. The premium model was
+unavailable six times: one work waited four times (7.6 minutes of waiting) and still delivered. Total paid for the
+trial: $8.73 of the $15 approved.
+
+**Decision (Claude, for the owner to confirm): workflow 2 stays off.** It is now as reliable as workflow 1 on these six
+and does about a third fewer research calls, but it is slower (about 10 to 14 minutes against 8) because the editor's
+review with corrections takes two to five minutes and the premium model is often briefly unavailable. Before it is
+switched on: Codex's audit of this work; then a decision on the editor's thinking level and on how much it rewrites
+(it replaced most paragraphs of most drafts), measured the same way.

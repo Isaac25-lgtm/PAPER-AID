@@ -17,6 +17,7 @@ import json
 import math
 import re
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from app.ai.orchestration import FINAL_PART_WORDS, HISTORY_WORDS, REVIEW_REPAIRS, check_content, payload_words
@@ -26,14 +27,16 @@ from app.jobs import state
 from app.jobs.models import Engine, Job, JobStatus, Progress, ReadinessItem, Stage, TopicRoute, Wallet, utcnow
 from app.pricing.billing import settle_completed
 from app.proposals import evidence as ev
-from app.proposals.ai import Figure, SectionText, Table
+from app.proposals.ai import Correction, Figure, SectionText, Table
 from app.proposals.models import EvidenceItem, EvidenceSource
 from app.proposals.pipeline import (
     _topic,
+    apply_corrections,
     checkpointed,
     essential_answered,
     gather,
     load_library,
+    numbered,
     record_topics,
     research_gap_items,
     research_gaps,
@@ -47,9 +50,10 @@ from app.rules.validators import UNDER_LENGTH, Context
 from app.works import budget as budget_engine
 from app.works import directives, numbers, templates
 from app.works import results as results_engine
-from app.works.ai import Classified, Covered, Evaluation, Final, FinalRule, PlanReview, Priority, ResultsReview, WorkRunner
+from app.works.ai import Blocker, Classified, Covered, Edited, Evaluation, Final, FinalRule, PlanReview, Priority, ResultsReview, WorkRunner
 from app.works.models import (
     AI_NOTE,
+    Approval,
     Budget,
     BudgetLine,
     Limit,
@@ -96,6 +100,11 @@ def step_input(ctx: "StageContext") -> WorkStepInput:
 def _runner(ctx: "StageContext") -> WorkRunner:
     runner = ctx.ai(WorkRunner)
     assert isinstance(runner, WorkRunner)
+    if runner._engine.workflow >= 2 and ctx.has(INPUT):
+        # A document's final review is paid for before anything else may spend its share (every stage of the step).
+        inp = WorkStepInput.model_validate(ctx.get_json(INPUT))
+        if inp.step in ("DRAFT", "REVISE") and inp.plan is not None:
+            runner.keep_for_editor(8 * sum(s.words for s in inp.plan.sections))
     return runner
 
 
@@ -533,6 +542,14 @@ def stage_planning(ctx: "StageContext") -> None:
             answer = runner.plan({**payload, "draft": plan.model_dump(by_alias=True), "critique": [*review.issues, *_plan_problems(plan, spec)]}).model_dump()
             plan = _plan_from(answer, skeleton, spec)
         plan_decision = None
+    elif runner._engine.workflow >= 2 and spec.kind == "COURSEWORK":
+        # Workflow 2: a coursework plan is internal (the student never sees it), so PaperAid's code checks decide it,
+        # with one repair by the writer when they find something, and the final editor reviews the document itself.
+        # The decision says so: it is not a reviewer's approval (Codex's plan 2026-10-09).
+        if _plan_problems(plan, spec):
+            answer = runner.plan({**payload, "draft": plan.model_dump(by_alias=True), "critique": _plan_problems(plan, spec)}).model_dump()
+            plan = _plan_from(answer, skeleton, spec)
+        plan_decision = ReviewDecision(outcome="APPROVED", reason="CODE_CHECKS")
     else:
         plan, plan_decision = _final_plan(runner, payload, plan, skeleton, spec, plan_rules)
     if _plan_problems(plan, spec):  # never charge for a plan the student could not approve
@@ -1170,16 +1187,23 @@ def _complete(answer: "Final", rule_ids: set[str], coverage_ids: set[str], prior
 
 
 def _final_review(runner: WorkRunner, inp: WorkStepInput, document: WorkDocument, library_items: dict[str, EvidenceItem],
-                  tokens: dict[str, tuple[str, str]], doc_rules: list[dict[str, Any]]) -> "Final | None":
+                  tokens: dict[str, tuple[str, str]], doc_rules: list[dict[str, Any]], *,
+                  ask: Callable[[dict[str, Any]], "Final | None"] | None = None, extra: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+                  rule_sections: dict[str, list[str]] | None = None, answers: list[Any] | None = None) -> "Final | None":
     """Sol's review of the exact deliverable, with a verdict required for every document rule, every
     part of the question and every funder priority, in every part. A long document is reviewed in
     bounded parts (a long section split across them), each with a manifest of the whole; a rule fails
     if any part fails it, and a part of the question is answered if any part answers it. Any verdict
-    missing, cut off or unaffordable: None (not reviewed)."""
+    missing, cut off or unaffordable: None (not reviewed).
+
+    Workflow 2's final editor is asked the same way: `ask` is its call, `extra` what else each part's request
+    carries (the text it may correct), `rule_sections` the sections a section rule applies to, and `answers`
+    collects each part's whole answer (its corrections with its verdicts)."""
     spec = _spec(inp)
     whole = deliverable(inp, document, library_items, tokens)
     base = {"spec": _compact_spec(spec), "student": _student(inp), "position": inp.plan.position if inp.plan else "",
-            "rules": [{"rule": r["id"], "requirement": r["requirement"], "severity": r["severity"]} for r in doc_rules],
+            "rules": [{"rule": r["id"], "requirement": r["requirement"], "severity": r["severity"],
+                       **({"sections": rule_sections[r["id"]]} if rule_sections and r["id"] in rule_sections else {})} for r in doc_rules],
             "coverage": [c.model_dump(by_alias=True) for c in spec.coverage], "priorities": spec.priorities}
     # Every whole request stays within FINAL_PART_WORDS (Codex audit 2026-10-01; Codex review 2026-10-07,
     # finding 8): what every part repeats (specification, rules, the student's context, front matter, the
@@ -1232,31 +1256,221 @@ def _final_review(runner: WorkRunner, inp: WorkStepInput, document: WorkDocument
     else:
         return None  # even the repeated context does not fit; never send an oversized paid request
     rule_ids, coverage_ids, priorities = {r["id"] for r in doc_rules}, {c.id for c in spec.coverage}, set(spec.priorities)
-    answers = []
+    given: list[Final] = []
     for n, part in enumerate(parts, start=1):
         document_part = {"front": whole["front"], "sections": part["sections"], "tables": part["tables"], "references": part["references"], "notes": part["notes"]}
-        answer = runner.final({**base, "document": document_part, "manifest": manifest, "part": f"{n} of {len(parts)}"})
+        answer = (ask or runner.final)({**base, "document": document_part, "manifest": manifest, "part": f"{n} of {len(parts)}", **(extra(part) if extra else {})})
         if answer is None or not _complete(answer, rule_ids, coverage_ids, priorities):
             return None
-        answers.append(answer)
+        given.append(answer)
+        if answers is not None:
+            answers.append(answer)
     rules: dict[str, FinalRule] = {}
-    for answer in answers:
+    for answer in given:
         for r in answer.rules:
             seen = rules.get(r.rule)
             if seen is None or r.status == "FAIL" or (r.status == "PASS" and seen.status == "NOT_APPLICABLE"):
                 rules[r.rule] = r if seen is None or seen.status != "FAIL" else seen
     coverage: dict[str, Covered] = {}
-    for answer in answers:
+    for answer in given:
         for c in answer.coverage:
             if c.id not in coverage or (c.answered and not coverage[c.id].answered):
                 coverage[c.id] = c
     priorities_seen: dict[str, Priority] = {}
-    for answer in answers:
+    for answer in given:
         for pr in answer.priorities:
             if pr.priority not in priorities_seen or (pr.addressed and not priorities_seen[pr.priority].addressed):
                 priorities_seen[pr.priority] = pr
     return Final(rules=[rules[i] for i in sorted(rule_ids)], coverage=[coverage[i] for i in sorted(coverage_ids)],
                  priorities=[priorities_seen[p] for p in spec.priorities])
+
+
+# --- workflow 2: the final editor reviews, corrects and decides (algorithm revision 2026-10-09) -------------
+
+
+@dataclass
+class Editorial:
+    final: Final  # the editor's last verdicts, on the text as delivered
+    rules: list[dict[str, Any]]  # the rules it judged: the document's and each section's
+    unresolved: dict[str, list[str]]  # what code still finds, by section
+    blockers: list[Blocker]
+    stripped: list[str]
+    approval: Approval
+
+
+def _text_hash(current: dict[str, SectionText]) -> str:
+    return hashlib.sha256(json.dumps({k: v.model_dump() for k, v in sorted(current.items())}, sort_keys=True).encode()).hexdigest()
+
+
+def _editor_rules(spec: ResolvedSpec, plan_sections: list[PlanSection], current: dict[str, SectionText]) -> tuple[list[dict[str, Any]], dict[str, list[str]]]:
+    """The rules the final editor judges, each once: those of the whole document, and those of each section (which
+    the section check only reports on in workflow 2) with the headings they apply to."""
+    rules = {r["id"]: r for r in _document_rules(spec)}
+    of_document = set(rules)
+    where: dict[str, list[str]] = {}
+    for s in plan_sections:
+        for r in (_rules_for(spec, s.key) if s.key in current else []):
+            if r["id"] not in of_document:
+                rules.setdefault(r["id"], r)
+                where.setdefault(r["id"], []).append(s.heading)
+    return list(rules.values()), where
+
+
+def _evidence_for_editor(items: list[EvidenceItem]) -> list[dict[str, str]]:
+    return [{"token": f"⟦{e['id']}⟧", **e} for e in _for_model(items, passages=True)]
+
+
+def _editor_request(inp: WorkStepInput, current: dict[str, SectionText], editable: list[str], library_items: dict[str, EvidenceItem],
+                    tokens: dict[str, tuple[str, str]], findings: dict[str, list[str]], flagged: list[dict[str, str]] | None = None) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    """What each part of the editor's request carries besides the document as printed: the text it may correct (each
+    paragraph with an id, citations and held figures as tokens), the evidence and figures it may use, the lengths, and
+    what PaperAid's checks found. `flagged` (the resolution): its own corrections a check could not support; `findings`
+    are then what code found in the corrected text."""
+    assert inp.plan is not None
+    sections = {s.key: s for s in inp.plan.sections}
+    usable = [i for i in library_items.values() if i.usable]
+    total, limit, _ = _limit_words(inp, current, library_items, tokens)
+
+    def extra(part: dict[str, Any]) -> dict[str, Any]:
+        keys = [k for k in dict.fromkeys(e["key"] for e in part["sections"]) if k in editable and k in current]
+        offered = {i.id: i for i in usable} if len(usable) <= 40 else {i.id: i for k in keys for i in _relevant(sections[k], usable)}
+        offered.update({i: library_items[i] for k in keys for p in current[k].paragraphs for i in ev.cited_ids(p) if i in library_items and library_items[i].usable})
+        found = [{"section": k, "heading": sections[k].heading, "issues": findings[k]} for k in keys if findings.get(k)]
+        found += [{"section": "", "heading": "", "issues": findings[""]}] if findings.get("") else []
+        out: dict[str, Any] = {
+            "editable": [{"key": k, "heading": sections[k].heading, "words": sections[k].words, "minWords": sections[k].min_words, "maxWords": sections[k].max_words,
+                          "wordsNow": _rendered_words(current[k], tokens), "paragraphs": numbered(current[k]),
+                          "hasTable": bool(current[k].table.rows), "hasFigure": current[k].figure is not None} for k in keys],
+            "evidence": _evidence_for_editor(list(offered.values())),
+            "numberTokens": numbers.for_model(tokens),
+            "length": {"words": total, "limit": int(limit.max), "minimum": int(limit.max * UNDER_LENGTH) + 1} if limit is not None else None,
+        }
+        if flagged is None:
+            out["findings"] = found
+        else:
+            out["flagged"] = [{"section": f["key"], "heading": sections[f["key"]].heading, "paragraph": f["paragraph"], "problem": f["problem"]}
+                              for f in flagged if f["key"] in keys]
+            out["checks"] = found
+        return out
+
+    return extra
+
+
+def _editor_checks(inp: WorkStepInput, current: dict[str, SectionText], editable: list[str], library_items: dict[str, EvidenceItem],
+                   tokens: dict[str, tuple[str, str]], allowed: str) -> dict[str, list[str]]:
+    """What code finds in the text as it stands, by section ("" for the whole document): each section's own checks,
+    any sentence that would be withheld as untraceable (named by paragraph, never removed here), and the length."""
+    assert inp.plan is not None
+    sections = {s.key: s for s in inp.plan.sections}
+    found: dict[str, list[str]] = {}
+    for key in editable:
+        if key not in current:
+            continue
+        problems = _checks(inp, sections[key], current[key], library_items, allowed, tokens)
+        kept = set(_strip(inp, current[key], library_items, allowed).paragraphs)
+        for paragraph in numbered(current[key]):
+            if paragraph["text"] not in kept:
+                problems.append(f"Paragraph {paragraph['id']} carries a citation or figure that cannot be traced to the evidence, the number tokens or the "
+                                "student's details. Cite it with a token from the evidence, or remove it.")
+        if problems:
+            found[key] = list(dict.fromkeys(problems))
+    excess, _ = _word_excess(inp, current, library_items, tokens)
+    if excess:
+        found[""] = [f"The document is about {excess} words over its limit. Shorten it by that much, starting with what was added last."]
+    for key, issues in _too_short(inp, current, library_items, tokens, editable).items():
+        found.setdefault(key, []).extend(issues)
+    return found
+
+
+def _unsupported(runner: WorkRunner, inp: WorkStepInput, applied: list[dict[str, str]], library_items: dict[str, EvidenceItem],
+                 tokens: dict[str, tuple[str, str]]) -> list[dict[str, str]]:
+    """The editor's corrections to a claim, method or conclusion that a standard-model check could not support. The
+    check only flags (it never rewrites, and never approves): what it flags goes back to the editor. A correction it
+    gives no verdict on counts as flagged."""
+    asked = [a for a in applied if a["kind"] != "WORDING" and a["after"]]
+    if not asked:
+        return []
+    items = [{"id": a["id"], "before": a["before"], "after": a["after"],
+              "evidence": _evidence_for_editor([library_items[i] for i in dict.fromkeys(ev.cited_ids(a["after"])) if i in library_items])} for a in asked]
+    flags = runner.flag(items, {"student": _student(inp), "numberTokens": numbers.for_model(tokens)})
+    return [{"key": a["key"], "paragraph": a["paragraph"],
+             "problem": (flags[a["id"]].problem.strip() if a["id"] in flags else "") or "The check could not confirm this correction against its evidence."}
+            for a in asked if a["id"] not in flags or not flags[a["id"]].supported]
+
+
+def _editorial(ctx: "StageContext", runner: WorkRunner, inp: WorkStepInput, current: dict[str, SectionText], editable: list[str],
+               library_items: dict[str, EvidenceItem], tokens: dict[str, tuple[str, str]], allowed: str) -> Editorial:
+    """Workflow 2 (the owner's one fixed principle, 2026-10-09): the premium model reads the finished work once, corrects
+    it itself and gives the final decision, and nothing rewrites the work after it.
+
+    Before it: the writer's compression and code's withholding settle the wording, and PaperAid's own checks run once
+    (findings for the editor, never a verdict or a repair round). Its corrections are applied by paragraph, by code.
+    Then code checks the corrected text, and a standard-model check may flag a corrected claim its evidence does not
+    support. Only if something was flagged or found does the editor look once more, and that is the end: wording code
+    still cannot trace after it is never released."""
+    assert inp.plan is not None
+    spec = _spec(inp)
+    sections = {s.key: s for s in inp.plan.sections}
+    by_heading = {" ".join(s.heading.lower().split()): s.key for s in inp.plan.sections}
+    short = _too_short(inp, current, library_items, tokens, editable)
+    if short:  # the writer develops a draft well under its limit before the editor reads it: an editor corrects, it does not write
+        progress(ctx, "REPAIRING", 1)
+        for key, fuller in runner.repair(_repair_items(inp, current, library_items, short), _common(inp)).items():
+            if key in short:
+                current[key] = _kept(current[key], fuller)
+    _compress_to_limits(ctx, runner, inp, current, tokens, library_items, editable)
+    stripped: list[str] = []
+    for key in list(editable):
+        cleaned = _strip(inp, current[key], library_items, allowed)
+        if cleaned != current[key]:
+            stripped.append(key)
+            current[key] = cleaned
+    known = _audit(ctx, runner, inp, current, list(editable), rounds=0)
+    findings = {k: [i for i in v if i != NOT_REVIEWED] for k, v in known["unresolved"].items()}
+    for key, issues in _too_short(inp, current, library_items, tokens, editable).items():
+        findings.setdefault(key, []).extend(issues)
+    rules, rule_sections = _editor_rules(spec, inp.plan.sections, current)
+    reviewed = _text_hash(current)
+
+    def ask(call: Callable[[dict[str, Any]], Edited | None], extra: Callable[[dict[str, Any]], dict[str, Any]]) -> tuple[Final, list[Correction], list[Blocker]]:
+        answers: list[Edited] = []
+        final = _final_review(runner, inp, _document(inp, current, set()), library_items, tokens, rules, ask=call, extra=extra,
+                              rule_sections=rule_sections, answers=answers)
+        if final is None:
+            raise PermanentStageError(
+                "SPEND_CAP" if runner.budget_reached else "REVIEW_UNAVAILABLE",
+                "PaperAid could not complete its final review of this draft, so nothing was delivered and you were not charged. Please try again.",
+                "final editor incomplete" + (" (spend cap)" if runner.budget_reached else ""))
+        named = [c if c.section in sections else c.model_copy(update={"section": by_heading.get(" ".join(c.section.lower().split()), c.section)})
+                 for a in answers for c in a.corrections]
+        return final, named, [b for a in answers for b in a.blockers]
+
+    progress(ctx, "FINAL_REVIEW", 1)
+    final, corrections, blockers = ask(runner.edit, _editor_request(inp, current, editable, library_items, tokens, findings))
+    applied, refused = apply_corrections(current, corrections, editable)
+    checks = _editor_checks(inp, current, editable, library_items, tokens, allowed)
+    for key, why in refused.items():
+        checks.setdefault(key, []).extend(why)
+    flagged = _unsupported(runner, inp, applied, library_items, tokens)
+    refusals = sum(len(v) for v in refused.values())
+    resolved = bool(checks or flagged)
+    if resolved:
+        progress(ctx, "FINAL_REVIEW", 2)
+        final, corrections, blockers = ask(runner.resolve, _editor_request(inp, current, editable, library_items, tokens, checks, flagged=flagged))
+        again, refused = apply_corrections(current, corrections, editable)
+        applied += again
+        refusals += sum(len(v) for v in refused.values())
+        if any(_strip(inp, current[k], library_items, allowed) != current[k] for k in editable if k in current):
+            # The editor's last wording carries something code cannot trace: withholding it now would deliver text nobody approved.
+            raise PermanentStageError("DOCUMENT_NOT_APPROVED", "PaperAid could not verify the final wording. No document was released and nothing was charged. Please try again.",
+                                      "the final editor's wording carries a citation or figure code cannot trace")
+        checks = {k: _checks(inp, sections[k], current[k], library_items, allowed, tokens) for k in editable if k in current}
+        for key, why in refused.items():
+            checks.setdefault(key, []).extend(why)
+    approval = Approval(
+        reviewer=(runner._engine.vertex_routes.get("w_edit") or [runner.model_for("w_edit")])[0], reviewed_sha256=reviewed, accepted_sha256=_text_hash(current),
+        corrections=len(applied), substantive=sum(1 for a in applied if a["kind"] != "WORDING"), flagged=len(flagged), resolved=resolved, refused=refusals)
+    return Editorial(final=final, rules=rules, unresolved={k: v for k, v in checks.items() if v and k in current}, blockers=blockers, stripped=stripped, approval=approval)
 
 
 def _where_keys(where: str, plan_sections: list[PlanSection]) -> list[str]:
@@ -1489,7 +1703,10 @@ def stage_auditing(ctx: "StageContext") -> None:
                 raise PermanentStageError("NOTHING_REVISED", "PaperAid could not make these changes this time, so your document is unchanged and nothing was charged.",
                                           "revise: nothing resolved")
 
-    review(targets)
+    workflow2 = runner._engine.workflow >= 2
+    approval: Approval | None = None
+    if not workflow2:
+        review(targets)
     stripped: list[str] = []
     fix_notes: list[str] = []
 
@@ -1537,7 +1754,16 @@ def stage_auditing(ctx: "StageContext") -> None:
                 current[key] = cleaned
         review([k for k in editable if current[k] != reviewed_text.get(k)], rounds=0)
 
-    if runner._engine.single_reviewer:
+    if workflow2:
+        # The final editor (algorithm revision 2026-10-09): one review that corrects, then the decision. No repair rounds.
+        edited = _editorial(ctx, runner, inp, current, editable, library_items, tokens, allowed)
+        final, doc_rules, approval = edited.final, edited.rules, edited.approval
+        stripped.extend(edited.stripped)
+        unresolved.update(edited.unresolved)
+        for blocker in edited.blockers:  # what the editor could not settle is shown with the document's checks
+            named = [k for k in _where_keys(blocker.where, inp.plan.sections) if k in current]
+            unresolved.setdefault(named[0] if named else "The document", []).append(blocker.issue.strip())
+    elif runner._engine.single_reviewer:
         # One accountable final reviewer (owner decision 2026-09-30): Sol reviews the exact deliverable
         # after every change; an objection is repaired (only the sections concerned) and the whole
         # deliverable reviewed again, at most twice. A review that cannot complete is never approval.
@@ -1599,7 +1825,8 @@ def stage_auditing(ctx: "StageContext") -> None:
             raise PermanentStageError("NOTHING_REVISED", "PaperAid could not make these changes this time, so your document is unchanged and nothing was charged.",
                                       "revise: nothing changed")
 
-    document = _document(inp, current, set(evaluations) | set(integrity))
+    document = _document(inp, current, set(current) if workflow2 else set(evaluations) | set(integrity))
+    document.approval = approval
     if base is not None:
         document.revised = list(editable)
         earlier = {s.key: s.reviewed for s in base.sections}
@@ -1656,7 +1883,10 @@ def stage_auditing(ctx: "StageContext") -> None:
 
     # The Word file is built once before the step can complete and be charged: a document that cannot
     # be exported fails here, without charge, never at the student's download (Codex audit, second round).
-    ctx.put_bytes("document.docx", export.build(document, spec, inp.results, inp.budget, library_items, tokens, draft=document.status == "NOT_READY"))
+    built = export.build(document, spec, inp.results, inp.budget, library_items, tokens, draft=document.status == "NOT_READY")
+    if workflow2:  # read back before anything is published: the file carries the accepted text, whole and in order
+        export.verify(built, document, spec, inp.results, inp.budget, library_items, tokens, draft=document.status == "NOT_READY")
+    ctx.put_bytes("document.docx", built)
     warnings = []
     if stripped:
         warnings.append(f"PaperAid withheld sentences it could not trace to confirmed evidence or your own details in: {', '.join(stripped)}.")

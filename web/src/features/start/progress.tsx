@@ -111,7 +111,9 @@ export function StartProgress({ jobId, phase, title, estimate, onDone }: { jobId
       </ol>
       {job?.activity?.kind === 'WAITING' && (
         <Alert tone="info" className="mt-4">
-          PaperAid is busy with other work, so yours is waiting for its turn. Everything done so far is saved, and it continues by itself.
+          {job.activity.note === 'FINAL_REVIEW'
+            ? 'Your draft is written and saved. PaperAid’s final review is not available right now; it starts by itself as soon as it can.'
+            : 'PaperAid is busy with other work, so yours is waiting for its turn. Everything done so far is saved, and it continues by itself.'}
         </Alert>
       )}
       {job?.activity?.kind === 'RETRYING' && (

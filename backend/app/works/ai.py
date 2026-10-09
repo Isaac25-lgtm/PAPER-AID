@@ -15,15 +15,19 @@ from app.analysis import research
 from app.core.errors import PermanentStageError, RetryableStageError
 from app.proposals.ai import (
     EXTRACT_SCHEMA,
+    FLAG_SCHEMA,
     NEEDS_V2,
     SEARCH_SCHEMA,
     SECTIONS_SCHEMA,
     WORK_SECTIONS_SCHEMA,
+    Correction,
     Extracted,
+    Flag,
     Need,
     Searched,
     SectionText,
     _Extracted,
+    _Flags,
     _Needs,
     _Searched,
     _Sections,
@@ -254,6 +258,30 @@ class Final(BaseModel):
     priorities: list[Priority]
 
 
+# Workflow 2 (algorithm revision 2026-10-09): the final editor's answer is its verdicts with its own corrections.
+EDIT_KINDS = ("WORDING", "CLAIM", "METHOD", "CONCLUSION")
+EDIT_SCHEMA = _obj(
+    {
+        "corrections": _list(_obj({"section": _S, "paragraph": _S, "action": _enum("REPLACE", "INSERT_AFTER", "DELETE", "REMOVE_TABLE", "REMOVE_FIGURE"),
+                                   "text": _S, "kind": _enum(*EDIT_KINDS), "reason": _S})),
+        "rules": _list(_obj({"rule": _S, "status": _enum("PASS", "FAIL", "NOT_APPLICABLE"), "note": _S, "where": _S})),
+        "coverage": _list(_obj({"id": _S, "answered": {"type": "boolean"}, "where": _S})),
+        "priorities": _list(_obj({"priority": _S, "addressed": {"type": "boolean"}, "where": _S})),
+        "blockers": _list(_obj({"where": _S, "issue": _S})),
+    }
+)
+
+
+class Blocker(BaseModel):
+    where: str = ""
+    issue: str
+
+
+class Edited(Final):
+    corrections: list[Correction] = []
+    blockers: list[Blocker] = []
+
+
 def _whole[T: BaseModel](answer: T | None, task: str) -> T:
     if answer is None:
         raise RetryableStageError("OUTPUT_TRUNCATED", UNAVAILABLE, f"answer did not fit on {task}")
@@ -377,6 +405,30 @@ class WorkRunner(AIRunner):
         answer = self._call("w_adjudicate", {**common, "sections": items}, ADJUDICATE_SCHEMA, _Adjudications)
         known = {i["key"] for i in items}
         return {r.key: r for r in (answer.results if answer else []) if r.key in known}
+
+    # --- workflow 2: the final editor reviews, corrects and decides -----------------------------
+    def _editor(self, task: str, payload: dict[str, Any]) -> Edited | None:
+        """The final editor's verdicts with its corrections; None when the answer was cut off or unaffordable: not
+        reviewed, never approval. When its model cannot answer at all the stage waits (CapacityWait, kind REVIEW)."""
+        try:
+            return self.ask_editor(task, payload, EDIT_SCHEMA, Edited)
+        except PermanentStageError as exc:
+            if exc.code != "BUDGET_EXCEEDED":
+                raise
+            self.budget_reached = True
+            return None
+
+    def edit(self, payload: dict[str, Any]) -> Edited | None:
+        return self._editor("w_edit", payload)
+
+    def resolve(self, payload: dict[str, Any]) -> Edited | None:
+        return self._editor("w_resolve", payload)
+
+    def flag(self, items: list[dict[str, Any]], common: dict[str, Any]) -> dict[str, Flag]:
+        """Which corrected claims their evidence does not support. It only flags: it never rewrites or approves."""
+        answer = _whole(self._call("w_flag", {**common, "corrections": items}, FLAG_SCHEMA, _Flags), "w_flag")
+        known = {i["id"] for i in items}
+        return {r.id: r for r in answer.results if r.id in known}
 
     def final(self, payload: dict[str, Any]) -> Final | None:
         try:

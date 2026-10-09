@@ -5,6 +5,7 @@ the reference list in the required style, and, where it applies, the last-page n
 
 import io
 import re
+import zipfile
 from dataclasses import dataclass
 from typing import Literal
 
@@ -12,6 +13,7 @@ from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
 from docx.shared import Inches, Pt
 
+from app.core.errors import PermanentStageError
 from app.formatting.apply import _set_font
 from app.proposals import evidence as ev
 from app.proposals.export import _footer_numbers
@@ -233,6 +235,29 @@ def build(document: WorkDocument, spec: ResolvedSpec, results: ResultsModel | No
 
 
 ILLUSTRATIVE = "(illustrative values)"
+
+
+def verify(data: bytes, document: WorkDocument, spec: ResolvedSpec, results: ResultsModel | None, budget: Budget | None, library: dict[str, EvidenceItem],
+           tokens: dict[str, tuple[str, str]], draft: bool) -> None:
+    """The built file opens and carries every heading and paragraph of the accepted text, in order (algorithm revision
+    2026-10-09: nothing is published or charged for until the file itself has been read back)."""
+    def plain(text: str) -> str:
+        return " ".join(text.split())
+
+    try:
+        written = [plain(p.text) for p in Document(io.BytesIO(data)).paragraphs]
+    except (zipfile.BadZipFile, KeyError, ValueError) as exc:
+        raise PermanentStageError("EXPORT_FAILED", "PaperAid could not build the Word file of this draft. Nothing was charged; please try again.",
+                                  f"built file does not open: {type(exc).__name__}") from exc
+    position = 0
+    for block in layout(document, spec, results, budget, library, tokens, draft):
+        if block.kind not in ("heading", "paragraph") or not plain(block.text):
+            continue
+        try:
+            position = written.index(plain(block.text), position) + 1
+        except ValueError:
+            raise PermanentStageError("EXPORT_FAILED", "PaperAid could not build the Word file of this draft. Nothing was charged; please try again.",
+                                      f"built file lacks a {block.kind} of section {block.section}") from None
 
 
 def draw_figure(rows: tuple[tuple[str, ...], ...]) -> bytes:

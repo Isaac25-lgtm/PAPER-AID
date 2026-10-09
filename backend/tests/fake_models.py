@@ -291,6 +291,10 @@ class FakeModels:
             return {"sections": out}
         if task == "p_review":
             return {"results": [{"key": s["key"], "grade": "PASS", "issues": [], "note": ""} for s in payload["sections"]]}
+        if task in ("p_edit", "p_resolve"):  # the final editor: nothing to correct, every section passes
+            return {"results": [{"key": s["key"], "grade": "PASS", "issues": [], "note": "", "corrections": []} for s in payload["sections"]]}
+        if task == "p_flag":
+            return {"results": [{"id": c["id"], "supported": True, "problem": ""} for c in payload["corrections"]]}
         if task == "p_readiness":
             return {"items": [{"id": q["id"], "status": "PASS", "note": "Present.", "where": ""} for q in payload["questions"]], "consistency": []}
         if task == "p_audit":

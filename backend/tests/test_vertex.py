@@ -109,7 +109,8 @@ def test_every_step_has_a_stage_and_new_engines_route_all_of_them_to_vertex():
     assert e.vertex_routes["analyse"] == [REF] and e.vertex_routes["analyse_peer"] == ["vertex:gemini-3.5-flash-lite"]
     assert e.vertex_signoff == [REF]
     assert e.vertex_thinking == {"intake": "LOW", "planner": "HIGH", "research": "LOW", "execution": "MEDIUM", "first_audit": "MEDIUM",
-                                 "second_check": "MEDIUM", "premium_audit": "HIGH", "fix": "MEDIUM", "final_signoff": "MEDIUM"}
+                                 "second_check": "MEDIUM", "premium_audit": "HIGH", "fix": "MEDIUM", "final_signoff": "MEDIUM",
+                                 "final_editor": "HIGH"}  # the final editor's steps are routed in every new engine; only workflow 2 runs them
     assert e.vertex_project == "paperaid" and e.vertex_location == "global"
 
 
