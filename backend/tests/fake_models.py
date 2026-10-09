@@ -108,6 +108,9 @@ class FakeModels:
         if task in self.truncate:
             return ModelResult(text="{", usage=usage, provider="fake", model=model, stop="max_tokens")
         answer = self.overrides[task](payload) if task in self.overrides else self.default(task, payload)
+        if task in ("w_needs", "p_needs") and task not in self.overrides and "coveredBy" in json.dumps(schema):
+            answer = {"needs": [{"id": n["id"], "need": n["need"], "category": "STUDY" if n["kind"] == "LITERATURE" else "STATISTIC", "essential": False,
+                                 "query": n["query"], "broader": "", "coveredBy": []} for n in answer["needs"]]}
         return ModelResult(text=json.dumps(answer), usage=usage, provider="fake", model=model)
 
     def search_json(

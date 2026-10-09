@@ -310,7 +310,6 @@ def test_a_search_that_never_answers_is_left_out_after_two_runs_and_shown_in_the
     """Owner decision 2026-10-08: a tester's essay waited half an hour on one search of five. After four tries (two
     in each of two runs) the work goes on without that topic, and the document's checks say which."""
     from app.core.errors import RetryableStageError
-    from app.works import pipeline
 
     client = works_client
     lost: dict = {"need": None, "asked": 0}
@@ -329,8 +328,10 @@ def test_a_search_that_never_answers_is_left_out_after_two_runs_and_shown_in_the
     assert planned["status"] == "COMPLETED", planned.get("failure")
     work = _work(client, work["id"])
     work = client.post(f"/api/works/{work['id']}/plan/approve", headers=STUDENT, json={"baseVersion": work["planVersion"]}).json()
-    monkeypatch.setattr(pipeline, "_from_literature", unanswered(pipeline._from_literature))
-    monkeypatch.setattr(pipeline, "_from_web", unanswered(pipeline._from_web))
+    from app.proposals import pipeline as shared  # where the index and the web are searched for every service
+
+    monkeypatch.setattr(shared, "_from_index", unanswered(shared._from_index))
+    monkeypatch.setattr(shared, "_from_web", unanswered(shared._from_web))
     _, drafted = _run(client, work["id"], "DRAFT")
     assert drafted["status"] == "COMPLETED", drafted.get("failure")
     assert lost["asked"] == 2  # once in each of two runs here (the model's own second try is inside the real call)

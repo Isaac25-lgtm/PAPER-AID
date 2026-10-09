@@ -364,7 +364,7 @@ def freeze_vertex(settings: Settings, engine: Engine) -> Engine:
         return refs
 
     for task in STEPS:
-        stage = stage_for(task, engine.tier)
+        stage = stage_for(task, engine.tier, engine.workflow)
         engine.vertex_routes[task], engine.vertex_stages[task] = freeze(stage, task), stage
     engine.vertex_signoff = freeze(SIGNOFF, "review")
     engine.vertex_addenda = dict(VERTEX_ADDENDA)
@@ -434,13 +434,20 @@ def priced_engine(settings: Settings) -> Engine:
     return current_engine(settings).model_copy(update={"content": content_now()})
 
 
+# Prompt versions of workflow 2 (algorithm revision 2026-10-09), where a step's prompt differs from workflow 1's.
+WORKFLOW_PROMPTS: dict[int, dict[str, str]] = {2: {"w_needs": "w-needs-v2", "p_needs": "p-needs-v2"}}
+
+
 def current_engine(settings: Settings) -> Engine:
     """The engine a run priced now will execute with (see `Engine`)."""
+    prompts = {task: step.prompt for task, step in STEPS.items()}
+    if settings.workflow >= 2:
+        prompts.update(WORKFLOW_PROMPTS[2])
     return freeze_vertex(settings, Engine(lead_model=settings.lead_model, writer_model=settings.writer_model, ai_check_model=settings.ai_check_model,
                   ai_check_peer_model=settings.ai_check_peer_model, routine_model=settings.routine_model, drafting_model=settings.drafting_model,
                   require_dual_approval=settings.require_dual_approval, explicit_coverage=True, frontier_guidance=settings.frontier_guidance,
                   partial_chapters=settings.partial_chapters, single_reviewer=settings.single_reviewer,
-                   prompts={task: step.prompt for task, step in STEPS.items()}))
+                  prompts=prompts, workflow=min(2, max(1, settings.workflow))))
 
 
 REASONS = ["GENERIC_PHRASING", "UNIFORM_STRUCTURE", "LOW_SPECIFICITY", "FORMULAIC_TRANSITIONS", "OVER_HEDGING", "UNSUPPORTED_SUMMARY", "REPETITION", "STYLE_SHIFT"]
@@ -817,6 +824,8 @@ class AIRunner:
         self._round = 0  # the round of the review loop in progress (audit_rounds)
         self._inflight = 0.0  # estimates of calls under way in other threads (together), held against the cap
         self._inflight_lock = threading.Condition()  # also signals when a call under way has been recorded
+        self._held = 0.0  # the part of the cap only the steps in _held_for may spend (hold_back)
+        self._held_for: frozenset[str] = frozenset()
         self._audits: dict[str, list[Any]] = {}  # this loop's earlier answers of each approval review
         # The shared limit on Gemini calls (app.jobs.capacity): each call holds a slot while it runs. None: no limit
         # (estimates, Data Lab operations and tests run without one).
@@ -825,11 +834,27 @@ class AIRunner:
     def model_for(self, task: str) -> str:
         return model_for_engine(self._engine, task)
 
-    def _settled(self, estimate: float) -> None:
+    def hold_back(self, usd: float, tasks: frozenset[str]) -> None:
+        """Keeps part of the job's cap for the named steps (the final review and its corrections): no other step may
+        spend it, so research and drafting never leave a finished draft unable to afford its approval."""
+        self._held, self._held_for = max(0.0, usd), tasks
+
+    def _cap(self, task: str) -> float:
+        return self._budget if task in self._held_for else max(0.0, self._budget - self._held)
+
+    def _must_wait(self, estimate: float, cap: float) -> bool:
+        """The call does not fit beside the calls under way but would fit on what is really spent."""
+        return self._inflight > 0 and self._spent() + estimate <= cap < self._spent() + self._inflight + estimate
+
+    def _settled(self, estimate: float, cap: float | None = None) -> bool:
         """Called holding the lock, before a call reserves its estimate: while it does not fit beside the calls under
-        way but would fit on what is really spent, wait for them to be recorded."""
-        while self._inflight > 0 and self._spent() + estimate <= self._budget < self._spent() + self._inflight + estimate:
+        way but would fit on what is really spent, wait for them to be recorded. Returns whether it waited."""
+        cap = self._budget if cap is None else cap
+        waited = False
+        while self._must_wait(estimate, cap):
+            waited = True
             self._inflight_lock.wait(timeout=5)
+        return waited
 
     def together[A, B](self, first: Callable[[], A], second: Callable[[], B]) -> tuple[A, B]:
         """Two independent steps at the same time (a section's integrity check and its evaluation). Both
@@ -950,28 +975,38 @@ class AIRunner:
             reserve = max_searches * (costs.SEARCH_RESERVE_FACTOR if provider_name == "vertex" else 1)
             fee = costs.search_fee_usd(provider_name, reserve, self.settings.model_unit_prices, model) if max_searches else 0.0
             estimate = costs.estimate_usd(provider_name, model, prompt_chars, limit, prices, table, long_prices, thinking_tokens) + fee
-            # The shared limit: wait for a slot first (or pause the stage), so nothing is reserved while waiting.
-            release, queued_ms = self._gate(model, bool(max_searches)) if self._gate else ((lambda: None), 0)
-            try:
-                if queued_ms:
-                    # The wait for a slot may have been long: the job may have been cancelled or handed on meanwhile
-                    # (Codex audit through ea0599e, finding 9). Nothing is sent, and the slot is freed, if so.
-                    self._heartbeat()
-                with self._inflight_lock:  # a call running alongside (together) counts at its estimate until recorded
-                    # Calls under way hold their whole estimate until they are recorded. When this call does not fit
-                    # beside them but would fit on what is really spent, the budget is not exhausted: wait for them to
-                    # settle at their real cost and look again (Codex audit, finding 1: research stopped although the
-                    # money was there).
-                    self._settled(estimate)
-                    spent = self._spent() + self._inflight
-                    costs.ensure_within_budget(spent, estimate, self._budget)
-                    max_tokens = costs.affordable_output_tokens(provider_name, model, prompt_chars, limit, self._budget - spent - fee, prices, table, long_prices)
-                    if max_tokens < min(costs.MIN_OUTPUT_TOKENS, limit):
-                        costs.ensure_within_budget(spent, float("inf"), self._budget)
-                    self._inflight += estimate
-            except BaseException:
-                release()
-                raise
+            cap = self._cap(task)
+            queued_ms, waited = 0, False
+            while True:
+                # Calls under way hold their whole estimate until they are recorded. When this call does not fit beside
+                # them but would fit on what is really spent, the budget is not exhausted: it waits for them to settle
+                # at their real cost (Codex audit, finding 1). It waits BEFORE taking a slot of the shared limit: a slot
+                # was held, and its time used up, while nothing was running (Codex review 2026-10-09).
+                with self._inflight_lock:
+                    waited = self._settled(estimate, cap) or waited
+                # The shared limit: wait for a slot (or pause the stage). Nothing is reserved while waiting.
+                release, queued = self._gate(model, bool(max_searches)) if self._gate else ((lambda: None), 0)
+                queued_ms += queued
+                try:
+                    if queued or waited:
+                        # Either wait may have been long: the job may have been cancelled or handed on meanwhile
+                        # (Codex audit through ea0599e, finding 9). Nothing is sent, and the slot is freed, if so.
+                        self._heartbeat()
+                    with self._inflight_lock:  # a call running alongside (together) counts at its estimate until recorded
+                        again = self._must_wait(estimate, cap)  # a call alongside reserved while this one took its slot
+                        if not again:
+                            spent = self._spent() + self._inflight
+                            costs.ensure_within_budget(spent, estimate, cap)
+                            max_tokens = costs.affordable_output_tokens(provider_name, model, prompt_chars, limit, cap - spent - fee, prices, table, long_prices)
+                            if max_tokens < min(costs.MIN_OUTPUT_TOKENS, limit):
+                                costs.ensure_within_budget(spent, float("inf"), cap)
+                            self._inflight += estimate
+                except BaseException:
+                    release()
+                    raise
+                if not again:
+                    break
+                release()  # wait for the calls under way again, without the slot
             options = {"thinking": thinking} if provider_name == "vertex" and thinking else {}
             started = time.monotonic()
             try:
@@ -1043,7 +1078,7 @@ class AIRunner:
             with self._inflight_lock:
                 self._inflight -= estimate
                 self._inflight_lock.notify_all()
-        if self._spent() > self._budget:
+        if self._spent() > cap:
             # A search that ran more queries than reserved can pass the cap: what it bought is used, nothing
             # more is bought (the next call refuses), and the student is never charged above the quote.
             self.budget_reached = True

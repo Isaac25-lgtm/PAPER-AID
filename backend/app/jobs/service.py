@@ -991,6 +991,7 @@ SUPPORT_FIELDS = frozenset(
         "refine_cost_usd", "budget_usd", "model_calls", "events", "admin_actions", "failure_detail", "files_deleted", "deleting", "retiring",
         "input_sha256", "delivery", "notice",
         "activity", "timings", "ready_at", "capacity_waits",  # speed plan 2026-10-08: timing and status only, no paper text
+        "topics",  # algorithm revision 2026-10-09: how each research topic was routed, labels and counts only
     }
 )
 

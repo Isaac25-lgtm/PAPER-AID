@@ -15,7 +15,7 @@ from app.analysis import research
 from app.core.errors import PermanentStageError, RetryableStageError
 from app.proposals.ai import (
     EXTRACT_SCHEMA,
-    NEEDS_SCHEMA,
+    NEEDS_V2,
     SEARCH_SCHEMA,
     SECTIONS_SCHEMA,
     WORK_SECTIONS_SCHEMA,
@@ -27,6 +27,7 @@ from app.proposals.ai import (
     _Needs,
     _Searched,
     _Sections,
+    needs_schema,
     searched_once_more,
 )
 from app.rules.extract import READ_SCHEMA
@@ -266,8 +267,11 @@ class WorkRunner(AIRunner):
 
     # --- evidence (the proposal prompts, on the works roles) --------------------------------
     def research_needs(self, payload: dict[str, Any]) -> list[Need]:
-        answer = self._call("w_needs", payload, NEEDS_SCHEMA, _Needs)
-        return answer.needs[: payload.get("limit", 8)] if answer else []
+        prompt = self._prompt_for("w_needs")
+        answer = self._call("w_needs", payload, needs_schema(prompt), _Needs)
+        if not answer:
+            return []
+        return answer.needs if prompt in NEEDS_V2 else answer.needs[: payload.get("limit", 8)]
 
     def extract(self, need: str, works: list[dict[str, str]]) -> list[Extracted]:
         answer = self._call("w_extract", {"need": need, "works": works}, EXTRACT_SCHEMA, _Extracted)

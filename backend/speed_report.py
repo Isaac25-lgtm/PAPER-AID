@@ -2,8 +2,10 @@ r"""Read-only speed report (speed plan 2026-10-08): where jobs spend their time,
 
 Per task and model: how many calls, their time (median, 90th percentile, slowest), how long they waited for a slot
 under the shared limit, and how many timed out or were refused for too many requests. Per stage: how long it ran and
-waited in the queue. Per kind of job: completion at the first try and in the end (provider outages included), and
-the time to a result. Prints numbers only, never paper text, names or credentials. Changes nothing.
+waited in the queue. Per kind of job and workflow: completion at the first try and in the end (provider outages
+included), and the time to a result. Per piece of work: the time from its first step to its document, measured
+directly (never a sum of stage medians). How research topics were routed. Jobs still unfinished stay visible.
+Prints numbers only, never paper text, names or credentials. Changes nothing.
 
     .venv\Scripts\python.exe speed_report.py --since 2026-10-08              (the cloud, signed in with gcloud)
     .venv\Scripts\python.exe speed_report.py --local .data --since 2026-10-08
@@ -34,6 +36,10 @@ def report(jobs: list[dict]) -> dict:
     calls: dict[str, dict[str, list]] = {}
     stages: dict[str, dict[str, list]] = {}
     kinds: dict[str, dict[str, list]] = {}
+    works: dict[str, list[dict]] = {}
+    topics: dict[str, dict] = {}
+    unfinished: dict[str, list[float]] = {}
+    latest = max((str(j.get("createdAt") or "") for j in jobs), default="")
     for job in jobs:
         for call in job.get("modelCalls") or []:
             group = calls.setdefault(f"{call.get('task') or '-'} · {call.get('model') or '-'}", {"time": [], "waited": [], "timeouts": [], "busy": []})
@@ -49,7 +55,23 @@ def report(jobs: list[dict]) -> dict:
             group["outcomes"].append(timing.get("outcome") or "")
         selection = job.get("selection") or {}
         kind = next((v for v in (selection.get("proposal"), selection.get("work"), selection.get("datalab"), selection.get("writing")) if v and v != "NONE"), "-")
+        workflow = int((((job.get("quote") or {}).get("engine") or {}).get("workflow")) or 1)
+        kind = kind if workflow < 2 else f"{kind} · workflow {workflow}"
+        if job.get("workId"):
+            works.setdefault(job["workId"], []).append(job)
+        for topic in job.get("topics") or []:
+            group = topics.setdefault(f"{topic.get('category') or '-'}{' · essential' if topic.get('essential') else ''}",
+                                      {"n": 0, "covered": 0, "reused": 0, "index": {}, "web": {}, "reason": {}, "verified": 0})
+            group["n"] += 1
+            group["covered"] += bool(topic.get("covered"))
+            group["reused"] += bool(topic.get("reused"))
+            group["verified"] += int(topic.get("verified") or 0) > 0
+            for name in ("index", "web", "reason"):
+                value = topic.get(name) or "-"
+                group[name][value] = group[name].get(value, 0) + 1
         if job.get("status") not in ("COMPLETED", "FAILED", "CANCELLED"):
+            if job.get("status") in ("QUEUED", "PROCESSING") and job.get("queuedAt") and latest:  # still waiting or running: never dropped
+                unfinished.setdefault(kind, []).append(max(0.0, _seconds(job["queuedAt"], latest)) / 60)
             continue
         group = kinds.setdefault(kind, {"first": [], "eventual": [], "minutes": []})
         # first try: no stage was retried or paused, and no call was lost and asked again (Codex audit, finding 12)
@@ -59,7 +81,24 @@ def report(jobs: list[dict]) -> dict:
         group["first"].append(job.get("status") == "COMPLETED" and not retried)
         if job.get("status") == "COMPLETED" and job.get("queuedAt") and job.get("completedAt"):
             group["minutes"].append(_seconds(job["queuedAt"], job["completedAt"]) / 60)
+    documents: dict[str, dict[str, list]] = {}
+    for steps in works.values():  # a piece of work: from its first step queued to its first document, as the student waited
+        steps = sorted((j for j in steps if j.get("queuedAt")), key=lambda j: str(j["queuedAt"]))
+        drafts = [j for j in steps if (j.get("selection") or {}).get("work") == "DRAFT"]
+        if not steps or not drafts:
+            continue
+        done = next((j for j in drafts if j.get("status") == "COMPLETED" and j.get("completedAt")), None)
+        workflow = int((((drafts[0].get("quote") or {}).get("engine") or {}).get("workflow")) or 1)
+        group = documents.setdefault(f"workflow {workflow}", {"minutes": [], "delivered": [], "steps": []})
+        group["delivered"].append(done is not None)
+        group["steps"].append(len(steps))
+        if done:
+            group["minutes"].append(_seconds(steps[0]["queuedAt"], done["completedAt"]) / 60)
     return {
+        "documents": {name: {"works": len(g["delivered"]), "delivered": sum(g["delivered"]), "minutesFromFirstStepToDocument": _spread(g["minutes"]),
+                             "stepsPerWork": _spread([float(n) for n in g["steps"]])} for name, g in sorted(documents.items())},
+        "topics": dict(sorted(topics.items())),
+        "unfinished": {name: {"jobs": len(ages), "oldestMinutes": round(max(ages), 1)} for name, ages in sorted(unfinished.items())},
         "calls": {name: {"seconds": _spread(g["time"]), "waitedForSlot": _spread([w for w in g["waited"] if w > 0]),
                          "timeouts": sum(g["timeouts"]), "tooManyRequests": sum(g["busy"])} for name, g in sorted(calls.items())},
         "stages": {name: {"ranSeconds": _spread(g["ran"]), "queuedSeconds": _spread(g["queued"]),

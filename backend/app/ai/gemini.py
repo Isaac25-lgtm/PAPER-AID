@@ -41,8 +41,10 @@ THINKING_ROOM: dict[str, int] = {"MINIMAL": 2_000, "LOW": 6_000, "MEDIUM": 16_00
 
 # The stages of the Gemini workflow. second_check is the independent second opinion the AI check
 # has always had (two assessors per passage): a different model, so it is not the same view twice.
-STAGES = ("intake", "planner", "research", "execution", "first_audit", "second_check", "premium_audit", "fix", "final_signoff")
-Stage = Literal["intake", "planner", "research", "execution", "first_audit", "second_check", "premium_audit", "fix", "final_signoff"]
+STAGES = ("intake", "planner", "research", "execution", "first_audit", "second_check", "premium_audit", "fix", "final_signoff",
+          "topics", "final_editor")
+Stage = Literal["intake", "planner", "research", "execution", "first_audit", "second_check", "premium_audit", "fix", "final_signoff",
+                "topics", "final_editor"]
 
 TASK_STAGES: dict[str, str] = {}
 for _stage, _tasks in {
@@ -67,10 +69,16 @@ SIGNOFF_TASKS = frozenset({"review", "p_review", "p_plan_review", "p_profile_rev
 SEARCH_TASKS = frozenset({"research", "p_search", "w_search"})
 
 
-def stage_for(task: str, tier: str = "STANDARD") -> str:
+# Workflow 2 (algorithm revision 2026-10-09): choosing research topics is a stage of its own.
+WORKFLOW_STAGES: dict[int, dict[str, str]] = {2: {"w_needs": "topics", "p_needs": "topics"}}
+
+
+def stage_for(task: str, tier: str = "STANDARD", workflow: int = 1) -> str:
     """A premium works tier has its section evaluation done by the premium auditor."""
     if task not in TASK_STAGES:
         raise PermanentStageError("AI_TASK_UNCONFIGURED", "This AI task is not configured.", f"unknown task {task}")
+    if workflow >= 2 and task in WORKFLOW_STAGES[2]:
+        return WORKFLOW_STAGES[2][task]
     return "premium_audit" if task == "w_evaluate" and tier == "PREMIUM" else TASK_STAGES[task]
 
 

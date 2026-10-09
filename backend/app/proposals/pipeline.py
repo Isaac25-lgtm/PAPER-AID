@@ -22,7 +22,7 @@ from app.ai.orchestration import REVIEW_REPAIRS
 from app.analysis import fetch, research
 from app.core.errors import CapacityWait, PermanentStageError, RetryableStageError
 from app.jobs import state
-from app.jobs.models import Job, JobStatus, ReadinessItem, Stage, Wallet, utcnow
+from app.jobs.models import Job, JobStatus, ReadinessItem, Stage, TopicRoute, Wallet, utcnow
 from app.pricing.billing import settle_completed
 from app.pricing.quote import round_up
 from app.proposals import decisions, evidence, profile, rulebook, sampling
@@ -123,19 +123,15 @@ def stage_researching(ctx: "StageContext") -> None:
 
     today = utcnow().date().isoformat()
 
+    needs, covered = topics_to_search([n for n in runner.research_needs(payload) if safe(n.query)], library, limit, runner)
+    routes = {_topic(n): TopicRoute(category=n.category or n.kind, essential=n.essential) for n in needs}
+
     def answer(need) -> list[EvidenceItem]:
-        def search() -> list[EvidenceItem]:
-            items: list[EvidenceItem] = []
-            if need.kind == "LITERATURE":
-                items = _from_literature(runner, need.need, need.query, inp.chapter, today, settings.proposal_works_per_need)
-            if not items and not runner.budget_reached:
-                items = _from_web(runner, need.need, need.query, inp.chapter, today, settings.research_max_searches, safe)
-            return items
+        route = routes[_topic(need)]
+        return checkpointed(ctx, runner, need, lambda: gather(runner, need, settings, inp.chapter, today, safe, route), route)
 
-        return checkpointed(ctx, runner, need, search)
-
-    needs = [n for n in runner.research_needs(payload) if safe(n.query)][:limit]
-    found = evidence.dedupe(research_topics(ctx, needs, answer, settings.research_parallel))
+    gathered = research_topics(ctx, needs, answer, settings.research_parallel)
+    found = evidence.dedupe(gathered)
     unsearched = research_gaps(ctx, needs)
     checked = [i for i in found if i.verified]
     verdicts = runner.verify_claims(
@@ -145,10 +141,112 @@ def stage_researching(ctx: "StageContext") -> None:
         verdict = verdicts.get(item.id)
         item.support = verdict.support if verdict else "NOT_FOUND"  # an unchecked finding is never usable
     ctx.put_json("evidence.json", [i.model_dump(by_alias=True) for i in found])
+    record_topics(ctx, needs, covered, routes)
+    essential_answered(runner, needs, gathered, found)
     if runner.budget_reached:
         ctx.update(lambda j: _warn(j, ["The research reached this step's spending limit, so fewer sources were gathered than planned."], partial=True))
     if unsearched:
         ctx.update(lambda j: _warn(j, [unsearched], partial=False))
+
+
+# --- how a topic is answered (algorithm revision 2026-10-09) ------------------------------------------
+INDEX_FAILED = frozenset({"RATE_LIMITED", "ALLOWANCE_USED", "UNAVAILABLE", "ACCESS_DENIED", "INVALID"})  # could not be asked: not "nothing found"
+SCHOLARLY = frozenset({"STUDY", "METHOD"})
+
+
+def topics_to_search(asked: list, library: dict[str, EvidenceItem], limit: int, runner) -> tuple[list, list]:
+    """(the needs to search, the needs saved evidence already answers). Workflow 1: the first `limit`, none covered.
+    Workflow 2: a need is covered only when every piece of evidence it names is in the library and usable; at most
+    `limit` of the others are searched, so nothing is looked for twice."""
+    if runner._engine.workflow < 2:
+        return asked[:limit], []
+    usable = {i.id for i in library.values() if i.usable}
+    covered = [n for n in asked if n.covered_by and all(e in usable for e in n.covered_by)]
+    return [n for n in asked if n not in covered][:limit], covered
+
+
+def gather(runner: ProposalRunner, need, settings, chapter: int, today: str, safe, route: TopicRoute,
+           readings: Callable[[], list[EvidenceItem]] | None = None, open_sources: bool = True) -> list[EvidenceItem]:
+    """One topic's findings, and in `route` how it was answered. The student's own readings come first (works).
+
+    Workflow 1, as priced: the scholarly index for a LITERATURE need, the web when that gave nothing or for a FACT.
+    Workflow 2: the kind of source decides. Research findings, theories and methods are looked for in the index, from
+    a ranked pool, with one broader query when the first finds nothing; official figures and policies on the web. The
+    other route is tried only when the first could not be asked at all, or found nothing for a need the work depends
+    on: a web search is the exception, not the fallback for every empty result."""
+    items = readings() if readings else []
+    if not open_sources or runner.budget_reached:
+        return items
+
+    def index(query: str, pool: int, keep: int | None) -> list[EvidenceItem]:
+        return _from_index(runner, need.need, query, chapter, today, pool, keep, route)
+
+    def web(reason: str) -> list[EvidenceItem]:
+        route.reason = reason
+        found = _from_web(runner, need.need, need.query, chapter, today, settings.research_max_searches, safe)
+        route.web = "FOUND" if found else "NOTHING"
+        route.findings += len(found)
+        route.verified += sum(1 for i in found if i.verified)
+        return found
+
+    if runner._engine.workflow < 2:
+        if need.kind == "LITERATURE":
+            items += index(need.query, settings.proposal_works_per_need, None)
+        if not items and not runner.budget_reached:
+            items += web("AS_PRICED")
+        return items
+
+    def answered() -> bool:
+        return any(i.verified for i in items)
+
+    def from_index() -> list[EvidenceItem]:
+        found = index(need.query, settings.index_candidates, settings.index_abstracts)
+        broader = need.broader.strip()
+        if (not any(i.verified for i in found) and route.index not in INDEX_FAILED and broader and broader.casefold() != need.query.strip().casefold()
+                and safe(broader) and not runner.budget_reached):
+            found += index(broader, settings.index_candidates, settings.index_abstracts)
+        return found
+
+    if need.category in SCHOLARLY:
+        items += from_index()
+        failed = route.index in INDEX_FAILED
+        if not answered() and (failed or need.essential) and not runner.budget_reached:
+            items += web("INDEX_FAILED" if failed else "INDEX_EMPTY")
+    else:
+        if not answered():
+            items += web("OFFICIAL_SOURCE")
+        if not answered() and need.essential and not runner.budget_reached:
+            items += from_index()  # a published study may carry the figure
+    return items
+
+
+def record_topics(ctx: "StageContext", needs: Sequence, covered: Sequence, routes: dict[str, TopicRoute]) -> None:
+    """How each topic was answered, on the job: labels and counts only (never a topic's words)."""
+    topics = [routes[_topic(n)] for n in needs] + [TopicRoute(category=n.category or n.kind, essential=n.essential, covered=True) for n in covered]
+
+    def keep(j: Job) -> Job:
+        j.topics = topics[:40]
+        return j
+
+    ctx.update(keep)
+
+
+def essential_answered(runner, needs: Sequence, gathered: list[EvidenceItem], found: list[EvidenceItem]) -> None:
+    """Workflow 2: a need the work depends on must have at least one finding that may be cited. Without one the step
+    stops here, in its first minutes and without charge, instead of writing around the gap and failing its review
+    later (missing compulsory evidence is never turned into a warning: Codex's plan, 2026-10-09)."""
+    if runner._engine.workflow < 2:
+        return
+    usable = {i.id for i in found if i.usable}
+    answered = {i.need for i in gathered if i.id in usable}
+    missing = [n.need.strip() for n in needs if n.essential and n.need not in answered]
+    if missing:
+        why = "its spending limit was reached first" if runner.budget_reached else "no source PaperAid could confirm answers it"
+        raise PermanentStageError(
+            "EVIDENCE_MISSING",
+            f"PaperAid could not find reliable evidence for something this work depends on ({why}): \u201c{missing[0][:200]}\u201d. "
+            "Nothing was charged. Add a source or more detail about it, then start again.",
+            f"essential topics unanswered: {len(missing)} of {len(needs)}")
 
 
 # A topic whose search the provider leaves unanswered fails its stage, which is retried. Each run asks twice
@@ -160,8 +258,10 @@ RESEARCH_GAPS = "research-gaps.json"
 
 
 def _topic(need) -> str:
-    """Within one job the topic (its need, query and kind) identifies it: the job's input is frozen."""
-    return hashlib.sha256(json.dumps([need.need, need.query, need.kind]).encode()).hexdigest()[:24]
+    """Within one job the topic (its need, query and kind, and in workflow 2 its category) identifies it: the job's
+    input is frozen."""
+    category = getattr(need, "category", "")
+    return hashlib.sha256(json.dumps([need.need, need.query, need.kind, *([category] if category else [])]).encode()).hexdigest()[:24]
 
 
 def _lost_runs(ctx: "StageContext", need) -> int:
@@ -169,15 +269,26 @@ def _lost_runs(ctx: "StageContext", need) -> int:
     return int(ctx.get_json(name)["runs"]) if ctx.has(name) else 0
 
 
-def checkpointed(ctx: "StageContext", runner, need, search: Callable[[], list[EvidenceItem]]) -> list[EvidenceItem]:
+def checkpointed(ctx: "StageContext", runner, need, search: Callable[[], list[EvidenceItem]], route: TopicRoute | None = None) -> list[EvidenceItem]:
     """A research topic answered in full is saved (speed plan 2026-10-08, Codex: checkpoints before anything else): a
-    retry of this stage reads it back instead of fetching its sources again. A topic cut short by the spending cap is
-    not saved. A topic lost in LOST_TOPIC_RUNS runs is not asked again: it has no sources and is reported (research_gaps)."""
+    retry of this stage reads it back instead of fetching its sources again, with how it was answered (`route`). A
+    topic cut short by the spending cap is not saved. A topic lost in LOST_TOPIC_RUNS runs is not asked again: it has
+    no sources and is reported (research_gaps)."""
     name = f"research/{_topic(need)}.json"
     if ctx.has(name):  # already answered: read back even when nothing more may be spent (Codex audit, finding 1)
-        return [EvidenceItem.model_validate(i) for i in ctx.get_json(name)]
+        saved = ctx.get_json(name)
+        if isinstance(saved, dict):  # saved with its route (algorithm revision 2026-10-09); a list is an earlier save
+            if route is not None:
+                for field, value in TopicRoute.model_validate(saved.get("route") or {}).model_dump().items():
+                    setattr(route, field, value)
+            saved = saved.get("items") or []
+        if route is not None:
+            route.reused = True
+        return [EvidenceItem.model_validate(i) for i in saved]
     runs = _lost_runs(ctx, need)
     if runner.budget_reached or runs >= LOST_TOPIC_RUNS:
+        if route is not None and runs >= LOST_TOPIC_RUNS:
+            route.web = "LOST"
         return []
     try:
         items = search()
@@ -187,9 +298,12 @@ def checkpointed(ctx: "StageContext", runner, need, search: Callable[[], list[Ev
         ctx.put_json(f"research/lost-{_topic(need)}.json", {"runs": runs + 1})
         if runs + 1 < LOST_TOPIC_RUNS:
             raise
+        if route is not None:
+            route.web = "LOST"
         return []
     if not runner.budget_reached:
-        ctx.put_json(name, [i.model_dump(by_alias=True) for i in items])
+        saved_items = [i.model_dump(by_alias=True) for i in items]
+        ctx.put_json(name, saved_items if route is None else {"items": saved_items, "route": route.model_dump(by_alias=True)})
     return items
 
 
@@ -250,8 +364,16 @@ def _severity(error: BaseException) -> int:
     return 2
 
 
-def _from_literature(runner: ProposalRunner, need: str, query: str, chapter: int, today: str, limit: int) -> list[EvidenceItem]:
-    works = fetch.openalex_search(query, utcnow().year - LITERATURE_YEARS, limit)
+def _from_index(runner: ProposalRunner, need: str, query: str, chapter: int, today: str, pool: int, keep: int | None, route: TopicRoute) -> list[EvidenceItem]:
+    """Findings for a need from the scholarly index, each quoted from a work's abstract. `keep` (workflow 2): `pool`
+    candidates are read, ranked in code and the best `keep` passed to the reader; None: the works as the index
+    returned them (as priced before). `route` records what the search came to."""
+    outcome, works = fetch.openalex_find(query, utcnow().year - LITERATURE_YEARS, pool)
+    route.index = outcome
+    route.candidates += len(works)
+    if keep is not None:
+        works = research.rank_works(works, need, query, keep)
+    route.kept += len(works)
     if not works:
         return []
     listed = [{"id": f"w{n}", "title": w["title"], "year": w["year"], "abstract": w["abstract"][:3000]} for n, w in enumerate(works, start=1)]
@@ -274,6 +396,10 @@ def _from_literature(runner: ProposalRunner, need: str, query: str, chapter: int
                 retrieved_on=today,
             )
         )
+    route.findings += len(items)
+    route.verified += sum(1 for i in items if i.verified)
+    if not items:
+        route.index = "NOTHING_RELEVANT"  # works came back, none answered the need
     return items
 
 

@@ -90,12 +90,18 @@ def _get(url: str) -> tuple[bytes, str] | None:
 def _fetch(url: str) -> tuple[int, bytes, str] | None:
     """(status, body, content type) of a public URL's final response, or None when it could not be
     reached safely (then nothing is known about it)."""
+    got = _request(url)
+    return got[:3] if got else None
+
+
+def _request(url: str, redirects: int = MAX_REDIRECTS) -> tuple[int, bytes, str, dict[str, str]] | None:
+    """`_fetch` with the final response's headers (lower-case names) and a chosen number of redirects."""
     current = url
     deadline = time.monotonic() + TOTAL_SEC
     try:
         # trust_env=False: an environment proxy would resolve the host itself, bypassing the pinning.
         with httpx.Client(timeout=TIMEOUT_SEC, headers=HEADERS, follow_redirects=False, trust_env=False) as client:
-            for _ in range(MAX_REDIRECTS + 1):  # every hop is resolved, validated and pinned again
+            for _ in range(redirects + 1):  # every hop is resolved, validated and pinned again
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     return None
@@ -110,8 +116,9 @@ def _fetch(url: str) -> tuple[int, bytes, str] | None:
                     if response.is_redirect and "location" in response.headers:
                         current = urljoin(current, response.headers["location"])
                         continue
+                    headers = {k.lower(): v for k, v in response.headers.items()}
                     if response.status_code != 200:
-                        return response.status_code, b"", ""
+                        return response.status_code, b"", "", headers
                     body = b""
                     for chunk in response.iter_bytes():
                         if time.monotonic() >= deadline:
@@ -119,7 +126,7 @@ def _fetch(url: str) -> tuple[int, bytes, str] | None:
                         body += chunk
                         if len(body) > MAX_BYTES:
                             break
-                    return 200, body[:MAX_BYTES], response.headers.get("content-type", "").lower()
+                    return 200, body[:MAX_BYTES], headers.get("content-type", "").lower(), headers
     except httpx.HTTPError as exc:
         logger.info("source page could not be read", extra={"fields": {"error": type(exc).__name__}})
         return None
@@ -137,13 +144,8 @@ def abstract_text(url: str) -> str | None:
     match = DOI.search(url)
     if not match:
         return None
-    got = _get(f"https://api.openalex.org/works/doi:{quote(match.group(1).rstrip('.'), safe='/')}")
-    if not got:
-        return None
-    try:
-        return _abstract(json.loads(got[0]).get("abstract_inverted_index") or {})
-    except (ValueError, AttributeError):
-        return None
+    data = _openalex_json(f"/works/doi:{quote(match.group(1).rstrip('.'), safe='/')}")
+    return _abstract(data.get("abstract_inverted_index") or {}) if data else None
 
 
 def _abstract(index: dict[str, list[int]]) -> str | None:
@@ -170,7 +172,7 @@ def resolve_doi(url: str) -> str:
     key = f"pmcid:{pmcid.group(1).upper()}" if pmcid else f"pmid:{pmid.group(1)}" if pmid else ""
     if not key:
         return ""
-    data = _json(f"https://api.openalex.org/works/{key}")
+    data = _openalex_json(f"/works/{key}")
     return ((data or {}).get("doi") or "").removeprefix("https://doi.org/").lower()
 
 
@@ -190,14 +192,73 @@ def _surname_initials(family: str, given: str) -> str:
     return f"{family.strip()}, {initials}".strip().rstrip(",")
 
 
-def openalex_search(query: str, from_year: int, limit: int) -> list[dict[str, str]]:
-    """Scholarly works matching a query (OpenAlex, free and open), newest research first, each
-    with its abstract and bibliographic details. Only works that have an abstract are returned:
-    PaperAid confirms every quoted passage against it. The query is the only thing sent."""
+OPENALEX = "https://api.openalex.org"
+_openalex_key = ""  # set once at start-up (app.runtime); sent only to api.openalex.org, never logged
+# What a search of the index came to (algorithm revision 2026-10-09): "no results" is not "could not be asked".
+IndexOutcome = Literal["FOUND", "NO_RESULTS", "RATE_LIMITED", "ALLOWANCE_USED", "UNAVAILABLE", "ACCESS_DENIED", "INVALID"]
+
+
+def set_openalex_key(key: str) -> None:
+    global _openalex_key
+    _openalex_key = key.strip()
+
+
+def _openalex(path: str) -> tuple[int, bytes, str, dict[str, str]] | None:
+    """One request to OpenAlex, with PaperAid's key when it has one. No redirect is followed, so the key can only
+    ever reach api.openalex.org."""
+    url = OPENALEX + path
+    if _openalex_key:
+        url += ("&" if "?" in path else "?") + "api_key=" + quote(_openalex_key, safe="")
+    return _request(url, redirects=0)
+
+
+def _openalex_json(path: str) -> dict | None:
+    got = _openalex(path)
+    if not got or got[0] != 200:
+        return None
+    try:
+        data = json.loads(got[1])
+    except ValueError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def openalex_find(query: str, from_year: int, limit: int) -> tuple[IndexOutcome, list[dict[str, str]]]:
+    """Scholarly works matching a query (OpenAlex), most relevant first, each with its abstract and bibliographic
+    details, and what the search came to. Only works that have an abstract are returned: PaperAid confirms every
+    quoted passage against it. The query is the only thing sent."""
     params = f"search={quote(query)}&filter=from_publication_date:{from_year}-01-01,has_abstract:true&per-page={limit}&sort=relevance_score:desc"
-    data = _json(f"https://api.openalex.org/works?{params}")
+    got = _openalex(f"/works?{params}")
+    if got is None:
+        return "UNAVAILABLE", []
+    status, body, _, headers = got
+    if status == 429:
+        # The day's allowance used up reads 0 remaining; otherwise it is the per-second limit.
+        spent = headers.get("x-ratelimit-remaining-usd", "") in ("0", "0.0", "0.00", "0.000") or headers.get("x-ratelimit-remaining", "") == "0"
+        return ("ALLOWANCE_USED" if spent else "RATE_LIMITED"), []
+    if status in (401, 403):
+        return "ACCESS_DENIED", []
+    if status != 200:
+        return "UNAVAILABLE", []
+    try:
+        data = json.loads(body)
+    except ValueError:
+        return "INVALID", []
+    if not isinstance(data, dict) or not isinstance(data.get("results"), list):
+        return "INVALID", []
+    works = _openalex_works(data["results"][:limit])
+    return ("FOUND" if works else "NO_RESULTS"), works
+
+
+def openalex_search(query: str, from_year: int, limit: int) -> list[dict[str, str]]:
+    return openalex_find(query, from_year, limit)[1]
+
+
+def _openalex_works(results: list) -> list[dict[str, str]]:
     works = []
-    for item in (data or {}).get("results", [])[:limit]:
+    for item in results:
+        if not isinstance(item, dict):
+            continue
         abstract = _abstract(item.get("abstract_inverted_index") or {})
         title = item.get("display_name") or ""
         if not abstract or not title:
@@ -225,6 +286,7 @@ def openalex_search(query: str, from_year: int, limit: int) -> list[dict[str, st
                 "pages": pages,
                 "type": item.get("type") or "",
                 "abstract": abstract,
+                "retracted": "yes" if item.get("is_retracted") else "",
             }
         )
     return works
@@ -292,5 +354,5 @@ def crossref_search(bibliographic: str, rows: int = 3) -> list[dict[str, str]] |
 
 def openalex_retracted(doi: str) -> bool | None:
     """OpenAlex's retraction flag for a DOI; None when the work is unknown to it."""
-    data = _json(f"https://api.openalex.org/works/doi:{quote(doi, safe='/')}")
+    data = _openalex_json(f"/works/doi:{quote(doi, safe='/')}")
     return None if data is None else bool(data.get("is_retracted"))

@@ -6,7 +6,7 @@ batches halved. Schemas are strict: every field required, nothing extra."""
 from collections.abc import Callable
 from typing import Any, Literal
 
-from pydantic import BaseModel, StrictBool
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from app.ai.orchestration import SEARCH_DECLINED, AIRunner
 from app.ai.providers import UNAVAILABLE, ModelResult
@@ -33,6 +33,16 @@ SAMPLE_METHODS = ("YAMANE", "COCHRAN", "KREJCIE_MORGAN", "CENSUS", "SATURATION",
 READY = _enum("PASS", "NEEDS_REVIEW", "MISSING", "NOT_APPLICABLE")
 
 NEEDS_SCHEMA = _obj({"needs": _list(_obj({"id": _S, "need": _S, "kind": _enum("LITERATURE", "FACT"), "query": _S}))})
+# Workflow 2 (algorithm revision 2026-10-09): what kind of source answers each need, whether the work depends on it,
+# a broader query for a second try, and the saved evidence that already answers it.
+NEEDS_SCHEMA_V2 = _obj({"needs": _list(_obj({"id": _S, "need": _S, "category": _enum("STUDY", "METHOD", "STATISTIC", "POLICY"), "essential": {"type": "boolean"},
+                                             "query": _S, "broader": _S, "coveredBy": _STRS}))})
+NEEDS_V2 = frozenset({"w-needs-v2", "p-needs-v2"})
+
+
+def needs_schema(prompt: str) -> dict[str, Any]:
+    """The answer a needs prompt was written for (a job keeps the prompt it was priced with)."""
+    return NEEDS_SCHEMA_V2 if prompt in NEEDS_V2 else NEEDS_SCHEMA
 EXTRACT_SCHEMA = _obj({"findings": _list(_obj({"work": _S, "statement": _S, "passage": _S, "scope": _S}))})
 SEARCH_SCHEMA = _obj(
     {
@@ -127,10 +137,17 @@ AUDIT_SCHEMA = _obj(
 
 
 class Need(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     id: str
     need: str
-    kind: Literal["LITERATURE", "FACT"]
+    kind: Literal["LITERATURE", "FACT"] = "LITERATURE"  # workflow 1
     query: str
+    # Workflow 2 (needs_schema): empty on a workflow-1 answer.
+    category: Literal["STUDY", "METHOD", "STATISTIC", "POLICY", ""] = ""
+    essential: bool = False
+    broader: str = ""
+    covered_by: list[str] = Field(default=[], alias="coveredBy")
 
 
 class _Needs(BaseModel):
@@ -284,8 +301,13 @@ class ProposalRunner(AIRunner):
     # --- evidence ---------------------------------------------------------------------------
 
     def research_needs(self, payload: dict[str, Any]) -> list[Need]:
-        answer = self._call("p_needs", payload, NEEDS_SCHEMA, _Needs)
-        return answer.needs[: payload.get("limit", 10)] if answer else []
+        """Workflow 1: at most `limit` needs. Workflow 2: every need, covered ones included (the pipeline searches at
+        most `limit` of the uncovered)."""
+        prompt = self._prompt_for("p_needs")
+        answer = self._call("p_needs", payload, needs_schema(prompt), _Needs)
+        if not answer:
+            return []
+        return answer.needs if prompt in NEEDS_V2 else answer.needs[: payload.get("limit", 10)]
 
     def extract(self, need: str, works: list[dict[str, str]]) -> list[Extracted]:
         """Findings from scholarly abstracts; only the need and the works are sent."""

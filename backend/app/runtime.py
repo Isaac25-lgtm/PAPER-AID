@@ -30,6 +30,9 @@ def get_runtime() -> Runtime:
     from app.proposals import rulebook
 
     rulebook.use_storage(files.get, files.exists)  # institution profiles built from students' guides
+    from app.analysis import fetch
+
+    fetch.set_openalex_key(settings.openalex_api_key.get_secret_value() if settings.openalex_api_key else "")
     runtime.queue = (
         CloudTasksQueue(settings)
         if settings.queue_backend == "cloud_tasks"

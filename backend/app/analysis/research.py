@@ -113,6 +113,32 @@ def quote_found(passage: str, page: str) -> bool:
     return True
 
 
+def rank_works(works: list[dict[str, str]], need: str, query: str, keep: int) -> list[dict[str, str]]:
+    """The works of an index search most likely to answer a need, best first (algorithm revision 2026-10-09). The
+    index's own order (its relevance) is the base. A work gains for carrying the need's and the query's words in its
+    title and abstract, and for naming the places and groups the need names, so local evidence is not displaced by a
+    better-known study of somewhere else. Age costs nothing: a foundational work stays. Retracted works and repeats
+    of one work are left out."""
+    wanted = {w for w in _words(need + " " + query) if len(w) > 3} - signals.STOPWORDS
+    named = {w.lower() for w in re.findall(r"(?<!^)(?<![.?!]\s)\b[A-Z][a-z'’-]{2,}", need)} - signals.STOPWORDS
+    seen: set[str] = set()
+    scored: list[tuple[float, int, dict[str, str]]] = []
+    total = max(1, len(works))
+    for position, work in enumerate(works):
+        key = work.get("doi") or re.sub(r"[^a-z0-9]", "", work.get("title", "").casefold())
+        if work.get("retracted") or not key or key in seen:
+            continue
+        seen.add(key)
+        title, abstract = _words(work.get("title", "")), _words(work.get("abstract", ""))
+        score = 1 - position / total
+        if wanted:
+            score += 1.5 * len(wanted & title) / len(wanted) + len(wanted & abstract) / len(wanted)
+        if named:
+            score += 0.75 * len(named & (title | abstract)) / len(named)
+        scored.append((-score, position, work))
+    return [work for _, _, work in sorted(scored, key=lambda s: s[:2])[:keep]]
+
+
 def verbatim(claim: str, text: str) -> bool:
     """The claim must be quoted from the passage (ignoring spacing and quote styles)."""
 

@@ -23,12 +23,23 @@ from app.ai.orchestration import FINAL_PART_WORDS, HISTORY_WORDS, REVIEW_REPAIRS
 from app.analysis import fetch, research
 from app.core.errors import PermanentStageError
 from app.jobs import state
-from app.jobs.models import Engine, Job, JobStatus, Progress, ReadinessItem, Stage, Wallet, utcnow
+from app.jobs.models import Engine, Job, JobStatus, Progress, ReadinessItem, Stage, TopicRoute, Wallet, utcnow
 from app.pricing.billing import settle_completed
 from app.proposals import evidence as ev
 from app.proposals.ai import Figure, SectionText, Table
 from app.proposals.models import EvidenceItem, EvidenceSource
-from app.proposals.pipeline import _from_literature, _from_web, checkpointed, load_library, research_gap_items, research_gaps, research_topics
+from app.proposals.pipeline import (
+    _topic,
+    checkpointed,
+    essential_answered,
+    gather,
+    load_library,
+    record_topics,
+    research_gap_items,
+    research_gaps,
+    research_topics,
+    topics_to_search,
+)
 from app.rules import compliance, library
 from app.rules.extract import KEYS, requirements_from
 from app.rules.resolve import PLAN_SHARE_OF_LIMIT
@@ -365,20 +376,20 @@ def stage_researching(ctx: "StageContext") -> None:
     def named(text: str) -> bool:  # the need's own words reach the searching model too
         return bool({w.lower() for w in re.findall(r"[A-Za-z'’-]+", text)} & private)
 
+    needs, covered = topics_to_search([n for n in runner.research_needs(payload) if safe(n.query) and not named(n.need)], existing, limit, runner)
+    routes = {_topic(n): TopicRoute(category=n.category or n.kind, essential=n.essential) for n in needs}
+
     def answer(need) -> list[EvidenceItem]:
+        route = routes[_topic(need)]
+
         def search() -> list[EvidenceItem]:
-            items = _reading_items(runner, inp, ctx, need.need, today)
-            if spec.source_policy != "CLOSED" and not runner.budget_reached:
-                if need.kind == "LITERATURE":
-                    items += _from_literature(runner, need.need, need.query, 0, today, settings.proposal_works_per_need)  # type: ignore[arg-type]
-                if not items and not runner.budget_reached:
-                    items += _from_web(runner, need.need, need.query, 0, today, settings.research_max_searches, safe)  # type: ignore[arg-type]
-            return items
+            return gather(runner, need, settings, 0, today, safe, route,  # type: ignore[arg-type]
+                          readings=lambda: _reading_items(runner, inp, ctx, need.need, today), open_sources=spec.source_policy != "CLOSED")
 
-        return checkpointed(ctx, runner, need, search)
+        return checkpointed(ctx, runner, need, search, route)
 
-    needs = [n for n in runner.research_needs(payload) if safe(n.query) and not named(n.need)][:limit]
-    found = ev.dedupe([*found, *research_topics(ctx, needs, answer, settings.research_parallel)])
+    gathered = research_topics(ctx, needs, answer, settings.research_parallel)
+    found = ev.dedupe([*found, *gathered])
     unsearched = research_gaps(ctx, needs)
     checked = [i for i in found if i.verified]
     verdicts = runner.verify(
@@ -389,6 +400,8 @@ def stage_researching(ctx: "StageContext") -> None:
         verdict = verdicts.get(item.id)
         item.support = verdict.support if verdict else "NOT_FOUND"  # an unchecked finding is never usable
     ctx.put_json("evidence.json", [i.model_dump(by_alias=True) for i in found])
+    record_topics(ctx, needs, covered, routes)
+    essential_answered(runner, needs, gathered, found)
     if runner.budget_reached:
         ctx.update(lambda j: _warn(j, ["The research reached this step's spending limit, so fewer sources were gathered than planned."]))
     if unsearched:

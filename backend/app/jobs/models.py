@@ -227,6 +227,10 @@ class Engine(Camel):
     vertex_project: str = ""
     vertex_location: str = ""
     vertex_search_enabled: bool = False
+    # The algorithm revision of 2026-10-09 (owner, with Codex's plan), frozen like everything else. 1: the algorithm
+    # as it was priced before. 2: the scholarly index searched first from a ranked pool, web search for official
+    # sources and essential gaps, only uncovered topics searched, and the premium reviewer correcting directly.
+    workflow: int = 1
 
 
 class Passage(Camel):
@@ -667,6 +671,23 @@ class StageTiming(Camel):
     queued_ms: int = 0
 
 
+class TopicRoute(Camel):
+    """How one research topic was answered (algorithm revision 2026-10-09): labels and counts only, never the
+    topic's words. Plain strings, so an older release can still read a job that carries a newer label."""
+
+    category: str = ""  # STUDY, METHOD, STATISTIC or POLICY (workflow 1: LITERATURE or FACT)
+    essential: bool = False
+    covered: bool = False  # evidence already saved answers it: nothing was searched
+    reused: bool = False  # read back from an earlier run of this stage
+    index: str = "NOT_TRIED"  # FOUND, NOTHING_RELEVANT, NO_RESULTS, RATE_LIMITED, ALLOWANCE_USED, UNAVAILABLE, ACCESS_DENIED, INVALID
+    candidates: int = 0  # works the index returned
+    kept: int = 0  # abstracts read for findings
+    web: str = "NOT_USED"  # FOUND, NOTHING, LOST
+    reason: str = ""  # why the web was searched: OFFICIAL_SOURCE, INDEX_EMPTY, INDEX_FAILED, AS_PRICED
+    findings: int = 0
+    verified: int = 0  # findings whose quoted passage PaperAid found itself
+
+
 class Progress(Camel):
     """Where a long check is (Codex 2026-10-07: show whether it is checking or repairing, and the round)."""
 
@@ -757,6 +778,7 @@ class Job(JobView):
     timings: list[StageTiming] = []  # each run of each stage (the last 80), for the admin timeline and speed reports
     ready_at: datetime | None = None  # when the job's next stage was put on the queue (its queue wait starts here)
     capacity_waits: int = 0  # pauses for Gemini capacity so far (never counted as provider-failure retries)
+    topics: list[TopicRoute] = []  # how each research topic of this step was answered (labels and counts only)
 
     def view(self) -> JobView:
         return JobView.model_validate(self.model_dump())

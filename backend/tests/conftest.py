@@ -107,6 +107,12 @@ def _client(tmp_path, monkeypatch, pricing: str):
         return [dict(w) for w in models.works][:limit]
 
     monkeypatch.setattr(fetch, "openalex_search", openalex_search)
+
+    def openalex_find(query, from_year, limit):
+        works = fetch.openalex_search(query, from_year, limit)  # looked up when called: a test may replace it
+        return ("FOUND" if works else "NO_RESULTS"), works
+
+    monkeypatch.setattr(fetch, "openalex_find", openalex_find)
     monkeypatch.setattr(fetch, "crossref_work", lambda doi: models.crossref.get(doi))
     monkeypatch.setattr(fetch, "crossref_lookup", lambda doi: ("FOUND", models.crossref[doi]) if doi in models.crossref else ("NOT_FOUND", None))
     monkeypatch.setattr(fetch, "crossref_search", lambda text, rows=3: [dict(r) for r in models.crossref_found])

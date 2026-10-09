@@ -91,6 +91,23 @@ class Settings(BaseSettings):
     fix_thinking: Thinking = "MEDIUM"
     final_signoff_model: str = "gemini-3.8-flash"  # re-review after a repair: were the findings resolved?
     final_signoff_thinking: Thinking = "MEDIUM"  # it checks named findings; the premium audit keeps HIGH
+    # The algorithm revision of 2026-10-09 (owner, with Codex's plan). WORKFLOW is frozen into every quote's engine
+    # (Engine.workflow), so a job keeps the algorithm it was priced with. 1: as before. 2: see Engine.workflow.
+    workflow: int = 1
+    # Choosing research topics is a narrow task: its own stage, so its thinking level can differ from planning's
+    # (HIGH there took up to 100 s for a list of topics, 8 October).
+    topics_model: str = "gemini-3.8-flash"
+    topics_thinking: Thinking = "MEDIUM"
+    # The final editor (owner, 2026-10-09): the premium model reviews the finished document once, corrects it
+    # directly and gives the final approval. It has NO fallback: when it cannot run, the job keeps its draft and waits.
+    final_editor_model: str = "gemini-3.1-pro-preview"
+    final_editor_thinking: Thinking = "HIGH"
+    # The scholarly index (OpenAlex). A free key gives $1 of use a day instead of $0.10; it is sent only to
+    # api.openalex.org and never logged. Workflow 2 reads a pool of candidates, ranks them in code and passes the
+    # best few abstracts to the reader.
+    openalex_api_key: SecretStr | None = None
+    index_candidates: int = 50
+    index_abstracts: int = 8
     # A stage's fallback stages, used only when its model is unavailable, rate-limited or timing out, and
     # only if they cost no more in any billing dimension. The premium auditor is a preview model on shared
     # capacity: a live run was rate-limited four times in five minutes, so its review goes to the first
@@ -351,6 +368,8 @@ class Settings(BaseSettings):
 
         if any(stage not in STAGES or any(f not in STAGES for f in fallbacks) for stage, fallbacks in self.gemini_fallbacks.items()):
             raise ValueError("GEMINI_FALLBACKS must name Gemini workflow stages")
+        if self.gemini_fallbacks.get("final_editor"):
+            raise ValueError("The final editor has no fallback: it waits for the premium model")
         token_prices = {k: v for k, v in self.model_prices.items() if not k.startswith("vertex:")}
         unit_prices = {k: v for k, v in self.model_unit_prices.items() if not k.startswith("vertex:")}
         long_prices: dict[str, tuple[int, float, float, float]] = {}
