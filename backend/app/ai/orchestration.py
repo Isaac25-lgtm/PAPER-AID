@@ -869,8 +869,13 @@ class AIRunner:
         """Keeps the cost of the final editor's review, its check and its one resolution out of every other step's
         reach, up to half the job's cap (Codex's plan 2026-10-09: research must never spend the approval's money).
         `service`: "w" for works, "p" for proposal chapters."""
-        request = 2 * document_chars + 60_000  # the document as printed and as written, with rules and evidence
-        needed = self.worst_cost(f"{service}_edit", request) + self.worst_cost(f"{service}_resolve", request) + self.worst_cost(f"{service}_flag", 30_000)
+        text = 2 * document_chars  # the document as printed and as written
+        most = FINAL_PART_WORDS * 7  # about the characters of the largest request sent; a longer work is reviewed in parts
+        around = most // 2  # what every part repeats: the specification, rules, evidence and findings
+        parts = max(1, -(-text // (most - around)))
+        each = min(most, around + text // parts)
+        # every part's review and its one resolution, and the support check after each (Codex audit of fd74ff3)
+        needed = parts * (self.worst_cost(f"{service}_edit", each) + self.worst_cost(f"{service}_resolve", each)) + 2 * self.worst_cost(f"{service}_flag", 30_000)
         self.hold_back(min(needed, self._budget / 2), EDITOR_TASKS)
 
     def ask_editor[T: BaseModel](self, task: str, payload: dict[str, Any], schema: dict[str, Any], shape: type[T]) -> T | None:
@@ -965,7 +970,7 @@ class AIRunner:
                     payload = {**payload, "previousAudit": _history(prior, _history_room(payload))}
         if max_searches and refs[0].startswith("vertex:"):
             system += "\n\n" + PROMPTS[self._engine.vertex_addenda["search"]].replace("{max_searches}", str(max_searches))
-        if task == "w_final" and _words(payload) > FINAL_PART_WORDS:
+        if task in ("w_final", "w_edit", "w_resolve") and _words(payload) > FINAL_PART_WORDS:
             raise PermanentStageError("REVIEW_REQUEST_TOO_LARGE", "The final review could not safely fit the document. Nothing was charged.")
         model_ref = refs[0]
         cache_input = [task, model_ref, system, payload]

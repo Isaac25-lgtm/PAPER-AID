@@ -1389,6 +1389,12 @@ def _run_step(rt: Runtime, job_id: str) -> None:
     def timing(outcome: str, code: str = "") -> StageTiming:
         return StageTiming(stage=stage, attempt=attempt, started_at=started, ended_at=utcnow(), outcome=outcome, code=code, queued_ms=max(0, queued_ms))
 
+    if job.waiting_since and (started - job.waiting_since).total_seconds() > rt.settings.capacity_wait_limit_sec:
+        # Its waiting time ran out before this delivery (the queue was late): it stops here, before anything more is paid for.
+        review = job.activity is not None and job.activity.note == "FINAL_REVIEW"
+        _wait_for_capacity(rt, job_id, stage, ctx.owner, job.activity.note if job.activity else "", timing("WAITING", "REVIEW" if review else "CAPACITY"),
+                           kind="REVIEW" if review else "CAPACITY")
+        return
     try:
         run(ctx)
     except StageContinues:
@@ -1491,8 +1497,9 @@ def _wait_for_capacity(rt: Runtime, job_id: str, stage: Stage, owner: str, reaso
     """No Gemini capacity was free (speed plan 2026-10-08), or the final editor's model cannot answer now (kind REVIEW,
     algorithm revision 2026-10-09: nothing else approves in its place): the stage keeps what it has done (its finished
     calls replay from the cache), releases its lease and is delivered again after a wait. These pauses never use up the
-    stage's retries for provider failures. Their allowance is a time (`capacity_wait_limit_sec`, about two hours, with
-    `capacity_max_waits` as a second bound); past it the job stops, uncharged and resumable."""
+    stage's retries for provider failures. Their allowance is a time on the clock (`capacity_wait_limit_sec`, about two hours
+    from the run that first paused, with `capacity_max_waits` as a second bound); past it the job stops, uncharged and
+    resumable."""
     settings = rt.settings
     retry_again = False
     base = delay_sec or settings.capacity_retry_sec
@@ -1505,8 +1512,10 @@ def _wait_for_capacity(rt: Runtime, job_id: str, stage: Stage, owner: str, reaso
         j.lease_until, j.lease_owner = None, ""
         j.timings = [*j.timings, timing][-80:]
         j.capacity_waits += 1
-        # what this pause adds: the wait for a slot that ended in it (a capacity pause) and the delay before the next try
-        j.waited_sec += delay + (int(settings.capacity_wait_sec) if kind == "CAPACITY" else 0)
+        # By the clock, from when the run that first paused began (Codex audit of fd74ff3, finding 9: adding up the
+        # planned delays left out a slow failed request and a late delivery from the queue), with the delay to come.
+        j.waiting_since = j.waiting_since or timing.started_at
+        j.waited_sec = int((utcnow() - j.waiting_since).total_seconds()) + delay
         if j.capacity_waits > settings.capacity_max_waits or j.waited_sec > settings.capacity_wait_limit_sec:
             # retryable: the student can resume it, and its finished calls are reused (Codex audit, finding 10)
             j.failure = JobFailure(code="CAPACITY_BUSY", user_message=REVIEW_BUSY if kind == "REVIEW" else CAPACITY_BUSY, retryable=True)

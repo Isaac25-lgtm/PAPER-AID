@@ -1052,3 +1052,49 @@ and does about a third fewer research calls, but it is slower (about 10 to 14 mi
 review with corrections takes two to five minutes and the premium model is often briefly unavailable. Before it is
 switched on: Codex's audit of this work; then a decision on the editor's thinking level and on how much it rewrites
 (it replaced most paragraphs of most drafts), measured the same way.
+
+## 2026-10-09 — Codex's audit of the algorithm revision (fd74ff3): ten findings fixed; workflow 2 stays off
+
+Codex audited `deb7c3d` and `fd74ff3` (no files changed, no model calls; offline reproductions). Its verdict: keep
+workflow 2 off; workflow 1 with the shared improvements is potentially releasable after the full tests on the exact
+commit. Every finding reproduced in the code and is fixed, each with a regression test in
+`backend/tests/test_algorithm_v2.py`. The owner's instruction: publish after all the tests pass.
+
+- **1. A refused correction could still end in approval.** The editor decides on the text with every correction
+  applied. A correction to an unknown section was recorded under no section and dropped after the second look. Now a
+  correction refused on the last look stops the work (`DOCUMENT_NOT_APPROVED`): the text the decision describes does not
+  exist. One refused on the first look is told to the editor once (`checks`, the whole document). Before the document
+  is built its hash must equal the approval's (`accepted_sha256`), so nothing can change it afterwards.
+- **2. A chapter section passed with issues listed was approved.** An issue now blocks whatever the grade says: the
+  editor is asked again (told that its answer contradicts itself), and a section that still has an issue is not
+  delivered.
+- **3. A change of substance marked WORDING skipped the support check, and the second look's corrections were never
+  checked.** Every correction that changes a word, a figure or a citation is checked, whatever it is called
+  (`changes_words`: only case, spacing and punctuation are exempt, which code can see). The second look's corrections
+  are checked too; there is no further look to settle a flag, so a work stops and a chapter section is not delivered.
+- **4. The editor's request was measured before most of it was added.** The fit of each part is now measured on the
+  whole request (the text the editor may correct, the evidence, number tokens, findings). What the editor may correct
+  is split with the document (`share`: each paragraph goes with exactly one part, ids unchanged), and a part's evidence
+  shrinks with it. The runner refuses an oversized `w_edit` or `w_resolve` like an oversized `w_final`.
+- **5. An essential need could vanish, and any evidence id counted as coverage.** Essential needs are searched first
+  and all of them (up to twice the allowance); what is left over is recorded (`OVER_ALLOWANCE`) and an essential one
+  among them is reported as unanswered, never forgotten. Saved evidence covers a need only if at least one named item
+  can be about it (`research.about`: half of the search's own words, and a place or group the need names). This is a
+  check of subject by code, not of support.
+- **6. A heading two sections share** names neither: the correction is refused and the editor told.
+- **7. The other route was decided before the support check.** After the check, an essential need left with no usable
+  finding is asked once on the route not yet tried, saved like any topic, and checked too (`other_route`).
+- **8. The index was always asked for the last fifteen years.** A method or theory is looked for in any year; a
+  study's second search has no date floor.
+- **9. The two-hour allowance added up planned delays.** It is now measured by the clock from the run that first
+  paused (`Job.waiting_since`), checked at each pause and again at the next delivery before anything more is paid for.
+- **10. The speed report** now counts a work that stopped before its draft as started and not delivered, and
+  measures an unfinished job's age to the time of the report.
+- **The editor's reserve** covers every part's review and resolution and both support checks (still at most half the
+  cap).
+
+**Still unfinished (Codex's list, agreed):** workflow 2 is slower than workflow 1 and stays off; no real-model trial
+of these fixes yet (it needs a budget from the owner: $6.27 of the $15 is left); proposals, concept notes, funding
+proposals, revisions and long documents have not been trialled on workflow 2; fairness between students under heavy
+load; the final editor for Data Lab reports and Paper Check; `export.verify` does not yet prove tables, figures and
+layout; rollback with queued jobs and the new checkpoint format has tests only for reading the older form.

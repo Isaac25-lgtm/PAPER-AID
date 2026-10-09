@@ -139,6 +139,17 @@ def rank_works(works: list[dict[str, str]], need: str, query: str, keep: int) ->
     return [work for _, _, work in sorted(scored, key=lambda s: s[:2])[:keep]]
 
 
+def about(need: str, query: str, text: str) -> bool:
+    """Whether a piece of saved evidence can be about a need at all (Codex audit of fd74ff3, finding 5): its words
+    carry at least half of the search's own (two at least) and, when the need names places or groups, one of them.
+    A check of subject, never of support: a model's word that evidence covers a need is not taken alone."""
+    have = _words(text)
+    asked = {w for w in _words(query) if len(w) > 3} - signals.STOPWORDS
+    named = {w.lower() for w in re.findall(r"(?<!^)(?<![.?!]\s)\b[A-Z][a-z'’-]{2,}", need)} - signals.STOPWORDS
+    enough = len(asked & have) >= max(min(2, len(asked)), -(-len(asked) // 2))
+    return bool(asked) and enough and (not named or bool(named & have))
+
+
 def verbatim(claim: str, text: str) -> bool:
     """The claim must be quoted from the passage (ignoring spacing and quote styles)."""
 

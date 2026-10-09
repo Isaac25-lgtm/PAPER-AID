@@ -223,11 +223,12 @@ def _openalex_json(path: str) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
-def openalex_find(query: str, from_year: int, limit: int) -> tuple[IndexOutcome, list[dict[str, str]]]:
+def openalex_find(query: str, from_year: int | None, limit: int) -> tuple[IndexOutcome, list[dict[str, str]]]:
     """Scholarly works matching a query (OpenAlex), most relevant first, each with its abstract and bibliographic
     details, and what the search came to. Only works that have an abstract are returned: PaperAid confirms every
     quoted passage against it. The query is the only thing sent."""
-    params = f"search={quote(query)}&filter=from_publication_date:{from_year}-01-01,has_abstract:true&per-page={limit}&sort=relevance_score:desc"
+    since = f"from_publication_date:{from_year}-01-01," if from_year else ""  # None: any year (a theory's or a method's own source)
+    params = f"search={quote(query)}&filter={since}has_abstract:true&per-page={limit}&sort=relevance_score:desc"
     got = _openalex(f"/works?{params}")
     if got is None:
         return "UNAVAILABLE", []

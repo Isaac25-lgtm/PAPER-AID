@@ -338,7 +338,111 @@ def test_the_editor_is_given_the_text_it_may_correct_with_ids_tokens_evidence_an
     assert {"document", "coverage", "numberTokens", "findings", "length"} <= seen.keys()
 
 
-def test_a_wording_correction_is_applied_by_paragraph_and_needs_no_second_look(v2):
+def test_a_correction_of_punctuation_and_case_only_is_applied_without_a_support_check(v2):
+    def edit(payload):
+        first = payload["editable"][0]["paragraphs"][0]
+        return _verdicts(payload, corrections=[_correct(payload, first["text"].rstrip(".") + " !")])
+
+    from app.proposals.pipeline import changes_words
+
+    _, job, document = _draft(v2, edit=edit)
+    assert job["status"] == "COMPLETED", job.get("failure")
+    assert document.sections[0].paragraphs[0].endswith(" !") and document.approval.corrections == 1
+    assert "w_flag" not in v2.models.tasks and "w_resolve" not in v2.models.tasks  # code can see no word, figure or citation changed
+    assert not changes_words("Uptake fell, slightly ⟦E1a2b3c⟧.", "uptake fell slightly ⟦E1a2b3c⟧") and changes_words("Uptake fell ⟦E1a2b3c⟧.", "Uptake fell ⟦E9z8y7x⟧.")
+    assert changes_words("The source reports an association.", "The intervention causes the outcome.") and changes_words("It rose by 12%.", "It rose by 21%.")
+
+
+def test_a_change_of_substance_labelled_wording_is_still_checked_against_its_evidence(v2):
+    """Codex audit of fd74ff3, finding 3: the support check skipped whatever the editor called WORDING."""
+    checked = []
+
+    def edit(payload):
+        return _verdicts(payload, corrections=[_correct(payload, "The intervention causes the outcome in every district.", kind="WORDING")])
+
+    def flag(payload):
+        checked.extend(payload["corrections"])
+        return {"results": [{"id": c["id"], "supported": False, "problem": "The source reports an association."} for c in payload["corrections"] if "causes" in c["after"]]
+                           + [{"id": c["id"], "supported": True, "problem": ""} for c in payload["corrections"] if "causes" not in c["after"]]}
+
+    def resolve(payload):
+        flagged = payload["flagged"][0]
+        return _verdicts(payload, corrections=[_correct(payload, "The source reports an association between the two.", kind="WORDING", paragraph=flagged["paragraph"])])
+
+    _, job, document = _draft(v2, edit=edit, flag=flag, resolve=resolve)
+    assert job["status"] == "COMPLETED", job.get("failure")
+    assert [c["after"] for c in checked] == ["The intervention causes the outcome in every district.", "The source reports an association between the two."]
+    assert "causes the outcome" not in " ".join(p for sec in document.sections for p in sec.paragraphs) and document.approval.flagged == 1
+
+
+def test_an_unsupported_claim_written_on_the_last_look_stops_the_work(v2):
+    """Finding 3: the resolution's own corrections were never checked. There is no further look, so the work stops."""
+    def edit(payload):
+        return _verdicts(payload, corrections=[_correct(payload, "Distance causes low uptake everywhere.", kind="CLAIM")])
+
+    def resolve(payload):
+        return _verdicts(payload, corrections=[_correct(payload, "Distance is the only cause of low uptake.", kind="CLAIM", paragraph=payload["flagged"][0]["paragraph"])])
+
+    _, job, document = _draft(v2, edit=edit, resolve=resolve,
+                              flag=lambda payload: {"results": [{"id": c["id"], "supported": False, "problem": "Not what the source says."} for c in payload["corrections"]]})
+    assert job["status"] == "FAILED" and job["failure"]["code"] == "DOCUMENT_NOT_APPROVED" and document is None
+    assert v2.models.tasks.count("w_resolve") == 1 and v2.models.tasks.count("w_flag") == 2 and "w_repair" not in v2.models.tasks
+
+
+def test_a_correction_refused_on_the_last_look_is_never_read_as_approval(v2):
+    """Finding 1: a correction to an unknown section was recorded under no section and dropped, so the editor's
+    decision stood for text that was never made."""
+    def bad(payload):
+        return _verdicts(payload, corrections=[{"section": "no-such-section", "paragraph": "p1", "action": "REPLACE", "text": "A replacement that cannot be placed.",
+                                                "kind": "CLAIM", "reason": "Test."}])
+
+    seen = {}
+
+    def resolve(payload):
+        seen.update(payload)
+        return bad(payload)
+
+    _, job, document = _draft(v2, edit=bad, resolve=resolve)
+    assert job["status"] == "FAILED" and job["failure"]["code"] == "DOCUMENT_NOT_APPROVED" and document is None
+    assert [c["section"] for c in seen["checks"]] == [""] and "could not be applied" in seen["checks"][0]["issues"][0]  # told once, for the whole document
+
+
+def test_a_heading_two_sections_share_names_neither(v2):
+    """Finding 6: a duplicate heading was silently given to the last section that had it."""
+    from app.runtime import get_runtime
+    from app.works import service
+    from tests.test_works import _coursework, _run, _work
+
+    work = _coursework(v2)
+    _, planned = _run(v2, work["id"], "PLAN")
+    assert planned["status"] == "COMPLETED", planned.get("failure")
+    work = _work(v2, work["id"])
+    plan = work["plan"]
+    for section in plan["sections"][:2]:
+        section["heading"] = "Summary"
+    saved = v2.post(f"/api/works/{work['id']}/plan", headers=STUDENT, json={"plan": plan, "baseVersion": work["planVersion"]})
+    assert saved.status_code == 200, saved.json()
+    approved = v2.post(f"/api/works/{work['id']}/plan/approve", headers=STUDENT, json={"baseVersion": saved.json()["planVersion"], "acknowledge": ["PLAN_OBJECTIONS"]})
+    assert approved.status_code == 200, approved.json()
+    seen = {}
+
+    def edit(payload):
+        return _verdicts(payload, corrections=[_correct(payload, "A replacement addressed only by a heading two sections share.", section="Summary")])
+
+    def resolve(payload):
+        seen.update(payload)
+        return _verdicts(payload)
+
+    v2.models.overrides.update(w_edit=edit, w_resolve=resolve)
+    _, job = _run(v2, work["id"], "DRAFT")
+    assert job["status"] == "COMPLETED", job.get("failure")
+    rt = get_runtime()
+    document = service._doc(rt, rt.store.get_work(work["id"]))
+    assert "A replacement addressed only" not in " ".join(p for sec in document.sections for p in sec.paragraphs)
+    assert document.approval.refused == 1 and any("could not be applied" in i for c in seen["checks"] for i in c["issues"])
+
+
+def test_a_wording_correction_is_applied_by_paragraph_and_supported_needs_no_second_look(v2):
     marker = "This sentence was sharpened by the final editor."
 
     def edit(payload):
@@ -348,7 +452,7 @@ def test_a_wording_correction_is_applied_by_paragraph_and_needs_no_second_look(v
     work, job, document = _draft(v2, edit=edit)
     assert job["status"] == "COMPLETED", job.get("failure")
     assert marker in document.sections[0].paragraphs[0] and sum(marker in p for s in document.sections for p in s.paragraphs) == 1
-    assert "w_flag" not in v2.models.tasks and "w_resolve" not in v2.models.tasks
+    assert v2.models.tasks.count("w_flag") == 1 and "w_resolve" not in v2.models.tasks  # checked (it added words), supported, no second look
     assert document.approval.corrections == 1 and document.approval.substantive == 0
     assert document.approval.reviewed_sha256 != document.approval.accepted_sha256
     shown = v2.get(f"/api/works/{work['id']}/document", headers=STUDENT).json()
@@ -386,12 +490,15 @@ def test_a_flagged_claim_goes_back_to_the_editor_once_and_the_check_never_rewrit
         return _verdicts(payload, corrections=[_correct(payload, target["text"].replace(" Distance causes low uptake everywhere.", " Distance is associated with lower uptake."),
                                                         kind="CLAIM", paragraph=flagged["paragraph"])])
 
-    _, job, document = _draft(v2, edit=edit, resolve=resolve,
-                              flag=lambda payload: {"results": [{"id": c["id"], "supported": False, "problem": "The source shows an association in one district."} for c in payload["corrections"]]})
+    def flag(payload):  # the first claim is not what the source says; the narrowed one is
+        return {"results": [{"id": c["id"], "supported": "causes low uptake everywhere" not in c["after"], "problem": "The source shows an association in one district."}
+                            for c in payload["corrections"]]}
+
+    _, job, document = _draft(v2, edit=edit, resolve=resolve, flag=flag)
     assert job["status"] == "COMPLETED", job.get("failure")
     text = " ".join(p for s in document.sections for p in s.paragraphs)
     assert "is associated with lower uptake" in text and "causes low uptake everywhere" not in text
-    assert v2.models.tasks.count("w_resolve") == 1 and v2.models.tasks.count("w_flag") == 1  # one resolution, and it is not checked again
+    assert v2.models.tasks.count("w_resolve") == 1 and v2.models.tasks.count("w_flag") == 2  # one resolution, and what it wrote is checked too
     assert asked["flagged"][0]["problem"].startswith("The source shows") and "findings" not in asked
     assert document.approval.flagged == 1 and document.approval.resolved and "w_repair" not in v2.models.tasks
 
@@ -553,11 +660,15 @@ def test_a_coursework_plan_is_decided_by_code_and_says_so(v2):
 def test_the_final_review_s_share_of_the_cap_is_kept_from_every_other_step(monkeypatch):
     from app.ai.orchestration import EDITOR_TASKS
 
-    runner, _, _ = _gated(monkeypatch, budget=4.0)
+    runner, _, _ = _gated(monkeypatch, budget=10.0)
     monkeypatch.setattr(AIRunner, "worst_cost", lambda self, task, chars: 0.6)
-    runner.keep_for_editor(12_000)
-    assert runner._held == pytest.approx(1.8) and runner._held_for == EDITOR_TASKS
-    assert runner._cap("w_edit") == 4.0 and runner._cap("w_search") == pytest.approx(2.2)
+    runner.keep_for_editor(12_000)  # one part: the review, its resolution and the support check after each
+    assert runner._held == pytest.approx(4 * 0.6) and runner._held_for == EDITOR_TASKS
+    assert runner._cap("w_edit") == 10.0 and runner._cap("w_search") == pytest.approx(10 - 2.4)
+    runner, _, _ = _gated(monkeypatch, budget=40.0)
+    runner.keep_for_editor(60_000)  # a long work is reviewed in parts, and each part's review and resolution is kept
+    assert runner._held == pytest.approx(5 * 2 * 0.6 + 2 * 0.6)
+    runner, _, _ = _gated(monkeypatch, budget=4.0)
     monkeypatch.setattr(AIRunner, "worst_cost", lambda self, task, chars: 5.0)
     runner.keep_for_editor(12_000)
     assert runner._held == 2.0  # never more than half the cap
@@ -689,7 +800,8 @@ def test_a_chapter_correction_is_applied_by_paragraph_and_the_plan_s_statements_
     plan = ProposalPlan.model_validate(v2.get(f"/api/projects/{pid}", headers=STUDENT).json()["plan"])
     statements = plan_statements(plan, "objectives", sections["objectives"].number)
     assert sections["objectives"].paragraphs[-len(statements):] == statements  # put back by code, whatever the editor changed
-    assert "p_flag" not in v2.models.tasks and "p_resolve" not in v2.models.tasks  # an undone correction is not in the text: nothing to check
+    # the kept correction changed words, so it is checked (and supported); the undone one is not in the text: nothing to check
+    assert v2.models.tasks.count("p_flag") == 1 and "p_resolve" not in v2.models.tasks
     assert chapter.approval.corrections == 1 and chapter.approval.reviewed_sha256 != chapter.approval.accepted_sha256
 
 
@@ -704,8 +816,9 @@ def test_a_flagged_chapter_claim_goes_back_to_the_editor_once_for_that_section_o
         return _passes(payload, {"background": [_change(background, f"Distance causes lower uptake among every caregiver in the country. {token}", kind="CLAIM")]})
 
     def flag(payload):
-        seen["flag"] = payload
-        return {"results": [{"id": c["id"], "supported": False, "problem": "The source shows an association among rural caregivers, not a cause for all."} for c in payload["corrections"]]}
+        seen.setdefault("flag", payload)
+        return {"results": [{"id": c["id"], "supported": "causes" not in c["after"], "problem": "The source shows an association among rural caregivers, not a cause for all."}
+                            for c in payload["corrections"]]}
 
     def resolve(payload):
         seen["resolve"] = payload
@@ -716,7 +829,7 @@ def test_a_flagged_chapter_claim_goes_back_to_the_editor_once_for_that_section_o
     _, job, chapter = _chapter_one(v2, p_edit=edit, p_flag=flag, p_resolve=resolve)
     assert job["status"] == "COMPLETED", job.get("failure")
     tasks = v2.models.tasks
-    assert tasks.count("p_flag") == 1 and tasks.count("p_resolve") == 1 and "p_fix" not in tasks and "p_review" not in tasks
+    assert tasks.count("p_flag") == 2 and tasks.count("p_resolve") == 1 and "p_fix" not in tasks and "p_review" not in tasks  # the last look is checked too
     correction = seen["flag"]["corrections"][0]
     assert correction["after"].startswith("Distance causes") and correction["evidence"][0]["sourceWords"]  # checked against the source's own words
     assert [s["key"] for s in seen["resolve"]["sections"]] == ["background"]
@@ -840,4 +953,237 @@ def test_a_chapter_s_final_review_keeps_its_share_of_the_cap(v2, monkeypatch):
     _, job, _ = _chapter_one(v2)
     assert job["status"] == "COMPLETED", job.get("failure")
     assert held and {service for service, _ in held} == {"p"} and all(chars > 0 for _, chars in held)  # every stage of the chapter, never the plan
+
+
+# --- Codex's audit of fd74ff3: chapters --------------------------------------------------------------------------------
+
+
+def test_a_chapter_section_passed_with_issues_listed_is_asked_again_and_never_approved_as_it_stands(v2):
+    """Finding 2: grade PASS with "The central claim is unsupported." among its issues was read as approval."""
+    seen = {}
+
+    def contradictory(payload):
+        answer = _passes(payload)
+        for result in answer["results"]:
+            if result["key"] == "problem":
+                result["issues"] = ["The central claim is unsupported."]
+        return answer
+
+    def resolve(payload):
+        seen.update(payload)
+        return contradictory(payload)
+
+    _, job, chapter = _chapter_one(v2, p_edit=contradictory, p_resolve=resolve)
+    assert job["status"] == "FAILED" and job["failure"]["code"] == "DOCUMENT_NOT_APPROVED" and chapter is None
+    assert [s["key"] for s in seen["sections"]] == ["problem"] and "also listed issues" in seen["sections"][0]["paperaidChecks"][0]
+
+
+def test_an_unsupported_chapter_claim_written_on_the_last_look_is_not_delivered(v2):
+    def edit(payload, text="Distance causes lower uptake among every caregiver in the country."):
+        background = _section(payload, "background")
+        if background is None:
+            return _passes(payload)
+        return _passes(payload, {"background": [_change(background, f"{text} ⟦{background['evidence'][0]['id']}⟧", kind="WORDING")]})
+
+    _, job, chapter = _chapter_one(v2, p_edit=edit, p_resolve=lambda payload: edit(payload, "Distance is the only cause of lower uptake."),
+                                   p_flag=lambda payload: {"results": [{"id": c["id"], "supported": False, "problem": "The source shows an association."} for c in payload["corrections"]]})
+    assert job["status"] == "FAILED" and job["failure"]["code"] == "DOCUMENT_NOT_APPROVED" and chapter is None
+    assert v2.models.tasks.count("p_flag") == 2 and v2.models.tasks.count("p_resolve") == 1 and "p_fix" not in v2.models.tasks
+
+
+# --- Codex's audit of fd74ff3: research --------------------------------------------------------------------------------
+
+
+def _runner_v(workflow):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(_engine=SimpleNamespace(workflow=workflow), budget_reached=False)
+
+
+def _saved(item_id, statement, scope="Uganda", title="A study", need="An earlier need"):
+    from app.proposals.models import EvidenceItem, EvidenceSource
+
+    return EvidenceItem(id=item_id, chapter=0, need=need, statement=statement, passage=statement, scope=scope, access="ABSTRACT", verified=True, support="SUPPORTED",
+                        source=EvidenceSource(url="https://example.org/" + item_id, title=title, year="2020"), retrieved_on="2026-10-09")
+
+
+def _asked(n, need, query, essential=False, covered=(), category="STUDY"):
+    from app.proposals.ai import Need
+
+    return Need.model_validate({"id": f"n{n}", "need": need, "category": category, "essential": essential, "query": query, "broader": "", "coveredBy": list(covered)})
+
+
+def test_an_essential_topic_is_never_the_one_the_search_allowance_cuts_off():
+    """Finding 5: with one optional need before an essential one and room for one, the essential need vanished and
+    the check that it was answered passed."""
+    from app.proposals.pipeline import essential_answered, topics_to_search
+
+    optional = _asked(1, "Background on vaccination campaigns", "vaccination campaigns background")
+    essential = _asked(2, "Uptake of the malaria vaccine among caregivers in Mukono", "malaria vaccine uptake caregivers Mukono", essential=True)
+    search, covered, left = topics_to_search([optional, essential], {}, 1, _runner_v(2))
+    assert search == [essential] and covered == [] and left == [optional]
+    many = [_asked(n, f"Essential matter number {n} in Uganda", f"essential matter {n}", essential=True) for n in range(1, 6)]
+    search, _, left = topics_to_search(many, {}, 2, _runner_v(2))
+    assert len(search) == 4 and left == many[4:]  # every essential need up to twice the allowance; the rest reported, never forgotten
+    with pytest.raises(PermanentStageError) as stopped:
+        essential_answered(_runner_v(2), [], [], [], left)
+    assert stopped.value.code == "EVIDENCE_MISSING"
+    assert topics_to_search([optional, essential], {}, 1, _runner_v(1)) == ([optional], [], [])  # workflow 1 as it was priced
+
+
+def test_saved_evidence_about_something_else_does_not_cover_a_need():
+    """Finding 5: any usable evidence id counted as coverage, so a general vaccination study could stand in for an
+    essential question about local malaria-vaccine uptake and its search was skipped."""
+    from app.analysis import research
+    from app.proposals.pipeline import topics_to_search
+
+    library = {"Egeneral": _saved("Egeneral", "Childhood vaccination coverage rose across Europe after school campaigns.", scope="Europe", title="Vaccination in Europe"),
+               "Elocal": _saved("Elocal", "Uptake of the malaria vaccine among caregivers in Mukono was lower where clinics were far.", scope="Mukono, Uganda")}
+    need = "Uptake of the malaria vaccine among caregivers in Mukono"
+    query = "malaria vaccine uptake caregivers Mukono"
+    wrong = _asked(1, need, query, essential=True, covered=["Egeneral"])
+    right = _asked(2, need, query, essential=True, covered=["Elocal"])
+    unknown = _asked(3, need, query, covered=["Enot-there"])
+    search, covered, _ = topics_to_search([wrong, right, unknown], library, 5, _runner_v(2))
+    assert covered == [right] and search == [wrong, unknown]
+    assert not research.about(need, query, "Childhood vaccination coverage rose across Europe.") and research.about(need, query, library["Elocal"].statement)
+
+
+def test_a_need_whose_found_quotation_fails_the_support_check_is_asked_on_the_other_route(v2):
+    """Finding 7: the web was skipped because the index's quotation was found, then the support check rejected the
+    finding, and the essential need failed without the route it was allowed."""
+    from app.runtime import get_runtime
+
+    def verify(payload):  # the index's finding does not support its claim; the web's does
+        return {"results": [{"id": c["id"], "support": "SUPPORTED" if c["sources"][0]["access"] != "ABSTRACT" else "CONTRADICTED", "note": ""} for c in payload["claims"]]}
+
+    v2.models.overrides["w_verify"] = verify
+    _, job, stored = _plan(v2, [_need(1, "STUDY", essential=True), _need(2, "STUDY")])
+    assert job["status"] == "COMPLETED", job.get("failure")
+    first, second = get_runtime().store.get(job["id"]).topics[:2]
+    assert (first.index, first.web, first.reason) == ("FOUND", "FOUND", "NOT_SUPPORTED")  # the essential need: the web, once
+    assert (second.index, second.web) == ("FOUND", "NOT_USED")  # an optional need is not sent to the web for it
+    assert v2.models.tasks.count("w_search") == 1 and v2.models.tasks.count("w_verify") == 2
+
+
+def test_a_method_is_looked_for_in_any_year_and_a_study_s_second_search_has_no_date_floor(v2, monkeypatch):
+    """Finding 8: the index was always asked for the last fifteen years, and workflow 2 no longer sends an empty
+    search to the web, where foundational sources used to come from."""
+    from app.analysis import fetch
+    from tests.fake_models import WORK
+
+    asked = []
+
+    def find(query, from_year, limit):
+        asked.append((query, from_year))
+        return ("FOUND", [WORK]) if from_year is None else ("NO_RESULTS", [])
+
+    monkeypatch.setattr(fetch, "openalex_find", find)
+    _, job, _ = _plan(v2, [_need(1, "METHOD"), _need(2, "STUDY")])
+    assert job["status"] == "COMPLETED", job.get("failure")
+    by_query = {}
+    for query, year in asked:
+        by_query.setdefault(query, []).append(year)
+    assert by_query["maternal health topic 1"] == [None]  # a method's own source, however old
+    window, anytime = by_query["maternal health topic 2"]
+    assert window is not None and anytime is None  # a study: recent first, then any year
+
+
+# --- Codex's audit of fd74ff3: request size, waiting, reporting --------------------------------------------------------
+
+
+def test_every_request_to_the_editor_fits_the_bound_and_each_paragraph_is_offered_once(v2):
+    """Finding 4: the document was measured before the text the editor may correct, the evidence and the findings
+    were added, and a section split between parts was sent whole with each."""
+    from app.ai import orchestration
+    from tests import fake_works
+
+    def long_draft(payload):
+        answer = fake_works.draft(payload)
+        for section in answer["sections"]:
+            body = section["paragraphs"]
+            section["paragraphs"] = [f"{p} (paragraph {n} of this section)" for n in range(1, 13) for p in body]
+        return answer
+
+    sizes, offered = [], []
+
+    def edit(payload):
+        sizes.append(orchestration.payload_words(payload))
+        offered.extend((e["key"], p["id"]) for e in payload["editable"] for p in e["paragraphs"])
+        return _verdicts(payload)
+
+    v2.models.overrides["w_draft"] = long_draft
+    v2.models.overrides["w_compress"] = lambda payload: {"sections": [{"key": s["key"], "paragraphs": s["text"], "table": s["table"]} for s in payload["sections"]]}
+    _, job, _ = _draft(v2, edit=edit)
+    assert len(sizes) > 1 and max(sizes) <= orchestration.FINAL_PART_WORDS, sizes  # reviewed in parts, each within the bound
+    assert len(offered) == len(set(offered))  # no paragraph was sent with two parts
+    assert job["status"] in ("COMPLETED", "FAILED")  # over its word limit it may be refused; never by an oversized request
+    with pytest.raises(PermanentStageError) as refused:  # and the runner itself refuses one, for the editor as for the reviewer
+        from app.runtime import get_runtime
+        from app.works.ai import EDIT_SCHEMA, Edited, WorkRunner
+
+        engine = get_runtime().store.get(job["id"]).quote.engine
+        WorkRunner(get_runtime().settings, v2.models, lambda call: None, lambda: 0.0, 99.0, engine=engine)._call(
+            "w_edit", {"document": "word " * (orchestration.FINAL_PART_WORDS + 10)}, EDIT_SCHEMA, Edited)
+    assert refused.value.code == "REVIEW_REQUEST_TOO_LARGE"
+
+
+def test_waiting_is_bounded_by_the_clock_from_the_first_pause(v2, monkeypatch):
+    """Finding 9: the allowance added up planned delays, so a slow failed request or a late delivery did not count."""
+    from datetime import timedelta
+
+    from app.core.errors import RetryableStageError
+    from app.jobs.models import utcnow
+    from app.runtime import get_runtime
+
+    rt = get_runtime()
+    rt.settings.review_wait_sec = 1
+    rt.settings.capacity_wait_limit_sec = 3600
+    tries = []
+
+    def edit(payload):
+        tries.append(1)
+        if len(tries) == 1:
+            raise RetryableStageError("PROVIDER_UNAVAILABLE", "Unavailable.", "test: the premium model is down")
+        return _verdicts(payload)
+
+    original = rt.queue.enqueue
+
+    def late(job_id, task_name, delay_sec=0):
+        if "-w" in task_name:  # the delivery after a wait comes two hours late (the planned delay was a second)
+            def back(j):
+                j.waiting_since = utcnow() - timedelta(hours=2)
+                return j
+            rt.store.update(job_id, back)
+        return original(job_id, task_name, delay_sec)
+
+    monkeypatch.setattr(rt.queue, "enqueue", late)
+    _, job, document = _draft(v2, edit=edit)
+    stored = rt.store.get(job["id"])
+    assert job["status"] == "FAILED" and job["failure"]["code"] == "CAPACITY_BUSY" and document is None
+    assert stored.capacity_waits == 2 and stored.waited_sec > 3600  # stopped at its next delivery, before another paid request
+    assert v2.models.tasks.count("w_edit") == 1
+
+
+def test_the_speed_report_counts_a_work_that_stopped_before_its_draft_and_ages_jobs_to_the_report_s_time():
+    """Finding 10: a failed plan with no draft vanished from the delivery figures, and an unfinished job's age was
+    measured to the newest job, so the newest one was always zero minutes old."""
+    import sys
+    from datetime import UTC, datetime
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).parents[1]))
+    from speed_report import report
+
+    def step(work, kind, status, queued, done=None):
+        return {"workId": work, "selection": {"work": kind}, "status": status, "queuedAt": queued, "completedAt": done, "createdAt": queued, "quote": {"engine": {"workflow": 2}}}
+
+    jobs = [step("a", "PLAN", "FAILED", "2026-10-09T10:00:00+00:00"),
+            step("b", "PLAN", "COMPLETED", "2026-10-09T10:00:00+00:00", "2026-10-09T10:03:00+00:00"),
+            step("b", "DRAFT", "COMPLETED", "2026-10-09T10:03:00+00:00", "2026-10-09T10:10:00+00:00"),
+            step("c", "PLAN", "COMPLETED", "2026-10-09T10:00:00+00:00", "2026-10-09T10:02:00+00:00"),
+            step("d", "PLAN", "PROCESSING", "2026-10-09T10:30:00+00:00")]
+    out = report(jobs, now=datetime(2026, 10, 9, 11, 0, tzinfo=UTC))
+    assert out["documents"]["workflow 2"]["works"] == 2 and out["documents"]["workflow 2"]["delivered"] == 1  # a (stopped) and b; c has simply no draft yet
+    assert out["unfinished"]["PLAN · workflow 2"] == {"jobs": 1, "oldestMinutes": 30.0}
 

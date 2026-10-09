@@ -793,7 +793,8 @@ class Job(JobView):
     timings: list[StageTiming] = []  # each run of each stage (the last 80), for the admin timeline and speed reports
     ready_at: datetime | None = None  # when the job's next stage was put on the queue (its queue wait starts here)
     capacity_waits: int = 0  # pauses for Gemini capacity so far (never counted as provider-failure retries)
-    waited_sec: int = 0  # how long those pauses have added up to (the allowance is a time: capacity_wait_limit_sec)
+    waited_sec: int = 0  # the time since the first of those pauses began, with the delay to come (the allowance: capacity_wait_limit_sec)
+    waiting_since: datetime | None = None  # when the stage run that first paused began: waiting is measured by the clock from here
     topics: list[TopicRoute] = []  # how each research topic of this step was answered (labels and counts only)
 
     def view(self) -> JobView:

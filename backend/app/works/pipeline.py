@@ -32,11 +32,13 @@ from app.proposals.models import EvidenceItem, EvidenceSource
 from app.proposals.pipeline import (
     _topic,
     apply_corrections,
+    changes_words,
     checkpointed,
     essential_answered,
     gather,
     load_library,
     numbered,
+    other_route,
     record_topics,
     research_gap_items,
     research_gaps,
@@ -385,32 +387,36 @@ def stage_researching(ctx: "StageContext") -> None:
     def named(text: str) -> bool:  # the need's own words reach the searching model too
         return bool({w.lower() for w in re.findall(r"[A-Za-z'’-]+", text)} & private)
 
-    needs, covered = topics_to_search([n for n in runner.research_needs(payload) if safe(n.query) and not named(n.need)], existing, limit, runner)
+    needs, covered, left = topics_to_search([n for n in runner.research_needs(payload) if safe(n.query) and not named(n.need)], existing, limit, runner)
     routes = {_topic(n): TopicRoute(category=n.category or n.kind, essential=n.essential) for n in needs}
 
-    def answer(need) -> list[EvidenceItem]:
+    def answer(need, other: bool = False) -> list[EvidenceItem]:
         route = routes[_topic(need)]
 
         def search() -> list[EvidenceItem]:
             return gather(runner, need, settings, 0, today, safe, route,  # type: ignore[arg-type]
-                          readings=lambda: _reading_items(runner, inp, ctx, need.need, today), open_sources=spec.source_policy != "CLOSED")
+                          readings=lambda: _reading_items(runner, inp, ctx, need.need, today), open_sources=spec.source_policy != "CLOSED", other=other)
 
-        return checkpointed(ctx, runner, need, search, route)
+        return checkpointed(ctx, runner, need, search, route, part="other" if other else "")
+
+    def check(items: list[EvidenceItem]) -> None:
+        checked = [i for i in items if i.verified]
+        verdicts = runner.verify(
+            [{"id": i.id, "claim": i.statement, "context": i.need, "sources": [{"title": i.source.title, "published": i.source.year, "access": i.access, "passage": i.passage, "scope": i.scope}]}
+             for i in checked]
+        ) if checked else {}
+        for item in checked:
+            verdict = verdicts.get(item.id)
+            item.support = verdict.support if verdict else "NOT_FOUND"  # an unchecked finding is never usable
 
     gathered = research_topics(ctx, needs, answer, settings.research_parallel)
     found = ev.dedupe([*found, *gathered])
+    check(found)
+    gathered, found = other_route(ctx, runner, needs, routes, gathered, found, lambda need: answer(need, other=True), check, settings.research_parallel)
     unsearched = research_gaps(ctx, needs)
-    checked = [i for i in found if i.verified]
-    verdicts = runner.verify(
-        [{"id": i.id, "claim": i.statement, "context": i.need, "sources": [{"title": i.source.title, "published": i.source.year, "access": i.access, "passage": i.passage, "scope": i.scope}]}
-         for i in checked]
-    ) if checked else {}
-    for item in checked:
-        verdict = verdicts.get(item.id)
-        item.support = verdict.support if verdict else "NOT_FOUND"  # an unchecked finding is never usable
     ctx.put_json("evidence.json", [i.model_dump(by_alias=True) for i in found])
-    record_topics(ctx, needs, covered, routes)
-    essential_answered(runner, needs, gathered, found)
+    record_topics(ctx, needs, covered, routes, left)
+    essential_answered(runner, needs, gathered, found, left)
     if runner.budget_reached:
         ctx.update(lambda j: _warn(j, ["The research reached this step's spending limit, so fewer sources were gathered than planned."]))
     if unsearched:
@@ -1243,13 +1249,25 @@ def _final_review(runner: WorkRunner, inp: WorkStepInput, document: WorkDocument
         manifest = [{"key": e["key"], "heading": e["heading"], "words": _words_of_entry(e),
                      "part": (str(spans[e["key"]][0]) if spans[e["key"]][0] == spans[e["key"]][-1] else f"{spans[e['key']][0]}-{spans[e['key']][-1]}")}
                     for e in whole["sections"] if e["key"] in spans]
+        # The share of each section a part shows, as (from, to) of its words: what the editor may correct is split
+        # the same way, so no paragraph is sent with two parts (Codex audit of fd74ff3, finding 4).
+        sizes = {e["key"]: max(1, sum(len(t.split()) for t in e.get("text", []))) for e in whole["sections"]}
+        seen: dict[str, int] = {}
+        for n, part in enumerate(parts, start=1):
+            part["share"] = {}
+            for e in part["sections"]:
+                start = seen.get(e["key"], 0)
+                seen[e["key"]] = start + sum(len(t.split()) for t in e.get("text", []))
+                first = part["share"].get(e["key"], (start / sizes[e["key"]], 0.0))[0]
+                part["share"][e["key"]] = (first, 2.0 if n == spans[e["key"]][-1] else seen[e["key"]] / sizes[e["key"]])
         return parts, manifest
 
     for _ in range(10):
         parts, manifest = build_parts(bound)
+        # the request as it will be sent, with everything the editor's part carries besides the document
         if all(payload_words({**base, "document": {"front": whole["front"], "sections": part["sections"],
                                                         "tables": part["tables"], "references": part["references"], "notes": part["notes"]},
-                              "manifest": manifest, "part": f"{n} of {len(parts)}"}) + history_room <= FINAL_PART_WORDS
+                              "manifest": manifest, "part": f"{n} of {len(parts)}", **(extra(part) if extra else {})}) + history_room <= FINAL_PART_WORDS
                for n, part in enumerate(parts, start=1)):
             break
         bound = max(20, bound // 2)
@@ -1331,15 +1349,32 @@ def _editor_request(inp: WorkStepInput, current: dict[str, SectionText], editabl
     usable = [i for i in library_items.values() if i.usable]
     total, limit, _ = _limit_words(inp, current, library_items, tokens)
 
+    def shown(key: str, part: dict[str, Any]) -> list[dict[str, str]]:
+        """The paragraphs of a section this part may correct: those that begin within the share of the section the
+        part shows (all of them for a section shown whole). Ids are the whole section's, so they never change."""
+        low, high = part.get("share", {}).get(key, (0.0, 2.0))
+        paragraphs = numbered(current[key])
+        total = max(1, sum(len(p["text"].split()) for p in paragraphs))
+        out, before = [], 0
+        for paragraph in paragraphs:
+            if low <= before / total < high:
+                out.append(paragraph)
+            before += len(paragraph["text"].split())
+        return out
+
     def extra(part: dict[str, Any]) -> dict[str, Any]:
         keys = [k for k in dict.fromkeys(e["key"] for e in part["sections"]) if k in editable and k in current]
-        offered = {i.id: i for i in usable} if len(usable) <= 40 else {i.id: i for k in keys for i in _relevant(sections[k], usable)}
-        offered.update({i: library_items[i] for k in keys for p in current[k].paragraphs for i in ev.cited_ids(p) if i in library_items and library_items[i].usable})
+        paragraphs = {k: shown(k, part) for k in keys}
+        # Every finding while they fit in a quarter of a request; otherwise those related to these sections and those
+        # their paragraphs cite, so a part's evidence shrinks with the part.
+        everything = payload_words(_evidence_for_editor(usable)) <= FINAL_PART_WORDS // 4
+        offered = {i.id: i for i in usable} if everything else {i.id: i for k in keys for i in _relevant(sections[k], usable)}
+        offered.update({i: library_items[i] for k in keys for p in paragraphs[k] for i in ev.cited_ids(p["text"]) if i in library_items and library_items[i].usable})
         found = [{"section": k, "heading": sections[k].heading, "issues": findings[k]} for k in keys if findings.get(k)]
         found += [{"section": "", "heading": "", "issues": findings[""]}] if findings.get("") else []
         out: dict[str, Any] = {
             "editable": [{"key": k, "heading": sections[k].heading, "words": sections[k].words, "minWords": sections[k].min_words, "maxWords": sections[k].max_words,
-                          "wordsNow": _rendered_words(current[k], tokens), "paragraphs": numbered(current[k]),
+                          "wordsNow": _rendered_words(current[k], tokens), "paragraphs": paragraphs[k],
                           "hasTable": bool(current[k].table.rows), "hasFigure": current[k].figure is not None} for k in keys],
             "evidence": _evidence_for_editor(list(offered.values())),
             "numberTokens": numbers.for_model(tokens),
@@ -1384,10 +1419,10 @@ def _editor_checks(inp: WorkStepInput, current: dict[str, SectionText], editable
 
 def _unsupported(runner: WorkRunner, inp: WorkStepInput, applied: list[dict[str, str]], library_items: dict[str, EvidenceItem],
                  tokens: dict[str, tuple[str, str]]) -> list[dict[str, str]]:
-    """The editor's corrections to a claim, method or conclusion that a standard-model check could not support. The
-    check only flags (it never rewrites, and never approves): what it flags goes back to the editor. A correction it
-    gives no verdict on counts as flagged."""
-    asked = [a for a in applied if a["kind"] != "WORDING" and a["after"]]
+    """The editor's corrections that a standard-model check could not support: every correction that changed a word,
+    a figure or a citation, whatever the editor called it. The check only flags (it never rewrites, and never
+    approves): what it flags goes back to the editor. A correction it gives no verdict on counts as flagged."""
+    asked = [a for a in applied if a["after"] and changes_words(a["before"], a["after"])]  # never by the editor's own label
     if not asked:
         return []
     items = [{"id": a["id"], "before": a["before"], "after": a["after"],
@@ -1411,7 +1446,9 @@ def _editorial(ctx: "StageContext", runner: WorkRunner, inp: WorkStepInput, curr
     assert inp.plan is not None
     spec = _spec(inp)
     sections = {s.key: s for s in inp.plan.sections}
-    by_heading = {" ".join(s.heading.lower().split()): s.key for s in inp.plan.sections}
+    headings = [" ".join(s.heading.lower().split()) for s in inp.plan.sections]
+    # a heading names its section only when no other section has it: an ambiguous one is refused, never guessed at
+    by_heading = {h: s.key for h, s in zip(headings, inp.plan.sections, strict=True) if headings.count(h) == 1}
     short = _too_short(inp, current, library_items, tokens, editable)
     if short:  # the writer develops a draft well under its limit before the editor reads it: an editor corrects, it does not write
         progress(ctx, "REPAIRING", 1)
@@ -1460,13 +1497,22 @@ def _editorial(ctx: "StageContext", runner: WorkRunner, inp: WorkStepInput, curr
         again, refused = apply_corrections(current, corrections, editable)
         applied += again
         refusals += sum(len(v) for v in refused.values())
+        if refused:
+            # Its decision describes the text with every correction applied: with one left out, that text does not
+            # exist and the decision approves nothing (Codex audit of fd74ff3, finding 1).
+            raise PermanentStageError("DOCUMENT_NOT_APPROVED", "PaperAid could not verify the final wording. No document was released and nothing was charged. Please try again.",
+                                      f"{sum(len(v) for v in refused.values())} correction(s) from the final editor's last look could not be applied")
         if any(_strip(inp, current[k], library_items, allowed) != current[k] for k in editable if k in current):
             # The editor's last wording carries something code cannot trace: withholding it now would deliver text nobody approved.
             raise PermanentStageError("DOCUMENT_NOT_APPROVED", "PaperAid could not verify the final wording. No document was released and nothing was charged. Please try again.",
                                       "the final editor's wording carries a citation or figure code cannot trace")
+        late = _unsupported(runner, inp, again, library_items, tokens)
+        if late:
+            # What it wrote last is checked like what it wrote first; there is no further look to settle a flag, so the
+            # work stops here rather than go out with a claim nobody could confirm (finding 3).
+            raise PermanentStageError("DOCUMENT_NOT_APPROVED", "PaperAid could not verify the final wording. No document was released and nothing was charged. Please try again.",
+                                      f"{len(late)} correction(s) from the final editor's last look are not supported by their evidence")
         checks = {k: _checks(inp, sections[k], current[k], library_items, allowed, tokens) for k in editable if k in current}
-        for key, why in refused.items():
-            checks.setdefault(key, []).extend(why)
     approval = Approval(
         reviewer=(runner._engine.vertex_routes.get("w_edit") or [runner.model_for("w_edit")])[0], reviewed_sha256=reviewed, accepted_sha256=_text_hash(current),
         corrections=len(applied), substantive=sum(1 for a in applied if a["kind"] != "WORDING"), flagged=len(flagged), resolved=resolved, refused=refusals)
@@ -1826,6 +1872,9 @@ def stage_auditing(ctx: "StageContext") -> None:
                                       "revise: nothing changed")
 
     document = _document(inp, current, set(current) if workflow2 else set(evaluations) | set(integrity))
+    if approval is not None and _text_hash(current) != approval.accepted_sha256:
+        # the decision is bound to the exact text: anything that changed it afterwards would be delivered unapproved
+        raise PermanentStageError("DOCUMENT_NOT_APPROVED", "PaperAid could not verify the final wording. No document was released and nothing was charged. Please try again.", "the text changed after the final editor's decision")
     document.approval = approval
     if base is not None:
         document.revised = list(editable)

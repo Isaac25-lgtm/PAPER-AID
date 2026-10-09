@@ -47,7 +47,7 @@ if TYPE_CHECKING:
 
 INPUT = "proposal_input.json"
 YEAR = re.compile(r"\b(?:19|20)\d{2}\b")  # "8 December 2025" gives 2025
-LITERATURE_YEARS = 15  # scholarly search window; foundational theory comes through the web search
+LITERATURE_YEARS = 15  # scholarly search window for studies (workflow 1: foundational theory comes through the web search)
 NOT_REVIEWED = "The section was not reviewed."
 TENSE_SECTIONS = {1: {"purpose", "objectives", "questions", "scope", "synopsis"}, 4: {"purpose", "objectives", "questions", "scope", "methodology"}}  # chapter 3: every section
 
@@ -132,26 +132,31 @@ def stage_researching(ctx: "StageContext") -> None:
 
     today = utcnow().date().isoformat()
 
-    needs, covered = topics_to_search([n for n in runner.research_needs(payload) if safe(n.query)], library, limit, runner)
+    needs, covered, left = topics_to_search([n for n in runner.research_needs(payload) if safe(n.query)], library, limit, runner)
     routes = {_topic(n): TopicRoute(category=n.category or n.kind, essential=n.essential) for n in needs}
 
-    def answer(need) -> list[EvidenceItem]:
+    def answer(need, other: bool = False) -> list[EvidenceItem]:
         route = routes[_topic(need)]
-        return checkpointed(ctx, runner, need, lambda: gather(runner, need, settings, inp.chapter, today, safe, route), route)
+        return checkpointed(ctx, runner, need, lambda: gather(runner, need, settings, inp.chapter, today, safe, route, other=other), route,
+                            part="other" if other else "")
+
+    def check(items: list[EvidenceItem]) -> None:
+        checked = [i for i in items if i.verified]
+        verdicts = runner.verify_claims(
+            [{"id": i.id, "claim": i.statement, "context": i.need, "sources": [{"title": i.source.title, "published": i.source.year, "access": i.access, "passage": i.passage, "scope": i.scope}]} for i in checked]
+        ) if checked else {}
+        for item in checked:
+            verdict = verdicts.get(item.id)
+            item.support = verdict.support if verdict else "NOT_FOUND"  # an unchecked finding is never usable
 
     gathered = research_topics(ctx, needs, answer, settings.research_parallel)
     found = evidence.dedupe(gathered)
+    check(found)
+    gathered, found = other_route(ctx, runner, needs, routes, gathered, found, lambda need: answer(need, other=True), check, settings.research_parallel)
     unsearched = research_gaps(ctx, needs)
-    checked = [i for i in found if i.verified]
-    verdicts = runner.verify_claims(
-        [{"id": i.id, "claim": i.statement, "context": i.need, "sources": [{"title": i.source.title, "published": i.source.year, "access": i.access, "passage": i.passage, "scope": i.scope}]} for i in checked]
-    ) if checked else {}
-    for item in checked:
-        verdict = verdicts.get(item.id)
-        item.support = verdict.support if verdict else "NOT_FOUND"  # an unchecked finding is never usable
     ctx.put_json("evidence.json", [i.model_dump(by_alias=True) for i in found])
-    record_topics(ctx, needs, covered, routes)
-    essential_answered(runner, needs, gathered, found)
+    record_topics(ctx, needs, covered, routes, left)
+    essential_answered(runner, needs, gathered, found, left)
     if runner.budget_reached:
         ctx.update(lambda j: _warn(j, ["The research reached this step's spending limit, so fewer sources were gathered than planned."], partial=True))
     if unsearched:
@@ -163,32 +168,53 @@ INDEX_FAILED = frozenset({"RATE_LIMITED", "ALLOWANCE_USED", "UNAVAILABLE", "ACCE
 SCHOLARLY = frozenset({"STUDY", "METHOD"})
 
 
-def topics_to_search(asked: list, library: dict[str, EvidenceItem], limit: int, runner) -> tuple[list, list]:
-    """(the needs to search, the needs saved evidence already answers). Workflow 1: the first `limit`, none covered.
-    Workflow 2: a need is covered only when every piece of evidence it names is in the library and usable; at most
-    `limit` of the others are searched, so nothing is looked for twice."""
+def topics_to_search(asked: list, library: dict[str, EvidenceItem], limit: int, runner) -> tuple[list, list, list]:
+    """(the needs to search, the needs saved evidence already answers, the needs left unsearched). Workflow 1: the
+    first `limit`, none covered, none recorded as left (as priced).
+
+    Workflow 2 (Codex audit of fd74ff3, finding 5). A need is covered only when every piece of evidence it names is in
+    the library and usable AND at least one of them can be about it (`research.about`): the planner's word alone is
+    not coverage. Of the others, what the work depends on is never the part cut off: every essential need is searched
+    (up to twice the allowance), optional ones fill what is left of `limit`, and the rest are returned as left, so an
+    essential need beyond that is reported as unanswered, never forgotten. The planner's order is kept."""
     if runner._engine.workflow < 2:
-        return asked[:limit], []
-    usable = {i.id for i in library.values() if i.usable}
-    covered = [n for n in asked if n.covered_by and all(e in usable for e in n.covered_by)]
-    return [n for n in asked if n not in covered][:limit], covered
+        return asked[:limit], [], []
+    usable = {i.id: i for i in library.values() if i.usable}
+
+    def answered(need) -> bool:
+        named = [usable[e] for e in need.covered_by if e in usable]
+        return bool(need.covered_by) and len(named) == len(need.covered_by) and any(
+            research.about(need.need, need.query, " ".join([i.statement, i.scope, i.need, i.source.title])) for i in named)
+
+    covered = [n for n in asked if answered(n)]
+    rest = [n for n in asked if not any(n is c for c in covered)]
+    room = max(limit, min(sum(1 for n in rest if n.essential), 2 * limit))
+    first = [n for n in rest if n.essential] + [n for n in rest if not n.essential]
+    chosen = {id(n) for n in first[:room]}
+    return [n for n in rest if id(n) in chosen], covered, [n for n in rest if id(n) not in chosen]
 
 
 def gather(runner: ProposalRunner, need, settings, chapter: int, today: str, safe, route: TopicRoute,
-           readings: Callable[[], list[EvidenceItem]] | None = None, open_sources: bool = True) -> list[EvidenceItem]:
+           readings: Callable[[], list[EvidenceItem]] | None = None, open_sources: bool = True, other: bool = False) -> list[EvidenceItem]:
     """One topic's findings, and in `route` how it was answered. The student's own readings come first (works).
 
     Workflow 1, as priced: the scholarly index for a LITERATURE need, the web when that gave nothing or for a FACT.
     Workflow 2: the kind of source decides. Research findings, theories and methods are looked for in the index, from
     a ranked pool, with one broader query when the first finds nothing; official figures and policies on the web. The
     other route is tried only when the first could not be asked at all, or found nothing for a need the work depends
-    on: a web search is the exception, not the fallback for every empty result."""
-    items = readings() if readings else []
+    on: a web search is the exception, not the fallback for every empty result.
+
+    The index is asked within the last LITERATURE_YEARS for a study; a method or theory is cited from its own source
+    however old, and the second, broader search has no date floor (Codex audit of fd74ff3, finding 8: workflow 2 no
+    longer sends every empty search to the web, where older sources used to come from). `other`: only the route not
+    yet tried, for a need whose findings did not survive the support check (`other_route`)."""
+    items = readings() if readings and not other else []
     if not open_sources or runner.budget_reached:
         return items
+    window = utcnow().year - LITERATURE_YEARS
 
-    def index(query: str, pool: int, keep: int | None) -> list[EvidenceItem]:
-        return _from_index(runner, need.need, query, chapter, today, pool, keep, route)
+    def index(query: str, pool: int, keep: int | None, from_year: int | None = window) -> list[EvidenceItem]:
+        return _from_index(runner, need.need, query, chapter, today, pool, keep, route, from_year)
 
     def web(reason: str) -> list[EvidenceItem]:
         route.reason = reason
@@ -209,13 +235,18 @@ def gather(runner: ProposalRunner, need, settings, chapter: int, today: str, saf
         return any(i.verified for i in items)
 
     def from_index() -> list[EvidenceItem]:
-        found = index(need.query, settings.index_candidates, settings.index_abstracts)
+        floor = None if need.category == "METHOD" else window
+        found = index(need.query, settings.index_candidates, settings.index_abstracts, floor)
         broader = need.broader.strip()
-        if (not any(i.verified for i in found) and route.index not in INDEX_FAILED and broader and broader.casefold() != need.query.strip().casefold()
-                and safe(broader) and not runner.budget_reached):
-            found += index(broader, settings.index_candidates, settings.index_abstracts)
+        wider = broader if broader and broader.casefold() != need.query.strip().casefold() and safe(broader) else ""
+        if (not any(i.verified for i in found) and route.index not in INDEX_FAILED and (wider or floor is not None) and not runner.budget_reached):
+            found += index(wider or need.query, settings.index_candidates, settings.index_abstracts, None)
         return found
 
+    if other:  # the first route's findings did not survive the support check: the route not yet tried, once
+        if need.category in SCHOLARLY:
+            return web("NOT_SUPPORTED") if route.web == "NOT_USED" else []
+        return from_index() if route.index == "NOT_TRIED" else []
     if need.category in SCHOLARLY:
         items += from_index()
         failed = route.index in INDEX_FAILED
@@ -229,9 +260,35 @@ def gather(runner: ProposalRunner, need, settings, chapter: int, today: str, saf
     return items
 
 
-def record_topics(ctx: "StageContext", needs: Sequence, covered: Sequence, routes: dict[str, TopicRoute]) -> None:
+def other_route(ctx: "StageContext", runner, needs: Sequence, routes: dict[str, TopicRoute], gathered: list[EvidenceItem], found: list[EvidenceItem],
+                search: Callable[[Any], list[EvidenceItem]], check: Callable[[list[EvidenceItem]], None], parallel: int) -> tuple[list[EvidenceItem], list[EvidenceItem]]:
+    """Workflow 2 (Codex audit of fd74ff3, finding 7): whether a topic is answered is known only after the support
+    check, which can reject a finding whose quoted words were found. A need the work depends on that is left with no
+    usable finding is asked once on the route not yet tried, and those findings are checked too. `search` saves its
+    result like any topic. Returns everything gathered and the evidence, one entry per id."""
+    if runner._engine.workflow < 2 or runner.budget_reached:
+        return gathered, found
+    usable = {i.id for i in found if i.usable}
+    answered = {i.need for i in gathered if i.id in usable}
+
+    def untried(need) -> bool:
+        route = routes[_topic(need)]
+        return route.web == "NOT_USED" if need.category in SCHOLARLY else route.index == "NOT_TRIED"
+
+    again = [n for n in needs if n.essential and n.need not in answered and untried(n)]
+    if not again:
+        return gathered, found
+    more = research_topics(ctx, again, search, parallel)
+    known = {i.id for i in found}
+    new = [i for i in evidence.dedupe(more) if i.id not in known]
+    check(new)
+    return [*gathered, *more], evidence.dedupe([*found, *new])
+
+
+def record_topics(ctx: "StageContext", needs: Sequence, covered: Sequence, routes: dict[str, TopicRoute], left: Sequence = ()) -> None:
     """How each topic was answered, on the job: labels and counts only (never a topic's words)."""
-    topics = [routes[_topic(n)] for n in needs] + [TopicRoute(category=n.category or n.kind, essential=n.essential, covered=True) for n in covered]
+    topics = ([routes[_topic(n)] for n in needs] + [TopicRoute(category=n.category or n.kind, essential=n.essential, covered=True) for n in covered]
+              + [TopicRoute(category=n.category or n.kind, essential=n.essential, reason="OVER_ALLOWANCE") for n in left])
 
     def keep(j: Job) -> Job:
         j.topics = topics[:40]
@@ -240,7 +297,7 @@ def record_topics(ctx: "StageContext", needs: Sequence, covered: Sequence, route
     ctx.update(keep)
 
 
-def essential_answered(runner, needs: Sequence, gathered: list[EvidenceItem], found: list[EvidenceItem]) -> None:
+def essential_answered(runner, needs: Sequence, gathered: list[EvidenceItem], found: list[EvidenceItem], left: Sequence = ()) -> None:
     """Workflow 2: a need the work depends on must have at least one finding that may be cited. Without one the step
     stops here, in its first minutes and without charge, instead of writing around the gap and failing its review
     later (missing compulsory evidence is never turned into a warning: Codex's plan, 2026-10-09)."""
@@ -248,14 +305,14 @@ def essential_answered(runner, needs: Sequence, gathered: list[EvidenceItem], fo
         return
     usable = {i.id for i in found if i.usable}
     answered = {i.need for i in gathered if i.id in usable}
-    missing = [n.need.strip() for n in needs if n.essential and n.need not in answered]
+    missing = [n.need.strip() for n in needs if n.essential and n.need not in answered] + [n.need.strip() for n in left if n.essential]
     if missing:
         why = "its spending limit was reached first" if runner.budget_reached else "no source PaperAid could confirm answers it"
         raise PermanentStageError(
             "EVIDENCE_MISSING",
             f"PaperAid could not find reliable evidence for something this work depends on ({why}): \u201c{missing[0][:200]}\u201d. "
             "Nothing was charged. Add a source or more detail about it, then start again.",
-            f"essential topics unanswered: {len(missing)} of {len(needs)}")
+            f"essential topics unanswered: {len(missing)} of {len(needs) + len(left)}")
 
 
 # A topic whose search the provider leaves unanswered fails its stage, which is retried. Each run asks twice
@@ -278,12 +335,13 @@ def _lost_runs(ctx: "StageContext", need) -> int:
     return int(ctx.get_json(name)["runs"]) if ctx.has(name) else 0
 
 
-def checkpointed(ctx: "StageContext", runner, need, search: Callable[[], list[EvidenceItem]], route: TopicRoute | None = None) -> list[EvidenceItem]:
+def checkpointed(ctx: "StageContext", runner, need, search: Callable[[], list[EvidenceItem]], route: TopicRoute | None = None,
+                 part: str = "") -> list[EvidenceItem]:
     """A research topic answered in full is saved (speed plan 2026-10-08, Codex: checkpoints before anything else): a
     retry of this stage reads it back instead of fetching its sources again, with how it was answered (`route`). A
     topic cut short by the spending cap is not saved. A topic lost in LOST_TOPIC_RUNS runs is not asked again: it has
-    no sources and is reported (research_gaps)."""
-    name = f"research/{_topic(need)}.json"
+    no sources and is reported (research_gaps). `part` names a second search of the same topic (`other_route`)."""
+    name = f"research/{_topic(need)}{'-' + part if part else ''}.json"
     if ctx.has(name):  # already answered: read back even when nothing more may be spent (Codex audit, finding 1)
         saved = ctx.get_json(name)
         if isinstance(saved, dict):  # saved with its route (algorithm revision 2026-10-09); a list is an earlier save
@@ -373,11 +431,12 @@ def _severity(error: BaseException) -> int:
     return 2
 
 
-def _from_index(runner: ProposalRunner, need: str, query: str, chapter: int, today: str, pool: int, keep: int | None, route: TopicRoute) -> list[EvidenceItem]:
+def _from_index(runner: ProposalRunner, need: str, query: str, chapter: int, today: str, pool: int, keep: int | None, route: TopicRoute,
+                from_year: int | None = None) -> list[EvidenceItem]:
     """Findings for a need from the scholarly index, each quoted from a work's abstract. `keep` (workflow 2): `pool`
     candidates are read, ranked in code and the best `keep` passed to the reader; None: the works as the index
-    returned them (as priced before). `route` records what the search came to."""
-    outcome, works = fetch.openalex_find(query, utcnow().year - LITERATURE_YEARS, pool)
+    returned them (as priced before). `route` records what the search came to. `from_year`: None for any year."""
+    outcome, works = fetch.openalex_find(query, from_year, pool)
     route.index = outcome
     route.candidates += len(works)
     if keep is not None:
@@ -941,6 +1000,16 @@ def _owned(inp: StepInput, items: dict[str, dict[str, Any]], current: dict[str, 
 # --- workflow 2: the final editor's corrections, applied by paragraph (works and chapters alike) --------
 
 
+_WORDS_AND_TOKENS = re.compile(r"⟦[^⟧]*⟧|[^\W_]+")
+
+
+def changes_words(before: str, after: str) -> bool:
+    """Whether a correction changed any word, figure or citation, or their order. False only when code can see that
+    nothing but case, spacing or punctuation differs. The editor's own label is never the test (Codex audit of
+    fd74ff3, finding 3: a change of substance marked WORDING skipped the support check)."""
+    return _WORDS_AND_TOKENS.findall(before.casefold()) != _WORDS_AND_TOKENS.findall(after.casefold())
+
+
 def numbered(text: SectionText) -> list[dict[str, str]]:
     return [{"id": f"p{n}", "text": p} for n, p in enumerate(text.paragraphs, start=1)]
 
@@ -1187,7 +1256,7 @@ def _edited(ctx: "StageContext", runner: ProposalRunner, inp: StepInput, items: 
         return placed, {k: v for k, v in refused.items() if k}
 
     def unsupported(applied: list[dict[str, str]]) -> list[dict[str, str]]:
-        asked = [a for a in applied if a["kind"] != "WORDING" and a["after"]]
+        asked = [a for a in applied if a["after"] and changes_words(a["before"], a["after"])]  # never by the editor's own label
         if not asked:
             return []
         flags = runner.flag([{"id": a["id"], "before": a["before"], "after": a["after"],
@@ -1204,6 +1273,12 @@ def _edited(ctx: "StageContext", runner: ProposalRunner, inp: StepInput, items: 
     checks = found(grades)
     for key, why in refused.items():
         checks.setdefault(key, []).extend(why)
+    for key, grade in grades.items():
+        if grade.grade != "REPAIR" and any(i.strip() for i in grade.issues):
+            # An answer that passes a section and lists what is wrong with it contradicts itself: it is asked again,
+            # never read as approval (Codex audit of fd74ff3, finding 2).
+            checks.setdefault(key, []).append("Your answer passed this section and also listed issues in it. Settle each with a correction, or grade the section "
+                                              "REPAIR and say what remains: " + "; ".join(i.strip() for i in grade.issues if i.strip())[:400])
     flagged = unsupported(applied)
     refusals = sum(len(v) for v in refused.values())
     resolved = bool(checks or flagged) and not runner.budget_reached
@@ -1220,14 +1295,19 @@ def _edited(ctx: "StageContext", runner: ProposalRunner, inp: StepInput, items: 
             if edit is not None:
                 grades[item["key"]] = Grade(key=edit.key, grade=edit.grade, issues=edit.issues, note=edit.note)
         checks = found(current)
-        for key, why in refused.items():
+        for key, why in refused.items():  # its grade was for the text with every correction applied
             checks.setdefault(key, []).extend(why)
+        late = unsupported(more)  # what it wrote last is checked like what it wrote first; there is no further look
+        for flag in late:
+            checks.setdefault(flag["key"], []).append("A claim corrected on the final look could not be confirmed against its evidence: " + flag["problem"])
+        flagged += late
     unresolved: dict[str, list[str]] = {}
     for key in current:
         grade = grades.get(key)
-        issues = [*checks.get(key, []), *((grade.issues or ["REVIEW_REJECTED"]) if grade and grade.grade == "REPAIR" else []), *([] if grade else [NOT_REVIEWED])]
+        raised = [i.strip() for i in grade.issues if i.strip()] if grade else []  # an issue blocks whatever the grade says
+        issues = [*checks.get(key, []), *raised, *(["REVIEW_REJECTED"] if grade and grade.grade == "REPAIR" and not raised else []), *([] if grade else [NOT_REVIEWED])]
         if issues:
-            unresolved[key] = issues
+            unresolved[key] = list(dict.fromkeys(issues))
     approval = Approval(
         reviewer=(runner._engine.vertex_routes.get("p_edit") or [runner.model_for("p_edit")])[0], reviewed_sha256=reviewed, accepted_sha256=_text_hash(current),
         corrections=len(applied), substantive=sum(1 for a in applied if a["kind"] != "WORDING"), flagged=len(flagged), resolved=resolved, refused=refusals)

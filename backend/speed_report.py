@@ -14,7 +14,7 @@ Prints numbers only, never paper text, names or credentials. Changes nothing.
 import argparse
 import json
 import statistics
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from cost_report import cloud_jobs, local_jobs
@@ -32,14 +32,15 @@ def _seconds(start: str, end: str) -> float:
     return (datetime.fromisoformat(str(end).replace("Z", "+00:00")) - datetime.fromisoformat(str(start).replace("Z", "+00:00"))).total_seconds()
 
 
-def report(jobs: list[dict]) -> dict:
+def report(jobs: list[dict], now: datetime | None = None) -> dict:
+    """`now`: the time of the report (an unfinished job's age is measured to it, never to the newest job)."""
     calls: dict[str, dict[str, list]] = {}
     stages: dict[str, dict[str, list]] = {}
     kinds: dict[str, dict[str, list]] = {}
     works: dict[str, list[dict]] = {}
     topics: dict[str, dict] = {}
     unfinished: dict[str, list[float]] = {}
-    latest = max((str(j.get("createdAt") or "") for j in jobs), default="")
+    latest = (now or datetime.now(UTC)).isoformat()
     for job in jobs:
         for call in job.get("modelCalls") or []:
             group = calls.setdefault(f"{call.get('task') or '-'} · {call.get('model') or '-'}", {"time": [], "waited": [], "timeouts": [], "busy": []})
@@ -85,10 +86,14 @@ def report(jobs: list[dict]) -> dict:
     for steps in works.values():  # a piece of work: from its first step queued to its first document, as the student waited
         steps = sorted((j for j in steps if j.get("queuedAt")), key=lambda j: str(j["queuedAt"]))
         drafts = [j for j in steps if (j.get("selection") or {}).get("work") == "DRAFT"]
-        if not steps or not drafts:
+        if not steps:
+            continue
+        # A work that stopped before any draft (its reading or its plan failed) was started and not delivered: it
+        # counts (Codex audit of fd74ff3, finding 10). One whose earlier steps are fine and has no draft yet does not.
+        if not drafts and not any(j.get("status") in ("FAILED", "CANCELLED") for j in steps):
             continue
         done = next((j for j in drafts if j.get("status") == "COMPLETED" and j.get("completedAt")), None)
-        workflow = int((((drafts[0].get("quote") or {}).get("engine") or {}).get("workflow")) or 1)
+        workflow = int(((((drafts or steps)[0].get("quote") or {}).get("engine") or {}).get("workflow")) or 1)
         group = documents.setdefault(f"workflow {workflow}", {"minutes": [], "delivered": [], "steps": []})
         group["delivered"].append(done is not None)
         group["steps"].append(len(steps))
