@@ -59,7 +59,7 @@ def step_input(ctx: "StageContext") -> StepInput:
 def _runner(ctx: "StageContext", inp: StepInput) -> ProposalRunner:
     runner = ctx.ai(ProposalRunner)
     assert isinstance(runner, ProposalRunner)
-    if runner._engine.workflow >= 2 and inp.step in ("CHAPTER", "COMPLETE", "REVISE") and inp.plan is not None:
+    if runner._engine.final_editor and inp.step in ("CHAPTER", "COMPLETE", "REVISE") and inp.plan is not None:
         # A chapter's final review is paid for before research or drafting may spend its share (every stage of the step).
         written = [s for s in rulebook.sections(inp.rulebook, inp.chapter, inp.inputs.level, inp.plan) if not inp.only or s.key in inp.only]
         runner.keep_for_editor(8 * sum(s.words for s in written), "p")
@@ -153,10 +153,9 @@ def stage_researching(ctx: "StageContext") -> None:
     found = evidence.dedupe(gathered)
     check(found)
     gathered, found = other_route(ctx, runner, needs, routes, gathered, found, lambda need: answer(need, other=True), check, settings.research_parallel)
-    unsearched = research_gaps(ctx, needs)
     ctx.put_json("evidence.json", [i.model_dump(by_alias=True) for i in found])
     record_topics(ctx, needs, covered, routes, left)
-    essential_answered(runner, needs, gathered, found, left)
+    unsearched = research_gaps(ctx, needs, essential_answered(runner, needs, gathered, found, left))
     if runner.budget_reached:
         ctx.update(lambda j: _warn(j, ["The research reached this step's spending limit, so fewer sources were gathered than planned."], partial=True))
     if unsearched:
@@ -297,15 +296,20 @@ def record_topics(ctx: "StageContext", needs: Sequence, covered: Sequence, route
     ctx.update(keep)
 
 
-def essential_answered(runner, needs: Sequence, gathered: list[EvidenceItem], found: list[EvidenceItem], left: Sequence = ()) -> None:
+def essential_answered(runner, needs: Sequence, gathered: list[EvidenceItem], found: list[EvidenceItem], left: Sequence = ()) -> list:
     """Workflow 2: a need the work depends on must have at least one finding that may be cited. Without one the step
     stops here, in its first minutes and without charge, instead of writing around the gap and failing its review
-    later (missing compulsory evidence is never turned into a warning: Codex's plan, 2026-10-09)."""
+    later (missing compulsory evidence is never turned into a warning: Codex's plan, 2026-10-09).
+
+    The one exception (owner, 2026-10-10, after a chapter stopped because no page PaperAid could read confirmed the
+    words quoted for a theory): a theory or method (METHOD). The work is written without citing it and the topic is
+    named in the document's checks (`research_gaps`), as an unsearched topic is. Returns those needs."""
     if runner._engine.workflow < 2:
-        return
+        return []
     usable = {i.id for i in found if i.usable}
     answered = {i.need for i in gathered if i.id in usable}
-    missing = [n.need.strip() for n in needs if n.essential and n.need not in answered] + [n.need.strip() for n in left if n.essential]
+    unanswered = [n for n in [*needs, *left] if n.essential and n.need not in answered]
+    missing = [n.need.strip() for n in unanswered if n.category != "METHOD"]
     if missing:
         why = "its spending limit was reached first" if runner.budget_reached else "no source PaperAid could confirm answers it"
         raise PermanentStageError(
@@ -313,6 +317,7 @@ def essential_answered(runner, needs: Sequence, gathered: list[EvidenceItem], fo
             f"PaperAid could not find reliable evidence for something this work depends on ({why}): \u201c{missing[0][:200]}\u201d. "
             "Nothing was charged. Add a source or more detail about it, then start again.",
             f"essential topics unanswered: {len(missing)} of {len(needs) + len(left)}")
+    return [n for n in unanswered if n.category == "METHOD"]
 
 
 # A topic whose search the provider leaves unanswered fails its stage, which is retried. Each run asks twice
@@ -374,14 +379,18 @@ def checkpointed(ctx: "StageContext", runner, need, search: Callable[[], list[Ev
     return items
 
 
-def research_gaps(ctx: "StageContext", needs: Sequence) -> str:
-    """What the student is told when topics went unsearched, saved for the stage that builds the document's checks.
-    Empty when every topic was searched."""
+def research_gaps(ctx: "StageContext", needs: Sequence, unconfirmed: Sequence = ()) -> str:
+    """What the student is told when topics went unsearched or (`unconfirmed`: a theory or method the work depends
+    on) no source could be confirmed, saved for the stage that builds the document's checks. Empty when neither."""
     lost = [n.need.strip()[:200] for n in needs if _lost_runs(ctx, n) >= LOST_TOPIC_RUNS]
     note = ""
     if lost:
         note = (f"PaperAid could not search {len(lost)} of {len(needs)} research topics because the search did not answer after several tries, "
                 f"so it went on without {'it' if len(lost) == 1 else 'them'}: " + "; ".join(f"“{t}”" for t in lost) + ".")
+    named = [n.need.strip()[:200] for n in unconfirmed]
+    if named:
+        note = (note + " " if note else "") + ("PaperAid found no source it could confirm for " + ("a theory or method" if len(named) == 1 else f"{len(named)} theories or methods")
+                                               + " this work uses, so it is written without citing one. Add a source for: " + "; ".join(f"“{t}”" for t in named) + ".")
     ctx.put_json(RESEARCH_GAPS, {"note": note})
     return note
 
@@ -945,6 +954,9 @@ def _owned_kinds(inp: StepInput) -> dict[str, str]:
     return {s.key: s.from_plan for s in rulebook.sections(inp.rulebook, inp.chapter, inp.inputs.level, inp.plan) if s.from_plan}
 
 
+_LABEL = re.compile(r"^\s*H\s*(?:0|o|₀|a|A|1)\s*\d*\s*[:.)]\s*", re.I)  # a hypothesis label a plan's own text carries
+
+
 def plan_statements(plan: ProposalPlan, kind: str, number: str) -> list[str]:
     """The general and specific objectives, or the primary research question with the specific questions
     (each null hypothesis with its alternative; or the propositions), as approved, under numbered sub-headings
@@ -963,14 +975,25 @@ def plan_statements(plan: ProposalPlan, kind: str, number: str) -> list[str]:
         sub = 2
     questions = [q.strip() for q in plan.research_questions if q.strip()]
     label = {"QUESTIONS": "Specific Research Questions", "HYPOTHESES": "Research Hypotheses", "PROPOSITIONS": "Research Propositions"}[plan.questions_kind]
-    lines.append(f"{number}.{sub} {label}")
     if plan.questions_kind == "HYPOTHESES":
-        alternatives = [a.strip() for a in plan.alternative_hypotheses if a.strip()]
-        for i, null in enumerate(questions, start=1):
-            lines.append(f"H0{i}: {null}")
+        asked = [q for q in questions if rulebook.is_question(q)]
+
+        def bare(text: str) -> str:
+            # In a mixed plan (new on 2026-10-10: such plans were refused before) a label the plan's own text carries
+            # ("H01:", "Ha1:") is not printed twice. A plan of hypotheses only prints exactly as it always has, so the
+            # chapters already written from one still match their plan.
+            return _LABEL.sub("", text) if asked else text
+
+        alternatives = [bare(a.strip()) for a in plan.alternative_hypotheses if a.strip()]
+        # A descriptive objective keeps its research question beside the hypotheses (it takes none).
+        lines.append(f"{number}.{sub} {'Research Questions and Hypotheses' if asked else label}")
+        lines += [f"{ROMAN[i]}. {q}" for i, q in enumerate(asked)]
+        for i, null in enumerate((q for q in questions if not rulebook.is_question(q)), start=1):
+            lines.append(f"H0{i}: {bare(null)}")
             if i <= len(alternatives):
                 lines.append(f"HA{i}: {alternatives[i - 1]}")
     else:
+        lines.append(f"{number}.{sub} {label}")
         lines += [f"{ROMAN[i]}. {q}" for i, q in enumerate(questions)]
     return lines
 
@@ -1010,6 +1033,40 @@ def changes_words(before: str, after: str) -> bool:
     return _WORDS_AND_TOKENS.findall(before.casefold()) != _WORDS_AND_TOKENS.findall(after.casefold())
 
 
+# An objection to the statements PaperAid places from the approved plan, or to their sub-headings, being in the
+# section: void, because code puts them there whatever the writer does (live runs 2026-10-08 and the trial of
+# 2026-10-10: "Remove the sub-headings and the general and specific objectives from the text, as PaperAid inserts
+# them automatically", three reviews running, so the chapter could never be approved).
+_VOID = re.compile(r"\b(?:remove|delete|omit|drop|merge|renumber|exclude|do not (?:list|include|repeat|restate)|should not (?:list|include|repeat|restate|contain))\b"
+                   r".{0,160}\b(?:sub-?headings?|objectives?|questions?|hypothes[ie]s|propositions?|statements?)\b", re.I | re.S)
+
+
+def placed_apart(inp: StepInput, items: dict[str, dict[str, Any]], key: str, text: SectionText) -> tuple[list[str], list[str]]:
+    """A plan-owned section as (the writer's introduction, the statements code placed after it); any other section
+    as (its paragraphs, nothing). A reviewer judges what the writer wrote and is told what PaperAid places."""
+    kind = _owned_kinds(inp).get(key) if inp.plan is not None else None
+    if not kind or key not in items:
+        return text.paragraphs, []
+    statements = plan_statements(inp.plan, kind, items[key]["number"])
+    if statements and text.paragraphs[-len(statements):] == statements:
+        return text.paragraphs[: -len(statements)], statements
+    return text.paragraphs, []
+
+
+def reviewer_issues(inp: StepInput, key: str, issues: list[str]) -> list[str]:
+    """A reviewer's issues that stand: for a plan-owned section, never one about the placed statements being there."""
+    if inp.plan is None or key not in _owned_kinds(inp):
+        return issues
+    return [i for i in issues if not _VOID.search(i)]
+
+
+def review_item(inp: StepInput, items: dict[str, dict[str, Any]], key: str, text: SectionText, checks: list[str]) -> dict[str, Any]:
+    """One section as a reviewer is asked about it."""
+    lead, statements = placed_apart(inp, items, key, text)
+    return {**items[key], "text": lead, **({"placedByPaperAid": statements} if statements else {}), "table": text.table.model_dump(), "paperaidChecks": checks,
+            "_words": " ".join(text.paragraphs)}
+
+
 def numbered(text: SectionText) -> list[dict[str, str]]:
     return [{"id": f"p{n}", "text": p} for n, p in enumerate(text.paragraphs, start=1)]
 
@@ -1037,10 +1094,17 @@ def apply_corrections(current: dict[str, SectionText], corrections: list[Correct
             applied.append(entry)
             continue
         index = next((i for i, row in enumerate(rows[c.section]) if row[0] == c.paragraph), None)
+        text = " ".join(c.text.split())
+        if index is None and text and c.action in ("REPLACE", "INSERT_AFTER") and not any(row[0].startswith("p") and "+" not in row[0] for row in rows[c.section]):
+            # A section code left empty has no paragraph to name (trial 2026-10-10: the editor wrote the missing section
+            # twice and both were refused, so the chapter failed as "empty"): what it writes there opens the section.
+            entry.update(ref=f"new+{n}", after=text)
+            rows[c.section].append([entry["ref"], text])
+            applied.append(entry)
+            continue
         if index is None:
             refuse("there is no such paragraph")
             continue
-        text = " ".join(c.text.split())
         if c.action == "INSERT_AFTER":
             if not text:
                 refuse("no text was given")
@@ -1237,7 +1301,9 @@ def _edited(ctx: "StageContext", runner: ProposalRunner, inp: StepInput, items: 
         asked = list(current) if flagged is None else [k for k in current if checks.get(k) or any(f["key"] == k for f in flagged)]
         out = []
         for key in asked:
-            item = {**items[key], "paragraphs": numbered(current[key]), "table": current[key].table.model_dump(), "paperaidChecks": checks.get(key, []),
+            lead, statements = placed_apart(inp, items, key, current[key])
+            item = {**items[key], "paragraphs": numbered(current[key])[: len(lead)], **({"placedByPaperAid": statements} if statements else {}),
+                    "table": current[key].table.model_dump(), "paperaidChecks": checks.get(key, []),
                     "_words": " ".join(current[key].paragraphs)}
             if flagged is not None:
                 item["flagged"] = [{"paragraph": f["paragraph"], "problem": f["problem"]} for f in flagged if f["key"] == key]
@@ -1304,8 +1370,9 @@ def _edited(ctx: "StageContext", runner: ProposalRunner, inp: StepInput, items: 
     unresolved: dict[str, list[str]] = {}
     for key in current:
         grade = grades.get(key)
-        raised = [i.strip() for i in grade.issues if i.strip()] if grade else []  # an issue blocks whatever the grade says
-        issues = [*checks.get(key, []), *raised, *(["REVIEW_REJECTED"] if grade and grade.grade == "REPAIR" and not raised else []), *([] if grade else [NOT_REVIEWED])]
+        raised = reviewer_issues(inp, key, [i.strip() for i in grade.issues if i.strip()]) if grade else []  # an issue blocks whatever the grade says
+        rejected = grade is not None and grade.grade == "REPAIR" and not raised and not any(i.strip() for i in grade.issues)  # REPAIR with nothing said
+        issues = [*checks.get(key, []), *raised, *(["REVIEW_REJECTED"] if rejected else []), *([] if grade else [NOT_REVIEWED])]
         if issues:
             unresolved[key] = list(dict.fromkeys(issues))
     approval = Approval(
@@ -1322,7 +1389,7 @@ def stage_auditing(ctx: "StageContext") -> None:
     assert inp.plan is not None
     settings = ctx.rt.settings
     runner = _runner(ctx, inp)
-    workflow2 = runner._engine.workflow >= 2
+    workflow2 = runner._engine.final_editor  # the final editor's path; False: the earlier review and fixes
     library = _library(ctx, inp)
     usable = {i for i, item in library.items() if item.usable}
     sample = sampling.calculate(inp.plan.sample_size) if inp.chapter == 3 else None
@@ -1351,15 +1418,12 @@ def stage_auditing(ctx: "StageContext") -> None:
     for round_ in ([] if workflow2 else runner.audit_rounds(rounds + 1)):
         ctx.activity("CHECKING", round_ + 1, rounds + 1)
         problems = {k: _checks(inp, k, t, library, allowed) for k, t in current.items()}
-        review = [
-            {**items[k], "text": t.paragraphs, "table": t.table.model_dump(), "paperaidChecks": problems[k], "_words": " ".join(t.paragraphs)}
-            for k, t in current.items()
-        ]
+        review = [review_item(inp, items, k, t, problems[k]) for k, t in current.items()]
         grades = runner.grade(review, {**common, "vetting": vetting})
         unresolved = {}
         for key in current:
             grade = grades.get(key)
-            issues = [*problems[key], *(grade.issues if grade and grade.grade == "REPAIR" else [])]
+            issues = [*problems[key], *(reviewer_issues(inp, key, grade.issues) if grade and grade.grade == "REPAIR" else [])]
             if grade is None:  # never silently passed, whether or not the budget ran out (#10)
                 issues.append(NOT_REVIEWED)
             if issues:
@@ -1380,19 +1444,13 @@ def stage_auditing(ctx: "StageContext") -> None:
             stripped += [items[key]["heading"] for key in cleaned]
             current.update(cleaned)
             problems = {k: _checks(inp, k, current[k], library, allowed) for k in cleaned}
-            regraded = runner.grade(
-                [
-                    {**items[k], "text": current[k].paragraphs, "table": current[k].table.model_dump(), "paperaidChecks": problems[k], "_words": " ".join(current[k].paragraphs)}
-                    for k in cleaned
-                ],
-                {**common, "vetting": vetting},
-            )
+            regraded = runner.grade([review_item(inp, items, k, current[k], problems[k]) for k in cleaned], {**common, "vetting": vetting})
             for key in cleaned:
                 grade = regraded.get(key)
                 grades.pop(key, None)
                 if grade is not None:
                     grades[key] = grade
-                issues = [*problems[key], *(grade.issues if grade and grade.grade == "REPAIR" else [])] + ([] if grade else [NOT_REVIEWED])
+                issues = [*problems[key], *(reviewer_issues(inp, key, grade.issues) if grade and grade.grade == "REPAIR" else [])] + ([] if grade else [NOT_REVIEWED])
                 if issues:
                     unresolved[key] = issues
                 else:
@@ -1617,7 +1675,7 @@ def _revision(
         {**items[k], "text": t.paragraphs, "table": t.table.model_dump(), "issues": inp.revise[k], "_words": " ".join(t.paragraphs)}
         for k, t in current.items()
     ]
-    kept = runner._engine.workflow >= 2
+    kept = runner._engine.final_editor
     if kept and ctx.has("revised.json"):  # written before a wait for the final editor
         fixes = {k: SectionText.model_validate(v) for k, v in ctx.get_json("revised.json").items()}
     else:

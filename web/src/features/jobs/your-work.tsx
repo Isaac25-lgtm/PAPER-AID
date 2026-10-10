@@ -1,104 +1,15 @@
-import { ArrowRight, ChartColumn, FilePen, FolderOpen, HandCoins, Lightbulb, NotebookPen } from 'lucide-react'
-import { useEffect, useState } from 'react'
-import { Link } from 'react-router'
+import { ArrowRight, FolderOpen, Loader2 } from 'lucide-react'
+import { Link, useSearchParams } from 'react-router'
 import { ButtonLink } from '../../components/ui/button'
 import { Alert, Card, EmptyState, Skeleton } from '../../components/ui/primitives'
-import { DataError, useData } from '../../lib/data'
-import type { DataProject } from '../../lib/datalab-types'
-import type { Project } from '../../lib/proposal-types'
-import { startChoices } from '../../lib/start'
-import type { Job } from '../../lib/types'
+import { useData } from '../../lib/data'
+import { startChoices, type StartChoice } from '../../lib/start'
 import { useTitle } from '../../lib/use-title'
-import type { Work } from '../../lib/work-types'
 import { useAuth } from '../auth/auth-context'
-import { KIND_LABELS } from '../works/shared'
-import { StatusChip, type WorkspaceStatus } from '../workspace/parts'
-import { useJobList } from './hooks'
-import { JobRow } from './job-bits'
+import { StatusChip } from '../workspace/parts'
+import { SECTION_LISTS, useYourWork, type WorkItem } from './your-work-data'
 
-/** One row of "Your work": a coursework, funding document or proposal, with one plain status. */
-interface Item {
-  key: string
-  title: string
-  kind: string
-  icon: typeof NotebookPen
-  status: WorkspaceStatus
-  updated: string
-  to: string
-}
-
-function workItem(w: Work): Item {
-  const status: WorkspaceStatus = w.activeJob
-    ? { label: 'Writing…', tone: 'running' }
-    : w.autoFailure && !w.documents.length
-      ? { label: "Couldn't finish · not charged", tone: 'danger' }
-      : w.documents.length
-        ? w.status === 'READY'
-          ? { label: 'Ready', tone: 'ready' }
-          : w.status === 'READY_WITH_WARNINGS'
-            ? { label: 'Ready with warnings', tone: 'warn' }
-            : w.readiness.some((i) => i.basis === 'AUTHOR' && !['PASS', 'NOT_APPLICABLE'].includes(i.status))
-              ? { label: 'Needs your input', tone: 'input' }
-              : { label: 'Check before you submit', tone: 'danger' }
-        : { label: 'Not started', tone: 'idle' }
-  return {
-    key: w.id, title: w.plan?.title ?? w.inputs.title, kind: KIND_LABELS[w.kind], updated: w.updatedAt, to: `/app/works/${w.id}`,
-    icon: w.kind === 'COURSEWORK' ? NotebookPen : w.kind === 'CONCEPT_NOTE' ? Lightbulb : HandCoins, status,
-  }
-}
-
-function projectItem(p: Project): Item {
-  const written = p.chapters.filter((c) => c.current && c.number !== 4).map((c) => c.number)
-  const concept = p.chapters.some((c) => c.number === 4 && c.current)
-  const status: WorkspaceStatus = p.activeJob
-    ? { label: 'Writing…', tone: 'running' }
-    : p.autoFailure && !written.length && !concept
-      ? { label: "Couldn't finish · not charged", tone: 'danger' }
-      : written.length
-        ? { label: written.length === 3 ? 'Chapters 1–3 written' : `Chapter ${written.join(', ')} written`, tone: 'ready' }
-        : concept
-          ? { label: 'Concept paper written', tone: 'ready' }
-          : { label: 'Not started', tone: 'idle' }
-  return { key: p.id, title: p.plan?.title ?? p.inputs.topic, kind: 'Research proposal', icon: FilePen, updated: p.updatedAt, to: `/app/projects/${p.id}`, status }
-}
-
-function dataItem(p: DataProject): Item {
-  const status: WorkspaceStatus = p.activeJob
-    ? { label: 'Writing…', tone: 'running' }
-    : p.reports.length
-      ? { label: 'Report ready', tone: 'ready' }
-      : p.pending.length || p.survey === 'ASK'
-        ? { label: 'Needs your input', tone: 'input' }
-        : p.analyses.length
-          ? { label: `${p.analyses.length} analys${p.analyses.length === 1 ? 'is' : 'es'}`, tone: 'idle' }
-          : { label: p.source ? 'Not analysed yet' : 'No data yet', tone: 'idle' }
-  return { key: p.id, title: p.title, kind: 'Data Lab', icon: ChartColumn, updated: p.updatedAt, to: `/app/datalab/${p.id}`, status }
-}
-
-function useYourWork() {
-  const data = useData()
-  const [items, setItems] = useState<Item[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  useEffect(() => {
-    let alive = true
-    const load = () =>
-      Promise.all([data.works.list().catch(() => [] as Work[]), data.projects.list().catch(() => [] as Project[]), data.datalab.list().catch(() => [] as DataProject[])])
-        .then(([works, projects, datasets]) => {
-          if (!alive) return
-          setItems([...works.map(workItem), ...projects.map(projectItem), ...datasets.map(dataItem)].sort((a, b) => b.updated.localeCompare(a.updated)))
-        })
-        .catch((e: unknown) => alive && setError(e instanceof DataError ? e.message : 'We could not load your work.'))
-    load()
-    const timer = window.setInterval(load, 15000) // a running item changes to Ready by itself
-    return () => {
-      alive = false
-      window.clearInterval(timer)
-    }
-  }, [data])
-  return { items, error }
-}
-
-function ItemRow({ item }: { item: Item }) {
+function ItemRow({ item }: { item: WorkItem }) {
   return (
     <li>
       <Link to={item.to} className="group flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-surface-subtle focus-visible:outline-2 focus-visible:outline-brand-600">
@@ -115,11 +26,11 @@ function ItemRow({ item }: { item: Item }) {
   )
 }
 
-function ItemList({ items, limit }: { items: Item[]; limit?: number }) {
+function ItemList({ items }: { items: WorkItem[] }) {
   return (
     <Card className="p-1">
       <ul className="divide-y divide-line">
-        {(limit ? items.slice(0, limit) : items).map((item) => (
+        {items.map((item) => (
           <ItemRow key={item.key} item={item} />
         ))}
       </ul>
@@ -132,18 +43,27 @@ function greeting() {
   return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'
 }
 
-const RECENT = 4  // the dashboard shows the latest work only; the rest is under Your work (owner, 2026-10-04)
+/** Where "Your own paper" keeps its list: paper checks and formatting are jobs, with their own history. */
+const GROUP_LIST: Record<StartChoice['group'], { to: string; label: string }> = {
+  'Coursework': { to: '/app/works', label: 'Your coursework' },
+  'Research proposals': { to: '/app/projects', label: 'Your proposals' },
+  'Funding': { to: '/app/works?section=FUNDING', label: 'Your funding documents' },
+  'Data analysis': { to: '/app/datalab', label: 'Your data projects' },
+  'Your own paper': { to: '/app/history', label: 'Your papers' },
+}
 
-/** The dashboard (redesign 2026-10-04, after Jenni's home): a greeting, a row to start something, then the latest work. */
+/** The dashboard (owner, 2026-10-10): what a person can start, by section, and nothing else. Their own work is in
+ *  the left panel and under each section, so the page never fills up with it; one line says when something is
+ *  being written. */
 export function DashboardPage() {
   useTitle('Dashboard')
   const { user } = useAuth()
   const data = useData()
-  const { items, error } = useYourWork()
-  const papers = useJobList({ limit: 4 })
-  const paperJobs = papers.jobs.filter((j: Job) => !j.projectId && !j.services.some((s) => ['COURSEWORK', 'CONCEPT_NOTE', 'FUNDING_PROPOSAL', 'PROPOSAL'].includes(s)))
+  const { items } = useYourWork()
   const choices = startChoices(data.config)
+  const groups = [...new Set(choices.map((c) => c.group))]
   const firstName = user?.displayName.split(' ')[0] ?? ''
+  const running = (items ?? []).filter((i) => i.status.tone === 'running')
 
   return (
     <>
@@ -151,79 +71,68 @@ export function DashboardPage() {
         {greeting()}
         {firstName ? `, ${firstName}` : ''}
       </h1>
-      <p className="mt-1 text-[15px] text-fg-muted">What are you working on?</p>
+      <p className="mt-1 text-[15px] text-fg-muted">What would you like to do?</p>
 
-      <section aria-labelledby="start-new" className="mt-6">
-        <h2 id="start-new" className="sr-only">Start something new</h2>
-        <div className="flex flex-wrap gap-2">
-          {choices.map((c) => (
-            <Link key={c.id} to={c.to}
-              className="inline-flex h-9 items-center gap-2 rounded-lg border border-line bg-white px-3 text-sm font-medium text-fg shadow-[0_1px_2px_rgb(16_24_40/0.04)] transition-colors hover:border-line-strong hover:bg-surface-subtle focus-visible:outline-2 focus-visible:outline-brand-600">
-              <c.icon className="size-4 text-fg-subtle" aria-hidden /> {c.name}
-            </Link>
-          ))}
-          <Link to="/app/new" className="inline-flex h-9 items-center gap-1 px-2 text-sm font-medium text-brand-700 hover:underline">
-            Every service <ArrowRight className="size-3.5" aria-hidden />
-          </Link>
-        </div>
-      </section>
-
-      <section aria-labelledby="your-work" className="mt-10">
-        <div className="mb-2 flex items-center justify-between">
-          <h2 id="your-work" className="text-[15px] font-medium text-fg">
-            Continue working
-          </h2>
-          {items && items.length > RECENT && (
-            <Link to="/app/work" className="text-sm font-medium text-brand-700 hover:underline">
-              See all {items.length}
-            </Link>
-          )}
-        </div>
-        {error && <Alert tone="danger">{error}</Alert>}
-        {items === null && !error ? (
-          <Skeleton className="h-40 rounded-2xl" />
-        ) : items && items.length ? (
-          <ItemList items={items} limit={RECENT} />
-        ) : (
-          <EmptyState icon={<FolderOpen className="size-5" />} title="Nothing here yet" action={choices[0] && <ButtonLink to={choices[0].to}>{choices[0].action}</ButtonLink>}>
-            Start your first piece of work. It will appear here, with its status, whenever you come back.
-          </EmptyState>
-        )}
-      </section>
-
-      {paperJobs.length > 0 && (
-        <section aria-labelledby="papers" className="mt-10">
-          <div className="mb-2 flex items-center justify-between">
-            <h2 id="papers" className="text-[15px] font-medium text-fg">
-              Paper checks and formatting
-            </h2>
-            <Link to="/app/history" className="text-sm font-semibold text-brand-700 hover:underline">
-              See all
-            </Link>
-          </div>
-          <Card className="p-1.5">
-            <ul className="divide-y divide-line">
-              {paperJobs.map((job) => (
-                <JobRow key={job.id} job={job} />
-              ))}
-            </ul>
-          </Card>
-        </section>
+      {running.length > 0 && (
+        <Link to={running.length === 1 ? running[0].to : '/app/work'}
+          className="mt-5 flex items-center gap-2.5 rounded-xl border border-brand-200 bg-brand-50 px-4 py-2.5 text-sm text-brand-800 hover:border-brand-300 focus-visible:outline-2 focus-visible:outline-brand-600">
+          <Loader2 className="size-4 shrink-0 animate-spin" aria-hidden />
+          <span className="min-w-0 flex-1 truncate">
+            {running.length === 1 ? <>PaperAid is writing <span className="font-medium">{running[0].title}</span></> : `PaperAid is writing ${running.length} pieces of your work`}
+          </span>
+          <span className="shrink-0 font-medium">Open</span>
+        </Link>
       )}
+
+      <section aria-labelledby="sections" className="mt-6">
+        <h2 id="sections" className="sr-only">What you can do</h2>
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {groups.map((group) => {
+            const mine = (items ?? []).filter((i) => i.group === group).length
+            return (
+              <Card key={group} className="flex flex-col p-2">
+                <h3 className="px-3 pt-2 pb-1 text-[11px] font-semibold tracking-[0.08em] text-fg-subtle uppercase">{group}</h3>
+                <ul className="flex-1">
+                  {choices.filter((c) => c.group === group).map((c) => (
+                    <li key={c.id}>
+                      <Link to={c.to} className="group flex items-start gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-surface-subtle focus-visible:outline-2 focus-visible:outline-brand-600">
+                        <c.icon className="mt-0.5 size-[18px] shrink-0 text-brand-600" aria-hidden />
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-sm font-medium text-fg group-hover:text-brand-700">{c.name}</span>
+                          <span className="mt-0.5 block text-xs text-fg-subtle">{c.short}</span>
+                        </span>
+                        <ArrowRight className="mt-1 size-3.5 shrink-0 text-fg-subtle opacity-0 transition-opacity group-hover:opacity-100" aria-hidden />
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+                <Link to={GROUP_LIST[group].to} className="mx-3 mt-1 mb-1.5 border-t border-line pt-2.5 text-[13px] font-medium text-brand-700 hover:underline">
+                  {GROUP_LIST[group].label}
+                  {mine > 0 ? ` (${mine})` : ''}
+                </Link>
+              </Card>
+            )
+          })}
+        </div>
+      </section>
     </>
   )
 }
 
-/** Everything the student has written with PaperAid, newest first; paper checks keep their history. */
+/** Everything the student has started, by section: what is still pending first, then what is done. */
 export function YourWorkPage() {
   useTitle('Your work')
   const { items, error } = useYourWork()
+  const [params] = useSearchParams()
+  const only = params.get('section')
+  const sections = SECTION_LISTS.filter((s) => !only || s.group === only)
+
   return (
     <>
       <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-medium tracking-tight text-fg sm:text-3xl">Your work</h1>
-          <p className="mt-1 text-sm text-fg-muted">Everything you have started, with where it is. Open one to read, change or download it.</p>
+          <p className="mt-1 text-sm text-fg-muted">Everything you have started, by section. Open one to read, change or download it.</p>
         </div>
         <Link to="/app/history" className="text-sm font-semibold text-brand-700 hover:underline">
           Paper checks and formatting
@@ -233,9 +142,37 @@ export function YourWorkPage() {
       {items === null && !error ? (
         <Skeleton className="h-64 rounded-2xl" />
       ) : items && items.length ? (
-        <ItemList items={items} />
+        <div className="space-y-8">
+          {sections.map((section) => {
+            const mine = items.filter((i) => i.group === section.group)
+            if (!mine.length) return null
+            const pending = mine.filter((i) => !i.done)
+            const done = mine.filter((i) => i.done)
+            return (
+              <section key={section.group} aria-labelledby={`work-${section.label}`}>
+                <div className="mb-2 flex items-center justify-between">
+                  <h2 id={`work-${section.label}`} className="text-[15px] font-medium text-fg">{section.label}</h2>
+                  <Link to={section.to} className="text-sm font-medium text-brand-700 hover:underline">Open {section.label.toLowerCase()}</Link>
+                </div>
+                {pending.length > 0 && (
+                  <>
+                    <p className="mb-1.5 text-xs font-semibold tracking-[0.06em] text-fg-subtle uppercase">Pending ({pending.length})</p>
+                    <ItemList items={pending} />
+                  </>
+                )}
+                {done.length > 0 && (
+                  <>
+                    <p className={`mb-1.5 text-xs font-semibold tracking-[0.06em] text-fg-subtle uppercase ${pending.length ? 'mt-4' : ''}`}>Done ({done.length})</p>
+                    <ItemList items={done} />
+                  </>
+                )}
+              </section>
+            )
+          })}
+          {only && <Link to="/app/work" className="inline-block text-sm font-medium text-brand-700 hover:underline">See all your work</Link>}
+        </div>
       ) : (
-        <EmptyState icon={<FolderOpen className="size-5" />} title="Nothing here yet" action={<ButtonLink to="/app/new">Start something</ButtonLink>}>
+        <EmptyState icon={<FolderOpen className="size-5" />} title="Nothing here yet" action={<ButtonLink to="/app">See what you can start</ButtonLink>}>
           Your coursework, proposals and funding documents will be listed here.
         </EmptyState>
       )}

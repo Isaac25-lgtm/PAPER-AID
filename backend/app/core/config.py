@@ -94,6 +94,11 @@ class Settings(BaseSettings):
     # The algorithm revision of 2026-10-09 (owner, with Codex's plan). WORKFLOW is frozen into every quote's engine
     # (Engine.workflow), so a job keeps the algorithm it was priced with. 1: as before. 2: see Engine.workflow.
     workflow: int = 1
+    # Workflow 2 has two parts that can be used apart (owner, 2026-10-10: simplify the current path, keep the other as
+    # its backup). The research and the code-decided coursework plan come with WORKFLOW=2 alone. FINAL_EDITOR adds the
+    # premium model correcting and deciding at the end; without it the earlier final review stays, with one repair
+    # round for coursework so a draft cannot go round the loop past ten minutes. Frozen as Engine.final_editor.
+    final_editor: bool = True
     # Choosing research topics is a narrow task: its own stage, so its thinking level can differ from planning's
     # (HIGH there took up to 100 s for a list of topics, 8 October).
     topics_model: str = "gemini-3.8-flash"

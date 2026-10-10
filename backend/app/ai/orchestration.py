@@ -462,7 +462,7 @@ def current_engine(settings: Settings) -> Engine:
                   ai_check_peer_model=settings.ai_check_peer_model, routine_model=settings.routine_model, drafting_model=settings.drafting_model,
                   require_dual_approval=settings.require_dual_approval, explicit_coverage=True, frontier_guidance=settings.frontier_guidance,
                   partial_chapters=settings.partial_chapters, single_reviewer=settings.single_reviewer,
-                  prompts=prompts, workflow=min(2, max(1, settings.workflow))))
+                  prompts=prompts, workflow=min(2, max(1, settings.workflow)), final_editor=settings.workflow >= 2 and settings.final_editor))
 
 
 REASONS = ["GENERIC_PHRASING", "UNIFORM_STRUCTURE", "LOW_SPECIFICITY", "FORMULAIC_TRANSITIONS", "OVER_HEDGING", "UNSUPPORTED_SUMMARY", "REPETITION", "STYLE_SHIFT"]

@@ -231,6 +231,9 @@ class Engine(Camel):
     # as it was priced before. 2: the scholarly index searched first from a ranked pool, web search for official
     # sources and essential gaps, only uncovered topics searched, and the premium reviewer correcting directly.
     workflow: int = 1
+    # With workflow 2: True, the premium model corrects the finished work itself and decides (the final editor);
+    # False, the earlier final review and repair, with one repair round for coursework ("the simplified current path").
+    final_editor: bool = False
 
 
 class Passage(Camel):

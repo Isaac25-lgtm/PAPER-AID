@@ -537,7 +537,7 @@ def test_a_correction_that_names_its_section_by_heading_is_applied_to_that_secti
     section = next(s for s in document.sections if s.key == seen["editable"]["key"])
     assert section.paragraphs[0] == "The essay first sets out the question and the argument it will make about maternal health."
     assert document.approval.refused == 0 and document.approval.corrections == 1
-    assert seen["length"]["minimum"] == 1276 and seen["length"]["limit"] == 1500  # the editor is told how short is too short
+    assert seen["length"]["minimum"] == 1276 and seen["length"]["limit"] == 1455  # how short is too short, and a little under the real limit
 
 
 def test_what_the_editor_is_sent_back_names_sections_by_key(v2):
@@ -1186,4 +1186,267 @@ def test_the_speed_report_counts_a_work_that_stopped_before_its_draft_and_ages_j
     out = report(jobs, now=datetime(2026, 10, 9, 11, 0, tzinfo=UTC))
     assert out["documents"]["workflow 2"]["works"] == 2 and out["documents"]["workflow 2"]["delivered"] == 1  # a (stopped) and b; c has simply no draft yet
     assert out["unfinished"]["PLAN · workflow 2"] == {"jobs": 1, "oldestMinutes": 30.0}
+
+
+# --- The simplified current path: workflow 2's research and plan, the earlier review, one repair (owner 2026-10-10) ----
+
+
+@pytest.fixture
+def simple(tmp_path, monkeypatch):
+    from tests.conftest import _client
+
+    monkeypatch.setenv("WORKFLOW", "2")
+    monkeypatch.setenv("FINAL_EDITOR", "false")
+    monkeypatch.setenv("WORKS_ENABLED", '["CONCEPT_NOTE","COURSEWORK","FUNDING_PROPOSAL"]')
+    yield from _client(tmp_path, monkeypatch, "cost")
+
+
+def _unanswered(payload, answered):
+    return {"rules": [{"rule": r["rule"], "status": "PASS", "note": "Met.", "where": ""} for r in payload["rules"]],
+            "coverage": [{"id": c["id"], "answered": answered, "where": ""} for c in payload["coverage"]],
+            "priorities": [{"priority": p, "addressed": True, "where": ""} for p in payload["priorities"]]}
+
+
+def test_the_simplified_path_researches_and_plans_the_new_way_and_keeps_the_earlier_final_review(simple):
+    from app.runtime import get_runtime
+
+    _, job, document = _draft(simple)
+    assert job["status"] == "COMPLETED", job.get("failure")
+    tasks = simple.models.tasks
+    assert "w_final" in tasks and not {"w_edit", "w_flag", "w_resolve", "w_plan_review"} & set(tasks)  # the plan by code checks; the review as before
+    engine = get_runtime().store.get(job["id"]).quote.engine
+    assert (engine.workflow, engine.final_editor, engine.prompts["w_needs"]) == (2, False, "w-needs-v2") and document.approval is None
+    assert get_runtime().store.get(job["id"]).topics  # the routes of workflow 2's research are recorded
+
+
+def test_the_simplified_path_repairs_a_coursework_draft_once_and_no_more(simple):
+    """Trial of 9 October: the drafts that went round the repair loop twice took 17 and 18 minutes."""
+    repairs, reviews = [], []
+
+    def final(payload):
+        reviews.append(1)
+        return _unanswered(payload, answered=False)  # every review objects: only the limit can end it
+
+    def repair(payload):
+        from tests import fake_works
+
+        repairs.append(1)
+        return fake_works.repair(payload)
+
+    _, job, _ = _draft(simple, **{})
+    assert job["status"] == "COMPLETED", job.get("failure")
+    simple.models.overrides.update(w_final=final, w_repair=repair)
+    from tests.test_works import _coursework, _run, _work
+
+    work = _coursework(simple)
+    _run(simple, work["id"], "PLAN")
+    work = _work(simple, work["id"])
+    simple.post(f"/api/works/{work['id']}/plan/approve", headers=STUDENT, json={"baseVersion": work["planVersion"]})
+    _run(simple, work["id"], "DRAFT")
+    assert len(repairs) == 1 and len(reviews) == 2  # reviewed, repaired once, reviewed again: then it stops
+
+
+def test_the_editor_switch_is_frozen_with_the_workflow(monkeypatch):
+    from app.ai.orchestration import current_engine
+
+    def engine(**env):
+        for name in ("WORKFLOW", "FINAL_EDITOR"):
+            monkeypatch.delenv(name, raising=False)
+        for name, value in env.items():
+            monkeypatch.setenv(name, value)
+        return current_engine(real_settings())
+
+    assert (engine().workflow, engine().final_editor) == (1, False)
+    assert (engine(WORKFLOW="2").workflow, engine(WORKFLOW="2").final_editor) == (2, True)
+    assert (engine(WORKFLOW="2", FINAL_EDITOR="false").workflow, engine(WORKFLOW="2", FINAL_EDITOR="false").final_editor) == (2, False)
+    assert engine(FINAL_EDITOR="true").final_editor is False  # the editor belongs to workflow 2: on workflow 1 nothing changes
+
+
+# --- From the trials of 10 October -------------------------------------------------------------------------------------
+
+
+def test_the_editor_can_write_into_a_section_code_left_empty():
+    """A chapter failed as "The section is empty": code had withheld its one paragraph, the editor wrote the section
+    twice, and both corrections were refused for naming no existing paragraph."""
+    from app.proposals.ai import Correction, SectionText, Table
+    from app.proposals.pipeline import apply_corrections
+
+    current = {"significance": SectionText(key="significance", paragraphs=[], table=Table(caption="", rows=[])),
+               "problem": SectionText(key="problem", paragraphs=["The problem is stated here."], table=Table(caption="", rows=[]))}
+    corrections = [Correction(section="significance", paragraph="p1", action="REPLACE", text="The findings will inform district planners.", kind="CONCLUSION", reason="Empty."),
+                   Correction(section="significance", paragraph="", action="INSERT_AFTER", text="They will also guide later studies.", kind="CONCLUSION", reason="Empty."),
+                   Correction(section="problem", paragraph="p9", action="REPLACE", text="A paragraph that does not exist.", kind="CLAIM", reason="Wrong place.")]
+    applied, refused = apply_corrections(current, corrections, ["significance", "problem"])
+    assert current["significance"].paragraphs == ["The findings will inform district planners.", "They will also guide later studies."]
+    assert [a["paragraph"] for a in applied] == ["p1", "p2"] and list(refused) == ["problem"]  # a section with text still needs a real paragraph named
+
+
+def test_a_theory_with_no_confirmed_source_is_named_in_the_checks_and_the_step_goes_on():
+    """A chapter stopped because no page PaperAid could read confirmed the words quoted for a theory. A study, a
+    figure or a policy the work depends on still stops the step."""
+    from app.proposals.pipeline import essential_answered
+
+    theory = _asked(1, "How Random Utility Theory explains adoption decisions", "random utility theory adoption", essential=True, category="METHOD")
+    study = _asked(2, "Adoption of climate-smart practices among smallholders in Mbale", "climate-smart adoption smallholders Mbale", essential=True)
+    assert essential_answered(_runner_v(2), [theory], [], []) == [theory]
+    with pytest.raises(PermanentStageError) as stopped:
+        essential_answered(_runner_v(2), [theory, study], [], [])
+    assert stopped.value.code == "EVIDENCE_MISSING" and "Mbale" in stopped.value.user_message and "Random Utility" not in stopped.value.user_message
+    assert essential_answered(_runner_v(1), [theory, study], [], []) == []
+
+
+def test_the_first_draft_is_asked_for_nearly_its_whole_target_on_workflow_2(simple):
+    """Told the plan's own range (70% of the target), the writer wrote body sections at 65 to 90% of it."""
+    def asked_minimums(c):
+        seen = []
+        c.models.overrides["w_draft"] = lambda payload: (seen.extend((s["words"], s["minWords"]) for s in payload["sections"]), __import__("tests.fake_works", fromlist=["draft"]).draft(payload))[1]
+        _draft(c)
+        return seen
+
+    tight = asked_minimums(simple)
+    assert tight and all(minimum >= round(words * 0.92) for words, minimum in tight)
+
+
+def test_the_first_draft_is_given_a_ceiling_too_so_it_does_not_overshoot_a_hard_limit(simple):
+    """Round 3 of the test loop: with the floor alone the drafts went over their limit and were compressed twice."""
+    seen = []
+
+    def draft(payload):
+        from tests import fake_works
+
+        seen.extend((s["words"], s["minWords"], s["maxWords"]) for s in payload["sections"])
+        return fake_works.draft(payload)
+
+    simple.models.overrides["w_draft"] = draft
+    _draft(simple)
+    assert seen and all(low <= words <= high <= round(words * 1.05) for words, low, high in seen)
+
+
+def test_on_the_simplified_path_a_short_draft_is_lengthened_first_and_the_one_repair_is_kept(simple):
+    """Round 1 of the test loop: a 1,182-word draft for 1,500 was refused because the one repair had gone on a
+    reviewer's objection and nothing was left to lengthen it."""
+    from tests import fake_works
+
+    order = []
+
+    def short_draft(payload):
+        answer = fake_works.draft(payload)
+        for section in answer["sections"]:
+            words = " ".join(section["paragraphs"]).split()
+            section["paragraphs"] = [" ".join(words[: int(len(words) * 0.7)]).rstrip(".,;") + "."]
+        return answer
+
+    def repair(payload):
+        lengthen = any("well short" in i for s in payload["sections"] for i in s["issues"])
+        order.append("lengthen" if lengthen else "repair")
+        out = []
+        for s in payload["sections"]:
+            full = fake_works._text({"key": s["key"], "heading": s["heading"], "words": s["words"], "evidence": s["evidence"]}, [])
+            out.append({"key": s["key"], "paragraphs": full if lengthen else [*s["text"], "This part is now addressed."], "table": {"caption": "", "rows": []}})
+        return {"sections": out}
+
+    reviews = []
+
+    def final(payload):
+        reviews.append(1)
+        return _unanswered(payload, answered=len(reviews) > 1)  # objects once: the one repair must still be there for it
+
+    simple.models.overrides.update(w_draft=short_draft, w_repair=repair, w_final=final)
+    _, job, document = _draft(simple)
+    assert job["status"] == "COMPLETED", job.get("failure")
+    assert order == ["lengthen", "repair"] and 1275 <= document.words <= 1500
+
+
+# --- From round 2 of the test loop (10 October) -------------------------------------------------------------------------
+
+
+def test_a_reviewer_s_objection_to_the_statements_paperaid_places_never_stops_a_chapter(client):
+    """Trial 2026-10-10 (and live, 2026-10-08): three reviews running said "Remove the sub-headings and the general and
+    specific objectives from the text, as PaperAid inserts them automatically", so the chapter could never pass."""
+    seen = {}
+
+    def review(payload):
+        out = []
+        for s in payload["sections"]:
+            if "placedByPaperAid" in s:
+                seen[s["key"]] = s
+                out.append({"key": s["key"], "grade": "REPAIR", "note": "",
+                            "issues": ["Remove the sub-headings and the general and specific objectives from the text, as PaperAid inserts them automatically; write only the introductory paragraph."]})
+            else:
+                out.append({"key": s["key"], "grade": "PASS", "issues": [], "note": ""})
+        return {"results": out}
+
+    _, job, chapter = _chapter_one(client, p_review=review)
+    assert job["status"] == "COMPLETED", job.get("failure")
+    assert "p_fix" not in client.models.tasks  # nothing to repair: the objection is void
+    objectives = seen["objectives"]
+    assert objectives["placedByPaperAid"][0].endswith("General Objective") and not any("General Objective" in p for p in objectives["text"])  # shown apart from what the writer wrote
+    delivered = next(s for s in chapter.sections if s.key == "objectives")
+    assert any("General Objective" in p for p in delivered.paragraphs)  # and still placed in the chapter
+
+
+def test_a_real_objection_to_a_plan_owned_section_still_stands():
+    from types import SimpleNamespace
+
+    from app.proposals import pipeline
+    from tests.test_proposals import plan
+
+    inp = SimpleNamespace(plan=plan(), rulebook="ucu-2018-v2", chapter=1, inputs=SimpleNamespace(level="MASTERS"))
+    kept = pipeline.reviewer_issues(inp, "objectives", ["The introduction claims the study has been approved.", "Remove the sub-headings and the specific objectives from the text."])
+    assert kept == ["The introduction claims the study has been approved."]
+    assert pipeline.reviewer_issues(inp, "background", ["Remove the objectives listed in this section."]) == ["Remove the objectives listed in this section."]  # only where PaperAid places them
+
+
+def test_a_calculation_question_may_state_its_worked_results_and_an_essay_may_not():
+    """Every path stopped the calculation assignment in the trials: the figure check withheld the conclusion whole
+    because its numbers were calculated, not sourced."""
+    from types import SimpleNamespace
+
+    from app.proposals.ai import SectionText, Table
+    from app.works import pipeline
+
+    def work(question):
+        return SimpleNamespace(spec=SimpleNamespace(kind="COURSEWORK", coverage=[SimpleNamespace(text=question)]), inputs=SimpleNamespace(title="Coursework", description=question))
+
+    table = Table(caption="Worked example", rows=[["Step", "Value"], ["Equilibrium price", "30"], ["Equilibrium quantity", "60"]], illustrative=True)
+    current = {"theme1": SectionText(key="theme1", paragraphs=["The working is set out in the table."], table=table),
+               "conclusion": SectionText(key="conclusion", paragraphs=["The market clears at a price of 30 and a quantity of 60.", "It then clears at 44, a figure no table shows."],
+                                         table=Table(caption="", rows=[]))}
+    calc = work("A firm's demand is Q = 120 - 2P and its supply is Q = 3P - 30. Calculate the equilibrium price and quantity.")
+    essay = work("Discuss the role of Uganda's Universal Primary Education policy in improving access to education.")
+    new, old = SimpleNamespace(_engine=SimpleNamespace(workflow=2)), SimpleNamespace(_engine=SimpleNamespace(workflow=1))
+    assert pipeline._calculation(calc) and not pipeline._calculation(essay)
+    allowed = pipeline._with_worked(new, calc, current, "")
+    assert pipeline._strip(calc, current["conclusion"], {}, allowed).paragraphs == ["The market clears at a price of 30 and a quantity of 60."]  # its own results stay; an unknown figure goes
+    assert pipeline._strip(calc, current["conclusion"], {}, pipeline._with_worked(old, calc, current, "")).paragraphs == []  # the live path is unchanged
+    assert pipeline._strip(essay, current["conclusion"], {}, pipeline._with_worked(new, essay, current, "")).paragraphs == []  # an essay keeps the strict rule
+
+
+# --- From round 3 of the test loop (10 October) -------------------------------------------------------------------------
+
+
+def test_a_plan_may_state_a_descriptive_question_beside_its_hypotheses():
+    """A proposal stopped at its plan: one descriptive objective stated as a question and two null hypotheses with
+    their alternatives, refused three times by "Each null hypothesis needs its alternative hypothesis"."""
+    from app.proposals import rulebook
+    from app.proposals.pipeline import plan_statements
+    from tests.test_proposals import plan
+
+    mixed = plan(questionsKind="HYPOTHESES",
+                 specificObjectives=["To describe the practices adopted.", "To assess the effect of income on adoption.", "To assess the effect of extension visits on adoption."],
+                 researchQuestions=["What climate-smart practices are adopted by smallholder farmers in Mbale District?",
+                                    "H01: Household income does not significantly influence adoption.", "H02: Extension visits do not significantly influence adoption."],
+                 alternativeHypotheses=["Ha1: Household income significantly influences adoption.", "Ha2: Extension visits significantly influence adoption."])
+    assert not [p for p in rulebook.plan_problems("ucu-2018-v2", mixed, "MASTERS") if "hypothes" in p.lower()]
+    lines = plan_statements(mixed, "questions", "1.4")
+    assert lines[-6:] == ["1.4.2 Research Questions and Hypotheses", "i. What climate-smart practices are adopted by smallholder farmers in Mbale District?",
+                          "H01: Household income does not significantly influence adoption.", "HA1: Household income significantly influences adoption.",
+                          "H02: Extension visits do not significantly influence adoption.", "HA2: Extension visits significantly influence adoption."]  # labels printed once
+    unpaired = mixed.model_copy(update={"alternative_hypotheses": ["Household income significantly influences adoption."]})
+    assert any("2 null hypotheses, 1 alternatives" in p for p in rulebook.plan_problems("ucu-2018-v2", unpaired, "MASTERS"))  # a real mismatch still blocks
+    only_questions = mixed.model_copy(update={"research_questions": ["What is adopted?", "Why is it adopted?", "Who adopts it?"], "alternative_hypotheses": []})
+    assert any("at least one null hypothesis" in p for p in rulebook.plan_problems("ucu-2018-v2", only_questions, "MASTERS"))
+    plain = plan_statements(plan(questionsKind="HYPOTHESES", researchQuestions=["Income does not influence uptake."], alternativeHypotheses=["Income influences uptake."],
+                                 specificObjectives=["To assess income."]), "questions", "1.4")
+    assert plain[-3:] == ["1.4.2 Research Hypotheses", "H01: Income does not influence uptake.", "HA1: Income influences uptake."]  # an unmixed plan prints as before
 

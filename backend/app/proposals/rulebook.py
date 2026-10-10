@@ -163,6 +163,11 @@ def past_tense(question: str) -> bool:
     return any(w.endswith("ed") and w not in _ADJECTIVAL for w in words[1:5])
 
 
+def is_question(statement: str) -> bool:
+    """Among a plan's hypotheses, a statement worded as a question: a descriptive objective's research question."""
+    return statement.strip().endswith("?")
+
+
 def plan_problems(rulebook_id: str, plan: ProposalPlan, level: Level | None = None, four: bool = False, concept: bool = False) -> list[str]:
     """What must be fixed before a plan can be approved: code-checkable structure only. The manual's
     two-to-five guidance is a recommendation (`plan_advice`), not a blocker; a rulebook with enforced counts
@@ -183,9 +188,15 @@ def plan_problems(rulebook_id: str, plan: ProposalPlan, level: Level | None = No
     if book.get("primary_question") and not plan.primary_question.strip():
         problems.append("The plan needs a primary research question that the specific questions support.")
     if book.get("hypothesis_pairs") and plan.questions_kind == "HYPOTHESES":
+        # A descriptive objective is stated as a question beside the hypotheses and takes no alternative (trial
+        # 2026-10-10: a plan with one such question and two paired hypotheses was refused three times).
         alternatives = [a for a in plan.alternative_hypotheses if a.strip()]
-        if len(alternatives) != len(questions):
-            problems.append("Each null hypothesis needs its alternative hypothesis.")
+        nulls = [q for q in questions if not is_question(q)]
+        if not nulls:
+            problems.append("A plan with hypotheses states at least one null hypothesis; word the others as research questions, or use research questions throughout.")
+        elif len(alternatives) != len(nulls):
+            problems.append(f"Each null hypothesis needs its alternative hypothesis: {len(nulls)} null hypotheses, {len(alternatives)} alternatives. "
+                            "A descriptive objective stated as a question takes none.")
     if len(questions) != len(objectives):
         problems.append(f"Each objective needs its own research question: {len(objectives)} objectives, {len(questions)} questions.")
     if len(objectives) != len(plan.specific_objectives) or len(questions) != len(plan.research_questions):

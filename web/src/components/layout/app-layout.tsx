@@ -6,9 +6,11 @@ import { useEffect, useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router'
 import { TermsDialog } from '../../features/account/terms'
 import { useAuth } from '../../features/auth/auth-context'
+import { YourWorkProvider, pendingFirst, useYourWork, type WorkItem } from '../../features/jobs/your-work-data'
 import { useData } from '../../lib/data'
 import { formatTokenNumber } from '../../lib/format'
 import { startChoices } from '../../lib/start'
+import type { StartChoice } from '../../lib/start'
 import type { ServiceId } from '../../lib/types'
 import { useWallet } from '../../lib/use-wallet'
 import { Drawer } from '../ui/overlays'
@@ -20,7 +22,10 @@ interface NavItem {
   icon: LucideIcon
   active: (path: string, search: string) => boolean
   service?: ServiceId // shown only when this service is offered
+  groups?: StartChoice['group'][] // the student's work listed under it in the left panel
 }
+
+const LISTED = 4 // pieces of work shown under a section; the rest are one click away
 
 const HOME: NavItem[] = [
   { to: '/app', label: 'Home', icon: House, active: (p) => p === '/app' },
@@ -29,18 +34,28 @@ const HOME: NavItem[] = [
 
 /** One list of sections, the same for researchers and students (owner decision 2026-10-04). */
 const SECTIONS_NAV: NavItem[] = [
-  { to: '/app/works', label: 'Coursework & funding', icon: NotebookPen, service: 'COURSEWORK', active: (p) => p.startsWith('/app/works') },
-  { to: '/app/projects', label: 'Research proposals', icon: FilePen, service: 'PROPOSAL', active: (p) => p.startsWith('/app/projects') },
-  { to: '/app/datalab', label: 'Data Lab', icon: ChartColumn, service: 'DATALAB', active: (p) => p.startsWith('/app/datalab') },
+  { to: '/app/works', label: 'Coursework & funding', icon: NotebookPen, service: 'COURSEWORK', active: (p) => p.startsWith('/app/works'), groups: ['Coursework', 'Funding'] },
+  { to: '/app/projects', label: 'Research proposals', icon: FilePen, service: 'PROPOSAL', active: (p) => p.startsWith('/app/projects'), groups: ['Research proposals'] },
+  { to: '/app/datalab', label: 'Data Lab', icon: ChartColumn, service: 'DATALAB', active: (p) => p.startsWith('/app/datalab'), groups: ['Data analysis'] },
   { to: '/app/new?service=PAPER_CHECK', label: 'Paper Check', icon: Search, service: 'REFINE', active: (p, s) => p === '/app/new' && s.includes('PAPER_CHECK') },
   { to: '/app/new?service=ACADEMIC_FORMAT', label: 'Academic formatting', icon: FileCheck2, service: 'FORMAT', active: (p, s) => p === '/app/new' && s.includes('ACADEMIC_FORMAT') },
 ]
 
 /** The app shell (redesign 2026-10-04, after Jenni's calm): a left sidebar with New, Home, Your work and the
  *  sections; the work in the middle on white; the credit balance always in the top bar. On phones the
- *  sidebar is a drawer. */
+ *  sidebar is a drawer. The student's own work is listed in the left panel under its section, what is pending
+ *  first (owner, 2026-10-10), so the dashboard only shows what can be started. */
 export function AppLayout() {
+  return (
+    <YourWorkProvider>
+      <Shell />
+    </YourWorkProvider>
+  )
+}
+
+function Shell() {
   const { user, signOut } = useAuth()
+  const { items } = useYourWork()
   const navigate = useNavigate()
   const location = useLocation()
   const [menuOpen, setMenuOpen] = useState(false)
@@ -66,6 +81,32 @@ export function AppLayout() {
           active ? 'bg-brand-50 text-brand-700' : 'text-fg-muted hover:bg-surface-muted hover:text-fg')}>
         <item.icon className={clsx(big ? 'size-5' : 'size-[18px]', active ? 'text-brand-600' : 'text-fg-subtle')} aria-hidden /> {item.label}
       </Link>
+    )
+  }
+
+  /** A section with the student's work under it: pending first, then done, the newest of each. */
+  const sectionBlock = (item: NavItem, big = false) => {
+    const mine = pendingFirst((items ?? []).filter((i) => item.groups?.includes(i.group)))
+    return (
+      <div key={item.to}>
+        {navLink(item, big)}
+        {mine.length > 0 && (
+          <ul className={clsx('mt-0.5 mb-1.5 border-l border-line', big ? 'ml-5 pl-2' : 'ml-[19px] pl-2')}>
+            {mine.slice(0, LISTED).map((work) => (
+              <li key={work.key}>
+                <WorkLink work={work} active={location.pathname === work.to} big={big} />
+              </li>
+            ))}
+            {mine.length > LISTED && (
+              <li>
+                <Link to="/app/work" className={clsx('block rounded-md px-2 py-1 font-medium text-brand-700 hover:underline', big ? 'text-sm' : 'text-xs')}>
+                  See all {mine.length}
+                </Link>
+              </li>
+            )}
+          </ul>
+        )}
+      </div>
     )
   }
 
@@ -136,7 +177,7 @@ export function AppLayout() {
         <nav aria-label="App" className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-3">
           {HOME.map((item) => navLink(item))}
           {sections.length > 0 && <p className="mt-5 mb-1 px-2.5 text-[11px] font-semibold tracking-[0.08em] text-fg-subtle uppercase">Sections</p>}
-          {sections.map((item) => navLink(item))}
+          {sections.map((item) => sectionBlock(item))}
         </nav>
         <div className="flex flex-col gap-0.5 border-t border-line px-3 py-3">
           {footerLinks.map((item) => navLink(item))}
@@ -173,7 +214,7 @@ export function AppLayout() {
         <nav aria-label="App mobile" className="flex flex-col gap-0.5">
           {HOME.map((item) => navLink(item, true))}
           {sections.length > 0 && <p className="mt-4 mb-1 px-2.5 text-xs font-semibold tracking-[0.08em] text-fg-subtle uppercase">Sections</p>}
-          {sections.map((item) => navLink(item, true))}
+          {sections.map((item) => sectionBlock(item, true))}
           <p className="mt-4 mb-1 px-2.5 text-xs font-semibold tracking-[0.08em] text-fg-subtle uppercase">Start new</p>
           {choices.map((c) => (
             <Link key={c.id} to={c.to} className="flex items-center gap-2.5 rounded-lg px-2.5 py-3 text-base font-medium text-fg hover:bg-surface-muted">
@@ -189,6 +230,21 @@ export function AppLayout() {
       </Drawer>
       <TermsDialog />
     </div>
+  )
+}
+
+/** One piece of the student's work in the left panel: a dot for where it is (being written, waiting, done), its title. */
+function WorkLink({ work, active, big }: { work: WorkItem; active: boolean; big: boolean }) {
+  const tone = work.status.tone
+  const dot = tone === 'running' ? 'bg-brand-500 animate-pulse' : tone === 'ready' || tone === 'warn' ? 'bg-emerald-500' : tone === 'danger' ? 'bg-red-500' : 'bg-amber-400'
+  return (
+    <Link to={work.to} title={`${work.title} · ${work.status.label}`} aria-current={active ? 'page' : undefined}
+      className={clsx('flex items-center gap-2 rounded-md px-2 transition-colors focus-visible:outline-2 focus-visible:outline-brand-600', big ? 'py-2 text-sm' : 'py-1 text-[13px]',
+        active ? 'bg-brand-50 text-brand-700' : 'text-fg-muted hover:bg-surface-muted hover:text-fg')}>
+      <span className={clsx('size-1.5 shrink-0 rounded-full', dot)} aria-hidden />
+      <span className="min-w-0 flex-1 truncate">{work.title}</span>
+      <span className="sr-only">{work.status.label}</span>
+    </Link>
   )
 }
 
