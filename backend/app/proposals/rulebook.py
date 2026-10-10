@@ -4,6 +4,7 @@ revision never changes a proposal already under way. Prompts receive only the ru
 never the whole manual."""
 
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import cache
@@ -163,9 +164,20 @@ def past_tense(question: str) -> bool:
     return any(w.endswith("ed") and w not in _ADJECTIVAL for w in words[1:5])
 
 
+_QUESTION_MARKS = "?\uff1f\u061f\u037e"  # also the full-width, Arabic and Greek question marks
+_CLOSERS = " \t\"'\u201c\u201d\u2018\u2019\u00bb)]."
+_HYPOTHESIS_LABEL = re.compile(r"^\s*[\"'\u201c\u2018(]*\s*H\s*(?:0|o|\u2080|a|1)\s*\d*\s*[:.)]", re.I)
+_ASKS = re.compile(r"^\s*[\"'\u201c\u2018(]*\s*(?:what|which|who|whom|whose|how|why|when|where|to what extent|in what ways?|is|are|was|were|does|do|did|can|could|should|will|would)\b", re.I)
+
+
 def is_question(statement: str) -> bool:
-    """Among a plan's hypotheses, a statement worded as a question: a descriptive objective's research question."""
-    return statement.strip().endswith("?")
+    """Among a plan's hypotheses, a statement worded as a question: a descriptive objective's research question,
+    which takes no alternative. A statement labelled as a hypothesis ("H01:", "Ha2:") never is. Otherwise it is one
+    when it ends in a question mark of any script, whatever quotation marks or full stop follow it, or opens the way
+    a question does (Codex's audit of cbb99cb, finding 10: only a final ASCII "?" counted)."""
+    if _HYPOTHESIS_LABEL.match(statement):
+        return False
+    return statement.rstrip(_CLOSERS)[-1:] in tuple(_QUESTION_MARKS) or bool(_ASKS.match(statement))
 
 
 def plan_problems(rulebook_id: str, plan: ProposalPlan, level: Level | None = None, four: bool = False, concept: bool = False) -> list[str]:

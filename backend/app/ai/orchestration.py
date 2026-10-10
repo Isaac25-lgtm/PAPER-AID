@@ -141,8 +141,9 @@ STEPS: dict[str, Step] = {
     "p_plan_review_peer": Step("writer", Stage.PLANNING, "p-plan-review-v2", 8000),
     # Chapter: writer drafts → code checks → lead reviews → writer fixes (bounded rounds) → lead readiness.
     "p_draft": Step("writer", Stage.DRAFTING, "p-draft-v2", 16000),
-    "p_review": Step("lead", Stage.AUDITING, "p-review-v3", 8000),
-    "p_review_peer": Step("writer", Stage.AUDITING, "p-review-v3", 8000),
+    # v4 (2026-10-10): a plan-owned section is reviewed as the writer's introduction, with what PaperAid places given apart.
+    "p_review": Step("lead", Stage.AUDITING, "p-review-v4", 8000),
+    "p_review_peer": Step("writer", Stage.AUDITING, "p-review-v4", 8000),
     "p_fix": Step("writer", Stage.AUDITING, "p-fix-v2", 16000),
     "p_readiness": Step("lead", Stage.AUDITING, "p-readiness-v1", 8000),
     # Workflow 2 (algorithm revision 2026-10-09): the final editor of a chapter's sections, as for works (w_edit).
@@ -382,6 +383,17 @@ def freeze_vertex(settings: Settings, engine: Engine) -> Engine:
         stage = stage_for(task, engine.tier, engine.workflow)
         engine.vertex_routes[task], engine.vertex_stages[task] = freeze(stage, task), stage
     engine.vertex_signoff = freeze(SIGNOFF, "review")
+    if engine.workflow >= 2:
+        # Workflow 2 (Codex's audit of cbb99cb, finding 5): the owner's rule is that the premium model approves the
+        # wording that is delivered. As priced before, a review after a repair went to the standard model and the
+        # first review could fall back to it, so the premium model need never have seen the final text. Here every
+        # approval review, the first and each one after a repair, is the premium model's alone.
+        from app.ai.gemini import SIGNOFF_TASKS
+
+        for task in SIGNOFF_TASKS:
+            if task in engine.vertex_routes:
+                engine.vertex_routes[task] = engine.vertex_routes[task][:1]
+        engine.vertex_signoff = freeze("premium_audit", "review")[:1]
     engine.vertex_addenda = dict(VERTEX_ADDENDA)
     engine.vertex_project = settings.vertex_project or ""
     engine.vertex_location = settings.vertex_location or ""
@@ -462,7 +474,7 @@ def current_engine(settings: Settings) -> Engine:
                   ai_check_peer_model=settings.ai_check_peer_model, routine_model=settings.routine_model, drafting_model=settings.drafting_model,
                   require_dual_approval=settings.require_dual_approval, explicit_coverage=True, frontier_guidance=settings.frontier_guidance,
                   partial_chapters=settings.partial_chapters, single_reviewer=settings.single_reviewer,
-                  prompts=prompts, workflow=min(2, max(1, settings.workflow)), final_editor=settings.workflow >= 2 and settings.final_editor))
+                  prompts=prompts, workflow=min(2, max(1, settings.workflow)), final_editor=settings.final_editor if settings.workflow >= 2 else None))
 
 
 REASONS = ["GENERIC_PHRASING", "UNIFORM_STRUCTURE", "LOW_SPECIFICITY", "FORMULAIC_TRANSITIONS", "OVER_HEDGING", "UNSUPPORTED_SUMMARY", "REPETITION", "STYLE_SHIFT"]
@@ -938,7 +950,20 @@ class AIRunner:
         check_content(self._engine)
         return self._engine.prompts[task]
 
-    def _call[T: BaseModel](
+    def _call[T: BaseModel](self, task: str, payload: dict[str, Any], schema: dict[str, Any], shape: type[T], max_searches: int = 0,
+                            accept: Callable[[T, ModelResult], T] | None = None) -> T | None:
+        """One model call (see `_ask`). On workflow 2 an approval review has no stand-in: when the premium model cannot
+        answer, the stage waits with its work kept and asks again (as the final editor does), never a retry used up."""
+        from app.ai.gemini import SIGNOFF_TASKS
+
+        try:
+            return self._ask(task, payload, schema, shape, max_searches, accept)
+        except RetryableStageError as exc:
+            if self._engine.workflow >= 2 and self._engine.vertex_routes and task in SIGNOFF_TASKS and exc.code in REVIEW_WAITS:
+                raise CapacityWait("FINAL_REVIEW", delay_sec=self.settings.review_wait_sec, kind="REVIEW") from exc
+            raise
+
+    def _ask[T: BaseModel](
         self,
         task: str,
         payload: dict[str, Any],

@@ -1098,3 +1098,51 @@ of these fixes yet (it needs a budget from the owner: $6.27 of the $15 is left);
 proposals, revisions and long documents have not been trialled on workflow 2; fairness between students under heavy
 load; the final editor for Data Lab reports and Paper Check; `export.verify` does not yet prove tables, figures and
 layout; rollback with queued jobs and the new checkpoint format has tests only for reading the older form.
+
+## 2026-10-10 — The test loop: a simplified current path, the dashboard by section, Codex's audit of cbb99cb
+
+The owner's instructions of the day: test in small rounds (three courseworks, three proposals as far as Chapter One),
+fix what each round shows and run it again; coursework must not take more than ten minutes; perfect both algorithms
+so one can back the other up; simplify the current one rather than make it "agentic"; the dashboard shows what can be
+started and the left panel holds the work. Published at the owner's word ("first publish what we have ... we will
+revise what is committed and published") with **both newer paths still off**: production runs workflow 1.
+
+- **Three paths, two switches.** `WORKFLOW=2` brings the research of the algorithm revision and the code-decided
+  coursework plan. `FINAL_EDITOR` (frozen as `Engine.final_editor`; `Engine.editor` reads it) adds the premium model
+  correcting and deciding. Without it ("the simplified current path") the earlier final review stays, with one repair
+  for a coursework draft. An engine frozen on workflow 2 before the switch existed keeps the editor.
+- **On workflow 2 the premium model approves the wording that is delivered** (Codex, finding 5): every approval
+  review, the first and each one after a repair, is its alone; no cheaper sign-off and no stand-in; when it cannot
+  answer the stage waits. Workflow 1 keeps the sign-off it was priced with.
+- **Drafts (workflow 2):** the writer is asked for each section within 92 to 105% of its target (told the plan's
+  range it wrote body sections at 65 to 90%, so a third of drafts arrived short); a draft still short is lengthened
+  once before any review; the editor is told the real limit and a working target of 97% of it; it can write into a
+  section code left empty.
+- **Chapters, every workflow:** from `p-review-v4` a plan-owned section is reviewed as the writer's introduction, with
+  what PaperAid places given apart (`placedByPaperAid`), because a chapter failed three reviews on "remove the
+  objectives, as PaperAid inserts them". Nothing a reviewer says is set aside by code (a keyword filter tried first
+  dropped a genuine rejection: Codex, finding 1). A plan may state a descriptive question beside its hypotheses
+  (`is_question`; a plan of hypotheses only prints exactly as before).
+- **Withdrawn after Codex's audit:** an exception letting a calculation question state its worked results anywhere
+  (it let an invented figure into factual prose); an exception letting a missing essential theory or method, and on
+  the simplified path any missing essential topic, become a warning; skipping a draft's research when the plan had
+  found six sources. Missing essential evidence stops the step on every workflow 2 path, as agreed on 9 October.
+- **Dashboard (owner):** the dashboard shows what can be started, by section; the person's work is in the left
+  panel under its section, pending first, and on Your work by section. One light request (`GET /api/me/work`, from
+  the stored records alone) is polled, one at a time, every 15 s while something is being written and every 60 s
+  otherwise, never in a hidden tab; a failed refresh keeps what was last loaded (Codex, findings 7 to 9).
+
+### What the rounds showed (real models, synthetic topics; about $32 spent on trials in all)
+
+| Path | Courseworks | Coursework minutes | Chapter One |
+|---|---|---|---|
+| New (final editor), after the ten fixes of 9 October | 5 of 6 | 7.2 to 12.8 | 4 of 6 |
+| Simplified, round 1 | 1 of 3 | 6.1 | 3 of 3 |
+| Simplified, round 2 | 2 of 3 | 6.3, 6.5 | 2 of 3 |
+| Simplified, round 3 | 3 of 3 | 7.7, 10.9, 13.2 | 2 of 3 |
+| Simplified, round 4 | 2 of 3 | 12.0, 12.9 | 3 of 3 |
+
+The rounds ran on changing code and under different loads, so they are diagnostic, not a controlled comparison.
+**Neither newer path has yet shown coursework reliably within ten minutes**, and the calculation assignment still has
+no sound treatment (its results need provenance code can check). No round has run on the code as corrected after
+Codex's audit: a round on 10 October was lost when the machine's temporary folder was cleared.

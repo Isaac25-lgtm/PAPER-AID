@@ -16,6 +16,7 @@ import type {
   ServiceSelection,
   Wallet,
   WalletSummary,
+  WorkSummary,
 } from './types'
 import type { AnalysisResult, AnalysisSpec, DataPreview, DataProject, IdentifierRules, Places, ReportDocument, TranscriptChoice, UploadChoice, VariableKind } from './datalab-types'
 import type { ChapterView, CitationStyle, Comparison, EvidenceItem, FeedbackStatus, FrameworkStyle, Project, ProposalInputs, ProposalPlan, Rulebook, SampleSize, StepId, StepQuote, TitlePage, Variables } from './proposal-types'
@@ -74,6 +75,8 @@ export interface DataSource {
   deleteAccount(): Promise<void>
   /** The person accepted these terms (at sign-up, or when asked again). */
   acceptTerms(version: string): Promise<void>
+  /** Every piece of the person's work as one light line each (the left panel and the dashboard), newest first. */
+  yourWork(): Promise<WorkSummary[]>
   /** "Your work is ready" messages: which channels exist and the account's choices. */
   notifications(): Promise<Notifications>
   setNotifications(choice: Partial<Omit<Notifications, 'available'>>): Promise<Notifications>

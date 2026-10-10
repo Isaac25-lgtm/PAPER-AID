@@ -233,7 +233,13 @@ class Engine(Camel):
     workflow: int = 1
     # With workflow 2: True, the premium model corrects the finished work itself and decides (the final editor);
     # False, the earlier final review and repair, with one repair round for coursework ("the simplified current path").
-    final_editor: bool = False
+    final_editor: bool | None = None
+
+    @property
+    def editor(self) -> bool:
+        """Whether the final editor approves. An engine frozen on workflow 2 before the switch existed has no value
+        and keeps the editor it was priced with (Codex's audit of cbb99cb, finding 6)."""
+        return self.workflow >= 2 and self.final_editor is not False
 
 
 class Passage(Camel):

@@ -4,7 +4,7 @@ import { DataError, type DataSource, type JobQuery, type Notifications } from '.
 import type { ChapterView, Comparison, EvidenceItem, Project, Rulebook, StepQuote } from './proposal-types'
 import type { AnalysisResult, DataPreview, DataProject, IdentifierRules, Places, ReportDocument } from './datalab-types'
 import type { Work, WorkDocumentView, WorkStepQuote } from './work-types'
-import type { AdminJob, AdminSummary, FileMeta, ImageMeta, Job, JobDocument, LedgerEntry, Page, PublicConfig, QuoteResponse, Wallet, WalletSummary } from './types'
+import type { AdminJob, AdminSummary, FileMeta, ImageMeta, Job, JobDocument, LedgerEntry, Page, PublicConfig, QuoteResponse, Wallet, WalletSummary, WorkSummary } from './types'
 
 interface Options {
   config: PublicConfig
@@ -201,6 +201,7 @@ export function createApiSource({ config, getAuthHeaders }: Options): DataSource
 
     deleteAccount: () => request<void>('/api/me', { method: 'DELETE' }),
     acceptTerms: (version) => request<void>('/api/me/terms', { method: 'POST', body: JSON.stringify({ version }) }),
+    yourWork: () => request<WorkSummary[]>('/api/me/work'),
     notifications: () => request<Notifications>('/api/me/notifications'),
     setNotifications: (choice) => request<Notifications>('/api/me/notifications', { method: 'POST', body: JSON.stringify(choice) }),
 

@@ -479,3 +479,15 @@ export interface PublicConfig {
   retentionDays: number
   presets: { id: string; label: string; available: boolean }[]
 }
+
+/** One piece of a person's work as the left panel and the dashboard show it (GET /api/me/work). */
+export interface WorkSummary {
+  id: string
+  section: 'Coursework' | 'Funding' | 'Research proposals' | 'Data analysis'
+  kind: 'COURSEWORK' | 'CONCEPT_NOTE' | 'FUNDING_PROPOSAL' | 'PROPOSAL' | 'DATALAB'
+  title: string
+  updatedAt: string
+  state: 'WRITING' | 'FAILED' | 'READY' | 'READY_WITH_WARNINGS' | 'NEEDS_ATTENTION' | 'NOT_STARTED' | 'CHAPTERS' | 'CONCEPT' | 'REPORT' | 'ANALYSES' | 'NOT_ANALYSED' | 'NO_DATA'
+  chapters: number[]
+  analyses: number
+}

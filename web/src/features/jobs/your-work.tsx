@@ -138,7 +138,7 @@ export function YourWorkPage() {
           Paper checks and formatting
         </Link>
       </div>
-      {error && <Alert tone="danger">{error}</Alert>}
+      {error && <Alert tone={items ? 'info' : 'danger'} className="mb-4">{items ? error : 'We could not load your work.'}</Alert>}
       {items === null && !error ? (
         <Skeleton className="h-64 rounded-2xl" />
       ) : items && items.length ? (

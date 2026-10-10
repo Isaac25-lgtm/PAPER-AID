@@ -1,5 +1,6 @@
 """HTTP routes. Deliberately thin: parse input, call app.jobs.service, return its result."""
 
+from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, Body, Depends, File, Query, Request, UploadFile
@@ -51,6 +52,50 @@ def config(rt: Runtime = Depends(get_runtime), user: User | None = Depends(optio
 @api.get("/me")
 def me(user: User = Depends(current_user)) -> dict:
     return {"uid": user.uid, "email": user.email, "isAdmin": user.is_admin}
+
+
+class WorkSummary(Camel):
+    """One piece of a person's work as the left panel and the dashboard show it: where it is, never what it says."""
+
+    id: str
+    section: Literal["Coursework", "Funding", "Research proposals", "Data analysis"]
+    kind: Literal["COURSEWORK", "CONCEPT_NOTE", "FUNDING_PROPOSAL", "PROPOSAL", "DATALAB"]
+    title: str
+    updated_at: datetime
+    state: Literal["WRITING", "FAILED", "READY", "READY_WITH_WARNINGS", "NEEDS_ATTENTION", "NOT_STARTED", "CHAPTERS", "CONCEPT", "REPORT", "ANALYSES", "NOT_ANALYSED", "NO_DATA"]
+    chapters: list[int] = []  # a proposal: the chapters written
+    analyses: int = 0  # a data project: its analyses
+
+
+@api.get("/me/work", response_model=list[WorkSummary])
+def your_work(user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> list[WorkSummary]:
+    """Every piece of the person's work, one light line each, newest first, from the stored records alone: no
+    specification, document, evidence or dataset is read (a record that claims a running step has that step's
+    status looked up, as the full views do: the claim outlives the step). It is what every page of the app polls for the left panel,
+    which the full lists (each builds its whole view) are too heavy for (Codex's audit of cbb99cb, finding 9)."""
+    out: list[WorkSummary] = []
+    for w in rt.store.list_works(user.uid):
+        if w.deleting:
+            continue
+        doc = next((d for d in w.documents if d.version == w.current), w.documents[-1] if w.documents else None)
+        state = ("WRITING" if service.step_running(rt, w) else "FAILED" if w.auto_failure and doc is None else "NOT_STARTED" if doc is None
+                 else "READY" if doc.status == "READY" else "READY_WITH_WARNINGS" if doc.status == "READY_WITH_WARNINGS" else "NEEDS_ATTENTION")
+        out.append(WorkSummary(id=w.id, section="Coursework" if w.kind == "COURSEWORK" else "Funding", kind=w.kind, title=(w.plan.title if w.plan else "") or w.inputs.title,
+                               updated_at=w.updated_at, state=state))
+    for p in rt.store.list_projects(user.uid):
+        if p.deleting:
+            continue
+        written = sorted(c.number for c in p.chapters if c.current and c.number != 4)
+        concept = any(c.number == 4 and c.current for c in p.chapters)
+        state = ("WRITING" if service.step_running(rt, p) else "FAILED" if p.auto_failure and not written and not concept else "CHAPTERS" if written else "CONCEPT" if concept else "NOT_STARTED")
+        out.append(WorkSummary(id=p.id, section="Research proposals", kind="PROPOSAL", title=(p.plan.title if p.plan else "") or p.inputs.topic, updated_at=p.updated_at,
+                               state=state, chapters=written))
+    for d in rt.store.list_datalab(user.uid):
+        if d.deleting:
+            continue
+        state = "WRITING" if service.step_running(rt, d) else "REPORT" if d.reports else "ANALYSES" if d.analyses else "NOT_ANALYSED" if d.source or d.documents else "NO_DATA"
+        out.append(WorkSummary(id=d.id, section="Data analysis", kind="DATALAB", title=d.title, updated_at=d.updated_at, state=state, analyses=len(d.analyses)))
+    return sorted(out, key=lambda item: item.updated_at, reverse=True)
 
 
 class NotificationChoice(Camel):

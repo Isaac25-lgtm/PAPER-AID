@@ -1,11 +1,9 @@
 import { ChartColumn, FilePen, HandCoins, Lightbulb, NotebookPen } from 'lucide-react'
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
-import { DataError, useData } from '../../lib/data'
-import type { DataProject } from '../../lib/datalab-types'
-import type { Project } from '../../lib/proposal-types'
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useData } from '../../lib/data'
+import { createRefresher } from '../../lib/refresher'
 import type { StartChoice } from '../../lib/start'
-import type { Work } from '../../lib/work-types'
-import { KIND_LABELS } from '../works/shared'
+import type { WorkSummary } from '../../lib/types'
 import type { WorkspaceStatus } from '../workspace/parts'
 
 /** One piece of the student's work: a coursework, funding document, proposal or dataset, with one plain status. */
@@ -31,89 +29,85 @@ export const SECTION_LISTS: { group: StartChoice['group']; label: string; to: st
   { group: 'Data analysis', label: 'Data Lab', to: '/app/datalab' },
 ]
 
-function workItem(w: Work): WorkItem {
-  const status: WorkspaceStatus = w.activeJob
-    ? { label: 'Writing…', tone: 'running' }
-    : w.autoFailure && !w.documents.length
-      ? { label: "Couldn't finish · not charged", tone: 'danger' }
-      : w.documents.length
-        ? w.status === 'READY'
-          ? { label: 'Ready', tone: 'ready' }
-          : w.status === 'READY_WITH_WARNINGS'
-            ? { label: 'Ready with warnings', tone: 'warn' }
-            : w.readiness.some((i) => i.basis === 'AUTHOR' && !['PASS', 'NOT_APPLICABLE'].includes(i.status))
-              ? { label: 'Needs your input', tone: 'input' }
-              : { label: 'Check before you submit', tone: 'danger' }
-        : { label: 'Not started', tone: 'idle' }
-  return {
-    key: w.id, title: w.plan?.title ?? w.inputs.title, kind: KIND_LABELS[w.kind], updated: w.updatedAt, to: `/app/works/${w.id}`,
-    icon: w.kind === 'COURSEWORK' ? NotebookPen : w.kind === 'CONCEPT_NOTE' ? Lightbulb : HandCoins, status,
-    group: w.kind === 'COURSEWORK' ? 'Coursework' : 'Funding', done: !w.activeJob && w.documents.length > 0 && status.tone !== 'input',
+const KINDS: Record<WorkSummary['kind'], { label: string; icon: typeof NotebookPen; path: string }> = {
+  COURSEWORK: { label: 'Coursework', icon: NotebookPen, path: '/app/works' },
+  CONCEPT_NOTE: { label: 'Concept note', icon: Lightbulb, path: '/app/works' },
+  FUNDING_PROPOSAL: { label: 'Funding proposal', icon: HandCoins, path: '/app/works' },
+  PROPOSAL: { label: 'Research proposal', icon: FilePen, path: '/app/projects' },
+  DATALAB: { label: 'Data Lab', icon: ChartColumn, path: '/app/datalab' },
+}
+
+function status(s: WorkSummary): WorkspaceStatus {
+  switch (s.state) {
+    case 'WRITING': return { label: 'Writing…', tone: 'running' }
+    case 'FAILED': return { label: "Couldn't finish · not charged", tone: 'danger' }
+    case 'READY': return { label: 'Ready', tone: 'ready' }
+    case 'READY_WITH_WARNINGS': return { label: 'Ready with warnings', tone: 'warn' }
+    case 'NEEDS_ATTENTION': return { label: 'Needs your attention', tone: 'input' }
+    case 'CHAPTERS': return { label: s.chapters.length === 3 ? 'Chapters 1–3 written' : `Chapter ${s.chapters.join(', ')} written`, tone: 'ready' }
+    case 'CONCEPT': return { label: 'Concept paper written', tone: 'ready' }
+    case 'REPORT': return { label: 'Report ready', tone: 'ready' }
+    case 'ANALYSES': return { label: `${s.analyses} analys${s.analyses === 1 ? 'is' : 'es'}`, tone: 'idle' }
+    case 'NOT_ANALYSED': return { label: 'Not analysed yet', tone: 'idle' }
+    case 'NO_DATA': return { label: 'No data yet', tone: 'idle' }
+    default: return { label: 'Not started', tone: 'idle' }
   }
 }
 
-function projectItem(p: Project): WorkItem {
-  const written = p.chapters.filter((c) => c.current && c.number !== 4).map((c) => c.number)
-  const concept = p.chapters.some((c) => c.number === 4 && c.current)
-  const status: WorkspaceStatus = p.activeJob
-    ? { label: 'Writing…', tone: 'running' }
-    : p.autoFailure && !written.length && !concept
-      ? { label: "Couldn't finish · not charged", tone: 'danger' }
-      : written.length
-        ? { label: written.length === 3 ? 'Chapters 1–3 written' : `Chapter ${written.join(', ')} written`, tone: 'ready' }
-        : concept
-          ? { label: 'Concept paper written', tone: 'ready' }
-          : { label: 'Not started', tone: 'idle' }
+function item(s: WorkSummary): WorkItem {
+  const kind = KINDS[s.kind]
   return {
-    key: p.id, title: p.plan?.title ?? p.inputs.topic, kind: 'Research proposal', icon: FilePen, updated: p.updatedAt, to: `/app/projects/${p.id}`, status,
-    group: 'Research proposals', done: !p.activeJob && (written.length > 0 || concept),
-  }
-}
-
-function dataItem(p: DataProject): WorkItem {
-  const status: WorkspaceStatus = p.activeJob
-    ? { label: 'Writing…', tone: 'running' }
-    : p.reports.length
-      ? { label: 'Report ready', tone: 'ready' }
-      : p.pending.length || p.survey === 'ASK'
-        ? { label: 'Needs your input', tone: 'input' }
-        : p.analyses.length
-          ? { label: `${p.analyses.length} analys${p.analyses.length === 1 ? 'is' : 'es'}`, tone: 'idle' }
-          : { label: p.source ? 'Not analysed yet' : 'No data yet', tone: 'idle' }
-  return {
-    key: p.id, title: p.title, kind: 'Data Lab', icon: ChartColumn, updated: p.updatedAt, to: `/app/datalab/${p.id}`, status,
-    group: 'Data analysis', done: !p.activeJob && p.reports.length > 0,
+    key: s.id, title: s.title, kind: kind.label, icon: kind.icon, updated: s.updatedAt, to: `${kind.path}/${s.id}`, status: status(s), group: s.section,
+    done: ['READY', 'READY_WITH_WARNINGS', 'CHAPTERS', 'CONCEPT', 'REPORT'].includes(s.state),
   }
 }
 
 interface YourWork {
   items: WorkItem[] | null
+  /** The list could not be loaded, or (with `items`) could not be refreshed: what is shown is what was last loaded. */
   error: string | null
 }
 
 const Context = createContext<YourWork>({ items: null, error: null })
 
-/** Loads the student's work once for the whole app shell (the left panel and the pages share it) and keeps it fresh. */
+const WHILE_WRITING = 15_000 // something is being written: it turns to Ready by itself
+const OTHERWISE = 60_000
+
+/** Loads the person's work once for the whole app shell (the left panel and the pages share it) and keeps it fresh:
+ *  one light request at a time, the last good list kept when a refresh fails, nothing asked while the tab is hidden
+ *  (Codex's audit of cbb99cb, findings 7 to 9). */
 export function YourWorkProvider({ children }: { children: ReactNode }) {
   const data = useData()
   const [items, setItems] = useState<WorkItem[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const writing = useRef(false)
+
   useEffect(() => {
-    let alive = true
-    const load = () =>
-      Promise.all([data.works.list().catch(() => [] as Work[]), data.projects.list().catch(() => [] as Project[]), data.datalab.list().catch(() => [] as DataProject[])])
-        .then(([works, projects, datasets]) => {
-          if (!alive) return
-          setItems([...works.map(workItem), ...projects.map(projectItem), ...datasets.map(dataItem)].sort((a, b) => b.updated.localeCompare(a.updated)))
-        })
-        .catch((e: unknown) => alive && setError(e instanceof DataError ? e.message : 'We could not load your work.'))
-    load()
-    const timer = window.setInterval(load, 15000) // a running item changes to Ready by itself
+    const refresher = createRefresher(
+      () => data.yourWork(),
+      (list) => {
+        writing.current = list.some((s) => s.state === 'WRITING')
+        setItems(list.map(item))
+      },
+      (failed) => setError(failed ? 'We could not refresh your work just now. This is what was last loaded.' : null),
+    )
+    let timer = 0
+    const tick = async () => {
+      if (!document.hidden) await refresher.refresh()
+      timer = window.setTimeout(tick, writing.current ? WHILE_WRITING : OTHERWISE)
+    }
+    const shown = () => {
+      if (!document.hidden) void refresher.refresh()
+    }
+    void tick()
+    document.addEventListener('visibilitychange', shown)
     return () => {
-      alive = false
-      window.clearInterval(timer)
+      refresher.stop()
+      window.clearTimeout(timer)
+      document.removeEventListener('visibilitychange', shown)
     }
   }, [data])
+
   return <Context.Provider value={{ items, error }}>{children}</Context.Provider>
 }
 

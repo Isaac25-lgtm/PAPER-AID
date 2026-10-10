@@ -537,7 +537,7 @@ def test_a_correction_that_names_its_section_by_heading_is_applied_to_that_secti
     section = next(s for s in document.sections if s.key == seen["editable"]["key"])
     assert section.paragraphs[0] == "The essay first sets out the question and the argument it will make about maternal health."
     assert document.approval.refused == 0 and document.approval.corrections == 1
-    assert seen["length"]["minimum"] == 1276 and seen["length"]["limit"] == 1455  # how short is too short, and a little under the real limit
+    assert seen["length"] | {"words": 0} == {"words": 0, "limit": 1500, "aimFor": 1455, "minimum": 1276}  # the real limit, a working target under it, how short is too short
 
 
 def test_what_the_editor_is_sent_back_names_sections_by_key(v2):
@@ -1256,10 +1256,18 @@ def test_the_editor_switch_is_frozen_with_the_workflow(monkeypatch):
             monkeypatch.setenv(name, value)
         return current_engine(real_settings())
 
-    assert (engine().workflow, engine().final_editor) == (1, False)
-    assert (engine(WORKFLOW="2").workflow, engine(WORKFLOW="2").final_editor) == (2, True)
-    assert (engine(WORKFLOW="2", FINAL_EDITOR="false").workflow, engine(WORKFLOW="2", FINAL_EDITOR="false").final_editor) == (2, False)
-    assert engine(FINAL_EDITOR="true").final_editor is False  # the editor belongs to workflow 2: on workflow 1 nothing changes
+    from app.jobs.models import Engine
+
+    assert (engine().workflow, engine().editor) == (1, False)
+    assert (engine(WORKFLOW="2").workflow, engine(WORKFLOW="2").editor) == (2, True)
+    assert (engine(WORKFLOW="2", FINAL_EDITOR="false").workflow, engine(WORKFLOW="2", FINAL_EDITOR="false").editor) == (2, False)
+    assert engine(FINAL_EDITOR="true").editor is False  # the editor belongs to workflow 2: on workflow 1 nothing changes
+    # Codex's audit of cbb99cb, finding 6: an engine frozen on workflow 2 before the switch existed carries no value
+    # for it, and must keep the editor it was priced with when its job is read back and resumed.
+    saved = engine(WORKFLOW="2").model_dump(by_alias=True, mode="json")
+    del saved["finalEditor"]
+    assert Engine.model_validate(saved).editor is True
+    assert Engine.model_validate(engine(WORKFLOW="2", FINAL_EDITOR="false").model_dump(by_alias=True, mode="json")).editor is False
 
 
 # --- From the trials of 10 October -------------------------------------------------------------------------------------
@@ -1279,20 +1287,6 @@ def test_the_editor_can_write_into_a_section_code_left_empty():
     applied, refused = apply_corrections(current, corrections, ["significance", "problem"])
     assert current["significance"].paragraphs == ["The findings will inform district planners.", "They will also guide later studies."]
     assert [a["paragraph"] for a in applied] == ["p1", "p2"] and list(refused) == ["problem"]  # a section with text still needs a real paragraph named
-
-
-def test_a_theory_with_no_confirmed_source_is_named_in_the_checks_and_the_step_goes_on():
-    """A chapter stopped because no page PaperAid could read confirmed the words quoted for a theory. A study, a
-    figure or a policy the work depends on still stops the step."""
-    from app.proposals.pipeline import essential_answered
-
-    theory = _asked(1, "How Random Utility Theory explains adoption decisions", "random utility theory adoption", essential=True, category="METHOD")
-    study = _asked(2, "Adoption of climate-smart practices among smallholders in Mbale", "climate-smart adoption smallholders Mbale", essential=True)
-    assert essential_answered(_runner_v(2), [theory], [], []) == [theory]
-    with pytest.raises(PermanentStageError) as stopped:
-        essential_answered(_runner_v(2), [theory, study], [], [])
-    assert stopped.value.code == "EVIDENCE_MISSING" and "Mbale" in stopped.value.user_message and "Random Utility" not in stopped.value.user_message
-    assert essential_answered(_runner_v(1), [theory, study], [], []) == []
 
 
 def test_the_first_draft_is_asked_for_nearly_its_whole_target_on_workflow_2(simple):
@@ -1360,68 +1354,6 @@ def test_on_the_simplified_path_a_short_draft_is_lengthened_first_and_the_one_re
 # --- From round 2 of the test loop (10 October) -------------------------------------------------------------------------
 
 
-def test_a_reviewer_s_objection_to_the_statements_paperaid_places_never_stops_a_chapter(client):
-    """Trial 2026-10-10 (and live, 2026-10-08): three reviews running said "Remove the sub-headings and the general and
-    specific objectives from the text, as PaperAid inserts them automatically", so the chapter could never pass."""
-    seen = {}
-
-    def review(payload):
-        out = []
-        for s in payload["sections"]:
-            if "placedByPaperAid" in s:
-                seen[s["key"]] = s
-                out.append({"key": s["key"], "grade": "REPAIR", "note": "",
-                            "issues": ["Remove the sub-headings and the general and specific objectives from the text, as PaperAid inserts them automatically; write only the introductory paragraph."]})
-            else:
-                out.append({"key": s["key"], "grade": "PASS", "issues": [], "note": ""})
-        return {"results": out}
-
-    _, job, chapter = _chapter_one(client, p_review=review)
-    assert job["status"] == "COMPLETED", job.get("failure")
-    assert "p_fix" not in client.models.tasks  # nothing to repair: the objection is void
-    objectives = seen["objectives"]
-    assert objectives["placedByPaperAid"][0].endswith("General Objective") and not any("General Objective" in p for p in objectives["text"])  # shown apart from what the writer wrote
-    delivered = next(s for s in chapter.sections if s.key == "objectives")
-    assert any("General Objective" in p for p in delivered.paragraphs)  # and still placed in the chapter
-
-
-def test_a_real_objection_to_a_plan_owned_section_still_stands():
-    from types import SimpleNamespace
-
-    from app.proposals import pipeline
-    from tests.test_proposals import plan
-
-    inp = SimpleNamespace(plan=plan(), rulebook="ucu-2018-v2", chapter=1, inputs=SimpleNamespace(level="MASTERS"))
-    kept = pipeline.reviewer_issues(inp, "objectives", ["The introduction claims the study has been approved.", "Remove the sub-headings and the specific objectives from the text."])
-    assert kept == ["The introduction claims the study has been approved."]
-    assert pipeline.reviewer_issues(inp, "background", ["Remove the objectives listed in this section."]) == ["Remove the objectives listed in this section."]  # only where PaperAid places them
-
-
-def test_a_calculation_question_may_state_its_worked_results_and_an_essay_may_not():
-    """Every path stopped the calculation assignment in the trials: the figure check withheld the conclusion whole
-    because its numbers were calculated, not sourced."""
-    from types import SimpleNamespace
-
-    from app.proposals.ai import SectionText, Table
-    from app.works import pipeline
-
-    def work(question):
-        return SimpleNamespace(spec=SimpleNamespace(kind="COURSEWORK", coverage=[SimpleNamespace(text=question)]), inputs=SimpleNamespace(title="Coursework", description=question))
-
-    table = Table(caption="Worked example", rows=[["Step", "Value"], ["Equilibrium price", "30"], ["Equilibrium quantity", "60"]], illustrative=True)
-    current = {"theme1": SectionText(key="theme1", paragraphs=["The working is set out in the table."], table=table),
-               "conclusion": SectionText(key="conclusion", paragraphs=["The market clears at a price of 30 and a quantity of 60.", "It then clears at 44, a figure no table shows."],
-                                         table=Table(caption="", rows=[]))}
-    calc = work("A firm's demand is Q = 120 - 2P and its supply is Q = 3P - 30. Calculate the equilibrium price and quantity.")
-    essay = work("Discuss the role of Uganda's Universal Primary Education policy in improving access to education.")
-    new, old = SimpleNamespace(_engine=SimpleNamespace(workflow=2)), SimpleNamespace(_engine=SimpleNamespace(workflow=1))
-    assert pipeline._calculation(calc) and not pipeline._calculation(essay)
-    allowed = pipeline._with_worked(new, calc, current, "")
-    assert pipeline._strip(calc, current["conclusion"], {}, allowed).paragraphs == ["The market clears at a price of 30 and a quantity of 60."]  # its own results stay; an unknown figure goes
-    assert pipeline._strip(calc, current["conclusion"], {}, pipeline._with_worked(old, calc, current, "")).paragraphs == []  # the live path is unchanged
-    assert pipeline._strip(essay, current["conclusion"], {}, pipeline._with_worked(new, essay, current, "")).paragraphs == []  # an essay keeps the strict rule
-
-
 # --- From round 3 of the test loop (10 October) -------------------------------------------------------------------------
 
 
@@ -1449,4 +1381,189 @@ def test_a_plan_may_state_a_descriptive_question_beside_its_hypotheses():
     plain = plan_statements(plan(questionsKind="HYPOTHESES", researchQuestions=["Income does not influence uptake."], alternativeHypotheses=["Income influences uptake."],
                                  specificObjectives=["To assess income."]), "questions", "1.4")
     assert plain[-3:] == ["1.4.2 Research Hypotheses", "H01: Income does not influence uptake.", "HA1: Income influences uptake."]  # an unmixed plan prints as before
+
+
+# --- From round 4 of the test loop (10 October) -------------------------------------------------------------------------
+
+
+# --- Codex's audit of cbb99cb (10 October) ------------------------------------------------------------------------------
+
+
+def test_a_reviewer_is_shown_what_paperaid_places_apart_and_its_rejection_still_stands(client):
+    """Finding 1. A keyword filter dropped any objection that said "remove" near "objectives", including a genuine
+    one. Nothing a reviewer says is set aside now; it is told, by a new prompt version, what PaperAid places."""
+    from app.runtime import get_runtime
+
+    seen = {}
+
+    def review(payload):
+        out = []
+        for s in payload["sections"]:
+            if "placedByPaperAid" in s:
+                seen.setdefault(s["key"], s)
+            reject = s["key"] == "objectives"
+            out.append({"key": s["key"], "grade": "REPAIR" if reject else "PASS", "note": "",
+                        "issues": ["Remove the statement that this study will establish causation from associations; the objectives can remain."] if reject else []})
+        return {"results": out}
+
+    _, job, chapter = _chapter_one(client, p_review=review)
+    assert job["status"] == "FAILED" and job["failure"]["code"] == "DOCUMENT_NOT_APPROVED" and chapter is None  # the rejection stands
+    assert "p_fix" in client.models.tasks  # and was sent to the writer to put right
+    objectives = seen["objectives"]
+    assert objectives["placedByPaperAid"][0].endswith("General Objective") and not any("General Objective" in p for p in objectives["text"])
+    assert get_runtime().store.get(job["id"]).quote.engine.prompts["p_review"] == "p-review-v4"
+
+
+def test_a_job_priced_on_the_earlier_review_prompt_is_asked_as_it_was():
+    from types import SimpleNamespace
+
+    from app.proposals import pipeline
+    from app.proposals.ai import SectionText, Table
+    from tests.test_proposals import plan
+
+    inp = SimpleNamespace(plan=plan(), rulebook="ucu-2018-v2", chapter=1, inputs=SimpleNamespace(level="MASTERS"))
+    number = next(s.number for s in pipeline.rulebook.sections("ucu-2018-v2", 1, "MASTERS", plan()) if s.key == "objectives")
+    statements = pipeline.plan_statements(plan(), "objectives", number)
+    text = SectionText(key="objectives", paragraphs=["The study pursues the following objectives.", *statements], table=Table(caption="", rows=[]))
+    items = {"objectives": {"key": "objectives", "number": number, "heading": "Objectives of the Study"}}
+    before = pipeline.review_item(inp, items, "objectives", text, [], apart=False)
+    after = pipeline.review_item(inp, items, "objectives", text, [], apart=True)
+    assert before["text"] == text.paragraphs and "placedByPaperAid" not in before
+    assert after["text"] == ["The study pursues the following objectives."] and after["placedByPaperAid"] == statements
+
+
+def test_an_invented_figure_is_withheld_whatever_a_worked_table_shows_and_whatever_verb_the_question_uses():
+    """Finding 2. A blanket exception let any number in a model-written table stand in factual prose once the question
+    used a verb such as "find": "District officials recorded 900 cases." was kept. The exception is withdrawn."""
+    from types import SimpleNamespace
+
+    from app.proposals.ai import SectionText, Table
+    from app.works import pipeline
+
+    question = "Find factors associated with uptake among children aged 6-24 months."
+    inp = SimpleNamespace(spec=SimpleNamespace(kind="COURSEWORK", coverage=[SimpleNamespace(text=question)]), inputs=SimpleNamespace(title="Coursework", description=question))
+    table = Table(caption="Worked example", rows=[["Step", "Value"], ["Cases", "900"]], illustrative=True)
+    same = SectionText(key="theme1", paragraphs=["District officials recorded 900 cases.", "Suppose a district records 900 cases in a year."], table=table)
+    other = SectionText(key="conclusion", paragraphs=["District officials recorded 900 cases.", "Uptake varies between districts."], table=Table(caption="", rows=[]))
+    assert pipeline._strip(inp, same, {}, "").paragraphs == ["Suppose a district records 900 cases in a year."]  # only a sentence that opens as a hypothetical
+    assert pipeline._strip(inp, other, {}, "").paragraphs == ["Uptake varies between districts."]  # and never in another section
+    assert not hasattr(pipeline, "_with_worked") and not hasattr(pipeline, "_calculation")
+
+
+def test_missing_essential_evidence_stops_the_step_whatever_its_kind_and_on_either_path():
+    """Finding 3. An exception let a missing essential theory or method through, and on the simplified path every
+    missing essential topic. A compulsory method (a required instrument and its validation source) is evidence too."""
+    from types import SimpleNamespace
+
+    from app.proposals.pipeline import essential_answered
+
+    method = _asked(1, "The validated instrument the assignment requires and its validation source", "validated instrument validation study", essential=True, category="METHOD")
+    study = _asked(2, "Uptake among caregivers in Mukono", "uptake caregivers Mukono", essential=True)
+    policy = _asked(3, "The national policy the question names", "national immunisation policy Uganda", essential=True, category="POLICY")
+    for final_editor in (True, False, None):
+        runner = SimpleNamespace(_engine=SimpleNamespace(workflow=2, final_editor=final_editor), budget_reached=False)
+        for need in (method, study, policy):
+            with pytest.raises(PermanentStageError) as stopped:
+                essential_answered(runner, [need], [], [])
+            assert stopped.value.code == "EVIDENCE_MISSING"
+    assert essential_answered(_runner_v(1), [method, study, policy], [], []) is None  # workflow 1 as priced
+
+
+def test_findings_on_one_part_of_the_question_never_stand_in_for_the_draft_s_own_research(simple):
+    """Finding 4. A count of usable findings skipped the draft's research: six findings from one paper on one topic
+    did. The draft plans its needs and only a need saved evidence can be about is left out."""
+    from app.works import pipeline
+
+    _, job, _ = _draft(simple)
+    assert job["status"] == "COMPLETED", job.get("failure")
+    assert simple.models.tasks.count("w_needs") == 2 and not hasattr(pipeline, "PLAN_SOURCES_ENOUGH")  # the plan's needs, then the draft's
+
+
+def test_on_workflow_2_the_premium_model_approves_the_wording_that_is_delivered(simple):
+    """Finding 5. After a repair the review went to the standard model, and the first review could fall back to it:
+    the premium model need never have seen the final text. The recorded model is checked, not the task's name."""
+    from app.runtime import get_runtime
+
+    reviews = []
+
+    def final(payload):
+        reviews.append(1)
+        return _unanswered(payload, answered=len(reviews) > 1)  # objects once, so the delivered text is the repaired one
+
+    simple.models.overrides["w_final"] = final
+    _, job, document = _draft(simple)
+    assert job["status"] == "COMPLETED", job.get("failure")
+    stored = get_runtime().store.get(job["id"])
+    approvals = [c for c in stored.model_calls if c.task == "w_final"]
+    assert len(approvals) == 2 and all(c.model == "gemini-3.1-pro-preview" for c in approvals), [(c.task, c.model) for c in approvals]
+    engine = stored.quote.engine
+    assert engine.vertex_signoff == ["vertex:gemini-3.1-pro-preview"] and engine.vertex_routes["w_final"] == ["vertex:gemini-3.1-pro-preview"]  # no cheaper sign-off, no stand-in
+    assert engine.vertex_routes["p_review"] == ["vertex:gemini-3.1-pro-preview"] and engine.vertex_routes["w_plan_review"] == ["vertex:gemini-3.1-pro-preview"]
+
+
+def test_workflow_1_keeps_the_sign_off_it_was_priced_with(client):
+    from app.ai.orchestration import current_engine
+    from app.runtime import get_runtime
+
+    engine = current_engine(get_runtime().settings)
+    assert engine.workflow == 1 and engine.vertex_signoff[0] != "vertex:gemini-3.1-pro-preview" and len(engine.vertex_routes["w_final"]) == 2  # as priced: unchanged
+
+
+def test_on_workflow_2_an_approval_review_waits_for_the_premium_model(simple):
+    from app.core.errors import RetryableStageError
+    from app.runtime import get_runtime
+
+    get_runtime().settings.review_wait_sec = 1
+    calls = []
+
+    def final(payload):
+        calls.append(1)
+        if len(calls) <= 2:
+            raise RetryableStageError("VERTEX_MODEL_UNAVAILABLE", "Unavailable.", "test: the premium model is down")
+        return _unanswered(payload, answered=True)
+
+    simple.models.overrides["w_final"] = final
+    _, job, _ = _draft(simple)
+    assert job["status"] == "COMPLETED", job.get("failure")
+    stored = get_runtime().store.get(job["id"])
+    assert stored.capacity_waits == 2 and stored.attempts == 0 and [t.code for t in stored.timings if t.outcome == "WAITING"] == ["REVIEW", "REVIEW"]
+    assert all(c.model == "gemini-3.1-pro-preview" for c in stored.model_calls if c.task == "w_final" and not c.error_code)  # nothing approved in its place
+
+
+def test_a_question_among_hypotheses_is_recognised_without_its_ascii_question_mark():
+    """Finding 10. Only a final ASCII "?" counted, so the same descriptive question without it, inside typographic
+    quotation marks or ending in a full-width mark was read as a third null hypothesis."""
+    from app.proposals import rulebook
+
+    for question in ("What practices are adopted by smallholder farmers in Mbale District?",
+                     "What practices are adopted by smallholder farmers in Mbale District",
+                     "\u201cWhat practices are adopted by smallholder farmers in Mbale District?\u201d",
+                     "What practices are adopted by smallholder farmers in Mbale District\uff1f",
+                     "To what extent are climate-smart practices adopted in Mbale District?.",
+                     "The practices adopted by smallholder farmers in Mbale District: which are they?"):
+        assert rulebook.is_question(question), question
+    for hypothesis in ("H01: Household income does not significantly influence adoption.", "Household income does not significantly influence adoption.",
+                       "Ha2: Extension visits significantly influence adoption.", "There is no significant relationship between income and adoption.",
+                       "H01: Is there no relationship between income and adoption?"):  # a labelled hypothesis is one, however it is worded
+        assert not rulebook.is_question(hypothesis), hypothesis
+
+
+def test_your_work_is_one_light_line_each_and_reads_no_document(v2, monkeypatch):
+    """Finding 9. Every page of the app polled the three full lists, each of which builds whole views (specification,
+    document and evidence files). The left panel's list comes from the stored records alone."""
+    from app.runtime import get_runtime
+
+    work, job, _ = _draft(v2)
+    assert job["status"] == "COMPLETED", job.get("failure")
+    files = get_runtime().files
+    read = []
+    monkeypatch.setattr(type(files), "get", lambda self, path, _get=type(files).get: (read.append(path), _get(self, path))[1])
+    listed = v2.get("/api/me/work", headers=STUDENT)
+    assert listed.status_code == 200 and read == []  # nothing read from storage
+    full = v2.get(f"/api/works/{work['id']}", headers=STUDENT).json()
+    assert full["status"] in ("READY", "READY_WITH_WARNINGS") and full["activeJob"] is None
+    # finished: the record's claim on its step no longer counts, exactly as in the full view
+    assert [(i["id"], i["section"], i["kind"], i["state"]) for i in listed.json()] == [(work["id"], "Coursework", "COURSEWORK", full["status"])]
+    assert set(listed.json()[0]) == {"id", "section", "kind", "title", "updatedAt", "state", "chapters", "analyses"}  # where it is, never what it says
+    assert v2.get("/api/me/work").status_code in (401, 403)  # only the signed-in person's own
 

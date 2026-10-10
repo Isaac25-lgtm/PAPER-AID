@@ -102,7 +102,7 @@ def step_input(ctx: "StageContext") -> WorkStepInput:
 def _runner(ctx: "StageContext") -> WorkRunner:
     runner = ctx.ai(WorkRunner)
     assert isinstance(runner, WorkRunner)
-    if runner._engine.final_editor and ctx.has(INPUT):
+    if runner._engine.editor and ctx.has(INPUT):
         # A document's final review is paid for before anything else may spend its share (every stage of the step).
         inp = WorkStepInput.model_validate(ctx.get_json(INPUT))
         if inp.step in ("DRAFT", "REVISE") and inp.plan is not None:
@@ -219,29 +219,6 @@ def _illustrative(inp: WorkStepInput, text: SectionText) -> str:
     if text.figure is not None and not _figure_problems(text.figure):
         parts += [f"{p.x:g} {p.y:g}" for line in text.figure.series for p in line.points]
     return " ".join(parts)
-
-
-# A coursework question that itself asks for a calculation and gives figures to calculate from.
-CALCULATION = re.compile(r"\b(?:calculate|compute|solve|work out|derive|determine|find)\b", re.I)
-
-
-def _calculation(inp: WorkStepInput) -> bool:
-    spec = _spec(inp)
-    if spec.kind != "COURSEWORK":
-        return False
-    asked = " ".join([inp.inputs.title, inp.inputs.description, *(c.text for c in spec.coverage)])
-    return bool(CALCULATION.search(asked)) and len(re.findall(r"\d+(?:\.\d+)?", asked)) >= 2
-
-
-def _with_worked(runner: Any, inp: WorkStepInput, current: dict[str, SectionText], allowed: str) -> str:
-    """Workflow 2. When the question asks for a calculation, what PaperAid's worked tables and graphs show is the
-    answer, not an illustration: any section may state those results (the trials of 9 and 10 October: the figure
-    check withheld a conclusion whole because its numbers were calculated, not sourced, on every path). Still only
-    numbers that are in those tables, and the reviewer judges the working. Every other work keeps the rule that a
-    worked example's numbers stay in their table and in sentences that open as hypotheticals."""
-    if runner._engine.workflow < 2 or not _calculation(inp):
-        return allowed
-    return allowed + " " + " ".join(_illustrative(inp, text) for text in current.values())
 
 
 # A sentence that opens as a hypothetical: the only prose that may use a worked example's numbers.
@@ -436,9 +413,10 @@ def stage_researching(ctx: "StageContext") -> None:
     found = ev.dedupe([*found, *gathered])
     check(found)
     gathered, found = other_route(ctx, runner, needs, routes, gathered, found, lambda need: answer(need, other=True), check, settings.research_parallel)
+    unsearched = research_gaps(ctx, needs)
     ctx.put_json("evidence.json", [i.model_dump(by_alias=True) for i in found])
     record_topics(ctx, needs, covered, routes, left)
-    unsearched = research_gaps(ctx, needs, essential_answered(runner, needs, gathered, found, left))
+    essential_answered(runner, needs, gathered, found, left)
     if runner.budget_reached:
         ctx.update(lambda j: _warn(j, ["The research reached this step's spending limit, so fewer sources were gathered than planned."]))
     if unsearched:
@@ -989,7 +967,7 @@ def _audit(ctx: "StageContext", runner: WorkRunner, inp: WorkStepInput, current:
         for key in pending:  # verdicts on earlier wording never carry over to repaired text (Codex audit, second round)
             integrity.pop(key, None)
             evaluations.pop(key, None)
-        problems = {k: _checks(inp, sections[k], current[k], library_items, _with_worked(runner, inp, current, allowed), tokens) for k in pending}
+        problems = {k: _checks(inp, sections[k], current[k], library_items, allowed, tokens) for k in pending}
         items = _review_items(inp, sections, current, problems, pending)
         judged = [i for i in items if i["rules"] or premium or _risk(sections[i["key"]], current[i["key"]]) != "low"]
         checked, evaluated = runner.together(
@@ -1352,7 +1330,7 @@ def _develop_short(ctx: "StageContext", runner: WorkRunner, inp: WorkStepInput, 
             current[key] = _kept(current[key], fuller)
 
 
-EDITOR_ROOM = 0.97  # the share of a word limit the final editor is told is the limit
+EDITOR_ROOM = 0.97  # the share of a word limit the final editor is told to aim for
 
 
 @dataclass
@@ -1427,9 +1405,9 @@ def _editor_request(inp: WorkStepInput, current: dict[str, SectionText], editabl
                           "hasTable": bool(current[k].table.rows), "hasFigure": current[k].figure is not None} for k in keys],
             "evidence": _evidence_for_editor(list(offered.values())),
             "numberTokens": numbers.for_model(tokens),
-            # A little under the real limit: its corrections tend to add, and a draft ending 29 words over a 1,000-word
-            # limit was refused (trial 2026-10-10). The real limit is still what the document is held to.
-            "length": {"words": total, "limit": int(limit.max * EDITOR_ROOM), "minimum": int(limit.max * UNDER_LENGTH) + 1} if limit is not None else None,
+            # The real limit, and a working target a little under it: its corrections tend to add, and a draft ending
+            # 29 words over a 1,000-word limit was refused (trial 2026-10-10).
+            "length": {"words": total, "limit": int(limit.max), "aimFor": int(limit.max * EDITOR_ROOM), "minimum": int(limit.max * UNDER_LENGTH) + 1} if limit is not None else None,
         }
         if flagged is None:
             out["findings"] = found
@@ -1504,7 +1482,7 @@ def _editorial(ctx: "StageContext", runner: WorkRunner, inp: WorkStepInput, curr
     _compress_to_limits(ctx, runner, inp, current, tokens, library_items, editable)
     stripped: list[str] = []
     for key in list(editable):
-        cleaned = _strip(inp, current[key], library_items, _with_worked(runner, inp, current, allowed))
+        cleaned = _strip(inp, current[key], library_items, allowed)
         if cleaned != current[key]:
             stripped.append(key)
             current[key] = cleaned
@@ -1531,7 +1509,7 @@ def _editorial(ctx: "StageContext", runner: WorkRunner, inp: WorkStepInput, curr
     progress(ctx, "FINAL_REVIEW", 1)
     final, corrections, blockers = ask(runner.edit, _editor_request(inp, current, editable, library_items, tokens, findings))
     applied, refused = apply_corrections(current, corrections, editable)
-    checks = _editor_checks(inp, current, editable, library_items, tokens, _with_worked(runner, inp, current, allowed))
+    checks = _editor_checks(inp, current, editable, library_items, tokens, allowed)
     for key, why in refused.items():
         checks.setdefault(key, []).extend(why)
     flagged = _unsupported(runner, inp, applied, library_items, tokens)
@@ -1548,7 +1526,7 @@ def _editorial(ctx: "StageContext", runner: WorkRunner, inp: WorkStepInput, curr
             # exist and the decision approves nothing (Codex audit of fd74ff3, finding 1).
             raise PermanentStageError("DOCUMENT_NOT_APPROVED", "PaperAid could not verify the final wording. No document was released and nothing was charged. Please try again.",
                                       f"{sum(len(v) for v in refused.values())} correction(s) from the final editor's last look could not be applied")
-        if any(_strip(inp, current[k], library_items, _with_worked(runner, inp, current, allowed)) != current[k] for k in editable if k in current):
+        if any(_strip(inp, current[k], library_items, allowed) != current[k] for k in editable if k in current):
             # The editor's last wording carries something code cannot trace: withholding it now would deliver text nobody approved.
             raise PermanentStageError("DOCUMENT_NOT_APPROVED", "PaperAid could not verify the final wording. No document was released and nothing was charged. Please try again.",
                                       "the final editor's wording carries a citation or figure code cannot trace")
@@ -1558,7 +1536,7 @@ def _editorial(ctx: "StageContext", runner: WorkRunner, inp: WorkStepInput, curr
             # work stops here rather than go out with a claim nobody could confirm (finding 3).
             raise PermanentStageError("DOCUMENT_NOT_APPROVED", "PaperAid could not verify the final wording. No document was released and nothing was charged. Please try again.",
                                       f"{len(late)} correction(s) from the final editor's last look are not supported by their evidence")
-        checks = {k: _checks(inp, sections[k], current[k], library_items, _with_worked(runner, inp, current, allowed), tokens) for k in editable if k in current}
+        checks = {k: _checks(inp, sections[k], current[k], library_items, allowed, tokens) for k in editable if k in current}
     approval = Approval(
         reviewer=(runner._engine.vertex_routes.get("w_edit") or [runner.model_for("w_edit")])[0], reviewed_sha256=reviewed, accepted_sha256=_text_hash(current),
         corrections=len(applied), substantive=sum(1 for a in applied if a["kind"] != "WORDING"), flagged=len(flagged), resolved=resolved, refused=refusals)
@@ -1767,7 +1745,7 @@ def stage_auditing(ctx: "StageContext") -> None:
     shared = bool(runner._engine.vertex_routes)
     # The simplified current path (workflow 2 without the final editor, owner 2026-10-10): one repair for a coursework
     # draft, whoever asks for it. In the trial of 9 October the drafts that went round twice took 17 and 18 minutes.
-    one_repair = runner._engine.workflow >= 2 and not runner._engine.final_editor and spec.kind == "COURSEWORK" and base is None
+    one_repair = runner._engine.workflow >= 2 and not runner._engine.editor and spec.kind == "COURSEWORK" and base is None
     repairs_left = [1 if one_repair else ctx.rt.settings.repair_attempts + 1]
 
     def review(keys: list[str], rounds: int | None = None) -> None:
@@ -1798,7 +1776,7 @@ def stage_auditing(ctx: "StageContext") -> None:
                 raise PermanentStageError("NOTHING_REVISED", "PaperAid could not make these changes this time, so your document is unchanged and nothing was charged.",
                                           "revise: nothing resolved")
 
-    workflow2 = runner._engine.final_editor  # the final editor's path; False: the earlier review and repair
+    workflow2 = runner._engine.editor  # the final editor's path; False: the earlier review and repair
     approval: Approval | None = None
     if one_repair:  # a short draft is lengthened first, so the one repair is kept for what a review objects to
         _develop_short(ctx, runner, inp, current, library_items, tokens, editable)
@@ -1845,7 +1823,7 @@ def stage_auditing(ctx: "StageContext") -> None:
         """Compression and withholding, then whatever they changed is checked again (not repaired)."""
         _compress_to_limits(ctx, runner, inp, current, tokens, library_items, editable)
         for key in list(editable):
-            cleaned = _strip(inp, current[key], library_items, _with_worked(runner, inp, current, allowed))
+            cleaned = _strip(inp, current[key], library_items, allowed)
             if cleaned != current[key]:
                 stripped.append(key)
                 current[key] = cleaned

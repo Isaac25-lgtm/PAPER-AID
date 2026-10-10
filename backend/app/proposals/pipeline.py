@@ -59,7 +59,7 @@ def step_input(ctx: "StageContext") -> StepInput:
 def _runner(ctx: "StageContext", inp: StepInput) -> ProposalRunner:
     runner = ctx.ai(ProposalRunner)
     assert isinstance(runner, ProposalRunner)
-    if runner._engine.final_editor and inp.step in ("CHAPTER", "COMPLETE", "REVISE") and inp.plan is not None:
+    if runner._engine.editor and inp.step in ("CHAPTER", "COMPLETE", "REVISE") and inp.plan is not None:
         # A chapter's final review is paid for before research or drafting may spend its share (every stage of the step).
         written = [s for s in rulebook.sections(inp.rulebook, inp.chapter, inp.inputs.level, inp.plan) if not inp.only or s.key in inp.only]
         runner.keep_for_editor(8 * sum(s.words for s in written), "p")
@@ -153,9 +153,10 @@ def stage_researching(ctx: "StageContext") -> None:
     found = evidence.dedupe(gathered)
     check(found)
     gathered, found = other_route(ctx, runner, needs, routes, gathered, found, lambda need: answer(need, other=True), check, settings.research_parallel)
+    unsearched = research_gaps(ctx, needs)
     ctx.put_json("evidence.json", [i.model_dump(by_alias=True) for i in found])
     record_topics(ctx, needs, covered, routes, left)
-    unsearched = research_gaps(ctx, needs, essential_answered(runner, needs, gathered, found, left))
+    essential_answered(runner, needs, gathered, found, left)
     if runner.budget_reached:
         ctx.update(lambda j: _warn(j, ["The research reached this step's spending limit, so fewer sources were gathered than planned."], partial=True))
     if unsearched:
@@ -296,20 +297,16 @@ def record_topics(ctx: "StageContext", needs: Sequence, covered: Sequence, route
     ctx.update(keep)
 
 
-def essential_answered(runner, needs: Sequence, gathered: list[EvidenceItem], found: list[EvidenceItem], left: Sequence = ()) -> list:
+def essential_answered(runner, needs: Sequence, gathered: list[EvidenceItem], found: list[EvidenceItem], left: Sequence = ()) -> None:
     """Workflow 2: a need the work depends on must have at least one finding that may be cited. Without one the step
     stops here, in its first minutes and without charge, instead of writing around the gap and failing its review
-    later (missing compulsory evidence is never turned into a warning: Codex's plan, 2026-10-09).
-
-    The one exception (owner, 2026-10-10, after a chapter stopped because no page PaperAid could read confirmed the
-    words quoted for a theory): a theory or method (METHOD). The work is written without citing it and the topic is
-    named in the document's checks (`research_gaps`), as an unsearched topic is. Returns those needs."""
+    later (missing compulsory evidence is never turned into a warning: Codex's plan, 2026-10-09, and its audit of
+    cbb99cb, which reversed an exception for theories and methods and one for the simplified path)."""
     if runner._engine.workflow < 2:
-        return []
+        return
     usable = {i.id for i in found if i.usable}
     answered = {i.need for i in gathered if i.id in usable}
-    unanswered = [n for n in [*needs, *left] if n.essential and n.need not in answered]
-    missing = [n.need.strip() for n in unanswered if n.category != "METHOD"]
+    missing = [n.need.strip() for n in [*needs, *left] if n.essential and n.need not in answered]
     if missing:
         why = "its spending limit was reached first" if runner.budget_reached else "no source PaperAid could confirm answers it"
         raise PermanentStageError(
@@ -317,7 +314,6 @@ def essential_answered(runner, needs: Sequence, gathered: list[EvidenceItem], fo
             f"PaperAid could not find reliable evidence for something this work depends on ({why}): \u201c{missing[0][:200]}\u201d. "
             "Nothing was charged. Add a source or more detail about it, then start again.",
             f"essential topics unanswered: {len(missing)} of {len(needs) + len(left)}")
-    return [n for n in unanswered if n.category == "METHOD"]
 
 
 # A topic whose search the provider leaves unanswered fails its stage, which is retried. Each run asks twice
@@ -379,18 +375,14 @@ def checkpointed(ctx: "StageContext", runner, need, search: Callable[[], list[Ev
     return items
 
 
-def research_gaps(ctx: "StageContext", needs: Sequence, unconfirmed: Sequence = ()) -> str:
-    """What the student is told when topics went unsearched or (`unconfirmed`: a theory or method the work depends
-    on) no source could be confirmed, saved for the stage that builds the document's checks. Empty when neither."""
+def research_gaps(ctx: "StageContext", needs: Sequence) -> str:
+    """What the student is told when topics went unsearched, saved for the stage that builds the document's checks.
+    Empty when every topic was searched."""
     lost = [n.need.strip()[:200] for n in needs if _lost_runs(ctx, n) >= LOST_TOPIC_RUNS]
     note = ""
     if lost:
         note = (f"PaperAid could not search {len(lost)} of {len(needs)} research topics because the search did not answer after several tries, "
                 f"so it went on without {'it' if len(lost) == 1 else 'them'}: " + "; ".join(f"“{t}”" for t in lost) + ".")
-    named = [n.need.strip()[:200] for n in unconfirmed]
-    if named:
-        note = (note + " " if note else "") + ("PaperAid found no source it could confirm for " + ("a theory or method" if len(named) == 1 else f"{len(named)} theories or methods")
-                                               + " this work uses, so it is written without citing one. Add a source for: " + "; ".join(f"“{t}”" for t in named) + ".")
     ctx.put_json(RESEARCH_GAPS, {"note": note})
     return note
 
@@ -1033,14 +1025,6 @@ def changes_words(before: str, after: str) -> bool:
     return _WORDS_AND_TOKENS.findall(before.casefold()) != _WORDS_AND_TOKENS.findall(after.casefold())
 
 
-# An objection to the statements PaperAid places from the approved plan, or to their sub-headings, being in the
-# section: void, because code puts them there whatever the writer does (live runs 2026-10-08 and the trial of
-# 2026-10-10: "Remove the sub-headings and the general and specific objectives from the text, as PaperAid inserts
-# them automatically", three reviews running, so the chapter could never be approved).
-_VOID = re.compile(r"\b(?:remove|delete|omit|drop|merge|renumber|exclude|do not (?:list|include|repeat|restate)|should not (?:list|include|repeat|restate|contain))\b"
-                   r".{0,160}\b(?:sub-?headings?|objectives?|questions?|hypothes[ie]s|propositions?|statements?)\b", re.I | re.S)
-
-
 def placed_apart(inp: StepInput, items: dict[str, dict[str, Any]], key: str, text: SectionText) -> tuple[list[str], list[str]]:
     """A plan-owned section as (the writer's introduction, the statements code placed after it); any other section
     as (its paragraphs, nothing). A reviewer judges what the writer wrote and is told what PaperAid places."""
@@ -1053,16 +1037,12 @@ def placed_apart(inp: StepInput, items: dict[str, dict[str, Any]], key: str, tex
     return text.paragraphs, []
 
 
-def reviewer_issues(inp: StepInput, key: str, issues: list[str]) -> list[str]:
-    """A reviewer's issues that stand: for a plan-owned section, never one about the placed statements being there."""
-    if inp.plan is None or key not in _owned_kinds(inp):
-        return issues
-    return [i for i in issues if not _VOID.search(i)]
-
-
-def review_item(inp: StepInput, items: dict[str, dict[str, Any]], key: str, text: SectionText, checks: list[str]) -> dict[str, Any]:
-    """One section as a reviewer is asked about it."""
-    lead, statements = placed_apart(inp, items, key, text)
+def review_item(inp: StepInput, items: dict[str, dict[str, Any]], key: str, text: SectionText, checks: list[str], apart: bool) -> dict[str, Any]:
+    """One section as a reviewer is asked about it. `apart` (review prompts from p-review-v4, which says what
+    "placedByPaperAid" is): a plan-owned section is its writer's introduction, with what PaperAid places given apart.
+    Nothing a reviewer then says is set aside by code (Codex's audit of cbb99cb, finding 1: a keyword filter dropped a
+    genuine rejection); a job priced on an earlier prompt is asked exactly as it was."""
+    lead, statements = placed_apart(inp, items, key, text) if apart else (text.paragraphs, [])
     return {**items[key], "text": lead, **({"placedByPaperAid": statements} if statements else {}), "table": text.table.model_dump(), "paperaidChecks": checks,
             "_words": " ".join(text.paragraphs)}
 
@@ -1301,9 +1281,7 @@ def _edited(ctx: "StageContext", runner: ProposalRunner, inp: StepInput, items: 
         asked = list(current) if flagged is None else [k for k in current if checks.get(k) or any(f["key"] == k for f in flagged)]
         out = []
         for key in asked:
-            lead, statements = placed_apart(inp, items, key, current[key])
-            item = {**items[key], "paragraphs": numbered(current[key])[: len(lead)], **({"placedByPaperAid": statements} if statements else {}),
-                    "table": current[key].table.model_dump(), "paperaidChecks": checks.get(key, []),
+            item = {**items[key], "paragraphs": numbered(current[key]), "table": current[key].table.model_dump(), "paperaidChecks": checks.get(key, []),
                     "_words": " ".join(current[key].paragraphs)}
             if flagged is not None:
                 item["flagged"] = [{"paragraph": f["paragraph"], "problem": f["problem"]} for f in flagged if f["key"] == key]
@@ -1370,9 +1348,8 @@ def _edited(ctx: "StageContext", runner: ProposalRunner, inp: StepInput, items: 
     unresolved: dict[str, list[str]] = {}
     for key in current:
         grade = grades.get(key)
-        raised = reviewer_issues(inp, key, [i.strip() for i in grade.issues if i.strip()]) if grade else []  # an issue blocks whatever the grade says
-        rejected = grade is not None and grade.grade == "REPAIR" and not raised and not any(i.strip() for i in grade.issues)  # REPAIR with nothing said
-        issues = [*checks.get(key, []), *raised, *(["REVIEW_REJECTED"] if rejected else []), *([] if grade else [NOT_REVIEWED])]
+        raised = [i.strip() for i in grade.issues if i.strip()] if grade else []  # an issue blocks whatever the grade says
+        issues = [*checks.get(key, []), *raised, *(["REVIEW_REJECTED"] if grade and grade.grade == "REPAIR" and not raised else []), *([] if grade else [NOT_REVIEWED])]
         if issues:
             unresolved[key] = list(dict.fromkeys(issues))
     approval = Approval(
@@ -1389,7 +1366,7 @@ def stage_auditing(ctx: "StageContext") -> None:
     assert inp.plan is not None
     settings = ctx.rt.settings
     runner = _runner(ctx, inp)
-    workflow2 = runner._engine.final_editor  # the final editor's path; False: the earlier review and fixes
+    workflow2 = runner._engine.editor  # the final editor's path; False: the earlier review and fixes
     library = _library(ctx, inp)
     usable = {i for i, item in library.items() if item.usable}
     sample = sampling.calculate(inp.plan.sample_size) if inp.chapter == 3 else None
@@ -1406,6 +1383,7 @@ def stage_auditing(ctx: "StageContext") -> None:
         if inp.step == "COMPLETE":
             base = _base_document(ctx, inp)
     current = _owned(inp, items, current)
+    apart = runner._engine.prompts.get("p_review", "p-review-v3") != "p-review-v3"  # from p-review-v4 the prompt explains "placedByPaperAid"
     unresolved: dict[str, list[str]] = {}
     grades: dict[str, Grade] = {}
     stripped: list[str] = []
@@ -1418,12 +1396,12 @@ def stage_auditing(ctx: "StageContext") -> None:
     for round_ in ([] if workflow2 else runner.audit_rounds(rounds + 1)):
         ctx.activity("CHECKING", round_ + 1, rounds + 1)
         problems = {k: _checks(inp, k, t, library, allowed) for k, t in current.items()}
-        review = [review_item(inp, items, k, t, problems[k]) for k, t in current.items()]
+        review = [review_item(inp, items, k, t, problems[k], apart) for k, t in current.items()]
         grades = runner.grade(review, {**common, "vetting": vetting})
         unresolved = {}
         for key in current:
             grade = grades.get(key)
-            issues = [*problems[key], *(reviewer_issues(inp, key, grade.issues) if grade and grade.grade == "REPAIR" else [])]
+            issues = [*problems[key], *(grade.issues if grade and grade.grade == "REPAIR" else [])]
             if grade is None:  # never silently passed, whether or not the budget ran out (#10)
                 issues.append(NOT_REVIEWED)
             if issues:
@@ -1444,13 +1422,13 @@ def stage_auditing(ctx: "StageContext") -> None:
             stripped += [items[key]["heading"] for key in cleaned]
             current.update(cleaned)
             problems = {k: _checks(inp, k, current[k], library, allowed) for k in cleaned}
-            regraded = runner.grade([review_item(inp, items, k, current[k], problems[k]) for k in cleaned], {**common, "vetting": vetting})
+            regraded = runner.grade([review_item(inp, items, k, current[k], problems[k], apart) for k in cleaned], {**common, "vetting": vetting})
             for key in cleaned:
                 grade = regraded.get(key)
                 grades.pop(key, None)
                 if grade is not None:
                     grades[key] = grade
-                issues = [*problems[key], *(reviewer_issues(inp, key, grade.issues) if grade and grade.grade == "REPAIR" else [])] + ([] if grade else [NOT_REVIEWED])
+                issues = [*problems[key], *(grade.issues if grade and grade.grade == "REPAIR" else [])] + ([] if grade else [NOT_REVIEWED])
                 if issues:
                     unresolved[key] = issues
                 else:
@@ -1675,7 +1653,7 @@ def _revision(
         {**items[k], "text": t.paragraphs, "table": t.table.model_dump(), "issues": inp.revise[k], "_words": " ".join(t.paragraphs)}
         for k, t in current.items()
     ]
-    kept = runner._engine.final_editor
+    kept = runner._engine.editor
     if kept and ctx.has("revised.json"):  # written before a wait for the final editor
         fixes = {k: SectionText.model_validate(v) for k, v in ctx.get_json("revised.json").items()}
     else:

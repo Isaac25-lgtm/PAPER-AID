@@ -55,7 +55,7 @@ export function AppLayout() {
 
 function Shell() {
   const { user, signOut } = useAuth()
-  const { items } = useYourWork()
+  const { items, error: workError } = useYourWork()
   const navigate = useNavigate()
   const location = useLocation()
   const [menuOpen, setMenuOpen] = useState(false)
@@ -178,6 +178,7 @@ function Shell() {
           {HOME.map((item) => navLink(item))}
           {sections.length > 0 && <p className="mt-5 mb-1 px-2.5 text-[11px] font-semibold tracking-[0.08em] text-fg-subtle uppercase">Sections</p>}
           {sections.map((item) => sectionBlock(item))}
+          {workError && <p className="mt-2 px-2.5 text-xs text-fg-subtle" role="status">{items ? 'Your work could not be refreshed just now.' : 'Your work could not be loaded.'}</p>}
         </nav>
         <div className="flex flex-col gap-0.5 border-t border-line px-3 py-3">
           {footerLinks.map((item) => navLink(item))}
