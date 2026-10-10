@@ -33,3 +33,22 @@ export function createRefresher<T>(load: () => Promise<T>, onData: (data: T) => 
     },
   }
 }
+
+/** Calls `refresh` now and then again after each `delay()`, skipping it while `hidden()`; returns what stops it.
+ *  A refresh still under way when it is stopped schedules nothing afterwards: no timer outlives the page
+ *  (Codex's re-audit of d4d2bc7: the next timer was set after the request came back, whatever had happened meanwhile). */
+export function startPolling(refresh: () => Promise<void>, delay: () => number, hidden: () => boolean): () => void {
+  let disposed = false
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const tick = async () => {
+    if (disposed) return
+    if (!hidden()) await refresh()
+    if (disposed) return
+    timer = setTimeout(tick, delay())
+  }
+  void tick()
+  return () => {
+    disposed = true
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}

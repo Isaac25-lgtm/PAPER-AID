@@ -1411,7 +1411,7 @@ def test_a_reviewer_is_shown_what_paperaid_places_apart_and_its_rejection_still_
     assert "p_fix" in client.models.tasks  # and was sent to the writer to put right
     objectives = seen["objectives"]
     assert objectives["placedByPaperAid"][0].endswith("General Objective") and not any("General Objective" in p for p in objectives["text"])
-    assert get_runtime().store.get(job["id"]).quote.engine.prompts["p_review"] == "p-review-v4"
+    assert get_runtime().store.get(job["id"]).quote.engine.prompts["p_review"] == "p-review-v5"
 
 
 def test_a_job_priced_on_the_earlier_review_prompt_is_asked_as_it_was():
@@ -1566,4 +1566,90 @@ def test_your_work_is_one_light_line_each_and_reads_no_document(v2, monkeypatch)
     assert [(i["id"], i["section"], i["kind"], i["state"]) for i in listed.json()] == [(work["id"], "Coursework", "COURSEWORK", full["status"])]
     assert set(listed.json()[0]) == {"id", "section", "kind", "title", "updatedAt", "state", "chapters", "analyses"}  # where it is, never what it says
     assert v2.get("/api/me/work").status_code in (401, 403)  # only the signed-in person's own
+
+
+# --- Codex's re-audit of d4d2bc7 (10 October) ---------------------------------------------------------------------------
+
+
+def _states(client):
+    return {i["id"]: i["state"] for i in client.get("/api/me/work", headers=STUDENT).json()}
+
+
+def test_work_whose_latest_step_failed_or_was_stopped_is_never_listed_as_not_started(simple):
+    """The light list read only the record's own failure note, so a failed plan or draft with no document showed as
+    "Not started" while the workspace said why it had failed."""
+    from app.core.errors import PermanentStageError as Stop
+    from app.jobs.models import JobStatus
+    from app.runtime import get_runtime
+    from tests.test_works import _coursework, _run, _work
+
+    def refuse(payload):
+        raise Stop("PLAN_FAILED", "PaperAid could not make a plan for this. Nothing was charged.", "test")
+
+    rt = get_runtime()
+    fresh = _coursework(simple)
+    assert _states(simple)[fresh["id"]] == "NOT_STARTED"  # nothing has run yet: that is what "not started" means
+
+    simple.models.overrides["w_plan"] = refuse
+    failed_plan = _coursework(simple)
+    _, job = _run(simple, failed_plan["id"], "PLAN")
+    assert job["status"] == "FAILED" and _states(simple)[failed_plan["id"]] == "FAILED"
+
+    del simple.models.overrides["w_plan"]
+    failed_draft = _coursework(simple)
+    _run(simple, failed_draft["id"], "PLAN")
+    work = _work(simple, failed_draft["id"])
+    simple.post(f"/api/works/{work['id']}/plan/approve", headers=STUDENT, json={"baseVersion": work["planVersion"]})
+    simple.models.overrides["w_draft"] = refuse
+    _, job = _run(simple, failed_draft["id"], "DRAFT")
+    assert job["status"] == "FAILED" and _states(simple)[failed_draft["id"]] == "FAILED"  # a plan exists, the draft failed: still no document
+
+    def stopped(j):
+        j.status = JobStatus.CANCELLED
+        return j
+
+    rt.store.update(job["id"], stopped)
+    assert _states(simple)[failed_draft["id"]] == "FAILED"  # stopped by the person: also not "not started"
+    assert _states(simple)[fresh["id"]] == "NOT_STARTED"
+
+
+def test_a_proposal_or_a_data_report_that_failed_is_listed_as_failed(simple, monkeypatch):
+    from datetime import timedelta
+    from types import SimpleNamespace
+
+    from app.datalab.models import DataProject
+    from app.jobs.models import JobStatus, utcnow
+    from app.runtime import get_runtime
+    from tests.test_proposals import _create, _run
+
+    simple.models.overrides["p_plan"] = lambda payload: (_ for _ in ()).throw(PermanentStageError("PLAN_FAILED", "No plan could be made. Nothing was charged.", "test"))
+    pid = _create(simple)["id"]
+    job = _run(simple, pid, "PLAN")
+    assert job["status"] == "FAILED" and _states(simple)[pid] == "FAILED"
+
+    rt = get_runtime()
+    uid = rt.store.get_project(pid).owner_uid
+    data = DataProject(id="dl_test", owner_uid=uid, owner_email="demo@paperaid.app", title="Survey", expires_at=utcnow() + timedelta(days=30), jobs=["job_report"])
+    monkeypatch.setattr(type(rt.store), "list_datalab", lambda self, owner: [data])
+    real = type(rt.store).get
+    monkeypatch.setattr(type(rt.store), "get", lambda self, job_id: SimpleNamespace(status=JobStatus.FAILED) if job_id == "job_report" else real(self, job_id))
+    assert _states(simple)["dl_test"] == "FAILED"  # its report could not be finished: never "No data yet"
+
+
+def test_an_unsound_placed_statement_is_told_to_the_student_as_a_note_on_their_plan(client):
+    """Re-audit, finding 3: p-review-v4 called the placed statements "correct as they stand". They are the student's
+    approved plan and cannot be changed in the chapter, but the reviewer can still say one is unsound."""
+    from pathlib import Path
+
+    note = "Your plan: the first objective promises a causal conclusion that a cross-sectional design cannot give; word it as an association."
+
+    def review(payload):
+        return {"results": [{"key": s["key"], "grade": "PASS_WITH_WARNINGS" if s["key"] == "objectives" else "PASS", "issues": [],
+                             "note": note if s["key"] == "objectives" else ""} for s in payload["sections"]]}
+
+    _, job, chapter = _chapter_one(client, p_review=review)
+    assert job["status"] == "COMPLETED", job.get("failure")
+    assert any(note in w for w in chapter.warnings)  # delivered with the chapter, never dropped
+    prompt = (Path(__file__).parents[1] / "app" / "ai" / "prompts" / "p-review-v5.md").read_text(encoding="utf-8")
+    assert "not beyond question" in prompt and "correct as it stands" not in prompt and "Your plan:" in prompt
 

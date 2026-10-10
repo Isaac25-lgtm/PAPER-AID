@@ -142,8 +142,10 @@ STEPS: dict[str, Step] = {
     # Chapter: writer drafts → code checks → lead reviews → writer fixes (bounded rounds) → lead readiness.
     "p_draft": Step("writer", Stage.DRAFTING, "p-draft-v2", 16000),
     # v4 (2026-10-10): a plan-owned section is reviewed as the writer's introduction, with what PaperAid places given apart.
-    "p_review": Step("lead", Stage.AUDITING, "p-review-v4", 8000),
-    "p_review_peer": Step("writer", Stage.AUDITING, "p-review-v4", 8000),
+    # v5: those statements are the student's and cannot be changed here, but they are not beyond question: an unsound one
+    # is told to the student as a note on their plan (Codex's re-audit of d4d2bc7: v4 called them "correct as they stand").
+    "p_review": Step("lead", Stage.AUDITING, "p-review-v5", 8000),
+    "p_review_peer": Step("writer", Stage.AUDITING, "p-review-v5", 8000),
     "p_fix": Step("writer", Stage.AUDITING, "p-fix-v2", 16000),
     "p_readiness": Step("lead", Stage.AUDITING, "p-readiness-v1", 8000),
     # Workflow 2 (algorithm revision 2026-10-09): the final editor of a chapter's sections, as for works (w_edit).

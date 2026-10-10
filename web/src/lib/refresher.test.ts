@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { createRefresher } from './refresher'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createRefresher, startPolling } from './refresher'
 
 /** A load whose answers the test releases by hand, in any order. */
 function manual<T>() {
@@ -60,5 +60,43 @@ describe('createRefresher', () => {
     expect(seen).toEqual([])
     expect(failures).toEqual([])
     expect(pending).toHaveLength(1)
+  })
+})
+
+describe('startPolling', () => {
+  afterEach(() => vi.useRealTimers())
+
+  it('leaves no timer behind when it is stopped while a refresh is under way', async () => {
+    vi.useFakeTimers()
+    let finish = () => {}
+    const refresh = vi.fn(() => new Promise<void>((resolve) => (finish = resolve)))
+    const stop = startPolling(refresh, () => 15_000, () => false)
+    expect(refresh).toHaveBeenCalledTimes(1) // asked at once
+
+    stop() // the person left the app while the list was still loading
+    finish()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(vi.getTimerCount()).toBe(0) // nothing scheduled after it came back
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(refresh).toHaveBeenCalledTimes(1)
+  })
+
+  it('asks again after each delay, never while hidden, and stops when told to', async () => {
+    vi.useFakeTimers()
+    let hidden = false
+    const refresh = vi.fn(async () => {})
+    const stop = startPolling(refresh, () => 15_000, () => hidden)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(refresh).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(15_000)
+    expect(refresh).toHaveBeenCalledTimes(2)
+    hidden = true
+    await vi.advanceTimersByTimeAsync(45_000)
+    expect(refresh).toHaveBeenCalledTimes(2) // the tab is hidden: the timer keeps time, nothing is asked
+    hidden = false
+    await vi.advanceTimersByTimeAsync(15_000)
+    expect(refresh).toHaveBeenCalledTimes(3)
+    stop()
+    expect(vi.getTimerCount()).toBe(0)
   })
 })

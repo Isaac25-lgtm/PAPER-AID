@@ -1,7 +1,7 @@
 import { ChartColumn, FilePen, HandCoins, Lightbulb, NotebookPen } from 'lucide-react'
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useData } from '../../lib/data'
-import { createRefresher } from '../../lib/refresher'
+import { createRefresher, startPolling } from '../../lib/refresher'
 import type { StartChoice } from '../../lib/start'
 import type { WorkSummary } from '../../lib/types'
 import type { WorkspaceStatus } from '../workspace/parts'
@@ -91,19 +91,14 @@ export function YourWorkProvider({ children }: { children: ReactNode }) {
       },
       (failed) => setError(failed ? 'We could not refresh your work just now. This is what was last loaded.' : null),
     )
-    let timer = 0
-    const tick = async () => {
-      if (!document.hidden) await refresher.refresh()
-      timer = window.setTimeout(tick, writing.current ? WHILE_WRITING : OTHERWISE)
-    }
+    const stop = startPolling(() => refresher.refresh(), () => (writing.current ? WHILE_WRITING : OTHERWISE), () => document.hidden)
     const shown = () => {
       if (!document.hidden) void refresher.refresh()
     }
-    void tick()
     document.addEventListener('visibilitychange', shown)
     return () => {
       refresher.stop()
-      window.clearTimeout(timer)
+      stop()
       document.removeEventListener('visibilitychange', shown)
     }
   }, [data])

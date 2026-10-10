@@ -1146,3 +1146,19 @@ The rounds ran on changing code and under different loads, so they are diagnosti
 **Neither newer path has yet shown coursework reliably within ten minutes**, and the calculation assignment still has
 no sound treatment (its results need provenance code can check). No round has run on the code as corrected after
 Codex's audit: a round on 10 October was lost when the machine's temporary folder was cleared.
+
+### Codex's re-audit of d4d2bc7 (10 October): the ten fixes hold; three more findings fixed
+
+- **A failed job could be listed as "Not started".** The light list read only the record's own failure note; the full
+  views also look at the latest step. Now a piece of work with nothing delivered whose latest step failed or was
+  stopped is listed as "Couldn't finish" (works, proposals and Data Lab reports; the step's record is read, no file).
+- **A refresh timer could outlive the page.** The next timer was set after the request came back, whatever had
+  happened meanwhile. Polling is now one small function with a disposed flag (`startPolling`), tested with its timers.
+- **`p-review-v4` called the placed statements "correct as they stand".** They are the student's approved plan, which
+  a student can edit and approve without another review, so they are not beyond question. `p-review-v5`: the reviewer
+  never objects to their being there or asks for one to be changed in the chapter (no repair there can), but says an
+  unsound one in a note beginning "Your plan:", which is delivered with the chapter.
+
+Codex also pointed out, and it stands for the owner to decide: on the live path (workflow 1) a review after a repair
+still goes to the standard model, and the first review can fall back to it, as priced since 7 October. The rule that
+the premium model alone approves the delivered wording is enforced on workflow 2, which is off.

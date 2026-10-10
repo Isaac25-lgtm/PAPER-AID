@@ -17,6 +17,7 @@ from app.jobs.models import (
     Camel,
     FileMeta,
     ImageMeta,
+    JobStatus,
     JobView,
     Page,
     QuoteResponse,
@@ -73,12 +74,18 @@ def your_work(user: User = Depends(current_user), rt: Runtime = Depends(get_runt
     specification, document, evidence or dataset is read (a record that claims a running step has that step's
     status looked up, as the full views do: the claim outlives the step). It is what every page of the app polls for the left panel,
     which the full lists (each builds its whole view) are too heavy for (Codex's audit of cbb99cb, finding 9)."""
+    def ended_badly(jobs: list[str]) -> bool:
+        """Nothing was delivered and the latest step failed or was stopped: the full views say why, and the light
+        list must not call that "not started" (Codex's re-audit of d4d2bc7). The step's record is read, no file."""
+        last = rt.store.get(jobs[-1]) if jobs else None
+        return last is not None and last.status in (JobStatus.FAILED, JobStatus.CANCELLED)
+
     out: list[WorkSummary] = []
     for w in rt.store.list_works(user.uid):
         if w.deleting:
             continue
         doc = next((d for d in w.documents if d.version == w.current), w.documents[-1] if w.documents else None)
-        state = ("WRITING" if service.step_running(rt, w) else "FAILED" if w.auto_failure and doc is None else "NOT_STARTED" if doc is None
+        state = ("WRITING" if service.step_running(rt, w) else "FAILED" if doc is None and (w.auto_failure or ended_badly(w.jobs)) else "NOT_STARTED" if doc is None
                  else "READY" if doc.status == "READY" else "READY_WITH_WARNINGS" if doc.status == "READY_WITH_WARNINGS" else "NEEDS_ATTENTION")
         out.append(WorkSummary(id=w.id, section="Coursework" if w.kind == "COURSEWORK" else "Funding", kind=w.kind, title=(w.plan.title if w.plan else "") or w.inputs.title,
                                updated_at=w.updated_at, state=state))
@@ -87,13 +94,13 @@ def your_work(user: User = Depends(current_user), rt: Runtime = Depends(get_runt
             continue
         written = sorted(c.number for c in p.chapters if c.current and c.number != 4)
         concept = any(c.number == 4 and c.current for c in p.chapters)
-        state = ("WRITING" if service.step_running(rt, p) else "FAILED" if p.auto_failure and not written and not concept else "CHAPTERS" if written else "CONCEPT" if concept else "NOT_STARTED")
+        state = ("WRITING" if service.step_running(rt, p) else "FAILED" if not written and not concept and (p.auto_failure or ended_badly(p.jobs)) else "CHAPTERS" if written else "CONCEPT" if concept else "NOT_STARTED")
         out.append(WorkSummary(id=p.id, section="Research proposals", kind="PROPOSAL", title=(p.plan.title if p.plan else "") or p.inputs.topic, updated_at=p.updated_at,
                                state=state, chapters=written))
     for d in rt.store.list_datalab(user.uid):
         if d.deleting:
             continue
-        state = "WRITING" if service.step_running(rt, d) else "REPORT" if d.reports else "ANALYSES" if d.analyses else "NOT_ANALYSED" if d.source or d.documents else "NO_DATA"
+        state = "WRITING" if service.step_running(rt, d) else "REPORT" if d.reports else "FAILED" if ended_badly(d.jobs) else "ANALYSES" if d.analyses else "NOT_ANALYSED" if d.source or d.documents else "NO_DATA"
         out.append(WorkSummary(id=d.id, section="Data analysis", kind="DATALAB", title=d.title, updated_at=d.updated_at, state=state, analyses=len(d.analyses)))
     return sorted(out, key=lambda item: item.updated_at, reverse=True)
 
