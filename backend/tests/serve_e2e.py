@@ -71,6 +71,7 @@ def main() -> None:
     fetch.page_text = lambda url: fetch._text(models.pages[url].encode(), "text/html") if url in models.pages else None
     fetch.abstract_text = lambda url: models.abstracts.get(url)
     fetch.page_meta = lambda url: dict(models.meta.get(url, {}))
+    fetch.page_title = lambda url: models.titles.get(url, "")
     fetch.openalex_search = lambda query, from_year, limit: [dict(w) for w in models.works][:limit]
     fetch.openalex_find = lambda query, from_year, limit: ("FOUND" if models.works else "NO_RESULTS", [dict(w) for w in models.works][:limit])
     fetch.crossref_work = lambda doi: models.crossref.get(doi)

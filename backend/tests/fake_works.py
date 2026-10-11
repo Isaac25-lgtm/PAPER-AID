@@ -109,7 +109,8 @@ def _text(section: dict[str, Any], tokens: list[dict[str, Any]]) -> list[str]:
     total = len(sentences[0].split())
     n = 0
     while total < words * 0.95:
-        sentence = fillers[n % len(fillers)]
+        # each section says its own thing: a sentence repeated word for word across sections is a finding (2026-10-11)
+        sentence = f"{fillers[n % len(fillers)][:-1]}, for {topic}."
         sentences.append(sentence)
         total += len(sentence.split())
         n += 1

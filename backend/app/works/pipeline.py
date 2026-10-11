@@ -201,6 +201,23 @@ def _remove_figure_requested(requests: list[str]) -> bool:
     ))
 
 
+# A note to the person who ordered the document, written into the document: "the student must establish baseline
+# data", "details to be supplied by the student". A concept note or a funding proposal is the applicant's own voice
+# and is read by a funder (quality round 2026-10-11: two funding proposals in two carried such sentences). Coursework
+# may speak of students; these documents never address one.
+NOTE_TO_STUDENT = re.compile(
+    r"\bthe student\s+(?:must|should|needs?\s+to|will\s+(?:need|have)\s+to|is\s+to|has\s+to|can|may|is\s+(?:asked|expected|required))\b"
+    r"|\b(?:by|for|from)\s+the\s+student\b(?!s)|\bthe\s+student(?:'s|’s)\s+(?:own\s+)?(?:organisation|organization|answers?|figures?|details|records)\b"
+    r"|\bPaperAid\b", re.I)
+
+
+def _notes_to_student(inp: WorkStepInput, paragraph: str) -> list[str]:
+    """The sentences of a paragraph that are notes to the student, in a document that is not coursework."""
+    if _spec(inp).kind == "COURSEWORK":
+        return []
+    return [s for s in ev.sentences(paragraph) if NOTE_TO_STUDENT.search(s)]
+
+
 def _examples_allowed(inp: WorkStepInput) -> bool:
     """Hypothetical worked examples and drawn graphs belong to coursework answers only; a funding
     proposal's or concept note's numbers must always be evidence or the applicant's own (finding 4)."""
@@ -524,12 +541,18 @@ def _results_from(answer: dict[str, Any]) -> tuple[ResultsModel, list[BudgetLine
 
 
 def _clip_strings(value: Any, limit: int = 600) -> Any:
+    """A Results Model's text within what each field stores. A text that is too long ends at a whole word, never in
+    the middle of one: a "frequency" cut at 60 characters read as truncated, its reviewer said so, and no repair could
+    put it right (quality round 2026-10-11: one funding proposal in three stopped at its plan for this)."""
     if isinstance(value, str):
-        return value[:limit]
+        if len(value) <= limit:
+            return value
+        cut = value[:limit + 1].rsplit(None, 1)[0] if " " in value[:limit + 1] else value[:limit]
+        return cut[:limit].rstrip(" ,;:(-")
     if isinstance(value, list):
         return [_clip_strings(v, limit) for v in value]
     if isinstance(value, dict):
-        return {k: _clip_strings(v, 120 if k in ("ownerRole", "responsibleRole") else 60 if k in ("unit", "frequency") else limit) for k, v in value.items()}
+        return {k: _clip_strings(v, 120 if k in ("ownerRole", "responsibleRole") else 60 if k == "unit" else 160 if k == "frequency" else limit) for k, v in value.items()}
     return value
 
 
@@ -859,6 +882,10 @@ def _checks(inp: WorkStepInput, section: PlanSection, text: SectionText, library
             problems.append("The text refers to a figure that this section does not contain.")
         problems += ev.citation_problems(plain, usable)
         problems += ev.statistic_problems(plain)  # prose, a caption and a cell alike
+        if n < len(text.paragraphs):
+            problems += [f"This sentence is a note to the student, not part of the document: “{s.strip()[:140]}”. The document speaks as the applicant. Remove the note; "
+                         "where a figure or fact only they can give is missing, the sentence is written around its marked gap and says nothing about the gap."
+                         for s in _notes_to_student(inp, plain)[:2]]
         if n >= len(text.paragraphs) and text.table.illustrative:  # the worked example's own cells
             found = ev.figure_problems(plain, library_items, allowed + " " + example)
         elif example and n < len(text.paragraphs):  # only a sentence framed as hypothetical may use the example's numbers
@@ -981,6 +1008,14 @@ def _audit(ctx: "StageContext", runner: WorkRunner, inp: WorkStepInput, current:
             integrity.pop(key, None)
             evaluations.pop(key, None)
         problems = {k: _checks(inp, sections[k], current[k], library_items, allowed, tokens) for k in pending}
+        # Advice to the writer (quality round 2026-10-11): a source's own wording carried over without quotation marks,
+        # and a sentence an earlier section has already said word for word. In a first draft it is asked for like any
+        # finding and what remains is shown with the document's checks. In a revision it rides along with a repair
+        # that is happening anyway and never counts against the section: a requested change is not undone for it.
+        again = ev.repeated_sentences([(s.key, [numbers.strip(p) for p in current[s.key].paragraphs]) for s in inp.plan.sections if s.key in current])
+        advice = {k: [*[a for p in current[k].paragraphs for a in ev.copied_problems(numbers.strip(p), library_items)][:3], *again.get(k, [])] for k in pending}
+        if inp.step != "REVISE":
+            problems = {k: [*found, *advice[k]] for k, found in problems.items()}
         items = _review_items(inp, sections, current, problems, pending)
         # From w-evaluate-v2 the evaluator reads each section beside the evidence it cites (the source's own words,
         # scope and any caution), and a section citing a finding that is only partly supported is always evaluated
@@ -1021,7 +1056,8 @@ def _audit(ctx: "StageContext", runner: WorkRunner, inp: WorkStepInput, current:
         if not unresolved or runner.budget_reached or round_ == rounds:
             break
         progress(ctx, "REPAIRING", round_ + 1)
-        for key, fixed in runner.repair(_repair_items(inp, current, library_items, unresolved, problems), common).items():
+        asked = {k: [*v, *[a for a in advice.get(k, []) if a not in v]] for k, v in unresolved.items()}
+        for key, fixed in runner.repair(_repair_items(inp, current, library_items, asked, problems), common).items():
             current[key] = _kept(current[key], fixed)
         repairs += 1
         pending = list(unresolved)
@@ -1077,6 +1113,8 @@ def _strip(inp: WorkStepInput, text: SectionText, library_items: dict[str, Evide
             plain = plain.replace(token, placeholder, 1)
         kept = ev.strip_overclaims(ev.strip_unsupported(plain, library_items, usable, in_example) if cell else
                                    ev.strip_unsupported(plain, library_items, usable, allowed, _framed(example)), gaps=False)
+        if not cell and (notes := _notes_to_student(inp, kept)):  # what the repair rounds left: a note to the student is never delivered inside the document
+            kept = " ".join(s for s in ev.sentences(kept) if s not in notes).strip()
         for placeholder, token in protected.items():
             kept = kept.replace(placeholder, token)
         return kept

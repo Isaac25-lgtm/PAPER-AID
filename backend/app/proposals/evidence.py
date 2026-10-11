@@ -54,6 +54,8 @@ def dated(item: EvidenceItem) -> str:
     gathered = re.match(r"(?:19|20)\d{2}", item.retrieved_on or "")
     if not year or not gathered or int(gathered.group(0)) - int(year.group(0)) <= DATED_AFTER:
         return ""
+    if not re.search(r"\d", re.sub(r"\b(?:19|20)\d{2}\b", "", item.statement)):
+        return ""  # no figure to go out of date: a method or a theory is not "as of 2015" (quality round, 2026-10-11)
     return (f"Published in {year.group(0)}. A figure or a description of the situation from it is given as that time's, with its year "
             f"(“in {year.group(0)}, ...”), never as the present position; for the present, use a recent finding or say none was found.")
 
@@ -546,6 +548,92 @@ def row_overclaims(header: list[str], row: list[str]) -> list[int]:
     headings = [*header, *[""] * len(row)]
     return [n for n, cell in enumerate(row) if not _RATIO.search(cell) and (
         _called_significant(cell) or (_called_significant(headings[n]) and bool(_AFFIRMS.fullmatch(cell.strip()))))]
+
+
+COPIED_RUN = 10  # words in a row
+
+
+def _word_spans(text: str) -> list[tuple[str, int, int]]:
+    """The words of a text with where each stands; citation and number tokens are not words and break a run."""
+    blanked = ANY_TOKEN.sub(lambda m: "\x00" * len(m.group(0)), text)
+    return [(m.group(0).casefold(), m.start(), m.end()) for m in re.finditer(r"[^\W_]+(?:['’][^\W_]+)*|\x00+", blanked)]
+
+
+def _copied_run(sentence: str, passages: list[str]) -> tuple[int, int, int] | None:
+    """The longest run of a source's own words in the sentence, outside quotation marks: (words, start, end) in the
+    sentence, or None when no run reaches COPIED_RUN."""
+    spans = _word_spans(sentence)
+    mine = [w for w, _, _ in spans]
+    best: tuple[int, int, int] | None = None
+    for passage in passages:
+        theirs = [w for w, _, _ in _word_spans(passage)]
+        previous = [0] * (len(theirs) + 1)
+        for i, word in enumerate(mine, start=1):
+            current = [0] * (len(theirs) + 1)
+            for j, other in enumerate(theirs, start=1):
+                if word == other and not word.startswith("\x00"):
+                    current[j] = previous[j - 1] + 1
+                    if current[j] >= COPIED_RUN and (best is None or current[j] > best[0]):
+                        best = (current[j], spans[i - current[j]][1], spans[i - 1][2])
+            previous = current
+    if best is None or _quoted(sentence, best[1]):
+        return None
+    return best
+
+
+def _passages_for(sentence: str, paragraph: str, library: dict[str, EvidenceItem]) -> list[str]:
+    ids = cited_ids(sentence) or cited_ids(paragraph)
+    return [library[i].passage for i in dict.fromkeys(ids) if i in library and library[i].passage]
+
+
+def copied_problems(paragraph: str, library: dict[str, EvidenceItem]) -> list[str]:
+    """Sentences that carry COPIED_RUN or more words in a row from the passage of a source they cite, outside
+    quotation marks. A citation does not make a source's own wording the student's: it is paraphrased or quoted
+    (the quality round of 2026-10-11 found runs of 22 words, in 20 of one coursework's 57 sentences)."""
+    problems = []
+    for sentence in sentences(paragraph):
+        found = _copied_run(sentence, _passages_for(sentence, paragraph, library))
+        if found:
+            opening = " ".join(sentence[found[1]:found[2]].split()[:6])
+            problems.append(f"A sentence carries {found[0]} words in a row from its source's own wording (“{opening} ...”). Say it in your own words, or keep the exact "
+                            "words short and inside quotation marks.")
+    return problems
+
+
+def quote_copied(paragraph: str, library: dict[str, EvidenceItem]) -> str:
+    """The last line of defence for copied wording: what the repair rounds left is marked as the quotation it is,
+    so nothing printed passes a source's words off as the student's. Nothing else changes; the same paragraph when
+    there is nothing to mark."""
+    out = []
+    changed = False
+    for sentence in sentences(paragraph):
+        for _ in range(3):
+            found = _copied_run(sentence, _passages_for(sentence, paragraph, library))
+            if not found:
+                break
+            sentence = f"{sentence[:found[1]]}“{sentence[found[1]:found[2]]}”{sentence[found[2]:]}"
+            changed = True
+        out.append(sentence)
+    return " ".join(out) if changed else paragraph
+
+
+def repeated_sentences(texts: list[tuple[str, list[str]]]) -> dict[str, list[str]]:
+    """By section key, the sentences (ten words or more) that an earlier section has already said word for word.
+    `texts`: each section's key and paragraphs, in the document's order."""
+    seen: dict[str, str] = {}
+    found: dict[str, list[str]] = {}
+    for key, paragraphs in texts:
+        for paragraph in paragraphs:
+            for sentence in sentences(paragraph):
+                words = [w for w, _, _ in _word_spans(sentence) if not w.startswith("\x00")]
+                if len(words) < 10:
+                    continue
+                same = " ".join(words)
+                if same in seen and seen[same] != key:
+                    found.setdefault(key, []).append(f"This sentence was already said, word for word, in an earlier section: “{sentence.strip()[:160]}”. Say it once, "
+                                                     "and here say something that takes the argument further.")
+                seen.setdefault(same, key)
+    return {key: list(dict.fromkeys(problems))[:3] for key, problems in found.items()}
 
 
 def table_problems(rows: list[list[str]]) -> list[str]:

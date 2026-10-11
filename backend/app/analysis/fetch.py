@@ -25,7 +25,7 @@ import httpx
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 
-from app.analysis.metadata import clean_authors, clean_container, clean_text, clean_title, distinct_entries, distinct_people, is_organisation
+from app.analysis.metadata import clean_authors, clean_container, clean_text, clean_title, distinct_entries, distinct_people, is_organisation, without_markers
 
 logger = logging.getLogger("paperaid.fetch")
 
@@ -181,7 +181,9 @@ def page_meta(url: str) -> dict[str, str]:
         return next((found[k][0] for k in keys if found.get(k)), "")
 
     authors = []
-    for name in found.get("citation_author", []):
+    for name in (without_markers(n) for n in found.get("citation_author", [])):
+        if not name:
+            continue
         if is_organisation(name):
             authors.append(name)
             continue
@@ -195,6 +197,24 @@ def page_meta(url: str) -> dict[str, str]:
     return {"title": clean_title(first("citation_title")), "authors": "; ".join(clean_authors(authors)[:20]), "year": year.group(0) if year else "",
             "container": first("citation_journal_title", "citation_conference_title", "citation_dissertation_institution", "citation_publisher"),
             "volume": first("citation_volume"), "issue": first("citation_issue"), "pages": pages, "doi": doi.group(1).rstrip(".").lower() if doi else ""}
+
+
+_TITLE = re.compile(r"<title\b[^>]*>(.*?)</title\s*>", re.I | re.S)
+
+
+def page_title(url: str) -> str:
+    """What a page calls itself (its Open Graph title, else its <title>), or "" when it cannot be read. For a
+    reference whose finding gave only the site's name as its title."""
+    got = _get(url)
+    if not got or "html" not in got[1].lower():
+        return ""
+    head = got[0][:200_000].decode("utf-8", errors="replace")
+    for tag in _META.findall(head):
+        attrs = {m.group(1).lower(): m.group(2) if m.group(2) is not None else m.group(3) for m in _ATTR.finditer(tag)}
+        if (attrs.get("property") or attrs.get("name") or "").lower() == "og:title" and clean_text(attrs.get("content") or ""):
+            return clean_title(attrs["content"])[:300]
+    found = _TITLE.search(head)
+    return clean_title(found.group(1))[:300] if found else ""
 
 
 def abstract_text(url: str) -> str | None:

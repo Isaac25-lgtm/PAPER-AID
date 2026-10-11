@@ -78,6 +78,16 @@ def clean_pages(value: str) -> str:
     return first.strip() if dash and first.strip() == last.strip() else (value or "")
 
 
+def without_markers(name: str) -> str:
+    """An author's name without the affiliation markers a page prints against it ("Figueiredo1,2")."""
+    return re.sub(r"(?<=[^\W\d_])\d+(?:\s*,\s*\d+)*\b", "", name).strip(" ,;")
+
+
+def bare_site(title: str) -> bool:
+    """A "title" that is only a site's address ("eprcug.org"): not the title of anything."""
+    return not title.strip() or bool(re.fullmatch(r"(?:https?://)?(?:[a-z0-9-]+\.)+[a-z]{2,}/?", title.strip(), re.I))
+
+
 def is_organisation(name: str) -> bool:
     """A registered author that is a body ("Center for Rapid Evidence Synthesis (ACRES)"): its name is kept whole,
     never split into a surname and initials. Used only where the record does not say which an author is; brackets
@@ -147,6 +157,7 @@ def clean_authors(authors: list[str]) -> list[str]:
     cleaned: list[str] = []
     for raw in authors:
         name = _TITLE_BEFORE.sub("", _DEGREE.sub("", clean_text(raw))).strip(" ,;")
+        name = re.sub(r"^(?:for|on behalf of)\s+(?:the\s+)?(?=[A-Z])", "", name)  # "for the STROBE Initiative": the group is the author
         if not name:
             continue
         family, comma, rest = name.partition(",")

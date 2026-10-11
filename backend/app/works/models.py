@@ -320,7 +320,7 @@ class Indicator(Camel):
     target_date: str = Field(default="", max_length=20)
     disaggregation: list[str] = []
     means_of_verification: str = Field(default="", max_length=300)
-    frequency: str = Field(default="", max_length=60)
+    frequency: str = Field(default="", max_length=160)  # "Semi-annually, at the close of each placement cycle (months 6 and 12)" is 68
     responsible_role: str = Field(default="", max_length=120)
 
 

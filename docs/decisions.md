@@ -1380,3 +1380,64 @@ so what it shows never changes with the other chapters' later versions.
 
 Codex also noted, correctly, that on the live path the premium model is the first reviewer of a repair, not a
 guaranteed one: the standard model can still approve when the premium model cannot answer. Only workflow 2 waits.
+
+## 2026-10-11 — The owner's quality round: every kind of document on the live path, read for what recurs
+
+The owner asked for three to four documents of each kind a student can order, on the algorithm students use, to judge
+the content and fix what recurred. Run on `7c11335`'s code with real models and synthetic topics: 4 courseworks, 3
+full research proposals (plan and Chapters One to Three), 3 research concept notes, 3 funding proposals, 3 funding
+concept notes. About $16 for the first pass and $9 for the reruns.
+
+| Kind | Delivered, first pass | What stopped the others |
+|---|---|---|
+| Coursework | 4 of 4 | |
+| Research concept note | 3 of 3 | |
+| Funding concept note | 3 of 3 | |
+| Funding proposal | 2 of 3 | a field of the Results Model cut in the middle of a word |
+| Full research proposal | 1 of 3 | a plan refused for "fabricated" variables; Chapter Two refused for a pronoun |
+
+### What recurred, and what was done
+
+- **A source's own wording carried over without quotation marks.** In one coursework 20 of 57 sentences held eight or
+  more of a source's words in a row, one of them 22, each with its citation. The writers were told to state what the
+  evidence says and were given its words; nothing told them not to reuse the words. Now: the writers are told to put
+  a source's meaning in their own words (`p-draft-v5`, `w-draft-v8`, and the repair prompts); code finds a run of ten
+  words from a cited passage outside quotation marks (`evidence.copied_problems`) and sends it back; in a chapter,
+  what the repairs leave is marked as the quotation it is before the approval reads it (`quote_copied`), and the
+  student is told where. This is paraphrase and quotation as any institution requires them. It is not, and must
+  never become, wording changed to defeat a detector. After the change the same coursework had one such sentence.
+- **The same sentence word for word in two sections** of a coursework (`evidence.repeated_sentences`): the later
+  section is told. In a coursework revision both findings are advice that rides with a repair and never undo a
+  requested change.
+- **A funding document that spoke to "the student"**: "key operational details remain gaps for the student to
+  confirm. The student must establish baseline data". Found in two funding proposals of two and two concept notes of
+  three. A check and a last line of defence for concept notes and funding proposals (`NOTE_TO_STUDENT`), and the rule
+  in the writer's prompts: the document speaks as the applicant and says nothing about what is missing.
+- **A Results Model's text cut mid-word** (`_clip_strings`: "frequency" at 60 characters). Its reviewer asked for the
+  truncated text to be completed and no repair could: the proposal stopped at its plan. The field now holds 160
+  characters and a text that must be cut ends at a whole word.
+- **The premium model's re-check, on the live path since this morning, refused more.** A plan was refused because the
+  planner's proposed variables were called "fabricated" (and a repair had emptied them); a whole Chapter Two was
+  refused because "These enterprises" had its noun a sentence away. `p-plan-review-v3` says what a plan proposes is
+  not invented; `signoff-v2` says what an objection at sign-off is: an unresolved finding or a new defect of
+  substance, never a small matter of wording a repair left. Everything `signoff-v1` required still stands.
+- **References**: a title that is only a site's name is replaced by the page's own title, or the finding is not used
+  (`bare_site`, `fetch.page_title`); affiliation digits against an author's name are removed (`without_markers`);
+  "for the STROBE Initiative" is the group, not a person.
+- **The dated note on a statement with no figure** ("methodological literature from 2015 noted that ..."): only a
+  figure goes out of date.
+- **"Compare" answered with differences only** (noted by the reviewer three times in the day, never repaired):
+  `w-plan-v7` plans what the things have in common as well as how they differ.
+
+### After the fixes (the cases that failed, run again)
+
+The refused funding proposal was delivered; the proposal whose plan was refused completed all three chapters; the
+coursework with 20 copied sentences had 1; no rerun document repeated a sentence across sections, spoke to the
+student, or carried a site's name as a title.
+
+### Still to do, seen in this round
+
+- A basic first-year question is still answered above its level in places ("ontology, epistemology").
+- News sites and university marketing blogs are still cited for facts and definitions that have better sources.
+- The same facts are restated across a concept note's background, problem statement and justification.
+- Under load (ten to sixteen jobs at once on one machine) courseworks took 8.5 to 21.7 minutes; searches timed out.

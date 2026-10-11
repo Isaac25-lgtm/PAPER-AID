@@ -139,20 +139,22 @@ STEPS: dict[str, Step] = {
     "p_critique": Step("writer", Stage.PLANNING, "p-critique-v1", 8000),
     "p_guide": Step("writer", Stage.PLANNING, "p-guide-v1", 8000),
     "p_finalise": Step("lead", Stage.PLANNING, "p-finalise-v4", 12000),
-    "p_plan_review": Step("lead", Stage.PLANNING, "p-plan-review-v2", 8000),
-    "p_plan_review_peer": Step("writer", Stage.PLANNING, "p-plan-review-v2", 8000),
+    # v3 (quality round 2026-10-11): what a plan proposes (variables, theory, design) is not "invented"; only a statement of fact nobody gave is.
+    "p_plan_review": Step("lead", Stage.PLANNING, "p-plan-review-v3", 8000),
+    "p_plan_review_peer": Step("writer", Stage.PLANNING, "p-plan-review-v3", 8000),
     # Chapter: writer drafts → code checks → lead reviews → writer fixes (bounded rounds) → lead readiness.
     # v3 (academic audit, 2026-10-11): a partly supported finding's caution, gaps as limits of the evidence, association before effect, plain language.
     # p-plan-v5, p-draft-v4, p-fix-v4, w-draft-v6, w-repair-v7 (Codex's audit of 1a3b1e7, findings 2 and 8): significance as the source reports it and by the
     # value of no difference (1 for a ratio, 0 for a difference); cause only where the design can identify one, whatever the design is called.
-    "p_draft": Step("writer", Stage.DRAFTING, "p-draft-v4", 16000),
+    # p-draft-v5, p-fix-v5, w-draft-v8, w-repair-v8 (quality round 2026-10-11): a source's meaning in the writer's own words, never its wording.
+    "p_draft": Step("writer", Stage.DRAFTING, "p-draft-v5", 16000),
     # v4 (2026-10-10): a plan-owned section is reviewed as the writer's introduction, with what PaperAid places given apart.
     # v5: those statements are the student's and cannot be changed here, but they are not beyond question: an unsound one
     # is told to the student as a note on their plan (Codex's re-audit of d4d2bc7: v4 called them "correct as they stand").
     # v6 (Codex's audit of 6e513af): the sentences code could not judge are given to be read ("forYourJudgement"); so from w-evaluate-v3.
     "p_review": Step("lead", Stage.AUDITING, "p-review-v6", 8000),
     "p_review_peer": Step("writer", Stage.AUDITING, "p-review-v6", 8000),
-    "p_fix": Step("writer", Stage.AUDITING, "p-fix-v4", 16000),  # v3: the same rules as p-draft-v3
+    "p_fix": Step("writer", Stage.AUDITING, "p-fix-v5", 16000),  # v3: the same rules as p-draft-v3
     "p_readiness": Step("lead", Stage.AUDITING, "p-readiness-v1", 8000),
     # Workflow 2 (algorithm revision 2026-10-09): the final editor of a chapter's sections, as for works (w_edit).
     "p_edit": Step("lead", Stage.AUDITING, "p-edit-v1", 16000),
@@ -177,17 +179,17 @@ STEPS: dict[str, Step] = {
     # w-search-v2 (2026-10-11): for a standard account, textbooks and teaching material before a company's page. Proposals keep p-search-v1.
     "w_search": Step("ANALYST", Stage.RESEARCHING, "w-search-v2", 4000),
     "w_verify": Step("INTEGRITY", Stage.RESEARCHING, "verify-v1", 6000),
-    "w_plan": Step("WRITER", Stage.PLANNING, "w-plan-v6", 12000),  # v2: claims within the evidence, a repair changes only what was raised; v3: says the plan is internal (Codex audit of 9239dd0); v4: the applicant's own facts never asserted either way, no page claims (live funding runs 2026-10-03); v5 (2026-10-11): a direct answer at the depth the command words and the level ask for
+    "w_plan": Step("WRITER", Stage.PLANNING, "w-plan-v7", 12000),  # v2: claims within the evidence, a repair changes only what was raised; v3: says the plan is internal (Codex audit of 9239dd0); v4: the applicant's own facts never asserted either way, no page claims (live funding runs 2026-10-03); v5 (2026-10-11): a direct answer at the depth the command words and the level ask for
     "w_plan_review": Step("EVALUATOR", Stage.PLANNING, "w-plan-review-v2", 6000),  # v2: blocking issues apart from suggestions; a repair is checked against the earlier issues (live funding runs 2026-10-03)
     "w_results": Step("WRITER", Stage.PLANNING, "w-results-v3", 16000),  # v2: says the Results Model is internal (Codex audit of 9239dd0); v3: measurement rules (live funding runs 2026-10-03)
     "w_results_review": Step("EVALUATOR", Stage.PLANNING, "w-results-review-v4", 8000),  # v2: blocking issues apart from suggestions; a repair is checked against the earlier issues
     # v4: only explicitly hypothetical prose uses example numbers; v5 (academic audit, 2026-10-11): cautions, gaps, ratios, the answer each command word
     # asks for at the student's level, ordinary examples from their setting.
-    "w_draft": Step("WRITER", Stage.DRAFTING, "w-draft-v7", 16000),
+    "w_draft": Step("WRITER", Stage.DRAFTING, "w-draft-v8", 16000),
     "w_integrity": Step("INTEGRITY", Stage.AUDITING, "w-integrity-v1", 6000),
     # v2 (Codex's audit of 1a3b1e7): the evaluator reads each section beside the evidence it cites, cautions included.
     "w_evaluate": Step("EVALUATOR", Stage.AUDITING, "w-evaluate-v3", 8000),
-    "w_repair": Step("WRITER", Stage.AUDITING, "w-repair-v7", 16000),  # v5: explicit hypothetical framing and graph preservation; v6: the rules of w-draft-v5
+    "w_repair": Step("WRITER", Stage.AUDITING, "w-repair-v8", 16000),  # v5: explicit hypothetical framing and graph preservation; v6: the rules of w-draft-v5
     "w_adjudicate": Step("ADJUDICATOR", Stage.AUDITING, "w-adjudicate-v1", 4000),
     "w_final": Step("EVALUATOR", Stage.AUDITING, "w-final-v2", 8000),  # v2: the exact deliverable, every verdict required (Sol with one final reviewer)
     "w_compress": Step("WRITER", Stage.AUDITING, "w-compress-v1", 12000),
@@ -352,7 +354,9 @@ def _saved_result(saved: str) -> ModelResult:
     raw = json.loads(saved)
     return ModelResult(text=raw["text"], usage=Usage(0, 0, 0, 0), provider="vertex", model=raw["model"], queries=raw["queries"], grounding=raw["grounding"])
 # Instructions added to a released prompt on Vertex, versioned and frozen like the prompts themselves.
-VERTEX_ADDENDA = {"signoff": "signoff-v1", "search": "vertex-search-v1"}
+# signoff-v2 (quality round 2026-10-11): what an objection at sign-off is. The premium model, re-checking a repair, refused a
+# whole chapter for a pronoun whose noun was a sentence away.
+VERTEX_ADDENDA = {"signoff": "signoff-v2", "search": "vertex-search-v1"}
 
 
 def freeze_vertex(settings: Settings, engine: Engine) -> Engine:

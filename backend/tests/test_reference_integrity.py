@@ -462,3 +462,37 @@ def test_two_records_without_dois_are_one_work_only_when_everything_they_say_agr
                  (record(1, authors=["Smith, J."], container="Journal of Education", volume="12"), record(2, authors=["Smith, J."]))):
         for order in permutations([a, b]):
             assert len(evidence.reference_list(order)) == 1, (a.authors, b.authors, a.organisation)
+
+
+def test_markers_and_group_prefixes_are_not_part_of_an_author_s_name(monkeypatch):
+    """ "G Figueiredo1,2, R., M Patino1,3, C., & C Ferreira1,4, J. (2025)" and "... Egger, M., & for the STROBE
+    Initiative. (2007)" (quality round of 11 October)."""
+    from app.analysis.metadata import without_markers
+
+    assert without_markers("Rejane G Figueiredo1,2") == "Rejane G Figueiredo" and without_markers("Cecilia M Patino1, 3") == "Cecilia M Patino"
+    assert without_markers("Okello, James Peter") == "Okello, James Peter" and without_markers("3M Health Care") == "3M Health Care"
+    page = (b'<html><head><meta name="citation_title" content="Cross-sectional studies: understanding applications">'
+            b'<meta name="citation_author" content="Rejane G Figueiredo1,2"><meta name="citation_author" content="Cecilia M Patino1,3">'
+            b'<meta name="citation_publication_date" content="2025"></head></html>')
+    monkeypatch.setattr(fetch, "_get", lambda url: (page, "text/html"))
+    assert PAGE_META("https://example.org/a")["authors"] == "Figueiredo, R. G.; Patino, C. M."
+    assert clean_authors(["Vandenbroucke, J. P.", "Egger, M.", "for the STROBE Initiative"]) == ["Vandenbroucke, J. P.", "Egger, M.", "STROBE Initiative"]
+    assert clean_authors(["on behalf of the RTS,S Clinical Trials Partnership"]) == ["RTS,S Clinical Trials Partnership"]
+
+
+def test_a_site_s_name_is_never_a_reference_s_title(offline):
+    """ "Economic Policy Research Centre. (2025). eprcug.org. https://eprcug.org/blog/..." (quality round)."""
+    from app.analysis.metadata import bare_site
+
+    assert bare_site("eprcug.org") and bare_site("southernvoice.org") and bare_site("https://www.amref.org/") and bare_site("  ")
+    assert not bare_site("Statistical abstract 2024") and not bare_site("Node.js in practice")
+    url = "https://eprcug.org/blog/are-skills-mismatches-fuelling-africas-youth-unemployment-crisis/"
+    offline.setattr(fetch, "page_title", lambda u: "Are skills mismatches fuelling Africa's youth unemployment crisis?")
+    source = pipeline._web_source(_Finding(url, title="eprcug.org", publisher="Economic Policy Research Centre", published="2025"))
+    assert source.title == "Are skills mismatches fuelling Africa's youth unemployment crisis?" and source.organisation == "Economic Policy Research Centre"
+    same_as_publisher = pipeline._web_source(_Finding(url, title="Economic Policy Research Centre", publisher="Economic Policy Research Centre", published="2025"))
+    assert same_as_publisher.title.startswith("Are skills mismatches")
+    offline.setattr(fetch, "page_title", lambda u: "")
+    assert pipeline._web_source(_Finding(url, title="eprcug.org", publisher="Economic Policy Research Centre", published="2025")) is None  # nothing to call it: not a reference
+    kept = pipeline._web_source(_Finding(url, title="A look into youth unemployment in Uganda", publisher="Economic Policy Research Centre", published="2023"))
+    assert kept.title == "A look into youth unemployment in Uganda"  # a real title is never looked up again

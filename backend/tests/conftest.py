@@ -102,6 +102,7 @@ def _client(tmp_path, monkeypatch, pricing: str):
     monkeypatch.setattr(fetch, "page_text", lambda url: fetch_html_text(models.pages.get(url)))  # no network in tests
     monkeypatch.setattr(fetch, "abstract_text", lambda url: models.abstracts.get(url))
     monkeypatch.setattr(fetch, "page_meta", lambda url: dict(models.meta.get(url, {})))
+    monkeypatch.setattr(fetch, "page_title", lambda url: models.titles.get(url, ""))
 
     def openalex_search(query, from_year, limit):
         models.searched.append(query)

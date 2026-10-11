@@ -147,12 +147,12 @@ def test_a_retry_after_a_crash_in_link_resolution_reuses_the_paid_answer(sdk, mo
 def test_an_older_release_refuses_a_gemini_priced_engine_instead_of_switching_models(sdk, monkeypatch):
     calls, _ = sdk
     engine = priced_engine(settings())
-    assert "prompt:signoff-v1" in engine.content and "prompt:vertex-search-v1" in engine.content
+    assert "prompt:signoff-v2" in engine.content and "prompt:vertex-search-v1" in engine.content
     # How the 2026-10-05 image reads it: no Vertex fields (they are unknown to it), and its prompts lack the new ones.
     older = Engine.model_validate({k: v for k, v in engine.model_dump(by_alias=True).items() if not k.startswith("vertex")})
     assert not older.vertex_routes and orchestration.model_for_engine(older, "analyse") == "openai:gpt-6-luna"
     now = orchestration.content_now()
-    monkeypatch.setattr(orchestration, "content_now", lambda: {k: v for k, v in now.items() if k not in ("prompt:signoff-v1", "prompt:vertex-search-v1")})
+    monkeypatch.setattr(orchestration, "content_now", lambda: {k: v for k, v in now.items() if k not in ("prompt:signoff-v2", "prompt:vertex-search-v1")})
     ai = AIRunner(settings(), lambda _: None, lambda: 0, 5, engine=older)
     with pytest.raises(PermanentStageError, match="ENGINE_CHANGED"):
         ai._call("analyse", {}, SCHEMA, Answer)
@@ -165,7 +165,7 @@ def test_every_priced_quote_freezes_its_content(fixed_client):
 
     job_id, _ = start_job(fixed_client, selection={"writing": "AI_CHECK"})
     engine = get_runtime().store.get(job_id).quote.engine
-    assert engine.vertex_routes and "prompt:analyse-v3" in engine.content and "prompt:signoff-v1" in engine.content
+    assert engine.vertex_routes and "prompt:analyse-v3" in engine.content and "prompt:signoff-v2" in engine.content
 
 
 # --- 5. Sign-off history: per part, never doubled, within the review bound ---------------------------------

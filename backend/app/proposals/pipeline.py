@@ -20,7 +20,7 @@ from urllib.parse import urlsplit
 from pydantic import ValidationError
 
 from app.ai.orchestration import REVIEW_REPAIRS
-from app.analysis import fetch, research
+from app.analysis import fetch, metadata, research
 from app.core.errors import CapacityWait, PermanentStageError, RetryableStageError
 from app.jobs import state
 from app.jobs.models import Approval, Job, JobStatus, ReadinessItem, Stage, TopicRoute, Wallet, utcnow
@@ -588,8 +588,14 @@ def _web_source(finding) -> EvidenceSource | None:
     if declared or hosted:
         return None
     year = YEAR.search(finding.published)
+    title = finding.title.strip()
+    if metadata.bare_site(title) or title.casefold() == finding.publisher.strip().casefold():
+        # the finding named only the site: the page's own title, or it is not a reference (quality round 2026-10-11: "eprcug.org.")
+        title = fetch.page_title(finding.url)
+        if metadata.bare_site(title):
+            return None
     return EvidenceSource(
-        url=finding.url, title=finding.title.strip(), organisation=finding.publisher.strip(), year=year.group(0) if year else "",
+        url=finding.url, title=title, organisation=finding.publisher.strip(), year=year.group(0) if year else "",
         container=finding.publisher.strip(), kind="REPORT", metadata="PAGE",
     )
 
@@ -1279,7 +1285,7 @@ def _checks(inp: StepInput, key: str, text: SectionText, library: dict[str, Evid
     for paragraph in text.paragraphs:
         problems += evidence.citation_problems(paragraph, usable)
         problems += evidence.figure_problems(paragraph, library, allowed)
-        problems += evidence.gap_problems(paragraph) + evidence.statistic_problems(paragraph)
+        problems += evidence.gap_problems(paragraph) + evidence.statistic_problems(paragraph) + evidence.copied_problems(paragraph, library)
         if tense:
             problems += evidence.tense_problems(paragraph)
     table_allowed = _table_allowed(inp, allowed)
@@ -1470,6 +1476,7 @@ def stage_auditing(ctx: "StageContext") -> None:
     unresolved: dict[str, list[str]] = {}
     grades: dict[str, Grade] = {}
     stripped: list[str] = []
+    quoted: list[str] = []
     approval: Approval | None = None
     if workflow2:
         current, grades, unresolved, stripped, approval = _edited(ctx, runner, inp, items, current, library, allowed, {**common, "vetting": vetting})
@@ -1500,10 +1507,17 @@ def stage_auditing(ctx: "StageContext") -> None:
     if runner._engine.require_dual_approval and not workflow2:
         # Code removes what it cannot trace BEFORE the final approval, so both reviewers approve the
         # exact wording that is delivered (Codex, plan review 2026-09-29).
+        # A source's own wording that the repair rounds left is marked as the quotation it is, before the same
+        # approval (quality round 2026-10-11): what is printed never passes a source's words off as the student's.
+        marked = {key: text.model_copy(update={"paragraphs": told}) for key, text in current.items()
+                  if (told := [evidence.quote_copied(p, library) for p in text.paragraphs]) != text.paragraphs}
+        current.update(marked)
+        quoted += [items[key]["heading"] for key in marked]
         cleaned = {key: tidy for key, text in current.items() if (tidy := _cleaned(inp, text, library, usable, allowed)) != text}
-        if cleaned:
+        if cleaned or marked:
             stripped += [items[key]["heading"] for key in cleaned]
             current.update(cleaned)
+            cleaned = {key: current[key] for key in dict.fromkeys([*marked, *cleaned])}
             problems = {k: _checks(inp, k, current[k], library, allowed) for k in cleaned}
             regraded = runner.grade([review_item(inp, items, k, current[k], problems[k], apart, _to_read(current[k]) if judged else None) for k in cleaned],
                                     {**common, "vetting": vetting})
@@ -1550,6 +1564,9 @@ def stage_auditing(ctx: "StageContext") -> None:
         current[key] = text.model_copy(update={"paragraphs": [p for p in cleaned if p], "table": table})
     if stripped:
         warnings.append(f"PaperAid removed sentences it could not trace to confirmed evidence or your plan in: {', '.join(stripped)}.")
+    if quoted:
+        warnings.append("PaperAid put quotation marks around words taken directly from a source in: " + ", ".join(dict.fromkeys(quoted))
+                        + ". Read each quotation: keep it, or put the point in your own words.")
     unreviewed = [f"{items[k]['number']} {items[k]['heading']}" for k in current if k not in grades]
     if unreviewed:
         warnings.append(f"PaperAid could not fully check these sections this time, so read them carefully: {', '.join(unreviewed)}.")

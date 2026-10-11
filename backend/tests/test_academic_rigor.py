@@ -464,3 +464,152 @@ def test_the_chapter_reviewer_is_sent_the_sentences_to_read_and_the_chapter_keep
     folder = Path(__file__).parents[1] / "app" / "ai" / "prompts"
     for step in ("p_review", "w_evaluate"):
         assert '"forYourJudgement"' in (folder / f"{STEPS[step].prompt}.md").read_text(encoding="utf-8"), step
+
+
+# --- the owner's quality round of 11 October: what recurred in the delivered documents -------------------------------
+
+PASSAGE = ("In a cross-sectional study, the investigator measures the outcome and the exposures in the study participants at the same time. "
+           "Unlike in case-control studies or cohort studies, the participants are selected based on the inclusion and exclusion criteria set for the study.")
+
+
+def _cited(passage: str = PASSAGE) -> dict[str, EvidenceItem]:
+    return {"E0a1b2c": _item(support="SUPPORTED", passage=passage, statement="Exposure and outcome are measured at one time.")}
+
+
+def test_a_source_s_own_wording_is_paraphrased_or_quoted_never_carried_over():
+    """In one coursework 20 of 57 sentences carried eight or more of a source's words in a row, one of them 22, each
+    with its citation and none in quotation marks."""
+    library = _cited()
+    copied = "In a cross-sectional study, the investigator measures the outcome and the exposures in the study participants at the same time ⟦E0a1b2c⟧."
+    problems = evidence.copied_problems(copied, library)
+    assert len(problems) == 1 and "21 words in a row" in problems[0] and "“In a cross-sectional study, the investigator ...”" in problems[0]
+    for sound in ("Because exposure and outcome are recorded together, a cross-sectional study cannot show which came first ⟦E0a1b2c⟧.",  # in the writer's own words
+                  "Setia describes a design in which “the investigator measures the outcome and the exposures in the study participants at the same time” ⟦E0a1b2c⟧.",
+                  "The investigator measures the outcome and the exposures together ⟦E0a1b2c⟧.",  # a short run is how a subject is spoken of
+                  "In a cross-sectional study, the investigator measures the outcome and the exposures in the study participants at the same time."):  # cites nothing: not this check's
+        assert evidence.copied_problems(sound, library) == [], sound
+    # a sentence without a citation of its own is read against what its paragraph cites
+    paragraph = "The design is simple ⟦E0a1b2c⟧. Unlike in case-control studies or cohort studies, the participants are selected based on the inclusion and exclusion criteria."
+    assert len(evidence.copied_problems(paragraph, library)) == 1
+    # a citation token breaks a run: words on either side of one are not one borrowed phrase
+    broken = "The investigator measures the outcome and the exposures ⟦E0a1b2c⟧ in the study participants at the same time."
+    assert evidence.copied_problems(broken, library) == []
+
+
+def test_copied_wording_the_repairs_left_is_marked_as_a_quotation():
+    library = _cited()
+    left = "Its weakness is plain. In a cross-sectional study, the investigator measures the outcome and the exposures in the study participants at the same time ⟦E0a1b2c⟧. This limits it."
+    marked = evidence.quote_copied(left, library)
+    assert marked == ("Its weakness is plain. “In a cross-sectional study, the investigator measures the outcome and the exposures in the study participants at the same time” ⟦E0a1b2c⟧. "
+                      "This limits it.")
+    assert evidence.copied_problems(marked, library) == [] and evidence.quote_copied(marked, library) is marked
+    own = "Because exposure and outcome are recorded together, the order of events is unknown ⟦E0a1b2c⟧."
+    assert evidence.quote_copied(own, library) is own
+
+
+def test_a_sentence_is_said_once_in_a_document():
+    """ "In a cross-sectional study, the investigator measures ... (Setia, 2016)." stood word for word in the
+    introduction and in two later sections."""
+    said = "Paradigms of inquiry are distinguished through their ontology, epistemology, and methodology ⟦E0a1b2c⟧."
+    found = evidence.repeated_sentences([("introduction", [f"Research has two traditions. {said}"]), ("theme1", [f"{said} Each has its own procedures."]),
+                                         ("conclusion", ["The two approaches differ in their assumptions and in their use of context, as shown."])])
+    assert list(found) == ["theme1"] and "already said, word for word" in found["theme1"][0] and "Paradigms of inquiry" in found["theme1"][0]
+    assert evidence.repeated_sentences([("introduction", [said, said])]) == {}  # within one section it is the section's own reviewer's matter
+    assert evidence.repeated_sentences([("a", ["It is limited."]), ("b", ["It is limited."])]) == {}  # a short sentence may recur
+
+
+def test_only_a_figure_goes_out_of_date():
+    """ "Methodological literature from 2015 noted that quantitative research requires large samples": the dated
+    note had been applied to a statement with nothing in it that dates."""
+    old = EvidenceSource(url="https://example.org/m", title="Sampling in qualitative research", year="2011")
+    method = _item(support="SUPPORTED", source=old, statement="Quantitative research requires samples large enough to give precise estimates.")
+    figure = _item(support="SUPPORTED", source=old, statement="The youth labour force was growing at 4.7 percent a year.")
+    dated_year_only = _item(support="SUPPORTED", source=old, statement="Sackett described the bias in 1979.")
+    assert evidence.dated(method) == "" and evidence.dated(dated_year_only) == "" and evidence.dated(figure).startswith("Published in 2011.")
+
+
+def _funding_input():
+    from app.works.models import ResolvedSpec, WorkStepInput
+
+    spec = ResolvedSpec.model_construct(kind="FUNDING_PROPOSAL", variant="NGO_PROJECT", mode="COMPACT", level="", source_policy="OPEN", fields=[], citation_style="APA7",
+                                        directives=[], coverage=[], active_rules=[], flags={}, limits=[], requirements=[], target_words=3000)
+    return WorkStepInput.model_construct(spec=spec, plan=None, inputs=None, results=None, budget=None, kind="FUNDING_PROPOSAL")
+
+
+def test_a_funding_document_never_speaks_to_the_student():
+    """ "However, key operational details remain gaps for the student to confirm. The student must establish
+    baseline data ..." was printed in a proposal an organisation would send to a funder."""
+    from app.proposals.ai import SectionText, Table
+    from app.works import pipeline as works_pipeline
+    from app.works.models import PlanSection
+
+    notes = ("However, key operational details remain gaps for the student to confirm.", "The student must establish baseline data from facility records.",
+             "Staff salary allocations must be supplied by the student.", "[The student should provide the organisation’s registration number.]",
+             "PaperAid has left the targets blank.")
+    sound = ("The project will train 40 village health teams.", "Students in upper primary classes will form health clubs.", "Each student receives a reusable pad kit.",
+             "The baseline will be established in the first month from facility records.")
+    funding, coursework = _funding_input(), _work_input()
+    for sentence in notes:
+        assert works_pipeline._notes_to_student(funding, sentence) == [sentence], sentence
+        assert works_pipeline._notes_to_student(coursework, sentence) == []  # an essay may speak of students
+    for sentence in sound:
+        assert works_pipeline._notes_to_student(funding, sentence) == [], sentence
+    section = PlanSection.model_construct(key="implementation", heading="Implementation", brief="", words=300, min_words=0, max_words=0, field_id="", coverage=[], criteria=[])
+    text = SectionText(key="implementation", paragraphs=[f"{sound[0]} {notes[1]} {sound[3]}"], table=Table(caption="", rows=[]))
+    found = works_pipeline._checks(funding, section, text, {}, "40", {})
+    assert any("is a note to the student" in p and "establish baseline data" in p for p in found)
+    assert works_pipeline._strip(funding, text, {}, "40").paragraphs == [f"{sound[0]} {sound[3]}"]  # what a repair left is never delivered
+    assert works_pipeline._strip(coursework, text, {}, "40").paragraphs == text.paragraphs
+
+
+def test_a_results_model_s_text_is_never_cut_in_the_middle_of_a_word():
+    """One funding proposal in three stopped at its plan: "Semi-annually upon placement completion for each cohort
+    (Mon" was what code had kept of a frequency, the reviewer asked for the truncated text to be completed, and no
+    repair could."""
+    from app.works.models import Indicator
+    from app.works.pipeline import _clip_strings
+
+    frequency = "Semi-annually upon placement completion for each cohort (Months 6 and 12)"
+    assert _clip_strings({"indicators": [{"frequency": frequency}]}) == {"indicators": [{"frequency": frequency}]}
+    assert Indicator.model_fields["frequency"].metadata[0].max_length == 160
+    long = "Quarterly, " + "at the close of each training cycle and again " * 6
+    cut = _clip_strings({"frequency": long})["frequency"]
+    assert len(cut) <= 160 and long.startswith(cut) and long[len(cut)] == " " and not cut.endswith((",", " "))
+    assert _clip_strings({"unit": "x" * 80})["unit"] == "x" * 60  # one unbroken word has nowhere else to end
+
+
+def test_the_prompts_carry_what_the_round_showed():
+    from pathlib import Path
+
+    from app.ai.orchestration import STEPS
+
+    folder = Path(__file__).parents[1] / "app" / "ai" / "prompts"
+
+    def prompt(step: str) -> str:
+        return (folder / f"{STEPS[step].prompt}.md").read_text(encoding="utf-8")
+
+    for step in ("p_draft", "w_draft"):
+        assert "Put what a source says in your own words" in prompt(step) and "not as wording to reuse" in prompt(step), step
+    for step in ("p_fix", "w_repair"):
+        assert "words carried over from a source" in prompt(step), step
+    for step in ("w_draft", "w_repair"):
+        assert "It never mentions \"the student\", PaperAid, or what still has to be supplied" in prompt(step), step
+    assert "what the things have in common as well as how they differ" in prompt("w_plan")
+    review = prompt("p_plan_review")
+    assert "is not invented merely because neither the student nor the evidence stated it" in review and "Never ask for the plan's proposals to be emptied" in review
+    assert STEPS["p_plan_review"].prompt == STEPS["p_plan_review_peer"].prompt == "p-plan-review-v3"
+
+
+def test_a_sign_off_objection_is_something_a_marker_would_count():
+    """The premium model, re-checking a repair, refused a whole chapter because "These enterprises" had its noun a
+    sentence away (quality round, 11 October). New engines carry signoff-v2; one priced before keeps its own."""
+    from pathlib import Path
+
+    from app.ai.orchestration import VERTEX_ADDENDA
+
+    assert VERTEX_ADDENDA["signoff"] == "signoff-v2"
+    folder = Path(__file__).parents[1] / "app" / "ai" / "prompts"
+    old, new = (folder / "signoff-v1.md").read_text(encoding="utf-8"), (folder / "signoff-v2.md").read_text(encoding="utf-8")
+    assert "A small matter of wording that a repair left behind" in new and "is not an objection" in new
+    assert "Every blocking finding in `previousAudit` is resolved" in new and "Approve only when nothing blocking remains" in new  # what v1 required still stands
+    assert new.replace(new[new.index("An objection at sign-off"):new.index("Report every unresolved")], "") == old
