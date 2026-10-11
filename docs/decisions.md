@@ -1301,3 +1301,26 @@ references restarting at page 1 (a new section copies the restart of the one bef
 Left as they are, on purpose: a complete export's Declaration and Approval pages are the forms the student and
 supervisor sign, with no note printed on them; a full name registered with no family field prints as registered.
 LibreOffice's rendering of the contents field is not verified on the development machine (it is not installed there).
+
+### Codex's re-audit of `458e65b` (11 October): the nine hold; five remaining gaps fixed
+
+1. **A record without a DOI could still join two registered papers into one.** Every DOI is now a work of its own. A
+   record without one joins a work only when it is the same as every record in it and that is the only work it could
+   be; a copy that fits two papers is listed on its own. The result no longer depends on the order of the sources.
+2. **A reversed author list was halved in spite of four identifiers.** An identifier now always prevents a merge. The
+   fault as the index really registers it (read from the record of the paper that showed it): two authors with
+   identifiers, then the same two written family name first with none. Only an entry with no identifier that repeats
+   an identified author is dropped; a list with no identifiers at all is halved only when it is wholly entered twice.
+   A department named on its own ("Department of Health") is a body and stays; a unit is a place of work only when
+   written with what it belongs to.
+3. **A sentence that rejects the claim was removed** ("the topic is not unstudied", "it would be misleading to say
+   that no study has ...", "should not be described as statistically significant"). Code now flags, and withholds,
+   only a plain assertion: any sentence or clause that denies, questions or attributes the claim (`_GUARD`) is left
+   exactly as it is, for the reviewer. This replaces the distance-based patterns, which had to be extended each time.
+4. **"Yes" under "Statistically significant?" passed.** A cell's answer is read with its heading.
+5. **Letters removed a concept paper's annotations.** They are attached to the work, not looked up by the rendered
+   reference (`reference_entries`).
+
+Also: a chapter's preview is cited as the combined proposal will be (letters told apart among everything the
+proposal's chapters cite, in the text and in that chapter's list). The contents field and the page numbers were
+checked in Word 16 on an exported proposal; LibreOffice was not available to check.

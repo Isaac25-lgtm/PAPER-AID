@@ -45,8 +45,12 @@ def test_a_claim_that_nothing_has_been_studied_is_sent_back():
                   "There is no evidence that the vaccine causes harm.",
                   # the claim is reported or denied, not made
                   "Earlier reviews claimed that no study has examined caregivers, which later work showed to be wrong.",
-                  "One author wrote that “no study has examined this question”, a claim this review does not accept."):
+                  "One author wrote that “no study has examined this question”, a claim this review does not accept.",
+                  # Codex's re-audit of 458e65b, finding 3: a sentence that rejects the claim
+                  "The topic is not unstudied.",
+                  "It would be misleading to say that no study has examined this question."):
         assert evidence.gap_problems(sound) == [], sound
+        assert evidence.strip_overclaims(sound) is sound
     kept = "The eligible population remains unknown. The district disease burden remains undocumented."
     assert evidence.strip_overclaims(kept) is kept
 
@@ -216,6 +220,13 @@ def test_the_word_significant_must_belong_to_the_result_it_is_judged_against():
     assert len(evidence.statistic_problems(wrong)) == 1
     after = "For education the estimate was OR = 1.27 (95% CI: 0.56–2.89; p = 0.043), which the authors describe as statistically significant."
     assert len(evidence.statistic_problems(after)) == 1
+    # Codex's re-audit of 458e65b, finding 3: the sentence itself says the result should not be called significant
+    caution = "The result is inconsistent and should not be described as statistically significant (OR = 1.27; 95% CI: 0.56–2.89; p = 0.043)."
+    assert evidence.statistic_problems(caution) == [] and evidence.strip_overclaims(caution) is caution
+    for denied in ("This cannot be called a significant association (OR = 1.27; 95% CI: 0.56–2.89; p = 0.043).",
+                   "It would be wrong to describe the association as significant (OR = 1.27; 95% CI: 0.56–2.89; p = 0.043).",
+                   "The association (OR = 1.27; 95% CI: 0.56–2.89; p = 0.043) isn’t significant once the interval is read."):
+        assert evidence.statistic_problems(denied) == [], denied
 
 
 def test_a_table_is_read_as_prose_is_and_a_row_with_its_headings():
@@ -232,6 +243,15 @@ def test_a_table_is_read_as_prose_is_and_a_row_with_its_headings():
     assert evidence.strip_table_overclaims([header, wrong, sound, denied]) == [header, ["Education", "1.27", "0.56–2.89", "0.043", ""], sound, denied]
     untouched = [header, sound, denied]
     assert evidence.strip_table_overclaims(untouched) is untouched
+    # Codex's re-audit of 458e65b, finding 4: the claim made by an answer under a heading that asks
+    asks = ["Factor", "OR", "95% CI", "p-value", "Statistically significant?"]
+    yes = ["Education", "1.27", "0.56–2.89", "0.043", "Yes"]
+    assert evidence.row_overclaims(asks, yes) == [4] and len(evidence.table_problems([asks, yes])) == 1
+    assert evidence.strip_table_overclaims([asks, yes]) == [asks, ["Education", "1.27", "0.56–2.89", "0.043", ""]]
+    for answer in ("No", "Not significant", "NS", "n.s."):
+        assert evidence.row_overclaims(asks, ["Education", "1.27", "0.56–2.89", "0.043", answer]) == [], answer
+    assert evidence.row_overclaims(asks, ["Age", "2.10", "1.30–3.40", "0.002", "Yes"]) == []  # a result that is significant
+    assert evidence.row_overclaims(["Factor", "OR", "95% CI", "p-value", "Not significant?"], ["Education", "1.27", "0.56–2.89", "0.043", "Yes"]) == []
 
     # the proposal's checks and its last line of defence
     from app.proposals.ai import SectionText, Table

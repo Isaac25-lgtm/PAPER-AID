@@ -495,7 +495,13 @@ def chapter(rt: Runtime, user: User, project_id: str, number: int, version: int 
     doc = _chapter_doc(rt, stored, version)
     if doc is None:
         raise NotFound("This chapter hasn't been written yet.")
-    citer = _citer(rt, p, doc.cited)
+    # A chapter is cited as the whole proposal will be: two works the download tells apart by letter carry the same
+    # letters here, in the text and in this chapter's list (Codex's re-audit of 458e65b).
+    scope = list(doc.cited)
+    for other in (1, 2, 3):
+        if number != CONCEPT and other != number and (also := _chapter_doc(rt, p.chapter(other))):
+            scope += also.cited
+    citer = _citer(rt, p, scope)
     for earlier in (1, 2):  # APA 6 names three to five authors in full at their first citation in the proposal
         if earlier < number != CONCEPT and (prior := _chapter_doc(rt, p.chapter(earlier))):
             _render(prior, citer, None)
@@ -505,7 +511,7 @@ def chapter(rt: Runtime, user: User, project_id: str, number: int, version: int 
         readiness=[i.model_copy(update={"status": "PASS", "note": "You confirmed the standard sample-size settings PaperAid assumed."})
                    if i.id == "C3-ASSUMED" and sampling_confirmed(p) else i for i in doc.readiness],
         warnings=doc.warnings, words=doc.words,
-        references=evidence.reference_list(sources, p.citation),
+        references=evidence.reference_list(sources, p.citation, among=[citer.library[i].source for i in scope if i in citer.library]),
         framework=[FrameworkColumn(label=label, items=items) for label, items in proposal_export.framework_columns(p.plan)]
         if number in (1, CONCEPT) and any(s.key == "framework" for s in doc.sections) else [],
         missing=[f"{s.number} {s.heading}" for s in rulebook.sections(p.rulebook, number, p.inputs.level, p.plan) if s.key in doc.missing] if p.plan and doc.missing else [],

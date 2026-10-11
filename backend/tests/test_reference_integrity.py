@@ -181,7 +181,9 @@ def test_an_author_registered_twice_with_the_names_reversed_is_one_person():
     """ "Murendo, C., Wollni, M., Conrad, M., & Meike, W." was two authors, each registered again the other way round."""
     works = fetch._openalex_works([{
         "display_name": "Mobile money and household food security in Uganda", "abstract_inverted_index": {"Mobile": [0], "money": [1]}, "publication_year": 2016,
-        "authorships": [{"author": {"display_name": n}} for n in ("Conrad Murendo", "Meike Wollni", "Murendo Conrad", "Wollni Meike")],
+        "authorships": [{"author": {"display_name": "Conrad Murendo", "id": "https://openalex.org/A5058047210", "orcid": "https://orcid.org/0000-0002-0267-7731"}},
+                        {"author": {"display_name": "Meike Wollni", "id": "https://openalex.org/A5044122196", "orcid": "https://orcid.org/0000-0002-8460-7840"}},
+                        {"author": {"display_name": "Murendo, Conrad", "id": None, "orcid": None}}, {"author": {"display_name": "Wollni, Meike", "id": None, "orcid": None}}],
         "primary_location": {"source": {"display_name": "RePEc: Research Papers in Economics", "type": "repository"}}, "doi": "https://doi.org/10.22004/ag.econ.229805"}])
     assert works[0]["authors"] == "Murendo, C.; Wollni, M."
     assert works[0]["container"] == ""  # a repository keeps a copy: it is not the journal
@@ -286,13 +288,15 @@ def test_authorship_is_never_changed_on_a_guess():
 
     assert clean_authors(["Smith, J.", "National Cancer Institute"]) == ["Smith, J.", "National Cancer Institute"]  # a body named on its own is a group author
     assert clean_authors(["Smith, J.", "Department of Epidemiology, National Cancer Institute, Bethesda"]) == ["Smith, J."]  # a unit with its place is where someone works
+    assert clean_authors(["Smith, J.", "Department of Health"]) == ["Smith, J.", "Department of Health"]  # a department named on its own is a body
     assert clean_authors(["Smith, J.", "Smith, J."]) == ["Smith, J.", "Smith, J."]  # John and James
     assert clean_authors(["Ministry of Health", "Ministry of Health"]) == ["Ministry of Health"]
     assert distinct_people(["John Paul", "Paul John"]) == ["John Paul", "Paul John"]
     assert distinct_people(["John Smith", "James Smith"]) == ["John Smith", "James Smith"]
     assert distinct_people(["John Smith", "John Smith"]) == ["John Smith"] and distinct_people(["John Smith", "John Smith"], ["A1", "A2"]) == ["John Smith", "John Smith"]
     assert distinct_people(["John Smith", "John Smith"], ["A1", ""]) == ["John Smith"]
-    assert distinct_people(["Conrad Murendo", "Meike Wollni", "Murendo Conrad", "Wollni Meike"], ["A1", "A2", "A3", "A4"]) == ["Conrad Murendo", "Meike Wollni"]
+    # as the index registers the fault: the second entries carry no identifier and are written family name first
+    assert distinct_people(["Conrad Murendo", "Meike Wollni", "Murendo, Conrad", "Wollni, Meike"], ["A1", "A2", "", ""]) == ["Conrad Murendo", "Meike Wollni"]
     works = fetch._openalex_works([{"display_name": "A study", "abstract_inverted_index": {"A": [0]}, "authorships": [
         {"author": {"display_name": "John Paul", "id": "https://openalex.org/A1"}}, {"author": {"display_name": "Paul John", "id": "https://openalex.org/A2"}},
         {"author": {"display_name": "John Smith", "id": "https://openalex.org/A3"}}, {"author": {"display_name": "James Smith", "id": "https://openalex.org/A4"}}]}])
@@ -330,3 +334,78 @@ def test_a_site_is_judged_by_its_real_host_and_by_where_its_address_leads(offlin
     offline.setattr(fetch, "landed", lambda url: "https://en.wikipedia.org/wiki/Touchscreen" if "short.example" in url else url)
     assert pipeline._web_source(_Finding("https://short.example/abc", title="Touchscreen", publisher="Short", published="")) is None
     assert pipeline._web_source(_Finding("https://notwikipedia.org.example.com/a", title="A page", publisher="Example", published="2024")) is not None
+
+
+# --- Codex's re-audit of 458e65b ------------------------------------------------------------------------------------
+
+def test_a_record_without_a_doi_never_joins_two_registered_papers_into_one():
+    """Finding 1: paper A, a web copy with no DOI, and paper B with the same long title, year and author became one
+    entry, whatever the order they came in."""
+    from itertools import permutations
+
+    title = "Teacher motivation and learner performance in government-aided primary schools"
+    a = _source(url="https://doi.org/10.1/a", doi="10.1/a", title=title, year="2024", authors=["Okello, J."], kind="ARTICLE")
+    b = _source(url="https://doi.org/10.1/b", doi="10.1/b", title=title, year="2024", authors=["Okello, J."], kind="ARTICLE")
+    web = _source(url="https://journal.example.org/view/9", title=title, year="2024", authors=["Okello, J."], kind="ARTICLE")
+    for order in permutations([a, b, web]):
+        groups = evidence.works(order)
+        assert sorted(len(g) for g in groups) == [1, 1, 1], [s.url for s in order]  # the copy could be either paper: it joins neither
+        assert len(evidence.reference_list(order)) == 3
+        assert {g[0].doi for g in groups} == {"10.1/a", "10.1/b", ""}
+    for order in permutations([a, web]):  # the one paper it can be: listed once, by its DOI
+        assert [[s.doi for s in g] for g in evidence.works(order)] == [["10.1/a", ""]]
+    unnamed = _source(url="https://example.org/copy", title=title, year="2024")
+    namara = _source(url="https://example.org/n", title=title, year="2024", authors=["Namara, P."])
+    for order in permutations([web, namara, unnamed]):  # a record that names nobody fits both authors' works: it joins neither
+        assert sorted(len(g) for g in evidence.works(order)) == [1, 1, 1]
+
+
+def test_author_identifiers_always_prevent_a_merge():
+    """Finding 2: four authors with four identifiers were halved because the second two read as the first two reversed."""
+    from app.analysis.metadata import distinct_people
+
+    four = ["John Paul", "Jane Mary", "Paul John", "Mary Jane"]
+    assert distinct_people(four, ["A1", "A2", "A3", "A4"]) == four
+    assert distinct_people(four, ["A1", "A2", "A3", ""]) == ["John Paul", "Jane Mary", "Paul John"]  # the one with no identifier repeats an identified author
+    assert distinct_people(four) == ["John Paul", "Jane Mary"]  # no identifier anywhere, and the whole list entered again the other way round
+    assert distinct_people(["John Paul", "Paul John"], ["A1", "A2"]) == ["John Paul", "Paul John"] and distinct_people(["John Paul", "Paul John"]) == ["John Paul", "Paul John"]
+    works = fetch._openalex_works([{"display_name": "A study", "abstract_inverted_index": {"A": [0]}, "authorships": [
+        {"author": {"display_name": name, "id": f"https://openalex.org/A{n}"}} for n, name in enumerate(four)]}])
+    assert works[0]["authors"] == "Paul, J.; Mary, J.; John, P.; Jane, M."
+
+
+def test_the_annotations_of_two_works_cited_alike_stay_with_them(client):
+    """Finding 5: with letters in the list, the concept paper's annotations were looked up by a reference text that
+    no longer matched, and both disappeared."""
+    import io
+
+    from docx import Document
+
+    from app.proposals import export
+    from app.proposals.models import ChapterDocument, ChapterSection, Project
+
+    first = _source(url="https://doi.org/10.1/f", doi="10.1/f", title="Financial reward management and teachers' performance", year="2024", authors=["Smith, J."], kind="ARTICLE")
+    second = first.model_copy(update={"url": "https://doi.org/10.1/n", "doi": "10.1/n", "title": "Non-financial reward management and teachers' performance"})
+    library = _library(first, second)
+    library["E000001"].statement, library["E000002"].statement = "Pay was associated with performance.", "Recognition was associated with performance."
+    paper = ChapterDocument.model_construct(sections=[ChapterSection.model_construct(key="background", number="1", heading="Background", paragraphs=[
+        "Pay matters ⟦E000001⟧ and so does recognition ⟦E000002⟧."], table=None, table_caption="")], cited=["E000001", "E000002"])
+    project = Project.model_validate(client.post("/api/projects", headers={"Authorization": "Dev student@example.com"}, json={
+        "inputs": {"topic": "Teacher motivation and learner performance in Lira District", "level": "MASTERS"}, "titlePage": {"studentName": "A Student"}, "citation": "APA7"}).json() | {"ownerUid": "u", "ownerEmail": "student@example.com"})
+    paragraphs = [p.text for p in Document(io.BytesIO(export.concept(project, paper, library))).paragraphs]
+    listed = paragraphs.index("Annotated References")
+    assert paragraphs[listed + 1].startswith("Smith, J. (2024a). Financial reward") and paragraphs[listed + 2] == "Pay was associated with performance."
+    assert paragraphs[listed + 3].startswith("Smith, J. (2024b). Non-financial reward") and paragraphs[listed + 4] == "Recognition was associated with performance."
+    assert "(Smith, 2024a)" in " ".join(paragraphs) and "(Smith, 2024b)" in " ".join(paragraphs)
+
+
+def test_a_chapter_is_cited_as_the_whole_proposal_will_be():
+    """Codex's re-audit of 458e65b: a chapter's preview showed "(Smith, 2024)" where the downloaded proposal, which
+    cites a second Smith paper in another chapter, shows "(Smith, 2024b)"."""
+    first = _source(url="https://doi.org/10.1/f", doi="10.1/f", title="Financial reward management and teachers' performance", year="2024", authors=["Smith, J."], kind="ARTICLE")
+    second = first.model_copy(update={"url": "https://doi.org/10.1/n", "doi": "10.1/n", "title": "Non-financial reward management and teachers' performance"})
+    library = _library(first, second)
+    whole = ["E000002", "E000001"]  # this chapter cites the second; another chapter cites the first
+    assert evidence.Citer(library, "APA7", whole).render("Recognition matters ⟦E000002⟧.") == "Recognition matters (Smith, 2024b)."
+    assert evidence.reference_list([second], "APA7", among=[first, second]) == [evidence.reference(second, "APA7", "b")]
+    assert "(2024). Non-financial" in evidence.reference_list([second])[0]  # a document that cites it alone

@@ -13,10 +13,10 @@ import re
 _TAG = re.compile(r"</?[A-Za-z][^<>]{0,60}>")
 _DEGREE = re.compile(r"\s*\(\s*(?:Ph\.?\s?D\.?|D\.?Phil\.?|Dr\.?|Prof\.?|M\.?Sc\.?|M\.?A\.?|MBA|M\.?D\.?|MPH|B\.?Sc\.?|Eng\.?|CPA)\s*\)", re.I)
 _TITLE_BEFORE = re.compile(r"^(?:Dr|Prof|Professor|Assoc\. Prof|Rev|Mr|Mrs|Ms)\.?\s+", re.I)
-# An entry that is where an author works, not who the author is: it names a unit of an institution ("Department of
-# ...", "Faculty of ..."), or an institution with its town or country after a comma. A body named on its own
-# ("National Cancer Institute", "RTS,S Clinical Trials Partnership") can be a genuine group author and is kept
-# (Codex's audit of 1a3b1e7, finding 4).
+# An entry that is where an author works, not who the author is: a unit or an institution written with what it
+# belongs to or where it is, after a comma ("Department of ..., University of ..., Malaysia"). A body named on its own
+# ("National Cancer Institute", "Department of Health", "RTS,S Clinical Trials Partnership") can be a genuine group
+# author and is kept (Codex's audits of 1a3b1e7, finding 4, and of 458e65b, finding 2).
 _UNIT = re.compile(r"\b(?:department|dept|faculty|school of|college of|division of|unit of|section of|laborator\w+ of|campus)\b", re.I)
 _PLACE = re.compile(r"\b(?:universit\w*|institut\w*|college|hospital|cent(?:re|er))\b", re.I)
 _PERSON = re.compile(r"^[^,;]{1,40},\s*(?:[^\W\d_]\.\s?){1,6}$")  # "Okello, J. P."
@@ -99,34 +99,44 @@ def distinct_people(names: list[str], ids: list[str] | None = None) -> list[str]
 
 
 def distinct_entries(names: list[str], ids: list[str] | None = None) -> list[int]:
-    """The positions to keep of full names as registered, without the two registration faults that can be told from the record itself:
+    """The positions to keep of full names as registered. An entry is dropped only where the record itself shows it
+    is a second entry of somebody already listed, and never when the record gives the two entries different
+    identifiers (Codex's audits of 1a3b1e7 and 458e65b):
 
-    - the same full name entered twice, unless the record gives the two different author identifiers;
-    - the whole list entered a second time with each name the other way round ("Conrad Murendo", "Meike Wollni",
-      "Murendo Conrad", "Wollni Meike": four entries for two people, in the same order).
+    - the same full name again, unless both entries carry identifiers and they differ;
+    - an entry with no identifier whose name is that of an identified author with its parts the other way round. This
+      is how the fault is actually registered: "Conrad Murendo" and "Meike Wollni", each with an identifier, followed
+      by "Murendo, Conrad" and "Wollni, Meike" with none;
+    - where no entry in it carries an identifier, the whole list entered a second time the other way round.
 
-    Nothing else is inferred. Two names made of the same words ("John Paul" and "Paul John") are two authors, and
-    two people who share a surname and initials are two (Codex's audit of 1a3b1e7, finding 4)."""
+    Nothing else is inferred. "John Paul" and "Paul John" with two identifiers, or with none in a list that is not a
+    repeat of itself, are two authors, and so are two people who share a surname and initials."""
     known = ids if ids is not None and len(ids) == len(names) else [""] * len(names)
+    words = [_words(name) for name in names]
     half = len(names) // 2
     count = len(names)
-    if len(names) >= 4 and len(names) % 2 == 0 and all(_turned(_words(a), _words(b)) for a, b in zip(names[:half], names[half:], strict=True)):
+    if len(names) >= 4 and len(names) % 2 == 0 and not any(known[half:]) and all(_turned(a, b) for a, b in zip(words[:half], words[half:], strict=True)):
         count = half
     out: list[int] = []
     seen: dict[str, set[str]] = {}
-    for n, (name, ident) in enumerate(zip(names[:count], known[:count], strict=True)):
-        same = " ".join(name.casefold().split())
-        if same and same in seen and not (ident and seen[same] and ident not in seen[same]):
+    for n in range(count):
+        same = " ".join(names[n].casefold().split())
+        if same and same in seen and not (known[n] and seen[same] and known[n] not in seen[same]):
+            continue
+        if not known[n] and any(known[other] and _turned(words[other], words[n]) for other in range(len(names)) if other != n):
             continue
         seen.setdefault(same, set())
-        if ident:
-            seen[same].add(ident)
+        if known[n]:
+            seen[same].add(known[n])
         out.append(n)
     return out
 
 
 def _affiliation(entry: str) -> bool:
-    return bool(_UNIT.search(entry)) or ("," in entry and bool(_PLACE.search(entry))) or len(entry) > 120
+    """A unit or an institution given with what it belongs to or where it is ("Department of Epidemiology, National
+    Cancer Institute, Bethesda"). A body named on its own, a department included ("Department of Health"), can be a
+    group author and is kept."""
+    return ("," in entry and bool(_UNIT.search(entry) or _PLACE.search(entry))) or len(entry) > 120
 
 
 def clean_authors(authors: list[str]) -> list[str]:

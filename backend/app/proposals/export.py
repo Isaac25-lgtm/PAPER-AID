@@ -363,15 +363,14 @@ def concept(project: Project, paper: ChapterDocument, library: dict[str, Evidenc
     sources = [library[i] for i in cited if i in library]
     if sources:
         doc.add_heading("Annotated References", level=2)
-        by_source: dict[str, list[str]] = {}
-        for item in sources:
-            key = evidence.reference_list([item.source], project.citation)[0]
-            by_source.setdefault(key, []).append(item.statement)
-        for entry in evidence.reference_list([i.source for i in sources], project.citation):
+        # each entry's annotations are those of the work it stands for, whatever letter the list gives it (Codex's
+        # re-audit of 458e65b, finding 5: they were looked up by the rendered reference, which a letter changes)
+        for entry, records in evidence.reference_entries([i.source for i in sources], project.citation):
+            statements = [item.statement for item in sources if any(evidence.same_source(item.source, r) for r in records)]
             p = doc.add_paragraph(entry)
             p.paragraph_format.left_indent = Inches(0.5)
             p.paragraph_format.first_line_indent = Inches(-0.5)
-            annotation = " ".join(dict.fromkeys(by_source.get(entry, [])))
+            annotation = " ".join(dict.fromkeys(statements))
             if annotation:
                 note = doc.add_paragraph()
                 note.paragraph_format.left_indent = Inches(0.5)

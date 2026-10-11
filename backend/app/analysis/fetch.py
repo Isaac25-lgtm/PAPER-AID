@@ -327,9 +327,14 @@ def _openalex_works(results: list) -> list[dict[str, str]]:
         authors = []
         listed = [a.get("author") or {} for a in item.get("authorships") or [] if isinstance(a, dict)]
         for name in distinct_people([(a.get("display_name") or "").strip() for a in listed], [str(a.get("orcid") or a.get("id") or "") for a in listed]):
-            if name:
-                given, _, family = name.rpartition(" ")
-                authors.append(name if is_organisation(name) else _surname_initials(family, given) if given else family)
+            if name and not is_organisation(name):
+                # "Murendo, Conrad" is a family name first; "Conrad Murendo" is the usual order
+                family, comma, given = name.partition(",")
+                if not comma:
+                    given, _, family = name.rpartition(" ")
+                authors.append(_surname_initials(family, given) if given.strip() else family.strip())
+            elif name:
+                authors.append(name)
         location = item.get("primary_location") or {}
         source = location.get("source") or {}
         biblio = item.get("biblio") or {}

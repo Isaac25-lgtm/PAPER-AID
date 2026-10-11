@@ -96,20 +96,23 @@ def _same_work(a: EvidenceSource, b: EvidenceSource) -> bool:
 
 
 def works(sources: Iterable[EvidenceSource]) -> list[list[EvidenceSource]]:
-    """The distinct works among these sources, each with every record of it; the record that carries a DOI first."""
-    groups: list[list[EvidenceSource]] = []
-    seen: set[str] = set()
+    """The distinct works among these sources, each with every record of it; the record that carries a DOI first.
+
+    Every DOI is a work of its own. A record without one joins a work only when it is the same work as every record
+    already in it, and only when that is the one work it could be: a record that fits two works (two papers under
+    different DOIs with one title, year and author) is listed on its own and never joins them into one (Codex's
+    re-audit of 458e65b, finding 1). The result does not depend on the order the sources come in."""
+    unique: dict[str, EvidenceSource] = {}
     for source in sources:
-        if _key(source) in seen:
-            continue
-        seen.add(_key(source))
-        group = next((g for g in groups if any(_same_work(known, source) for known in g)), None)
-        if group is None:
-            groups.append([source])
-        elif source.doi and not group[0].doi:
-            group.insert(0, source)
+        unique.setdefault(_key(source), source)
+    ordered = sorted(unique.values(), key=lambda s: (not s.doi, not s.authors))  # registered works first, then records that name an author
+    groups: list[list[EvidenceSource]] = []
+    for source in ordered:
+        fits = [] if source.doi else [g for g in groups if all(_same_work(known, source) for known in g)]
+        if len(fits) == 1:
+            fits[0].append(source)
         else:
-            group.append(source)
+            groups.append([source])
     return groups
 
 
@@ -248,11 +251,24 @@ def reference(source: EvidenceSource, style: CitationStyle = "APA7", letter: str
     return f"{head} {site + '. ' if site else ''}{link}".strip()
 
 
-def reference_list(sources: Iterable[EvidenceSource], style: CitationStyle = "APA7") -> list[str]:
-    """Alphabetical, one entry for each distinct work (`works`); works cited alike carry their letters."""
+def reference_entries(sources: Iterable[EvidenceSource], style: CitationStyle = "APA7",
+                      among: Iterable[EvidenceSource] | None = None) -> list[tuple[str, list[EvidenceSource]]]:
+    """The reference list with, beside each entry, the records of the work it stands for: alphabetical, one entry for
+    each distinct work (`works`). Works cited alike carry their letters, told apart among `among` when the list is
+    part of a larger document (a chapter of a proposal) and otherwise among these sources."""
     sources = list(sources)
-    letters = year_letters(sources, style)
-    return sorted((reference(group[0], style, letters.get(_key(group[0]), "")) for group in works(sources)), key=lambda r: r.lower().lstrip("“\"'"))
+    letters = year_letters(sources if among is None else [*sources, *among], style)
+    entries = [(reference(group[0], style, letters.get(_key(group[0]), "")), group) for group in works(sources)]
+    return sorted(entries, key=lambda e: e[0].lower().lstrip("“\"'"))
+
+
+def reference_list(sources: Iterable[EvidenceSource], style: CitationStyle = "APA7", among: Iterable[EvidenceSource] | None = None) -> list[str]:
+    return [entry for entry, _ in reference_entries(sources, style, among)]
+
+
+def same_source(a: EvidenceSource, b: EvidenceSource) -> bool:
+    """The two records are one source (its DOI, else its address)."""
+    return _key(a) == _key(b)
 
 
 # --- the checks ---------------------------------------------------------------------------------
@@ -331,9 +347,6 @@ ABSOLUTE_GAP = re.compile(
     r"|evidence\s+(?:on|about|regarding|concerning))"
     r"|(?:evidence|research|studies|literature)\b[^.;!?]{0,80}?\b(?:completely|entirely|totally|wholly|altogether)\s+(?:lacking|absent|missing))\b", re.I)
 _HEDGED = re.compile(r"\b(?:largely|relatively|comparatively|mostly|somewhat|partly|little)\s+$", re.I)  # "remains largely unstudied" is a limit, not an absolute
-# The claim is someone else's, or is being denied: "it is sometimes claimed that no study has ...".
-_REPORTED = re.compile(r"\b(?:claim\w*|argu\w*|assert\w*|contend\w*|impl(?:y|ies|ied)|not (?:true|correct|accurate|the case)|wrong|mistaken|incorrect"
-                       r"|cannot (?:be said|conclude)|does not mean)\b[^.;!?]{0,80}$", re.I)
 # A ratio (whose value of no difference is 1), its interval with its stated level, and its p-value, in one sentence:
 # "OR = 1.27; 95% CI: 0.56–2.89; p = 0.043".
 _RATIO = re.compile(
@@ -341,13 +354,21 @@ _RATIO = re.compile(
     r"(?:(?P<level>\d{2}(?:\.\d+)?)\s*%\s*)?(?:CI|confidence interval)(?:\s+(?:of|from|was|is))?\W{0,4}(?P<low>\d+(?:\.\d+)?)\s*(?:[-–—]|to|,)\s*(?P<high>\d+(?:\.\d+)?)"
     r"[^!?]{0,40}?\bp\s*(?:-?\s*value)?\s*(?P<op>[<=])\s*(?P<p>0?\.\d+)", re.I)
 _SIGNIFICANT = re.compile(r"\bsignifican(?:t|tly|ce)\b", re.I)
-_DENIED = re.compile(r"(?:\b(?:not|no|never|without|lacked|lacks?|failed to reach|fails to reach)\b[\s\w-]{0,25}|\bnon-?)$", re.I)
 _CLAUSE = re.compile(r";|\b(?:and|while|whereas|but|although|though)\b", re.I)
+# Words that deny, question or attribute what follows them. Code flags, and withholds, only a plain assertion: a
+# sentence that says the claim is wrong, doubtful or somebody else's is left exactly as it is, for the reviewer
+# (Codex's re-audit of 458e65b, finding 3: "the topic is not unstudied", "it would be misleading to say that no study
+# has ...", "should not be described as statistically significant" were each removed).
+_GUARD = re.compile(
+    r"\b(?:not|no|never|neither|nor|cannot|without|hardly|scarcely|non|inconsistent|misleading|mistaken|wrong|false|untrue|incorrect|inaccurate|doubt\w*|questionable"
+    r"|caution\w*|claim\w*|argu\w*|assert\w*|contend\w*|suggest\w*|impl(?:y|ies|ied)|say|says|said|saying|state|states|stated|stating|lacked|lacks?|fail\w*)\b|n['’]t\b", re.I)
+_AFFIRMS = re.compile(r"(?:yes|y|true|sig\.?|significant|✓|✔|\*{1,3})", re.I)
 
 
 def _called_significant(text: str) -> bool:
-    """The words say a result is significant ("not statistically significant" and "no significant" do not)."""
-    return any(not _DENIED.search(text[max(0, m.start() - 45):m.start()]) for m in _SIGNIFICANT.finditer(text))
+    """The words plainly say a result is significant. "Not statistically significant", "no significant ..." and
+    "should not be described as significant" do not, and neither does any clause that denies or questions."""
+    return bool(_SIGNIFICANT.search(text)) and not _GUARD.search(text)
 
 
 def _quoted(text: str, at: int) -> bool:
@@ -359,7 +380,8 @@ def gap_problems(paragraph: str) -> list[str]:
     """A statement, in the writer's own voice, that research on a topic does not exist."""
     for found in ABSOLUTE_GAP.finditer(paragraph):
         before = paragraph[:found.start()]
-        if _HEDGED.search(before) or _REPORTED.search(before[-140:]) or _quoted(paragraph, found.start()):
+        lead = re.split(r"(?<=[.!?])\s+", before)[-1]  # what the sentence has said before the claim
+        if _HEDGED.search(before) or _GUARD.search(lead) or _quoted(paragraph, found.start()):
             continue
         return [f"“{found.group(0)}” claims that nothing has been studied or is known. State the gap as what the sources found do not show (for example "
                 "“the studies found did not examine ...” or “published evidence on ... is limited”), never that no study exists."]
@@ -406,10 +428,13 @@ def row_text(header: list[str], row: list[str]) -> str:
 
 def row_overclaims(header: list[str], row: list[str]) -> list[int]:
     """The cells of a row that call its result significant while the row, read with its headings, reports a ratio
-    whose 95% interval includes 1 at p below 0.05 (a statistic spread across columns)."""
+    whose 95% interval includes 1 at p below 0.05 (a statistic spread across columns). A cell says so in its own
+    words ("Significant"), or by its answer under a heading that asks ("Statistically significant?": "Yes")."""
     if not _disagreeing(row_text(header, row)):
         return []
-    return [n for n, cell in enumerate(row) if _called_significant(cell) and not _RATIO.search(cell)]
+    headings = [*header, *[""] * len(row)]
+    return [n for n, cell in enumerate(row) if not _RATIO.search(cell) and (
+        _called_significant(cell) or (_called_significant(headings[n]) and bool(_AFFIRMS.fullmatch(cell.strip()))))]
 
 
 def table_problems(rows: list[list[str]]) -> list[str]:
