@@ -1248,3 +1248,56 @@ claim checking, assignment calibration, research feasibility, document productio
 Twelve of twelve were delivered. **Still open:** a basic question is now answered directly and on its subject, but
 its wording is heavier than a student's own, and its sources lean on companies' explanatory pages where a textbook
 would be right (textbooks are seldom open to a search). Both are for the test loop, not for code alone.
+
+## 2026-10-11 — Codex's audit of `1a3b1e7`: nine findings answered; a cleanup never changes what is true
+
+Codex read the academic-audit commit and found that several of its new rules "cleaned" information without enough
+evidence that the change was right. Each finding was reproduced and is answered below. The principle the fixes share:
+code removes or merges only what the record itself proves; what only may be wrong is left as it is, for a reviewer.
+
+1. **Two papers with one title and year were one reference.** A work is now the same as another only by DOI or
+   address, or, where at most one of them has a DOI, by a title long enough to tell works apart (25 letters, in any
+   script), the same year and the same first author where both name one (`evidence._same_work`, `works`). Works a
+   document would cite alike (the same author label and year) carry letters in the text and in its list, in the order
+   of their titles: "(Opok et al., 2026a)", "n.d.-b" (`year_letters`; every place a document is rendered gives its
+   citer the ids that document cites, so the two always agree).
+2. **The statistics check could delete a result that was right.** It now judges only a ratio (odds, risk, hazard,
+   prevalence) whose interval is stated at 95% or narrower, includes 1 and stands beside p below 0.05, and only when
+   the word "significant" belongs to that result: the clause leading to it or the one after it, never another
+   result's in the sentence. A 99% interval, an interval with no level, and a difference or coefficient (whose value
+   of no difference is 0) are not judged by code. The prompts that said "an interval that includes 1" now say "the
+   value of no difference (1 for a ratio, 0 for a difference)".
+3. **No coursework reviewer saw the caution.** From `w-evaluate-v2` the section evaluator reads each section beside
+   the evidence it cites (the source's own words, scope, caution), and a section citing a partly supported finding
+   is always evaluated. Work priced on `w-evaluate-v1` is asked as before. The whole-document final review still
+   reads exactly what the student receives.
+4. **Author cleanup removed real authors.** A body named on its own beside people is a group author and stays; only
+   a unit ("Department of ...") or an institution with its place is a place of work. A person's shortened name never
+   merges two people. A name entered twice is one person unless the record gives two identifiers; a reversed
+   duplicate is removed only when the whole list is entered a second time the other way round. Brackets no longer
+   make a name an organisation.
+5. **The gap check deleted honest statements.** It no longer matches "remains unknown / undocumented / unexamined",
+   "unexplored", or missing data: every alternative names research itself. A reported or denied claim and a
+   quotation are left alone. "There is no empirical evidence on ..." is now caught.
+6. **Tables escaped both checks.** A caption and a cell are read as prose is, and a row is read with its headings
+   (`row_text`, `row_overclaims`), in proposals and works; the last line of defence empties the cell that makes the
+   claim.
+7. **A registration with no author stopped the page being read.** The page's own declaration now completes it. With
+   no author anywhere, an article on a hosting site is left out and a body's own registered report is the body's.
+8. **Cause was tied to the name of a design.** `p-plan-v5`, `p-draft-v4`, `p-fix-v4`: what a study can show depends
+   on the question, the measurement and whether the design can identify a cause. A level or prevalence objective
+   stays descriptive; an observational cohort shows association; "effect" needs a randomised or justified
+   quasi-experimental comparison. Where the title changes a word of the student's topic, the plan tells the student
+   which word and why.
+9. **The site list.** Hosts are compared in lower case without a trailing full stop, and the address a link led to is
+   judged as well (`fetch.landed`). The list is described as what it is: PaperAid's default for evidence it finds on
+   the web, never applied to what a student supplies to be read.
+
+Also from the audit: a container is a repository only when its name says so outright; the contents page caches the
+headings read from the finished document (every numbered section, the statements placed under Objectives, the
+references). Opened in Word 16, the field fills with those headings and their page numbers; that check showed the
+references restarting at page 1 (a new section copies the restart of the one before), now carried on.
+
+Left as they are, on purpose: a complete export's Declaration and Approval pages are the forms the student and
+supervisor sign, with no note printed on them; a full name registered with no family field prints as registered.
+LibreOffice's rendering of the contents field is not verified on the development machine (it is not installed there).

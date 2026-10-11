@@ -856,8 +856,7 @@ def _checks(inp: WorkStepInput, section: PlanSection, text: SectionText, library
         ):
             problems.append("The text refers to a figure that this section does not contain.")
         problems += ev.citation_problems(plain, usable)
-        if n < len(text.paragraphs):
-            problems += ev.statistic_problems(plain)
+        problems += ev.statistic_problems(plain)  # prose, a caption and a cell alike
         if n >= len(text.paragraphs) and text.table.illustrative:  # the worked example's own cells
             found = ev.figure_problems(plain, library_items, allowed + " " + example)
         elif example and n < len(text.paragraphs):  # only a sentence framed as hypothetical may use the example's numbers
@@ -870,6 +869,7 @@ def _checks(inp: WorkStepInput, section: PlanSection, text: SectionText, library
         problems += [f"{t} is not an available number token." for t in numbers.render(paragraph, tokens)[1]]
         if spec.source_policy == "CLOSED":
             problems += [f"⟦{i}⟧ is not one of the set readings." for i in ev.cited_ids(plain) if i in library_items and not library_items[i].source.url.startswith("reading:")]
+    problems += ev.table_problems([[numbers.strip(c) for c in row] for row in text.table.rows])  # a statistic spread across a row's columns
     words = _rendered_words(text, tokens)
     if not any(p.strip() for p in text.paragraphs):
         problems.append("The section is empty.")
@@ -912,6 +912,12 @@ def _review_items(inp: WorkStepInput, sections: dict[str, PlanSection], current:
         }
         for k in keys
     ]
+
+
+def _cited_evidence(text: SectionText, library_items: dict[str, EvidenceItem]) -> list[EvidenceItem]:
+    """The evidence a section's wording cites (prose, caption and cells), in the order it is cited."""
+    ids = dict.fromkeys(i for field in [*text.paragraphs, *_cells(text)] for i in ev.cited_ids(numbers.strip(field)))
+    return [library_items[i] for i in ids if i in library_items]
 
 
 def _repair_items(inp: WorkStepInput, current: dict[str, SectionText], library_items: dict[str, EvidenceItem], fix: dict[str, list[str]],
@@ -974,7 +980,14 @@ def _audit(ctx: "StageContext", runner: WorkRunner, inp: WorkStepInput, current:
             evaluations.pop(key, None)
         problems = {k: _checks(inp, sections[k], current[k], library_items, allowed, tokens) for k in pending}
         items = _review_items(inp, sections, current, problems, pending)
-        judged = [i for i in items if i["rules"] or premium or _risk(sections[i["key"]], current[i["key"]]) != "low"]
+        # From w-evaluate-v2 the evaluator reads each section beside the evidence it cites (the source's own words,
+        # scope and any caution), and a section citing a finding that is only partly supported is always evaluated
+        # (Codex's audit of 1a3b1e7, finding 3: the caution reached the writer and no reviewer). Work priced on v1
+        # is asked exactly as it was.
+        shown = runner._prompt_for("w_evaluate") != "w-evaluate-v1"
+        cited = {k: _cited_evidence(current[k], library_items) for k in pending} if shown else {}
+        judged = [i for i in items if i["rules"] or premium or _risk(sections[i["key"]], current[i["key"]]) != "low" or any(e.caution for e in cited.get(i["key"], []))]
+        judged = [{**i, "evidence": _for_model(cited[i["key"]], passages=True)} for i in judged] if shown else judged
         checked, evaluated = runner.together(
             lambda items=items: runner.integrity([{**i, "lockedFacts": common["student"]} for i in items], {"spec": common["spec"], "student": common["student"]}),
             lambda judged=judged: runner.evaluate(judged, {**common, "tier": runner._engine.tier}))
@@ -1054,8 +1067,8 @@ def _strip(inp: WorkStepInput, text: SectionText, library_items: dict[str, Evide
         plain = paragraph
         for placeholder, token in protected.items():
             plain = plain.replace(token, placeholder, 1)
-        kept = ev.strip_unsupported(plain, library_items, usable, in_example) if cell else ev.strip_overclaims(
-            ev.strip_unsupported(plain, library_items, usable, allowed, _framed(example)), gaps=False)
+        kept = ev.strip_overclaims(ev.strip_unsupported(plain, library_items, usable, in_example) if cell else
+                                   ev.strip_unsupported(plain, library_items, usable, allowed, _framed(example)), gaps=False)
         for placeholder, token in protected.items():
             kept = kept.replace(placeholder, token)
         return kept
@@ -1065,7 +1078,8 @@ def _strip(inp: WorkStepInput, text: SectionText, library_items: dict[str, Evide
             "paragraphs": [p for p in (clean(p) for p in text.paragraphs) if p],
             # Table cells and the caption are delivered like prose, so they are held to the same rule
             # (Codex audit 2026-09-30 #6); a withheld cell stays as an empty cell.
-            "table": text.table.model_copy(update={"caption": clean(text.table.caption, cell=True), "rows": [[clean(c, cell=True) for c in row] for row in text.table.rows]}),
+            "table": text.table.model_copy(update={"caption": clean(text.table.caption, cell=True),
+                                                   "rows": ev.strip_table_overclaims([[clean(c, cell=True) for c in row] for row in text.table.rows])}),
         })
         if tidy == text:
             break
@@ -1076,7 +1090,8 @@ def _strip(inp: WorkStepInput, text: SectionText, library_items: dict[str, Evide
 def _final(ctx: "StageContext", runner: WorkRunner, inp: WorkStepInput, current: dict[str, SectionText], library_items: dict[str, EvidenceItem], tokens: dict[str, tuple[str, str]]):
     spec = _spec(inp)
     assert inp.plan is not None
-    citer = ev.Citer(library_items, spec.citation_style)
+    cited = dict.fromkeys(i for k in current for field in [*current[k].paragraphs, *_cells(current[k])] for i in ev.cited_ids(numbers.strip(field)))
+    citer = ev.Citer(library_items, spec.citation_style, cited)
     rules = [r for r in library.rules_for(spec.kind) if r["id"] in set(spec.active_rules)]
     doc_rules = library.scoped_rules(rules, "DOCUMENT")
     payload = {

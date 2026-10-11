@@ -86,7 +86,7 @@ class Context:
         rendered in the required style, so lengths are measured as the student will see them."""
         if self.doc is None:
             return []
-        citer = ev.Citer(self.library, self.spec.citation_style)  # as the Word file renders them
+        citer = ev.Citer(self.library, self.spec.citation_style, self.cited())  # as the Word file renders them
         out = []
         for s in self.doc.sections:
             text = " ".join(numbers.render(citer.render(p), self.tokens)[0] for p in s.paragraphs)
@@ -109,7 +109,7 @@ class Context:
         scope = {s.lower().replace(" ", "_") for s in limit.scope}
         keys = {s.key for s in self.doc.sections}
         only = scope if scope and scope <= keys else None  # a limit on named sections only
-        citer = ev.Citer(self.library, self.spec.citation_style)
+        citer = ev.Citer(self.library, self.spec.citation_style, self.cited())
         counted: list[str] = []
         for s in self.doc.sections:
             if only is not None and s.key not in only:
@@ -245,7 +245,7 @@ def _field_count(ctx: Context, rule: dict[str, Any]) -> Result:
         return None
     by_field = {s.field_id: s for s in ctx.doc.sections if s.field_id}
     rendered = {k: t for k, _, t in ctx.sections()}
-    citer = ev.Citer(ctx.library, ctx.spec.citation_style)
+    citer = ev.Citer(ctx.library, ctx.spec.citation_style, ctx.cited())
     for s in ctx.doc.sections:  # a box holds everything written in it, its table included (Codex audit, second round)
         if s.field_id and s.table:
             cells = [s.table_caption, *[c for row in s.table for c in row]]

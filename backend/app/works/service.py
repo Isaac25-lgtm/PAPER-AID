@@ -877,7 +877,7 @@ def document(rt: Runtime, user: User, work_id: str, version: int | None = None) 
     assert spec is not None
     library = load_library(rt.files, k.evidence_files)
     tokens = {key: (v[0], v[1]) for key, v in doc.number_values.items()}
-    citer = ev.Citer(library, spec.citation_style)
+    citer = ev.Citer(library, spec.citation_style, doc.cited)
     fields = {f.id: f for f in spec.fields}
     sections = []
     for s in doc.sections:

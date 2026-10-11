@@ -25,7 +25,7 @@ import httpx
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 
-from app.analysis.metadata import clean_authors, clean_container, clean_text, clean_title, distinct_people, is_organisation
+from app.analysis.metadata import clean_authors, clean_container, clean_text, clean_title, distinct_entries, distinct_people, is_organisation
 
 logger = logging.getLogger("paperaid.fetch")
 
@@ -83,6 +83,15 @@ def _text(body: bytes, content_type: str) -> str | None:
     return None
 
 
+_landed: dict[str, str] = {}  # the address a read page ended at, after its redirects (the last few hundred read)
+
+
+def landed(url: str) -> str:
+    """Where the address led when it was last read: the page a redirect or short link ends at. The address itself
+    when it has not been read or did not redirect."""
+    return _landed.get(url, url)
+
+
 def _get(url: str) -> tuple[bytes, str] | None:
     """(body, content type) of a public URL, or None when it cannot be read safely."""
     got = _fetch(url)
@@ -119,6 +128,10 @@ def _request(url: str, redirects: int = MAX_REDIRECTS) -> tuple[int, bytes, str,
                         current = urljoin(current, response.headers["location"])
                         continue
                     headers = {k.lower(): v for k, v in response.headers.items()}
+                    if current != url:
+                        if len(_landed) >= 512:
+                            _landed.pop(next(iter(_landed)))
+                        _landed[url] = current
                     if response.status_code != 200:
                         return response.status_code, b"", "", headers
                     body = b""
@@ -312,7 +325,8 @@ def _openalex_works(results: list) -> list[dict[str, str]]:
         if (item.get("language") or "en") != "en":
             continue  # the student, and PaperAid's checks, read English: a work in another language is not offered as a source
         authors = []
-        for name in distinct_people([((a.get("author") or {}).get("display_name") or "").strip() for a in item.get("authorships") or []]):
+        listed = [a.get("author") or {} for a in item.get("authorships") or [] if isinstance(a, dict)]
+        for name in distinct_people([(a.get("display_name") or "").strip() for a in listed], [str(a.get("orcid") or a.get("id") or "") for a in listed]):
             if name:
                 given, _, family = name.rpartition(" ")
                 authors.append(name if is_organisation(name) else _surname_initials(family, given) if given else family)
@@ -373,9 +387,10 @@ RETRACTION = {"retraction", "withdrawal", "removal"}
 
 def _crossref_record(message: dict, doi: str = "") -> dict[str, str]:
     people = [a for a in message.get("author") or [] if isinstance(a, dict)]
-    kept = set(distinct_people([f"{a.get('given', '')} {a.get('family', '')}".strip() or a.get("name", "") for a in people]))
-    authors = clean_authors([_surname_initials(a.get("family", ""), a.get("given", "")) if a.get("family") else a.get("name", "") for a in people
-                             if (f"{a.get('given', '')} {a.get('family', '')}".strip() or a.get("name", "")) in kept])
+    full = [f"{a.get('given', '')} {a.get('family', '')}".strip() or a.get("name", "") for a in people]
+    people = [people[n] for n in distinct_entries(full, [str(a.get("ORCID") or "") for a in people])]
+    # the registrant says which an author is: a person has a family name, a body has only a name
+    authors = clean_authors([_surname_initials(a.get("family", ""), a.get("given", "")) if a.get("family") else a.get("name", "") for a in people])
     parts = ((message.get("issued") or {}).get("date-parts") or [[None]])[0]
     # A retraction or withdrawal notice registered against this work (Crossref, with Retraction Watch data).
     updates = [u.get("type", "").lower() for u in message.get("updated-by") or [] if isinstance(u, dict)]

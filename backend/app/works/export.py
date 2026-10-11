@@ -130,7 +130,7 @@ def layout(document: WorkDocument, spec: ResolvedSpec, results: ResultsModel | N
     """The document as delivered: citations and figures filled in, tables that print (at least a header
     and one row), the reference list and the last-page note. `draft` adds the not-ready label, which
     only the stored file carries: it is decided after the final review, from its result."""
-    citer = ev.Citer(library, spec.citation_style)
+    citer = ev.Citer(library, spec.citation_style, document.cited)
 
     def show(text: str) -> str:
         return numbers.render(citer.render(text), tokens)[0]

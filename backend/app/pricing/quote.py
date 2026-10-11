@@ -300,7 +300,7 @@ def work_usd(settings: Settings, step: str, kind: str, words: int, engine: Engin
         usd += _step_usd(settings, "w_repair", section_input + words * CHARS_PER_WORD, words, e)
     audits = REVIEW_REPAIRS + 1 if e.single_reviewer else 2
     for _ in range(audits):  # the audit, and the audit again after each of the final review's repairs
-        usd += (rounds + 1) * (_step_usd(settings, "w_integrity", review_input, words * 2, e) + _step_usd(settings, "w_evaluate", review_input, words * 2, e))
+        usd += (rounds + 1) * (_step_usd(settings, "w_integrity", review_input, words * 2, e) + _step_usd(settings, "w_evaluate", review_input + evidence_chars * 2, words * 2, e))
         usd += rounds * _step_usd(settings, "w_repair", section_input + words * CHARS_PER_WORD, words, e)
         if e.roles.get("ADJUDICATOR"):
             usd += (rounds + 1) * _step_usd(settings, "w_adjudicate", review_input, words, e)
@@ -312,12 +312,12 @@ def work_usd(settings: Settings, step: str, kind: str, words: int, engine: Engin
         final_chars = base + words * CHARS_PER_WORD * 1.5 / parts + 9000
         usd += (REVIEW_REPAIRS + 1) * parts * _step_usd(settings, "w_final", final_chars, 0, e) + REVIEW_REPAIRS * _step_usd(settings, "w_repair", section_input, words, e)
         usd += (REVIEW_REPAIRS + 1) * 2 * _step_usd(settings, "w_compress", section_input + words * CHARS_PER_WORD, words, e)
-        usd += (REVIEW_REPAIRS + 1) * (_step_usd(settings, "w_integrity", review_input, words * 2, e) + _step_usd(settings, "w_evaluate", review_input, words * 2, e))
+        usd += (REVIEW_REPAIRS + 1) * (_step_usd(settings, "w_integrity", review_input, words * 2, e) + _step_usd(settings, "w_evaluate", review_input + evidence_chars * 2, words * 2, e))
         return usd
     usd += 2 * _step_usd(settings, "w_final", base + words * CHARS_PER_WORD * 1.2 + 6000, 0, e) + _step_usd(settings, "w_repair", section_input, words, e)
     usd += 2 * _step_usd(settings, "w_compress", section_input + words * CHARS_PER_WORD, words, e)
     # What compression or withholding changed is reviewed again, as it will be published (Codex audit 2026-09-30 #2).
-    usd += _step_usd(settings, "w_integrity", review_input, words * 2, e) + _step_usd(settings, "w_evaluate", review_input, words * 2, e)
+    usd += _step_usd(settings, "w_integrity", review_input, words * 2, e) + _step_usd(settings, "w_evaluate", review_input + evidence_chars * 2, words * 2, e)
     return usd
 
 

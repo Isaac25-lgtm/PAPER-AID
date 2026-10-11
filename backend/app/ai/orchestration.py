@@ -134,7 +134,7 @@ STEPS: dict[str, Step] = {
     # Plan, and each chapter's section briefs: lead drafts → writer critiques → lead finalises.
     # v2: the research-gap builder; v3: objective count, primary question, hypothesis pairs, question tense (2026-10-08);
     # v4 (academic audit, 2026-10-11): wording for what the design can show, variables as measured, a study the student can carry out.
-    "p_plan": Step("lead", Stage.PLANNING, "p-plan-v4", 12000),
+    "p_plan": Step("lead", Stage.PLANNING, "p-plan-v5", 12000),
     "p_brief": Step("lead", Stage.PLANNING, "p-brief-v2", 12000),
     "p_critique": Step("writer", Stage.PLANNING, "p-critique-v1", 8000),
     "p_guide": Step("writer", Stage.PLANNING, "p-guide-v1", 8000),
@@ -143,13 +143,15 @@ STEPS: dict[str, Step] = {
     "p_plan_review_peer": Step("writer", Stage.PLANNING, "p-plan-review-v2", 8000),
     # Chapter: writer drafts → code checks → lead reviews → writer fixes (bounded rounds) → lead readiness.
     # v3 (academic audit, 2026-10-11): a partly supported finding's caution, gaps as limits of the evidence, association before effect, plain language.
-    "p_draft": Step("writer", Stage.DRAFTING, "p-draft-v3", 16000),
+    # p-plan-v5, p-draft-v4, p-fix-v4, w-draft-v6, w-repair-v7 (Codex's audit of 1a3b1e7, findings 2 and 8): significance as the source reports it and by the
+    # value of no difference (1 for a ratio, 0 for a difference); cause only where the design can identify one, whatever the design is called.
+    "p_draft": Step("writer", Stage.DRAFTING, "p-draft-v4", 16000),
     # v4 (2026-10-10): a plan-owned section is reviewed as the writer's introduction, with what PaperAid places given apart.
     # v5: those statements are the student's and cannot be changed here, but they are not beyond question: an unsound one
     # is told to the student as a note on their plan (Codex's re-audit of d4d2bc7: v4 called them "correct as they stand").
     "p_review": Step("lead", Stage.AUDITING, "p-review-v5", 8000),
     "p_review_peer": Step("writer", Stage.AUDITING, "p-review-v5", 8000),
-    "p_fix": Step("writer", Stage.AUDITING, "p-fix-v3", 16000),  # v3: the same rules as p-draft-v3
+    "p_fix": Step("writer", Stage.AUDITING, "p-fix-v4", 16000),  # v3: the same rules as p-draft-v3
     "p_readiness": Step("lead", Stage.AUDITING, "p-readiness-v1", 8000),
     # Workflow 2 (algorithm revision 2026-10-09): the final editor of a chapter's sections, as for works (w_edit).
     "p_edit": Step("lead", Stage.AUDITING, "p-edit-v1", 16000),
@@ -179,10 +181,11 @@ STEPS: dict[str, Step] = {
     "w_results_review": Step("EVALUATOR", Stage.PLANNING, "w-results-review-v4", 8000),  # v2: blocking issues apart from suggestions; a repair is checked against the earlier issues
     # v4: only explicitly hypothetical prose uses example numbers; v5 (academic audit, 2026-10-11): cautions, gaps, ratios, the answer each command word
     # asks for at the student's level, ordinary examples from their setting.
-    "w_draft": Step("WRITER", Stage.DRAFTING, "w-draft-v5", 16000),
+    "w_draft": Step("WRITER", Stage.DRAFTING, "w-draft-v6", 16000),
     "w_integrity": Step("INTEGRITY", Stage.AUDITING, "w-integrity-v1", 6000),
-    "w_evaluate": Step("EVALUATOR", Stage.AUDITING, "w-evaluate-v1", 8000),
-    "w_repair": Step("WRITER", Stage.AUDITING, "w-repair-v6", 16000),  # v5: explicit hypothetical framing and graph preservation; v6: the rules of w-draft-v5
+    # v2 (Codex's audit of 1a3b1e7): the evaluator reads each section beside the evidence it cites, cautions included.
+    "w_evaluate": Step("EVALUATOR", Stage.AUDITING, "w-evaluate-v2", 8000),
+    "w_repair": Step("WRITER", Stage.AUDITING, "w-repair-v7", 16000),  # v5: explicit hypothetical framing and graph preservation; v6: the rules of w-draft-v5
     "w_adjudicate": Step("ADJUDICATOR", Stage.AUDITING, "w-adjudicate-v1", 4000),
     "w_final": Step("EVALUATOR", Stage.AUDITING, "w-final-v2", 8000),  # v2: the exact deliverable, every verdict required (Sol with one final reviewer)
     "w_compress": Step("WRITER", Stage.AUDITING, "w-compress-v1", 12000),

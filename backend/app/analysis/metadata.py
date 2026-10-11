@@ -13,16 +13,22 @@ import re
 _TAG = re.compile(r"</?[A-Za-z][^<>]{0,60}>")
 _DEGREE = re.compile(r"\s*\(\s*(?:Ph\.?\s?D\.?|D\.?Phil\.?|Dr\.?|Prof\.?|M\.?Sc\.?|M\.?A\.?|MBA|M\.?D\.?|MPH|B\.?Sc\.?|Eng\.?|CPA)\s*\)", re.I)
 _TITLE_BEFORE = re.compile(r"^(?:Dr|Prof|Professor|Assoc\. Prof|Rev|Mr|Mrs|Ms)\.?\s+", re.I)
-# An entry that is where an author works, not who the author is.
-_AFFILIATION = re.compile(r"\b(?:department|dept|faculty|school of|college of|universit\w*|institut\w*|centre for|center for|hospital|laborator\w+|division of|campus)\b", re.I)
+# An entry that is where an author works, not who the author is: it names a unit of an institution ("Department of
+# ...", "Faculty of ..."), or an institution with its town or country after a comma. A body named on its own
+# ("National Cancer Institute", "RTS,S Clinical Trials Partnership") can be a genuine group author and is kept
+# (Codex's audit of 1a3b1e7, finding 4).
+_UNIT = re.compile(r"\b(?:department|dept|faculty|school of|college of|division of|unit of|section of|laborator\w+ of|campus)\b", re.I)
+_PLACE = re.compile(r"\b(?:universit\w*|institut\w*|college|hospital|cent(?:re|er))\b", re.I)
 _PERSON = re.compile(r"^[^,;]{1,40},\s*(?:[^\W\d_]\.\s?){1,6}$")  # "Okello, J. P."
-# Where a copy is kept, not where the work was published: never printed as the journal.
-_REPOSITORY = re.compile(r"\b(?:repositor\w+|RePEc|research archive|IRDB|DSpace|ePrints?|digital commons|institutional archive)\b", re.I)
-# A registered author that is a body, not a person.
+# Where a copy is kept, not where the work was published: never printed as the journal. Only names that say so
+# outright; an index's own record of the source type decides first (`fetch._openalex_works`).
+_REPOSITORY = re.compile(r"\bRePEc\b|\bDSpace\b|\bePrints?\b|\bRepositories DataBase\b|\binstitutional\s+repositor\w+\b|\b(?:repository|research archive)\s*(?:\([^()]*\))?$", re.I)
+# A registered author that is a body, not a person: a word only bodies carry, or the small words inside a body's name.
 _ORGANISATION = re.compile(
     r"\b(?:cent(?:re|er)|institut\w*|universit\w*|ministry|bureau|organi[sz]ation|association|society|council|commission|authority|agency|department|office"
     r"|foundation|bank|fund|programme|program|committee|group|network|alliance|partnership|initiative|consortium|collaborat\w+|team|government|secretariat|union"
-    r"|trust|limited|ltd|inc|technologies|solutions|labs?|press|news|radio|school|college|hospital|library|unicef|unesco)\b|[()&]|\b(?:for|of|the|and)\b", re.I)
+    r"|trust|limited|ltd|inc|technologies|solutions|labs?|press|news|radio|school|college|hospital|library|unicef|unesco)\b|&", re.I)
+_BODY_WORDS = re.compile(r"(?<=\s)(?:for|of|the|and)(?=\s)")  # lower case only: a surname "The" or "Of" is written with a capital
 _SMALL = {"a", "an", "and", "as", "at", "by", "for", "from", "in", "into", "of", "on", "or", "the", "to", "with", "among", "between"}
 
 
@@ -74,29 +80,60 @@ def clean_pages(value: str) -> str:
 
 def is_organisation(name: str) -> bool:
     """A registered author that is a body ("Center for Rapid Evidence Synthesis (ACRES)"): its name is kept whole,
-    never split into a surname and initials."""
-    return bool(_ORGANISATION.search(name))
+    never split into a surname and initials. Used only where the record does not say which an author is; brackets
+    alone decide nothing ("John (Jack) Smith" is a person)."""
+    return bool(_ORGANISATION.search(name) or _BODY_WORDS.search(name))
 
 
-def distinct_people(names: list[str]) -> list[str]:
-    """Full names with nobody twice: some records list each author again with the names in the other order
-    ("Conrad Murendo" and "Murendo Conrad"), which printed as two people."""
-    seen: set[frozenset[str]] = set()
-    out = []
-    for name in names:
-        words = frozenset(re.findall(r"[^\W\d_]+", name.casefold()))
-        if words and words in seen:
+def _words(name: str) -> list[str]:
+    return re.findall(r"[^\W\d_]+", name.casefold())
+
+
+def _turned(a: list[str], b: list[str]) -> bool:
+    """The same name with its parts in the other order: "conrad murendo" and "murendo conrad", "lwanga mayanja musa" and "musa lwanga mayanja"."""
+    return len(a) >= 2 and a != b and any(a[k:] + a[:k] == b for k in range(1, len(a)))
+
+
+def distinct_people(names: list[str], ids: list[str] | None = None) -> list[str]:
+    return [names[n] for n in distinct_entries(names, ids)]
+
+
+def distinct_entries(names: list[str], ids: list[str] | None = None) -> list[int]:
+    """The positions to keep of full names as registered, without the two registration faults that can be told from the record itself:
+
+    - the same full name entered twice, unless the record gives the two different author identifiers;
+    - the whole list entered a second time with each name the other way round ("Conrad Murendo", "Meike Wollni",
+      "Murendo Conrad", "Wollni Meike": four entries for two people, in the same order).
+
+    Nothing else is inferred. Two names made of the same words ("John Paul" and "Paul John") are two authors, and
+    two people who share a surname and initials are two (Codex's audit of 1a3b1e7, finding 4)."""
+    known = ids if ids is not None and len(ids) == len(names) else [""] * len(names)
+    half = len(names) // 2
+    count = len(names)
+    if len(names) >= 4 and len(names) % 2 == 0 and all(_turned(_words(a), _words(b)) for a, b in zip(names[:half], names[half:], strict=True)):
+        count = half
+    out: list[int] = []
+    seen: dict[str, set[str]] = {}
+    for n, (name, ident) in enumerate(zip(names[:count], known[:count], strict=True)):
+        same = " ".join(name.casefold().split())
+        if same and same in seen and not (ident and seen[same] and ident not in seen[same]):
             continue
-        seen.add(words)
-        out.append(name)
+        seen.setdefault(same, set())
+        if ident:
+            seen[same].add(ident)
+        out.append(n)
     return out
 
 
+def _affiliation(entry: str) -> bool:
+    return bool(_UNIT.search(entry)) or ("," in entry and bool(_PLACE.search(entry))) or len(entry) > 120
+
+
 def clean_authors(authors: list[str]) -> list[str]:
-    """The people (or the one organisation) who wrote a work, from what was registered as its authors. A degree or
-    title is not part of a name; a surname in capitals is written normally; nobody is listed twice. Where the record
-    names people, an entry that is a place of work is not an author. Where it names only an organisation, that is the
-    author (a ministry, an agency), and stays."""
+    """The people and bodies who wrote a work, from what was registered as its authors. A degree or title is not part
+    of a name and a surname in capitals is written normally. Where the record names people, an entry that is a place
+    of work (a department, a faculty, an institution with its town) is not an author; a body named on its own beside
+    them is a group author and stays. Nobody is merged with anybody: two authors whose names shorten alike are two."""
     cleaned: list[str] = []
     for raw in authors:
         name = _TITLE_BEFORE.sub("", _DEGREE.sub("", clean_text(raw))).strip(" ,;")
@@ -109,8 +146,14 @@ def clean_authors(authors: list[str]) -> list[str]:
         if comma and _shouting(family) and len(family.strip()) > 3 and _PERSON.match(f"{family},{rest}"):
             name = f"{_title_case(family.strip())},{rest}"
         cleaned.append(name)
-    people = [a for a in cleaned if _PERSON.match(a)]
-    if people:  # places of work registered among the people who wrote it
-        cleaned = [a for a in cleaned if _PERSON.match(a) or not (_AFFILIATION.search(a) or len(a) > 80)]
+    if any(_PERSON.match(a) for a in cleaned):  # places of work registered among the people who wrote it
+        cleaned = [a for a in cleaned if _PERSON.match(a) or not _affiliation(a)]
     seen: set[str] = set()
-    return [a for a in cleaned if not (a.casefold() in seen or seen.add(a.casefold()))]
+    out = []
+    for name in cleaned:  # a body entered twice is one body; a person's shortened name proves nothing about a second person
+        if not _PERSON.match(name):
+            if name.casefold() in seen:
+                continue
+            seen.add(name.casefold())
+        out.append(name)
+    return out

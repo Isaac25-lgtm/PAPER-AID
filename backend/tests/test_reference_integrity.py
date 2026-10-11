@@ -28,7 +28,7 @@ def test_an_organisation_that_is_the_only_author_stays_the_author():
 
 
 def test_degrees_capitals_and_repeats_are_not_part_of_a_name():
-    assert clean_authors(["MAKHANDIA, C. S.", "MIROGA (PhD), D. J.", "OTINGA (PhD), D. C. H. N.", "Makhandia, C. S."]) == ["Makhandia, C. S.", "Miroga, D. J.", "Otinga, D. C. H. N."]
+    assert clean_authors(["MAKHANDIA, C. S.", "MIROGA (PhD), D. J.", "OTINGA (PhD), D. C. H. N."]) == ["Makhandia, C. S.", "Miroga, D. J.", "Otinga, D. C. H. N."]
     assert clean_authors(["Dr. Okello, J.", "", "  "]) == ["Okello, J."]
     assert clean_authors(["WHO"]) == ["WHO"] and clean_authors(["Ng, K."]) == ["Ng, K."]  # an acronym and a short surname are left alone
 
@@ -186,8 +186,8 @@ def test_an_author_registered_twice_with_the_names_reversed_is_one_person():
     assert works[0]["authors"] == "Murendo, C.; Wollni, M."
     assert works[0]["container"] == ""  # a repository keeps a copy: it is not the journal
     record = fetch._crossref_record({"title": ["A pathway to financial inclusion"], "author": [
-        {"family": "Adong", "given": "Annet"}, {"family": "Annet", "given": "Adong"}, {"family": "Kancs", "given": "d'Artis"}]})
-    assert record["authors"] == "Adong, A.; Kancs, D."  # and an initial is a capital
+        {"family": "Adong", "given": "Annet"}, {"family": "Kancs", "given": "d'Artis"}, {"family": "Annet", "given": "Adong"}, {"family": "d'Artis", "given": "Kancs"}]})
+    assert record["authors"] == "Adong, A.; Kancs, D."  # the whole list entered again the other way round; and an initial is a capital
     assert clean_authors(["Han., C. S.", "Sing., L. W.", "Okello, J."]) == ["Han, C. S.", "Sing, L. W.", "Okello, J."]  # a full stop registered inside a surname
 
 
@@ -238,3 +238,95 @@ def test_a_site_that_is_no_source_for_academic_work_is_never_cited(offline):
     kept = pipeline._web_source(_Finding("https://www.ubos.org/statistics/", title="Statistical abstract", publisher="Uganda Bureau of Statistics", published="2024"))
     assert kept is not None and kept.organisation == "Uganda Bureau of Statistics"
     assert pipeline._web_source(_Finding("https://openstax.org/books/principles-economics-3e/pages/5-1", title="Price elasticity", publisher="OpenStax", published="2022")) is not None  # an open textbook
+
+
+# --- Codex's audit of 1a3b1e7: a cleanup never changes what is true -------------------------------------------------
+
+def test_two_papers_with_one_title_and_year_are_two_references():
+    """Finding 1: "Introduction" (2024) by different authors under different DOIs was listed once."""
+    first = _source(url="https://doi.org/10.1/a", doi="10.1/a", title="Introduction", year="2024", authors=["Okello, J."], kind="ARTICLE")
+    second = _source(url="https://doi.org/10.1/b", doi="10.1/b", title="Introduction", year="2024", authors=["Namara, P."], kind="ARTICLE")
+    assert len(evidence.reference_list([first, second])) == 2
+    long_title = "Teacher motivation and learner performance in government-aided primary schools"
+    registered_twice = [_source(url=f"https://doi.org/10.1/{n}", doi=f"10.1/{n}", title=long_title, year="2024", authors=["Okello, J."], kind="ARTICLE") for n in "cd"]
+    assert len(evidence.reference_list(registered_twice)) == 2  # two registrations are two works, whatever their titles
+    other_author = [_source(url="https://example.org/1", title=long_title, year="2024", authors=["Okello, J."]), _source(url="https://example.org/2", title=long_title, year="2024", authors=["Namara, P."])]
+    assert len(evidence.reference_list(other_author)) == 2
+    cyrillic = [_source(url="https://example.org/3", title="Цінова еластичність попиту як детермінанта поведінки", year="2026", authors=["Ivanova, N."]),
+                _source(url="https://example.org/4", title="Трансформація життєво важливих соціальних потреб", year="2026", authors=["Ivanova, N."])]
+    assert len(evidence.reference_list(cyrillic)) == 2  # a title in another script is still a title
+
+
+def test_two_works_of_one_author_and_year_are_told_apart_by_letter_in_the_text_and_the_list():
+    """Finding 1: "(Opok et al., 2026)" stood for two different papers, and the list gave no way to tell which."""
+    financial = _source(url="https://doi.org/10.1/f", doi="10.1/f", title="Financial reward management and teachers' performance", year="2026",
+                        authors=["Opok, J. B.", "Obici, I. G.", "Mwesigwa, D."], kind="ARTICLE", container="East African Journal of Education Studies")
+    other = financial.model_copy(update={"url": "https://doi.org/10.1/n", "doi": "10.1/n", "title": "Non-financial reward management and teachers' performance"})
+    alone = _source(url="https://example.org/s", title="A third study", year="2025", authors=["Smith, J."])
+    library = _library(financial, other, alone)
+    citer = evidence.Citer(library, "APA7", library)
+    assert citer.render("Pay matters ⟦E000001⟧, and so does recognition ⟦E000002⟧.") == "Pay matters (Opok et al., 2026a), and so does recognition (Opok et al., 2026b)."
+    assert citer.render("Both are reported ⟦E000001⟧ ⟦E000002⟧ ⟦E000003⟧.") == "Both are reported (Opok et al., 2026a; Opok et al., 2026b; Smith, 2025)."
+    assert citer.render("⟦E000002|n⟧ disagree.") == "Opok et al. (2026b) disagree."
+    listed = evidence.reference_list([i.source for i in library.values()])
+    assert [entry[:44] for entry in listed] == ["Opok, J. B., Obici, I. G., & Mwesigwa, D. (2", "Opok, J. B., Obici, I. G., & Mwesigwa, D. (2", "Smith, J. (2025). A third study. https://exa"]
+    assert "(2026a). Financial reward" in listed[0] and "(2026b). Non-financial reward" in listed[1]
+    # a document that cites only one of them gives it no letter, in the text or in its list
+    assert evidence.Citer(library, "APA7", ["E000001", "E000003"]).render("Pay matters ⟦E000001⟧.") == "Pay matters (Opok et al., 2026)."
+    assert "(2026). Financial reward" in evidence.reference_list([financial, alone])[0]
+    undated = [_source(url=f"https://example.org/{n}", title=title, year="", organisation="Microsoft", container="Microsoft") for n, title in enumerate(("About keyboard input", "Keyboard input overview"))]
+    assert [evidence.reference(s, "APA7", letter)[:21] for s, letter in zip(undated, "ab", strict=True)] == ["Microsoft. (n.d.-a). ", "Microsoft. (n.d.-b). "]
+    assert evidence.Citer(_library(*undated), "HARVARD", ["E000001", "E000002"]).render("See ⟦E000002⟧.") == "See (Microsoft n.d.-b)."
+
+
+def test_authorship_is_never_changed_on_a_guess():
+    """Finding 4: a group co-author, two people whose names use the same words, and two people who shorten alike
+    were each lost."""
+    from app.analysis.metadata import distinct_people, is_organisation
+
+    assert clean_authors(["Smith, J.", "National Cancer Institute"]) == ["Smith, J.", "National Cancer Institute"]  # a body named on its own is a group author
+    assert clean_authors(["Smith, J.", "Department of Epidemiology, National Cancer Institute, Bethesda"]) == ["Smith, J."]  # a unit with its place is where someone works
+    assert clean_authors(["Smith, J.", "Smith, J."]) == ["Smith, J.", "Smith, J."]  # John and James
+    assert clean_authors(["Ministry of Health", "Ministry of Health"]) == ["Ministry of Health"]
+    assert distinct_people(["John Paul", "Paul John"]) == ["John Paul", "Paul John"]
+    assert distinct_people(["John Smith", "James Smith"]) == ["John Smith", "James Smith"]
+    assert distinct_people(["John Smith", "John Smith"]) == ["John Smith"] and distinct_people(["John Smith", "John Smith"], ["A1", "A2"]) == ["John Smith", "John Smith"]
+    assert distinct_people(["John Smith", "John Smith"], ["A1", ""]) == ["John Smith"]
+    assert distinct_people(["Conrad Murendo", "Meike Wollni", "Murendo Conrad", "Wollni Meike"], ["A1", "A2", "A3", "A4"]) == ["Conrad Murendo", "Meike Wollni"]
+    works = fetch._openalex_works([{"display_name": "A study", "abstract_inverted_index": {"A": [0]}, "authorships": [
+        {"author": {"display_name": "John Paul", "id": "https://openalex.org/A1"}}, {"author": {"display_name": "Paul John", "id": "https://openalex.org/A2"}},
+        {"author": {"display_name": "John Smith", "id": "https://openalex.org/A3"}}, {"author": {"display_name": "James Smith", "id": "https://openalex.org/A4"}}]}])
+    assert works[0]["authors"] == "Paul, J.; John, P.; Smith, J.; Smith, J."
+    assert not is_organisation("John (Jack) Smith") and not is_organisation("Andrew The") and is_organisation("Center for Rapid Evidence Synthesis (ACRES)")
+    registered = fetch._crossref_record({"title": ["Cancer statistics"], "author": [{"family": "Smith", "given": "John"}, {"name": "National Cancer Institute"}]})
+    assert registered["authors"] == "Smith, J.; National Cancer Institute"
+
+
+def test_only_a_name_that_says_so_is_a_repository():
+    from app.analysis.metadata import clean_container
+
+    for journal in ("Journal of Digital Repository Studies", "Archives of Disease in Childhood", "The Repository Review of Economics", "Research in Higher Education"):
+        assert clean_container(journal) == journal, journal
+
+
+def test_a_registration_that_names_no_author_is_completed_from_the_page(offline):
+    """Finding 7: the registration was taken as it stood and the page, which named its author, was never read."""
+    url = "https://www.sciencedirect.com/science/article/pii/S0001"
+    offline.setattr(fetch, "resolve_doi", lambda u: "10.1016/j.x.2024.1")
+    offline.setattr(fetch, "crossref_work", lambda doi: {"doi": doi, "title": "Uptake of the vaccine", "authors": "", "year": "2024", "container": "Vaccine", "volume": "42", "issue": "", "pages": "1–9"})
+    offline.setattr(fetch, "page_meta", lambda u: {"title": "Uptake of the vaccine", "authors": "Smith, J.", "year": "2024", "container": "Vaccine", "volume": "42", "issue": "", "pages": "1–9", "doi": ""})
+    source = pipeline._web_source(_Finding(url, title="Uptake of the vaccine", publisher="ScienceDirect", published="2024"))
+    assert source.authors == ["Smith, J."] and source.doi == "10.1016/j.x.2024.1" and source.organisation == ""
+    offline.setattr(fetch, "page_meta", lambda u: {})
+    assert pipeline._web_source(_Finding(url, title="Uptake of the vaccine", publisher="ScienceDirect", published="2024")) is None  # a hosting site, and nobody named anywhere
+    own = pipeline._web_source(_Finding("https://openknowledge.worldbank.org/handle/1", title="Uptake of the vaccine", publisher="World Bank", published="2024"))
+    assert own.authors == [] and own.organisation == "World Bank"  # a body's own registered report is the body's
+
+
+def test_a_site_is_judged_by_its_real_host_and_by_where_its_address_leads(offline):
+    """Finding 9: "en.wikipedia.org." (a fully qualified name) passed, and a link that redirects was judged by the link."""
+    assert pipeline._web_source(_Finding("https://en.wikipedia.org./wiki/Touchscreen", title="Touchscreen", publisher="Wikipedia", published="")) is None
+    assert pipeline._web_source(_Finding("https://EN.WIKIPEDIA.ORG/wiki/Touchscreen", title="Touchscreen", publisher="Wikipedia", published="")) is None
+    offline.setattr(fetch, "landed", lambda url: "https://en.wikipedia.org/wiki/Touchscreen" if "short.example" in url else url)
+    assert pipeline._web_source(_Finding("https://short.example/abc", title="Touchscreen", publisher="Short", published="")) is None
+    assert pipeline._web_source(_Finding("https://notwikipedia.org.example.com/a", title="A page", publisher="Example", published="2024")) is not None

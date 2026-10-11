@@ -522,40 +522,53 @@ HOSTS = re.compile(r"(?:^|\.)(?:ncbi\.nlm\.nih\.gov|europepmc\.org|researchgate\
                    r"mdpi\.com|frontiersin\.org|plos\.org|biomedcentral\.com|nature\.com|oup\.com|cambridge\.org|ajol\.info|scielo\.[a-z.]+|doaj\.org)$", re.I)
 
 
-# Sites a marker does not accept as a source for academic work, whatever they say: encyclopedias anyone can edit,
-# question-and-answer and social sites, personal blogging platforms, tutoring, homework, study-note and essay sites,
-# programming tutorials. A finding from one is never used (round of 11 October 2026: Wikipedia, a children's
-# encyclopedia and a tutoring site were cited when the research asked for standard accounts of a basic topic).
+# Sites PaperAid does not use as supporting evidence, by default: encyclopedias anyone can edit, question-and-answer
+# and social sites, personal blogging platforms, tutoring, homework, study-note and essay sites, programming tutorials.
+# A practical default, not a verdict on any one page: research offered Wikipedia, a children's encyclopedia and a
+# tutoring site as sources for a basic topic (round of 11 October 2026). It governs what PaperAid finds on the web to
+# support a claim; what a student supplies to be read or analysed (their own readings) never passes through it.
 NOT_CITABLE = re.compile(
     r"(?:^|\.)(?:wikipedia\.org|wikimedia\.org|wikibooks\.org|wikiversity\.org|fandom\.com|academickids\.com|kiddle\.co|quora\.com|reddit\.com|stackexchange\.com"
     r"|stackoverflow\.com|medium\.com|blogspot\.com|wordpress\.com|substack\.com|linkedin\.com|facebook\.com|youtube\.com|twitter\.com|x\.com|tiktok\.com"
     r"|varsitytutors\.com|chegg\.com|coursehero\.com|studocu\.com|scribd\.com|slideshare\.net|quizlet\.com|brainly\.[a-z.]+|sparknotes\.com|cliffsnotes\.com"
     r"|study\.com|studysmarter\.[a-z.]+|bartleby\.com|numerade\.com|ukessays\.com|ivypanda\.com|studycorgi\.com|gradesfixer\.com|edubirdie\.com"
     r"|investopedia\.com|geeksforgeeks\.org|tutorialspoint\.com|javatpoint\.com|w3schools\.com|byjus\.com|vedantu\.com|toppr\.com|testbook\.com"
-    r"|unacademy\.com|khanacademy\.org)$", re.I)
+    r"|unacademy\.com|khanacademy\.org)$")
+
+
+def _host(url: str) -> str:
+    """A web address's host as it is compared: lower case, without the full stop a fully qualified name may end in."""
+    return (urlsplit(url).hostname or "").rstrip(".").lower()
 
 
 def _web_source(finding) -> EvidenceSource | None:
     """Whose work a web page is, in this order: its registration (by DOI, then by its exact title), what the page
     itself declares for indexing, and only then the organisation that published it (a ministry, an agency, a
-    newspaper: the real author of its own pages). None for an article on a hosting site with no author found, and
-    for a site that is not a source for academic work (`NOT_CITABLE`)."""
-    if NOT_CITABLE.search(urlsplit(finding.url).hostname or ""):
+    newspaper: the real author of its own pages). A registration that names no author is completed from the page's own
+    declaration (Codex's audit of 1a3b1e7, finding 7). None for an article on a hosting site whose authors neither
+    names, and for a site PaperAid does not use as evidence (`NOT_CITABLE`), judged on the address given and on the
+    address it led to."""
+    hosts = {_host(finding.url), _host(fetch.landed(finding.url))}
+    if any(NOT_CITABLE.search(host) for host in hosts):
         return None
     doi = fetch.resolve_doi(finding.url)
     record = fetch.crossref_work(doi) if doi else None
     declared: dict[str, str] = {}
-    if not record:
+    if not record or not record.get("authors"):
         declared = fetch.page_meta(finding.url)
-        if declared.get("doi"):
+        if not record and declared.get("doi"):
             doi = declared["doi"]
             record = fetch.crossref_work(doi)
     if not record:
         found = _registered_by_title(declared.get("title") or finding.title, declared.get("year") or finding.published)
         record, doi = (found, found["doi"]) if found else (None, doi)
+    hosted = any(HOSTS.search(host) for host in hosts)
     if record and record.get("title"):
+        authors = _authors(record["authors"]) or _authors(declared.get("authors", ""))
+        if not authors and hosted:
+            return None  # registered, but nobody is named as its author by the registration or by the page
         return EvidenceSource(
-            url=finding.url, title=record["title"], authors=_authors(record["authors"]) or _authors(declared.get("authors", "")), year=record["year"],
+            url=finding.url, title=record["title"], authors=authors, organisation="" if authors else finding.publisher.strip(), year=record["year"],
             container=record["container"], volume=record["volume"], issue=record["issue"], pages=record["pages"], doi=doi, kind="ARTICLE", metadata="CROSSREF",
         )
     if declared.get("authors"):
@@ -563,7 +576,7 @@ def _web_source(finding) -> EvidenceSource | None:
             url=finding.url, title=declared["title"], authors=_authors(declared["authors"]), year=declared["year"], container=declared["container"],
             volume=declared["volume"], issue=declared["issue"], pages=declared["pages"], doi=doi, kind="ARTICLE" if declared["container"] else "REPORT", metadata="PAGE",
         )
-    if declared or HOSTS.search(urlsplit(finding.url).hostname or ""):
+    if declared or hosted:
         return None
     year = YEAR.search(finding.published)
     return EvidenceSource(
@@ -1259,9 +1272,11 @@ def _checks(inp: StepInput, key: str, text: SectionText, library: dict[str, Evid
         if tense:
             problems += evidence.tense_problems(paragraph)
     table_allowed = _table_allowed(inp, allowed)
-    for cell in _cells(text):
+    for cell in _cells(text):  # a caption and a cell are read as prose is, and a row with its headings
         found = evidence.citation_problems(cell, usable) + evidence.figure_problems(cell, library, table_allowed)
+        found += evidence.gap_problems(cell) + evidence.statistic_problems(cell)
         problems += [f"In the table: {p}" for p in found]
+    problems += [f"In the table: {p}" for p in evidence.table_problems(text.table.rows)]
     if not any(p.strip() for p in text.paragraphs):
         problems.append("The section is empty.")
     return list(dict.fromkeys(problems))
@@ -1284,9 +1299,9 @@ def _strip_table(inp: StepInput, text: SectionText, library: dict[str, EvidenceI
     table_allowed = _table_allowed(inp, allowed)
 
     def clean(cell: str) -> str:
-        return evidence.strip_unsupported(cell, library, usable, table_allowed)
+        return evidence.strip_overclaims(evidence.strip_unsupported(cell, library, usable, table_allowed))
 
-    return Table(caption=clean(text.table.caption), rows=[[clean(c) for c in row] for row in text.table.rows])
+    return Table(caption=clean(text.table.caption), rows=evidence.strip_table_overclaims([[clean(c) for c in row] for row in text.table.rows]))
 
 
 def _text_hash(current: dict[str, SectionText]) -> str:

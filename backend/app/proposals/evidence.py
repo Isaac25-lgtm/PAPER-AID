@@ -64,12 +64,68 @@ def _short_title(title: str) -> str:
     return " ".join(words[:5]) + ("…" if len(words) > 5 else "")
 
 
-def _year(source: EvidenceSource) -> str:
-    return source.year or "n.d."
+def _year(source: EvidenceSource, letter: str = "") -> str:
+    """The year as cited, with the letter that tells two works of one author and year apart ("2026a", "n.d.-a")."""
+    if not letter:
+        return source.year or "n.d."
+    return f"{source.year}{letter}" if source.year else f"n.d.-{letter}"
 
 
 def _key(source: EvidenceSource) -> str:
     return source.doi or research.normalise_url(source.url)
+
+
+def _title_key(source: EvidenceSource) -> str:
+    return re.sub(r"[\W_]+", "", clean_title(source.title).casefold())  # letters and digits of any script
+
+
+def _same_work(a: EvidenceSource, b: EvidenceSource) -> bool:
+    """Two records of one work: the same DOI or address, or one work reached by two addresses (its DOI and a page
+    that carries none). Two registrations are two works whatever their titles; without that proof the titles must be
+    the same and long enough to tell works apart ("Introduction" is not), in the same year, and by the same first
+    author where both name one (Codex's audit of 1a3b1e7, finding 1: a title and a year alone merged two papers)."""
+    if _key(a) == _key(b):
+        return True
+    if a.doi and b.doi:
+        return False
+    title = _title_key(a)
+    if len(title) < 25 or title != _title_key(b) or a.year != b.year:
+        return False
+    first_a, first_b = clean_authors(a.authors)[:1], clean_authors(b.authors)[:1]
+    return not (first_a and first_b) or _surname(first_a[0]).casefold() == _surname(first_b[0]).casefold()
+
+
+def works(sources: Iterable[EvidenceSource]) -> list[list[EvidenceSource]]:
+    """The distinct works among these sources, each with every record of it; the record that carries a DOI first."""
+    groups: list[list[EvidenceSource]] = []
+    seen: set[str] = set()
+    for source in sources:
+        if _key(source) in seen:
+            continue
+        seen.add(_key(source))
+        group = next((g for g in groups if any(_same_work(known, source) for known in g)), None)
+        if group is None:
+            groups.append([source])
+        elif source.doi and not group[0].doi:
+            group.insert(0, source)
+        else:
+            group.append(source)
+    return groups
+
+
+def year_letters(sources: Iterable[EvidenceSource], style: "CitationStyle" = "APA7") -> dict[str, str]:
+    """Letters for the works of one document that would otherwise be cited alike (the same author label and year):
+    "a", "b" ... in the order of their titles, as the reference list prints them. By source key; a work cited alone
+    in its label and year has none."""
+    alike: dict[tuple[str, str], list[list[EvidenceSource]]] = {}
+    for group in works(sources):
+        alike.setdefault((author_label(group[0], style).casefold(), _year(group[0])), []).append(group)
+    letters: dict[str, str] = {}
+    for groups in alike.values():
+        if len(groups) > 1:
+            for n, group in enumerate(sorted(groups, key=lambda g: (_title_key(g[0]), _key(g[0])))):
+                letters.update({_key(source): chr(97 + min(n, 25)) for source in group})
+    return letters
 
 
 def author_label(source: EvidenceSource, style: CitationStyle = "APA7", first: bool = False, narrative: bool = False) -> str:
@@ -94,8 +150,14 @@ class Citer:
     """Renders citation tokens in reading order, remembering first citations (APA 6 names three
     to five authors in full the first time)."""
 
-    def __init__(self, library: dict[str, EvidenceItem], style: CitationStyle):
+    def __init__(self, library: dict[str, EvidenceItem], style: CitationStyle, cited: Iterable[str] | None = None):
+        """`cited`: the ids the document cites, so works it would cite alike are told apart by letter exactly as its
+        reference list does (`reference_list` of the same sources). Without it no letter is given."""
         self.library, self.style, self.seen = library, style, set()
+        self.letters = year_letters([library[i].source for i in cited if i in library], style) if cited is not None else {}
+
+    def _when(self, source: EvidenceSource) -> str:
+        return _year(source, self.letters.get(_key(source), ""))
 
     def _label(self, source: EvidenceSource, narrative: bool) -> str:
         first = _key(source) not in self.seen
@@ -104,12 +166,13 @@ class Citer:
 
     def cite(self, sources: list[EvidenceSource], narrative: bool = False) -> str:
         if narrative and len(sources) == 1:
-            return f"{self._label(sources[0], True)} ({_year(sources[0])})"
-        unique = {_key(s): s for s in sources}
+            return f"{self._label(sources[0], True)} ({self._when(sources[0])})"
         sep = " " if self.style == "HARVARD" else ", "  # Harvard: (Okello et al. 2022); APA: (Okello et al., 2022)
-        # one work reached by two addresses prints once
-        parts = sorted(dict.fromkeys(f"{self._label(s, False)}{sep}{_year(s)}" for s in unique.values()), key=str.lower)
-        return "(" + "; ".join(parts) + ")"
+        parts = []
+        for group in works(sources):  # one work reached by two addresses prints once; two works never merge
+            parts.append(f"{self._label(group[0], False)}{sep}{self._when(group[0])}")
+            self.seen.update(_key(s) for s in group)
+        return "(" + "; ".join(sorted(parts, key=str.lower)) + ")"
 
     def render(self, text: str) -> str:
         """Replace citation tokens with in-text citations; consecutive tokens become one
@@ -142,12 +205,12 @@ def _authors_apa(authors: list[str], style: CitationStyle) -> str:
     return ", ".join(authors[: limit - 1]) + ", … " + authors[-1]
 
 
-def _harvard(source: EvidenceSource) -> str:
+def _harvard(source: EvidenceSource, letter: str = "") -> str:
     """Harvard (Cite Them Right): Surname, I. (Year) Title. Journal, volume(issue), pp. pages. Available at: link."""
     names = clean_authors(source.authors)
     who = (", ".join(names[:-1]) + " and " + names[-1]) if len(names) > 1 else (names[0] if names else clean_text(source.organisation))
     title = _ended(clean_title(source.title))
-    head = f"{who} ({_year(source)}) {title}" if who else f"{title.rstrip('.')} ({_year(source)})."
+    head = f"{who} ({_year(source, letter)}) {title}" if who else f"{title.rstrip('.')} ({_year(source, letter)})."
     link = f"https://doi.org/{source.doi}" if source.doi else ("" if source.url.startswith("reading:") else source.url)
     if source.kind == "ARTICLE":
         volume = source.volume + (f"({source.issue})" if source.issue else "")
@@ -159,17 +222,17 @@ def _harvard(source: EvidenceSource) -> str:
     return f"{head} Available at: {link}." if link else head
 
 
-def reference(source: EvidenceSource, style: CitationStyle = "APA7") -> str:
-    """One reference-list entry, built only from the source's recorded details."""
+def reference(source: EvidenceSource, style: CitationStyle = "APA7", letter: str = "") -> str:
+    """One reference-list entry, built only from the source's recorded details. `letter`: see `year_letters`."""
     if style == "HARVARD":
-        return _harvard(source)
+        return _harvard(source, letter)
     authors = clean_authors(source.authors)
     who = _authors_apa(authors, style) if authors else clean_text(source.organisation)
     title = _ended(clean_title(source.title))
     if who:
-        head = f"{who}{'' if who.endswith('.') else '.'} ({_year(source)}). {title}"
+        head = f"{who}{'' if who.endswith('.') else '.'} ({_year(source, letter)}). {title}"
     else:
-        head = f"{title} ({_year(source)})."
+        head = f"{title} ({_year(source, letter)})."
     if source.doi:
         link = f"doi:{source.doi}" if style == "APA6" else f"https://doi.org/{source.doi}"
     elif source.url.startswith("reading:"):  # one of the student's own readings: no web address
@@ -186,17 +249,10 @@ def reference(source: EvidenceSource, style: CitationStyle = "APA7") -> str:
 
 
 def reference_list(sources: Iterable[EvidenceSource], style: CitationStyle = "APA7") -> list[str]:
-    """Alphabetical, one entry per distinct source (DOI, else URL)."""
-    unique: dict[str, EvidenceSource] = {}
-    for s in sources:
-        unique.setdefault(_key(s), s)
-    # one work reached by two addresses (its DOI and a page that carries none) is listed once: the entry with a DOI
-    works: dict[tuple[str, str], EvidenceSource] = {}
-    for s in unique.values():
-        same = (re.sub(r"[^a-z0-9]", "", clean_title(s.title).casefold()), s.year)
-        if same not in works or (s.doi and not works[same].doi):
-            works[same] = s
-    return sorted((reference(s, style) for s in works.values()), key=lambda r: r.lower().lstrip("“\"'"))
+    """Alphabetical, one entry for each distinct work (`works`); works cited alike carry their letters."""
+    sources = list(sources)
+    letters = year_letters(sources, style)
+    return sorted((reference(group[0], style, letters.get(_key(group[0]), "")) for group in works(sources)), key=lambda r: r.lower().lstrip("“\"'"))
 
 
 # --- the checks ---------------------------------------------------------------------------------
@@ -261,54 +317,125 @@ def figure_problems(paragraph: str, library: dict[str, EvidenceItem], allowed_te
     return [f"The figure {f} is not in the evidence cited in this paragraph or in your plan." for f in missing]
 
 
-# A claim that nothing has been studied. A search that found nothing proves only that: the audit of 2026-10-10 found a
-# registered study and a dissertation on a topic a proposal called "uninvestigated" and "completely lacking". Each
-# alternative names research or evidence itself, so "electricity is completely lacking" is not one.
+# A claim that research on a topic does not exist. A search that found nothing proves only that: the audit of
+# 2026-10-10 found a registered study and a dissertation on a topic a proposal called "uninvestigated" and "completely
+# lacking". Every alternative names research itself (a study, the literature, published evidence), so a statement that
+# a fact is not known ("the eligible population remains unknown", "data on stock-outs are missing") is never one
+# (Codex's audit of 1a3b1e7, finding 5). Wording that only may be such a claim is left to the reviewer.
 _KIND = r"(?:prior\s+|previous\s+|existing\s+|known\s+|published\s+|empirical\s+)?"
 ABSOLUTE_GAP = re.compile(
-    r"\b(?:uninvestigated|unexplored|unstudied|unresearched"
-    r"|(?:has|have|had)\s+(?:never|not yet|yet to)\s+(?:been\s+|be\s+)?(?:studied|investigated|examined|researched|explored)"
-    rf"|no\s+{_KIND}(?:study|studies|research|evidence|literature|data)\s+(?:has|have|exists?|is available|are available)"
-    rf"|there\s+(?:is|are|exists?)\s+no\s+{_KIND}(?:study|studies|research|literature)\s+(?:on|about|into|that|which|examining|addressing|available|regarding|concerning|to date)"
-    r"|(?:remains?|remained)\s+(?:undocumented|unknown|unexamined)"
-    r"|(?:evidence|research|studies|data|literature|knowledge|information)\b[^.;!?]{0,80}?\b(?:completely|entirely|totally|wholly|altogether)\s+(?:lacking|absent|missing|unknown))\b", re.I)
-_HEDGED = re.compile(r"\b(?:largely|relatively|comparatively|mostly|somewhat|partly|little)\s+$", re.I)  # "remains largely unexplored" is a limit, not an absolute
-# "OR = 1.27; 95% CI: 0.56–2.89; p = 0.043": a ratio, its interval and its p-value in one sentence.
+    r"\b(?:uninvestigated|unstudied|unresearched"
+    r"|(?:has|have|had)\s+(?:never|not yet|yet to)\s+(?:been\s+|be\s+)?(?:studied|investigated|researched)"
+    rf"|no\s+{_KIND}(?:study|studies|research|evidence|literature)\s+(?:has|have|exists?|is available|are available)"
+    rf"|there\s+(?:is|are|exists?)\s+no\s+{_KIND}(?:(?:study|studies|research|literature)\s+(?:on|about|into|that|which|examining|addressing|available|regarding|concerning|to date)"
+    r"|evidence\s+(?:on|about|regarding|concerning))"
+    r"|(?:evidence|research|studies|literature)\b[^.;!?]{0,80}?\b(?:completely|entirely|totally|wholly|altogether)\s+(?:lacking|absent|missing))\b", re.I)
+_HEDGED = re.compile(r"\b(?:largely|relatively|comparatively|mostly|somewhat|partly|little)\s+$", re.I)  # "remains largely unstudied" is a limit, not an absolute
+# The claim is someone else's, or is being denied: "it is sometimes claimed that no study has ...".
+_REPORTED = re.compile(r"\b(?:claim\w*|argu\w*|assert\w*|contend\w*|impl(?:y|ies|ied)|not (?:true|correct|accurate|the case)|wrong|mistaken|incorrect"
+                       r"|cannot (?:be said|conclude)|does not mean)\b[^.;!?]{0,80}$", re.I)
+# A ratio (whose value of no difference is 1), its interval with its stated level, and its p-value, in one sentence:
+# "OR = 1.27; 95% CI: 0.56–2.89; p = 0.043".
 _RATIO = re.compile(
-    r"\b(?:a?OR|RR|HR|PR|odds ratios?|risk ratios?|hazard ratios?|prevalence ratios?)\b[^.;!?]{0,60}?\d+(?:\.\d+)?[^!?]{0,40}?"
-    r"(?:CI|confidence interval)(?:\s+(?:of|from|was|is))?\W{0,4}(\d+(?:\.\d+)?)\s*(?:[-–—]|to|,)\s*(\d+(?:\.\d+)?)[^!?]{0,40}?\bp\s*(?:-?\s*value)?\s*([<=])\s*(0?\.\d+)", re.I)
+    r"\b(?:a?OR|RR|HR|PR|odds ratios?|risk ratios?|hazard ratios?|prevalence ratios?|relative risks?)\b[^.;!?]{0,60}?\d+(?:\.\d+)?[^!?]{0,40}?"
+    r"(?:(?P<level>\d{2}(?:\.\d+)?)\s*%\s*)?(?:CI|confidence interval)(?:\s+(?:of|from|was|is))?\W{0,4}(?P<low>\d+(?:\.\d+)?)\s*(?:[-–—]|to|,)\s*(?P<high>\d+(?:\.\d+)?)"
+    r"[^!?]{0,40}?\bp\s*(?:-?\s*value)?\s*(?P<op>[<=])\s*(?P<p>0?\.\d+)", re.I)
 _SIGNIFICANT = re.compile(r"\bsignifican(?:t|tly|ce)\b", re.I)
 _DENIED = re.compile(r"(?:\b(?:not|no|never|without|lacked|lacks?|failed to reach|fails to reach)\b[\s\w-]{0,25}|\bnon-?)$", re.I)
+_CLAUSE = re.compile(r";|\b(?:and|while|whereas|but|although|though)\b", re.I)
 
 
-def _called_significant(sentence: str) -> bool:
-    """The sentence says its result is significant ("not statistically significant" and "no significant" do not)."""
-    return any(not _DENIED.search(sentence[max(0, m.start() - 45):m.start()]) for m in _SIGNIFICANT.finditer(sentence))
+def _called_significant(text: str) -> bool:
+    """The words say a result is significant ("not statistically significant" and "no significant" do not)."""
+    return any(not _DENIED.search(text[max(0, m.start() - 45):m.start()]) for m in _SIGNIFICANT.finditer(text))
+
+
+def _quoted(text: str, at: int) -> bool:
+    before = text[:at]
+    return before.count("“") > before.count("”") or before.count('"') % 2 == 1
 
 
 def gap_problems(paragraph: str) -> list[str]:
-    """A statement that a topic has never been studied, or that evidence is wholly absent."""
+    """A statement, in the writer's own voice, that research on a topic does not exist."""
     for found in ABSOLUTE_GAP.finditer(paragraph):
-        if _HEDGED.search(paragraph[:found.start()]):
+        before = paragraph[:found.start()]
+        if _HEDGED.search(before) or _REPORTED.search(before[-140:]) or _quoted(paragraph, found.start()):
             continue
         return [f"“{found.group(0)}” claims that nothing has been studied or is known. State the gap as what the sources found do not show (for example "
                 "“the studies found did not examine ...” or “published evidence on ... is limited”), never that no study exists."]
     return []
 
 
+def _disagreeing(sentence: str) -> list[re.Match[str]]:
+    """Ratios in the sentence whose stated interval, at 95% or narrower, includes 1 while the p-value is below 0.05.
+    Those cannot both hold. An interval at another level (a 99% interval can include 1 at p = 0.02), one whose level
+    is not stated, and a difference or a coefficient (whose value of no difference is 0) are not judged by code
+    (Codex's audit of 1a3b1e7, finding 2)."""
+    found = []
+    for m in _RATIO.finditer(sentence):
+        p = float(m.group("p"))
+        below = p < 0.05 or (m.group("op") == "<" and p <= 0.05)
+        if m.group("level") and float(m.group("level")) <= 95 and float(m.group("low")) <= 1 <= float(m.group("high")) and below:
+            found.append(m)
+    return found
+
+
 def statistic_problems(paragraph: str) -> list[str]:
-    """A ratio whose reported interval includes 1 while its p-value is below 0.05, called significant. The two do not
-    agree, whoever reported them (the audit of 2026-10-10 found one such result copied faithfully from a publisher's
-    abstract): it is told as the source reports it, never as a significant association. Code corrects no figure."""
+    """A ratio called significant while its own 95% interval includes 1 and its p-value is below 0.05. The two do
+    not agree, whoever reported them (the audit of 2026-10-10 found one copied faithfully from a publisher's
+    abstract): it is told as the source reports it, never as a significant association. Code corrects no figure.
+    The word must belong to that result: the clause that leads to it or the one that follows it, never another
+    result's in the same sentence ("age was significant (...), whereas education was not (...)")."""
     problems = []
     for sentence in sentences(paragraph):
-        for found in _RATIO.finditer(sentence):
-            low, high, p = float(found.group(1)), float(found.group(2)), float(found.group(4))
-            below = p < 0.05 or (found.group(3) == "<" and p <= 0.05)
-            if low <= 1 <= high and below and _called_significant(sentence):
-                problems.append(f"The interval reported ({found.group(1)}–{found.group(2)}) includes 1 while the p-value ({found.group(3)} {found.group(4)}) is below 0.05: these do not agree. "
-                                "Do not call this result significant; say what the source reports and that its interval includes 1, or leave the result out.")
+        every = list(_RATIO.finditer(sentence))
+        for m in _disagreeing(sentence):
+            n = next(i for i, other in enumerate(every) if other.start() == m.start())
+            lead = _CLAUSE.split(sentence[every[n - 1].end() if n else 0:m.start()])[-1]
+            tail = _CLAUSE.split(sentence[m.end():every[n + 1].start() if n + 1 < len(every) else len(sentence)])[0]
+            if _called_significant(lead) or _called_significant(tail):
+                problems.append(f"The {m.group('level')}% interval reported ({m.group('low')}–{m.group('high')}) includes 1 while the p-value ({m.group('op')} {m.group('p')}) is below 0.05: "
+                                "these do not agree. Do not call this result significant; say what the source reports and that its interval includes 1, or leave the result out.")
     return problems
+
+
+def row_text(header: list[str], row: list[str]) -> str:
+    """A table row read with its headings, as a reader takes it in: "OR = 1.27; 95% CI = 0.56–2.89; p = 0.043"."""
+    return "; ".join(f"{h.strip()} = {c.strip()}" if h.strip() else c.strip() for h, c in zip([*header, *[""] * len(row)], row, strict=False) if c.strip())
+
+
+def row_overclaims(header: list[str], row: list[str]) -> list[int]:
+    """The cells of a row that call its result significant while the row, read with its headings, reports a ratio
+    whose 95% interval includes 1 at p below 0.05 (a statistic spread across columns)."""
+    if not _disagreeing(row_text(header, row)):
+        return []
+    return [n for n, cell in enumerate(row) if _called_significant(cell) and not _RATIO.search(cell)]
+
+
+def table_problems(rows: list[list[str]]) -> list[str]:
+    """Rows (the first is the heading row) that are called significant against their own interval."""
+    if len(rows) < 2:
+        return []
+    return [f"The row “{row[0][:60]}” is called significant while its 95% interval includes 1 and its p-value is below 0.05: these do not agree. Do not call it significant."
+            for row in rows[1:] if row_overclaims(rows[0], row)]
+
+
+def strip_table_overclaims(rows: list[list[str]]) -> list[list[str]]:
+    """The rows with each cell that makes that claim emptied (a withheld cell stays as an empty cell). The same
+    list when nothing is withheld."""
+    if len(rows) < 2 or not any(row_overclaims(rows[0], row) for row in rows[1:]):
+        return rows
+    return [rows[0], *[["" if n in set(row_overclaims(rows[0], row)) else cell for n, cell in enumerate(row)] for row in rows[1:]]]
+
+
+def cited_in(sections: Iterable[object]) -> list[str]:
+    """The evidence ids a document's sections cite, in reading order: paragraphs, then a table's caption and cells."""
+    out: list[str] = []
+    for s in sections:
+        table = getattr(s, "table", None) or []
+        for text in [*getattr(s, "paragraphs", []), *([getattr(s, "table_caption", ""), *[c for row in table for c in row]] if table else [])]:
+            out += [i for i in cited_ids(text) if i not in out]
+    return out
 
 
 def strip_overclaims(paragraph: str, gaps: bool = True) -> str:

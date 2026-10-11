@@ -144,14 +144,25 @@ TOC_OPEN = (
 TOC_CLOSE = '<w:fldChar w:fldCharType="end"/>'
 
 
-def _contents(doc, headings: list[str]) -> None:
-    """A real contents field, which Word fills with page numbers when the document is opened. Until then (and in any
-    viewer that never updates fields) it shows the document's own headings, in order, never an instruction to the
-    reader (audit 2026-10-10: every proposal printed "Word fills in this table when the document is opened")."""
+def _contents(doc):
+    """A real contents field, which Word fills with page numbers when the document is opened. Returns its paragraph,
+    for `_fill_contents` once the document is built."""
     doc.add_heading("Table of Contents", level=1)
     paragraph = doc.add_paragraph()._p
     for inner in TOC_OPEN:
         paragraph.append(parse_xml(f'<w:r {nsdecls("w")}>{inner}</w:r>'))
+    return paragraph
+
+
+def _fill_contents(doc, paragraph) -> None:
+    """What the contents field shows until Word fills it (and in any viewer that never updates fields): the document's
+    own headings, read from the finished document so none is left out (the chapters' numbered sections, the
+    statements placed under Objectives, the lists, the references), each level set in a little further. Never an
+    instruction to the reader (audit 2026-10-10: every proposal printed "Word fills in this table when the document
+    is opened")."""
+    levels = {"Heading 1": 0, "Heading 2": 1, "Heading 3": 2}
+    headings = [("    " * levels[p.style.name] + p.text.strip()) for p in doc.paragraphs
+                if p.style is not None and p.style.name in levels and p.text.strip() and p.text.strip() != "Table of Contents"]
     for n, heading in enumerate(headings):
         text = html.escape(heading, quote=False)
         paragraph.append(parse_xml(f'<w:r {nsdecls("w")}>{"<w:br/>" if n else ""}<w:t xml:space="preserve">{text}</w:t></w:r>'))
@@ -165,6 +176,14 @@ def _footer_numbers(section, fmt: str) -> None:
         run._r.getparent().remove(run._r)
     _page_field_paragraph(footer, WD_ALIGN_PARAGRAPH.CENTER)
     _set_page_numbering(section._sectPr, fmt)
+
+
+def _continue_numbers(section) -> None:
+    """A section after the first chapter carries on the page numbers. A new section starts as a copy of the one
+    before it, its restart at page 1 included: the second chapter and the references each began again at page 1
+    (seen when Word filled the contents page, 2026-10-11)."""
+    for numbering in section._sectPr.findall(qn("w:pgNumType")):
+        numbering.attrib.pop(qn("w:start"), None)
 
 
 def framework_columns(plan: ProposalPlan | None) -> list[tuple[str, list[str]]]:
@@ -246,12 +265,13 @@ def build(project: Project, chapters: dict[int, ChapterDocument], library: dict[
         ],
     )
     doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
-    _contents(doc, [line for n, c in sorted(chapters.items()) for line in (f"CHAPTER {ORDINALS[n]}", c.title.upper(), *(f"{s.number} {s.heading}" for s in c.sections))])
+    contents = _contents(doc)
     tables = [(n, s) for n, c in sorted(chapters.items()) for s in c.sections if s.table]
+    everything = evidence.cited_in(s for n in (1, 2, 3) if n in chapters for s in chapters[n].sections)  # what the reference list will hold
     if tables:
         doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
         doc.add_heading("List of Tables", level=1)
-        listing = evidence.Citer(library, project.citation)  # its own state: the body's first citations are unaffected (M19)
+        listing = evidence.Citer(library, project.citation, everything)  # its own state: the body's first citations are unaffected (M19)
         for i, (n, s) in enumerate(tables, start=1):
             doc.add_paragraph(f"Table {n}.{i}: {listing.render(s.table_caption) or s.heading}")
     has_figure = framework_figure.draw_kind(project.plan) != "NONE" if project.plan else False
@@ -262,7 +282,7 @@ def build(project: Project, chapters: dict[int, ChapterDocument], library: dict[
         doc.add_paragraph("Figure 1.1: Conceptual framework")
     _footer_numbers(prelim, "lowerRoman")
 
-    citer = evidence.Citer(library, project.citation)
+    citer = evidence.Citer(library, project.citation, everything)
     cited: list[str] = []
     table_count = 0
     for n in (1, 2, 3):
@@ -272,6 +292,8 @@ def build(project: Project, chapters: dict[int, ChapterDocument], library: dict[
         section = doc.add_section(WD_SECTION.NEW_PAGE)
         if not any(c < n for c in chapters):
             _footer_numbers(section, "decimal")
+        else:
+            _continue_numbers(section)
         doc.add_heading(f"CHAPTER {ORDINALS[n]}", level=1)
         doc.add_heading(chapter.title.upper(), level=1)
         for s in chapter.sections:
@@ -301,12 +323,13 @@ def build(project: Project, chapters: dict[int, ChapterDocument], library: dict[
                             for run in cell.paragraphs[0].runs:
                                 run.bold = True
     if cited:
-        doc.add_section(WD_SECTION.NEW_PAGE)
+        _continue_numbers(doc.add_section(WD_SECTION.NEW_PAGE))
         doc.add_heading("REFERENCES", level=1)
         for entry in evidence.reference_list([library[i].source for i in cited if i in library], project.citation):
             p = doc.add_paragraph(entry)
             p.paragraph_format.left_indent = Inches(0.5)
             p.paragraph_format.first_line_indent = Inches(-0.5)
+    _fill_contents(doc, contents)
     out = io.BytesIO()
     doc.save(out)
     return out.getvalue()
@@ -324,7 +347,7 @@ def concept(project: Project, paper: ChapterDocument, library: dict[str, Evidenc
     for label, value in (("Name", page.student_name), ("Registration number", page.reg_number), ("Programme", inputs.programme or level), ("Supervisor", page.supervisor), ("Date", page.submission_date)):
         if value.strip():
             doc.add_paragraph(f"{label}: {value}")
-    citer = evidence.Citer(library, project.citation)
+    citer = evidence.Citer(library, project.citation, [i for s in paper.sections for p in s.paragraphs for i in evidence.cited_ids(p)])
     cited: list[str] = []
     columns = framework_columns(plan)
     for s in paper.sections:

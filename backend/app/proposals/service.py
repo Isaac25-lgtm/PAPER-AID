@@ -471,8 +471,8 @@ class ChapterView(Camel):  # camelCase like every other view (the browser read t
     to_align: list[str] = []  # keys of the sections to revise to the student's institution guide
 
 
-def _citer(rt: Runtime, p: Project) -> evidence.Citer:
-    return evidence.Citer(load_library(rt.files, p.evidence_files), p.citation)
+def _citer(rt: Runtime, p: Project, cited: list[str] | None = None) -> evidence.Citer:
+    return evidence.Citer(load_library(rt.files, p.evidence_files), p.citation, cited)
 
 
 def _render(doc: ChapterDocument, citer: evidence.Citer, plan: ProposalPlan | None) -> list[RenderedSection]:
@@ -495,7 +495,7 @@ def chapter(rt: Runtime, user: User, project_id: str, number: int, version: int 
     doc = _chapter_doc(rt, stored, version)
     if doc is None:
         raise NotFound("This chapter hasn't been written yet.")
-    citer = _citer(rt, p)
+    citer = _citer(rt, p, doc.cited)
     for earlier in (1, 2):  # APA 6 names three to five authors in full at their first citation in the proposal
         if earlier < number != CONCEPT and (prior := _chapter_doc(rt, p.chapter(earlier))):
             _render(prior, citer, None)
@@ -1094,7 +1094,7 @@ def compare(rt: Runtime, user: User, project_id: str, number: int, older: int, n
     def rendered(doc: ChapterDocument) -> dict[str, tuple[str, str, list[str]]]:
         """What the student sees of each section: its prose, then its table's caption and rows, so a
         changed schedule or budget is a change (Codex audit 56c4f83 M18)."""
-        citer = evidence.Citer(library, p.citation)  # its own: APA 6 names all authors only at a first citation
+        citer = evidence.Citer(library, p.citation, doc.cited)  # its own: APA 6 names all authors only at a first citation
         out = {}
         for s in doc.sections:
             lines = [citer.render(par) for par in s.paragraphs]
