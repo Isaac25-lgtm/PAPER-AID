@@ -595,6 +595,8 @@ def test_the_prompts_carry_what_the_round_showed():
     for step in ("w_draft", "w_repair"):
         assert "It never mentions \"the student\", PaperAid, or what still has to be supplied" in prompt(step), step
     assert "what the things have in common as well as how they differ" in prompt("w_plan")
+    # a Quality Control section left out the planned pilot through two repairs, and its chapter was refused
+    assert "Saying what will be done is not inventing a result" in prompt("p_draft") and "describing a planned step is not inventing a result" in prompt("p_fix")
     review = prompt("p_plan_review")
     assert "is not invented merely because neither the student nor the evidence stated it" in review and "Never ask for the plan's proposals to be emptied" in review
     assert STEPS["p_plan_review"].prompt == STEPS["p_plan_review_peer"].prompt == "p-plan-review-v3"
