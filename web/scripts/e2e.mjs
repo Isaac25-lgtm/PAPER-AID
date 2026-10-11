@@ -251,8 +251,9 @@ try {
   if (await page.getByText('held for work in progress').count()) throw new Error('credits still held after every job finished')
   step('credits page shows the balance and the history of holds and settlements')
 
-  // Dashboard and history show the job; admin console shows it with its stages.
-  await page.goto(`${base}/app`)
+  // The history lists the paper (the dashboard shows only what can be started since 2026-10-10); admin console shows
+  // it with its stages.
+  await page.goto(`${base}/app/history`)
   await page.getByText('Chapter drafts.docx').first().waitFor()
   await page.goto(`${base}/admin`)
   await page.getByText('demo@paperaid.app').first().waitFor()
