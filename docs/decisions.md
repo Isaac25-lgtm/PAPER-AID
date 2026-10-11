@@ -1162,3 +1162,89 @@ Codex's audit: a round on 10 October was lost when the machine's temporary folde
 Codex also pointed out, and it stands for the owner to decide: on the live path (workflow 1) a review after a repair
 still goes to the standard model, and the first review can fall back to it, as priced since 7 October. The rule that
 the premium model alone approves the delivered wording is enforced on workflow 2, which is off.
+
+## 2026-10-11 — The academic audit: references, claims, statistics and front pages (code and prompts; no model call added)
+
+An academic reading of the trial documents of 10 October found faults a marker would see at once. The owner's ruling:
+referencing cannot be left with a warning, and everything from that review that is necessary is fixed, on the live
+path as well as the newer ones. Codex read the same audit and agreed with its direction, in this order: references,
+claim checking, assignment calibration, research feasibility, document production. Nothing below adds a model call.
+
+### References (code)
+
+- **Registered details are cleaned once, where they are read** (`app/analysis/metadata.py`): markup and entities in
+  titles, titles and surnames registered in capitals, degrees and job titles in author names, affiliations listed as
+  authors, repeated authors. The same cleaning runs when a reference is rendered, so evidence saved before reads
+  correctly too.
+- **A web page is cited as the article it presents, never as its host.** `_web_source`: the registered record by DOI,
+  else what the page itself declares (`fetch.page_meta`, the `citation_*` tags scholarly sites publish), else the
+  registered record by title, else the page's named authors. An article page or repository entry with no author to be
+  found is not used as a source; an organisation's own page is cited as the organisation's.
+- **One work, one entry.** Several sources cited together merge into one bracket; a work reached by two addresses is
+  listed once, with its DOI.
+- **From the round of 11 October** (below): an author registered a second time with the names reversed is one person
+  (`distinct_people`); an organisation named as a page's author is kept whole, never split into a surname and
+  initials (`is_organisation`: "(acres), C. f. R. E. S."); a repository that keeps a copy is never printed as the
+  journal, and its volume is not printed without one (`clean_container`); a journal's name in capitals is written
+  normally unless it is a short name of initials; "105–105" is page 105; a title ending in a question mark takes no
+  full stop; an initial is a capital; the index offers no work in another language.
+- **A site that is no source for academic work is never cited** (`NOT_CITABLE`): encyclopedias anyone can edit,
+  question-and-answer and social sites, blogging platforms, tutoring, homework, study-note and essay sites, programming
+  tutorials. Once the research asked for standard accounts of a basic topic, Wikipedia, a children's encyclopedia and
+  a tutoring site had been cited. The list is of sites, not of judgements about a page: it is short and can grow.
+
+### Claims and statistics (code)
+
+- **A partly supported finding carries what the check found** (`EvidenceItem.caution`), to its writer and reviewer: a
+  figure from a sample in one city had been written as the country's.
+- **A claim that nothing has been studied** (`evidence.gap_problems`, proposals and concept notes): "uninvestigated",
+  "no study has examined", "evidence is completely lacking". A search that found nothing cannot show that; the gap is
+  stated as what the sources found do not show. Only wording about research or evidence itself counts.
+- **A ratio called significant while its own interval includes 1** (`evidence.statistic_problems`, proposals and
+  works). The figures were the publisher's, so code corrects none: it stops the word "significant".
+- Both are findings for the repair rounds. A sentence that still makes either claim afterwards is withheld before the
+  final review reads the section (`strip_overclaims`), as an untraceable figure is: a pattern never fails a chapter.
+
+### Front pages of a proposal (code)
+
+- The contents page is still a real field that Word fills with page numbers; until then it shows the document's own
+  headings, never the instruction "Word fills in this table when the document is opened".
+- In a draft, the Declaration and Approval pages say they are forms still to be signed.
+
+### What writers and the planner are now told (new prompt versions; released prompts unchanged)
+
+- `p-draft-v3`, `p-fix-v3`, `w-draft-v5`, `w-repair-v6`: the three rules above, before code has to raise them.
+- `p-draft-v3` and `p-plan-v4`: a cross-sectional or correlational study shows association, so titles, objectives,
+  questions and prose say "relationship" and "associated with"; "effect" and "impact" are for designs that can show
+  them. Variables are named as they will be measured, each in one role. The study is one the student can carry out
+  alone at their level in the time given.
+- `w-draft-v5`: coursework at the student's level in plain words, each part given the kind of answer its command word
+  asks for and no more, ordinary examples from the student's own setting (never an invented event or figure).
+- `w-plan-v5`, `w-needs-v3` (workflow 1) and `w-needs-v4` (workflow 2, `w-needs-v2` with the same rule): the writer's
+  rule alone did not hold. In the first round of 11 October "What are input devices? Describe five examples and
+  explain what each is used for" was still answered with a microphone's readout circuit and touchscreens in aircraft
+  cockpits, because the research topics had asked for specialist studies and the plan had built its sections on them.
+  A question that asks to define, describe or explain established knowledge is now researched from standard accounts
+  (textbooks, reference works, teaching material) and planned as a direct answer under the question's own terms.
+
+### Not changed, and why
+
+- **Length when the assignment gives no word count** stays as the rulebook's table by level: changing it changes price
+  bands, so it is the owner's decision.
+- **Calculation coursework** still has no sound treatment: its results need provenance that code can check.
+- Plan and chapter **reviewer prompts** are unchanged: a stricter reviewer raises refusals, and that is measured in a
+  test round first.
+
+### The round of 11 October (real models, the live path, synthetic topics; about $6.90)
+
+| Run | Delivered | Minutes | What it showed |
+|---|---|---|---|
+| Three courseworks, first rules | 3 of 3 | 11.8, 15.3, 19.2 (beside the test suite) | references clean; a simple question still answered as a research paper |
+| Three proposals to Chapter One | 3 of 3 | plan 5 to 9, chapter 13 to 14 | "associated with" and "relationship between" throughout; gaps as limits; front pages right; the reference defects listed above |
+| Two courseworks, plan and topics told | 2 of 2 | 9.3, 9.6 | sections follow the question's parts; Wikipedia and a tutoring site cited |
+| Two courseworks, sites excluded | 2 of 2 | 7.8, 8.4 | no such site; a medical "optical scanner" in an answer about computers |
+| Two courseworks, as committed | 2 of 2 | 8.5, 8.9 | on the subject throughout |
+
+Twelve of twelve were delivered. **Still open:** a basic question is now answered directly and on its subject, but
+its wording is heavier than a student's own, and its sources lean on companies' explanatory pages where a textbook
+would be right (textbooks are seldom open to a search). Both are for the test loop, not for code alone.

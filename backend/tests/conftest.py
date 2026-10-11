@@ -101,6 +101,7 @@ def _client(tmp_path, monkeypatch, pricing: str):
     monkeypatch.setitem(costs.SEARCH_FEE_USD, "fake", 0.01)  # the stand-in "searches" like the real lead
     monkeypatch.setattr(fetch, "page_text", lambda url: fetch_html_text(models.pages.get(url)))  # no network in tests
     monkeypatch.setattr(fetch, "abstract_text", lambda url: models.abstracts.get(url))
+    monkeypatch.setattr(fetch, "page_meta", lambda url: dict(models.meta.get(url, {})))
 
     def openalex_search(query, from_year, limit):
         models.searched.append(query)

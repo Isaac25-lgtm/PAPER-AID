@@ -132,7 +132,9 @@ STEPS: dict[str, Step] = {
     "p_extract": Step("lead", Stage.RESEARCHING, "p-extract-v1", 4000),
     "p_search": Step("lead", Stage.RESEARCHING, "p-search-v1", 4000),
     # Plan, and each chapter's section briefs: lead drafts → writer critiques → lead finalises.
-    "p_plan": Step("lead", Stage.PLANNING, "p-plan-v3", 12000),  # v2: the research-gap builder; v3: objective count, primary question, hypothesis pairs, question tense (2026-10-08)
+    # v2: the research-gap builder; v3: objective count, primary question, hypothesis pairs, question tense (2026-10-08);
+    # v4 (academic audit, 2026-10-11): wording for what the design can show, variables as measured, a study the student can carry out.
+    "p_plan": Step("lead", Stage.PLANNING, "p-plan-v4", 12000),
     "p_brief": Step("lead", Stage.PLANNING, "p-brief-v2", 12000),
     "p_critique": Step("writer", Stage.PLANNING, "p-critique-v1", 8000),
     "p_guide": Step("writer", Stage.PLANNING, "p-guide-v1", 8000),
@@ -140,13 +142,14 @@ STEPS: dict[str, Step] = {
     "p_plan_review": Step("lead", Stage.PLANNING, "p-plan-review-v2", 8000),
     "p_plan_review_peer": Step("writer", Stage.PLANNING, "p-plan-review-v2", 8000),
     # Chapter: writer drafts → code checks → lead reviews → writer fixes (bounded rounds) → lead readiness.
-    "p_draft": Step("writer", Stage.DRAFTING, "p-draft-v2", 16000),
+    # v3 (academic audit, 2026-10-11): a partly supported finding's caution, gaps as limits of the evidence, association before effect, plain language.
+    "p_draft": Step("writer", Stage.DRAFTING, "p-draft-v3", 16000),
     # v4 (2026-10-10): a plan-owned section is reviewed as the writer's introduction, with what PaperAid places given apart.
     # v5: those statements are the student's and cannot be changed here, but they are not beyond question: an unsound one
     # is told to the student as a note on their plan (Codex's re-audit of d4d2bc7: v4 called them "correct as they stand").
     "p_review": Step("lead", Stage.AUDITING, "p-review-v5", 8000),
     "p_review_peer": Step("writer", Stage.AUDITING, "p-review-v5", 8000),
-    "p_fix": Step("writer", Stage.AUDITING, "p-fix-v2", 16000),
+    "p_fix": Step("writer", Stage.AUDITING, "p-fix-v3", 16000),  # v3: the same rules as p-draft-v3
     "p_readiness": Step("lead", Stage.AUDITING, "p-readiness-v1", 8000),
     # Workflow 2 (algorithm revision 2026-10-09): the final editor of a chapter's sections, as for works (w_edit).
     "p_edit": Step("lead", Stage.AUDITING, "p-edit-v1", 16000),
@@ -165,18 +168,21 @@ STEPS: dict[str, Step] = {
     # and check, the writer plans, drafts and repairs, the evaluator judges each section against the
     # rules that apply to it, and only failing sections are repaired and judged again.
     "w_read": Step("ANALYST", Stage.ANALYSING, "w-read-v1", 12000),
-    "w_needs": Step("ANALYST", Stage.RESEARCHING, "w-needs-v1", 4000),
+    # v3 (academic audit, 2026-10-11): the evidence a question's demand calls for (standard accounts for a question that asks to describe or explain).
+    "w_needs": Step("ANALYST", Stage.RESEARCHING, "w-needs-v3", 4000),
     "w_extract": Step("ANALYST", Stage.RESEARCHING, "p-extract-v1", 4000),
     "w_search": Step("ANALYST", Stage.RESEARCHING, "p-search-v1", 4000),
     "w_verify": Step("INTEGRITY", Stage.RESEARCHING, "verify-v1", 6000),
-    "w_plan": Step("WRITER", Stage.PLANNING, "w-plan-v4", 12000),  # v2: claims within the evidence, a repair changes only what was raised; v3: says the plan is internal (Codex audit of 9239dd0); v4: the applicant's own facts never asserted either way, no page claims (live funding runs 2026-10-03)
+    "w_plan": Step("WRITER", Stage.PLANNING, "w-plan-v5", 12000),  # v2: claims within the evidence, a repair changes only what was raised; v3: says the plan is internal (Codex audit of 9239dd0); v4: the applicant's own facts never asserted either way, no page claims (live funding runs 2026-10-03); v5 (2026-10-11): a direct answer at the depth the command words and the level ask for
     "w_plan_review": Step("EVALUATOR", Stage.PLANNING, "w-plan-review-v2", 6000),  # v2: blocking issues apart from suggestions; a repair is checked against the earlier issues (live funding runs 2026-10-03)
     "w_results": Step("WRITER", Stage.PLANNING, "w-results-v3", 16000),  # v2: says the Results Model is internal (Codex audit of 9239dd0); v3: measurement rules (live funding runs 2026-10-03)
     "w_results_review": Step("EVALUATOR", Stage.PLANNING, "w-results-review-v4", 8000),  # v2: blocking issues apart from suggestions; a repair is checked against the earlier issues
-    "w_draft": Step("WRITER", Stage.DRAFTING, "w-draft-v4", 16000),  # v4: only explicitly hypothetical prose uses example numbers
+    # v4: only explicitly hypothetical prose uses example numbers; v5 (academic audit, 2026-10-11): cautions, gaps, ratios, the answer each command word
+    # asks for at the student's level, ordinary examples from their setting.
+    "w_draft": Step("WRITER", Stage.DRAFTING, "w-draft-v5", 16000),
     "w_integrity": Step("INTEGRITY", Stage.AUDITING, "w-integrity-v1", 6000),
     "w_evaluate": Step("EVALUATOR", Stage.AUDITING, "w-evaluate-v1", 8000),
-    "w_repair": Step("WRITER", Stage.AUDITING, "w-repair-v5", 16000),  # v5: explicit hypothetical framing and graph preservation
+    "w_repair": Step("WRITER", Stage.AUDITING, "w-repair-v6", 16000),  # v5: explicit hypothetical framing and graph preservation; v6: the rules of w-draft-v5
     "w_adjudicate": Step("ADJUDICATOR", Stage.AUDITING, "w-adjudicate-v1", 4000),
     "w_final": Step("EVALUATOR", Stage.AUDITING, "w-final-v2", 8000),  # v2: the exact deliverable, every verdict required (Sol with one final reviewer)
     "w_compress": Step("WRITER", Stage.AUDITING, "w-compress-v1", 12000),
@@ -464,7 +470,7 @@ def priced_engine(settings: Settings) -> Engine:
 
 
 # Prompt versions of workflow 2 (algorithm revision 2026-10-09), where a step's prompt differs from workflow 1's.
-WORKFLOW_PROMPTS: dict[int, dict[str, str]] = {2: {"w_needs": "w-needs-v2", "p_needs": "p-needs-v2"}}
+WORKFLOW_PROMPTS: dict[int, dict[str, str]] = {2: {"w_needs": "w-needs-v4", "p_needs": "p-needs-v2"}}  # w-needs-v4: v2 with the rule of v3
 
 
 def current_engine(settings: Settings) -> Engine:

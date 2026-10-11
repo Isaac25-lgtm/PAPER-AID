@@ -8,6 +8,7 @@ an unwritten chapter) and says so on its cover line; a final export requires eve
 (`final_blockers`). The approval page is a form for the supervisor to sign; PaperAid never signs or
 claims approval. Word updates the contents table's page numbers when the file is opened."""
 
+import html
 import io
 from datetime import date
 
@@ -135,20 +136,26 @@ def _form_page(doc, heading: str, lines: list[str]) -> None:
         doc.add_paragraph(line)
 
 
-TOC_RUNS = (
+TOC_OPEN = (
     '<w:fldChar w:fldCharType="begin" w:dirty="true"/>',
     '<w:instrText xml:space="preserve"> TOC \\o "1-3" \\h \\z \\u </w:instrText>',
     '<w:fldChar w:fldCharType="separate"/>',
-    "<w:t>Word fills in this table when the document is opened (or right-click it and choose Update Field).</w:t>",
-    '<w:fldChar w:fldCharType="end"/>',
 )
+TOC_CLOSE = '<w:fldChar w:fldCharType="end"/>'
 
 
-def _contents(doc) -> None:
+def _contents(doc, headings: list[str]) -> None:
+    """A real contents field, which Word fills with page numbers when the document is opened. Until then (and in any
+    viewer that never updates fields) it shows the document's own headings, in order, never an instruction to the
+    reader (audit 2026-10-10: every proposal printed "Word fills in this table when the document is opened")."""
     doc.add_heading("Table of Contents", level=1)
     paragraph = doc.add_paragraph()._p
-    for inner in TOC_RUNS:
+    for inner in TOC_OPEN:
         paragraph.append(parse_xml(f'<w:r {nsdecls("w")}>{inner}</w:r>'))
+    for n, heading in enumerate(headings):
+        text = html.escape(heading, quote=False)
+        paragraph.append(parse_xml(f'<w:r {nsdecls("w")}>{"<w:br/>" if n else ""}<w:t xml:space="preserve">{text}</w:t></w:r>'))
+    paragraph.append(parse_xml(f'<w:r {nsdecls("w")}>{TOC_CLOSE}</w:r>'))
 
 
 def _footer_numbers(section, fmt: str) -> None:
@@ -219,6 +226,7 @@ def build(project: Project, chapters: dict[int, ChapterDocument], library: dict[
         doc,
         "Declaration",
         [
+            *(["(A form for you to read, complete and sign before you submit. It is not yet signed.)", ""] if draft else []),
             (f"I, {name}, " if name else "I ") + "declare that this research proposal is my original work and has not been submitted to any other institution for any award.",
             "",
             "Signature: ______________________________        Date: ____________________",
@@ -230,6 +238,7 @@ def build(project: Project, chapters: dict[int, ChapterDocument], library: dict[
         doc,
         "Approval",
         [
+            *(["(A form for your supervisor to sign once they have approved the proposal. It is not yet signed.)", ""] if draft else []),
             "This research proposal has been submitted with my approval as the University supervisor.",
             "",
             f"Name: {supervisor}" if supervisor else "Name: ______________________________",
@@ -237,7 +246,7 @@ def build(project: Project, chapters: dict[int, ChapterDocument], library: dict[
         ],
     )
     doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
-    _contents(doc)
+    _contents(doc, [line for n, c in sorted(chapters.items()) for line in (f"CHAPTER {ORDINALS[n]}", c.title.upper(), *(f"{s.number} {s.heading}" for s in c.sections))])
     tables = [(n, s) for n, c in sorted(chapters.items()) for s in c.sections if s.table]
     if tables:
         doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)

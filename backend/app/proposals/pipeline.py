@@ -15,6 +15,7 @@ import re
 from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
 
 from pydantic import ValidationError
 
@@ -83,6 +84,8 @@ def _for_model(items: list[EvidenceItem], passages: bool = False) -> list[dict[s
     out = []
     for i in items:
         entry = {"id": i.id, "statement": i.statement, "scope": i.scope, "source": _label(i)}
+        if i.caution:
+            entry["caution"] = f"Only partly supported: {i.caution} Claim no more than the source's own words say, for the people, place and period they name."
         if passages:
             entry["sourceWords"] = i.passage
         out.append(entry)
@@ -148,6 +151,7 @@ def stage_researching(ctx: "StageContext") -> None:
         for item in checked:
             verdict = verdicts.get(item.id)
             item.support = verdict.support if verdict else "NOT_FOUND"  # an unchecked finding is never usable
+            item.caution = " ".join(verdict.note.split())[:300] if verdict and verdict.support == "PARTLY_SUPPORTED" else ""
 
     gathered = research_topics(ctx, needs, answer, settings.research_parallel)
     found = evidence.dedupe(gathered)
@@ -483,7 +487,8 @@ def _scholarly_source(work: dict[str, str]) -> EvidenceSource:
     return EvidenceSource(
         url=work["url"],
         title=data["title"],
-        authors=_authors(data.get("authors", "")),
+        # a registration that names no author: the index's own record of who wrote it, never an entry without one
+        authors=_authors(data.get("authors", "")) or _authors(work.get("authors", "")),
         year=data.get("year", ""),
         container=data.get("container", ""),
         volume=data.get("volume", ""),
@@ -510,6 +515,63 @@ def _registered_by_title(title: str, published: str) -> dict[str, str] | None:
     return None
 
 
+# Sites that hold other people's articles. Their name is never an article's author: when neither the registration
+# nor the page itself names the authors, the finding is left out (the owner's rule for references, 2026-10-11).
+HOSTS = re.compile(r"(?:^|\.)(?:ncbi\.nlm\.nih\.gov|europepmc\.org|researchgate\.net|academia\.edu|semanticscholar\.org|jstor\.org|core\.ac\.uk|"
+                   r"ssrn\.com|arxiv\.org|zenodo\.org|sciencedirect\.com|springer\.com|tandfonline\.com|wiley\.com|sagepub\.com|emerald\.com|"
+                   r"mdpi\.com|frontiersin\.org|plos\.org|biomedcentral\.com|nature\.com|oup\.com|cambridge\.org|ajol\.info|scielo\.[a-z.]+|doaj\.org)$", re.I)
+
+
+# Sites a marker does not accept as a source for academic work, whatever they say: encyclopedias anyone can edit,
+# question-and-answer and social sites, personal blogging platforms, tutoring, homework, study-note and essay sites,
+# programming tutorials. A finding from one is never used (round of 11 October 2026: Wikipedia, a children's
+# encyclopedia and a tutoring site were cited when the research asked for standard accounts of a basic topic).
+NOT_CITABLE = re.compile(
+    r"(?:^|\.)(?:wikipedia\.org|wikimedia\.org|wikibooks\.org|wikiversity\.org|fandom\.com|academickids\.com|kiddle\.co|quora\.com|reddit\.com|stackexchange\.com"
+    r"|stackoverflow\.com|medium\.com|blogspot\.com|wordpress\.com|substack\.com|linkedin\.com|facebook\.com|youtube\.com|twitter\.com|x\.com|tiktok\.com"
+    r"|varsitytutors\.com|chegg\.com|coursehero\.com|studocu\.com|scribd\.com|slideshare\.net|quizlet\.com|brainly\.[a-z.]+|sparknotes\.com|cliffsnotes\.com"
+    r"|study\.com|studysmarter\.[a-z.]+|bartleby\.com|numerade\.com|ukessays\.com|ivypanda\.com|studycorgi\.com|gradesfixer\.com|edubirdie\.com"
+    r"|investopedia\.com|geeksforgeeks\.org|tutorialspoint\.com|javatpoint\.com|w3schools\.com|byjus\.com|vedantu\.com|toppr\.com|testbook\.com"
+    r"|unacademy\.com|khanacademy\.org)$", re.I)
+
+
+def _web_source(finding) -> EvidenceSource | None:
+    """Whose work a web page is, in this order: its registration (by DOI, then by its exact title), what the page
+    itself declares for indexing, and only then the organisation that published it (a ministry, an agency, a
+    newspaper: the real author of its own pages). None for an article on a hosting site with no author found, and
+    for a site that is not a source for academic work (`NOT_CITABLE`)."""
+    if NOT_CITABLE.search(urlsplit(finding.url).hostname or ""):
+        return None
+    doi = fetch.resolve_doi(finding.url)
+    record = fetch.crossref_work(doi) if doi else None
+    declared: dict[str, str] = {}
+    if not record:
+        declared = fetch.page_meta(finding.url)
+        if declared.get("doi"):
+            doi = declared["doi"]
+            record = fetch.crossref_work(doi)
+    if not record:
+        found = _registered_by_title(declared.get("title") or finding.title, declared.get("year") or finding.published)
+        record, doi = (found, found["doi"]) if found else (None, doi)
+    if record and record.get("title"):
+        return EvidenceSource(
+            url=finding.url, title=record["title"], authors=_authors(record["authors"]) or _authors(declared.get("authors", "")), year=record["year"],
+            container=record["container"], volume=record["volume"], issue=record["issue"], pages=record["pages"], doi=doi, kind="ARTICLE", metadata="CROSSREF",
+        )
+    if declared.get("authors"):
+        return EvidenceSource(
+            url=finding.url, title=declared["title"], authors=_authors(declared["authors"]), year=declared["year"], container=declared["container"],
+            volume=declared["volume"], issue=declared["issue"], pages=declared["pages"], doi=doi, kind="ARTICLE" if declared["container"] else "REPORT", metadata="PAGE",
+        )
+    if declared or HOSTS.search(urlsplit(finding.url).hostname or ""):
+        return None
+    year = YEAR.search(finding.published)
+    return EvidenceSource(
+        url=finding.url, title=finding.title.strip(), organisation=finding.publisher.strip(), year=year.group(0) if year else "",
+        container=finding.publisher.strip(), kind="REPORT", metadata="PAGE",
+    )
+
+
 def _from_web(runner: ProposalRunner, need: str, query: str, chapter: int, today: str, searches: int, safe) -> list[EvidenceItem]:
     items = []
     for finding in runner.search(need, query, searches, safe):
@@ -520,22 +582,9 @@ def _from_web(runner: ProposalRunner, need: str, query: str, chapter: int, today
             abstract = fetch.abstract_text(finding.url)
             if abstract is not None and research.quote_found(finding.passage, abstract):
                 verified, access = True, "ABSTRACT"
-        doi = fetch.resolve_doi(finding.url)
-        record = fetch.crossref_work(doi) if doi else None
-        if not record:
-            record = _registered_by_title(finding.title, finding.published)
-            doi = record["doi"] if record else doi
-        if record and record.get("title"):
-            source = EvidenceSource(
-                url=finding.url, title=record["title"], authors=_authors(record["authors"]), year=record["year"], container=record["container"],
-                volume=record["volume"], issue=record["issue"], pages=record["pages"], doi=doi, kind="ARTICLE", metadata="CROSSREF",
-            )
-        else:
-            year = YEAR.search(finding.published)
-            source = EvidenceSource(
-                url=finding.url, title=finding.title.strip(), organisation=finding.publisher.strip(), year=year.group(0) if year else "",
-                container=finding.publisher.strip(), kind="REPORT", metadata="PAGE",
-            )
+        source = _web_source(finding)
+        if source is None:
+            continue  # a site that is no source for academic work, or an article on a hosting site whose authors could not be found
         items.append(
             EvidenceItem(
                 id=evidence.evidence_id(source.doi or source.url, finding.passage),
@@ -1206,6 +1255,7 @@ def _checks(inp: StepInput, key: str, text: SectionText, library: dict[str, Evid
     for paragraph in text.paragraphs:
         problems += evidence.citation_problems(paragraph, usable)
         problems += evidence.figure_problems(paragraph, library, allowed)
+        problems += evidence.gap_problems(paragraph) + evidence.statistic_problems(paragraph)
         if tense:
             problems += evidence.tense_problems(paragraph)
     table_allowed = _table_allowed(inp, allowed)
@@ -1219,9 +1269,10 @@ def _checks(inp: StepInput, key: str, text: SectionText, library: dict[str, Evid
 
 def _cleaned(inp: StepInput, text: SectionText, library: dict[str, EvidenceItem], usable: set[str], allowed: str) -> SectionText:
     """A section with every untraceable sentence removed, repeated until nothing more changes
-    (removing a cited sentence can leave a neighbour's figure unsupported)."""
+    (removing a cited sentence can leave a neighbour's figure unsupported), and every sentence that still claims no
+    study exists or calls a result significant against its own interval (`evidence.strip_overclaims`)."""
     for _ in range(5):
-        paragraphs = [p for p in (evidence.strip_unsupported(p, library, usable, allowed) for p in text.paragraphs) if p]
+        paragraphs = [p for p in (evidence.strip_overclaims(evidence.strip_unsupported(p, library, usable, allowed)) for p in text.paragraphs) if p]
         tidy = text.model_copy(update={"paragraphs": paragraphs, "table": _strip_table(inp, text, library, usable, allowed)})
         if tidy == text:
             break

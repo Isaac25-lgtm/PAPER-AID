@@ -37,7 +37,7 @@ NEEDS_SCHEMA = _obj({"needs": _list(_obj({"id": _S, "need": _S, "kind": _enum("L
 # a broader query for a second try, and the saved evidence that already answers it.
 NEEDS_SCHEMA_V2 = _obj({"needs": _list(_obj({"id": _S, "need": _S, "category": _enum("STUDY", "METHOD", "STATISTIC", "POLICY"), "essential": {"type": "boolean"},
                                              "query": _S, "broader": _S, "coveredBy": _STRS}))})
-NEEDS_V2 = frozenset({"w-needs-v2", "p-needs-v2"})
+NEEDS_V2 = frozenset({"w-needs-v2", "w-needs-v4", "p-needs-v2"})  # w-needs-v4: v2 with the rule of v3 (2026-10-11)
 
 
 def needs_schema(prompt: str) -> dict[str, Any]:

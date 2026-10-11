@@ -25,6 +25,8 @@ import httpx
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 
+from app.analysis.metadata import clean_authors, clean_container, clean_text, clean_title, distinct_people, is_organisation
+
 logger = logging.getLogger("paperaid.fetch")
 
 MAX_BYTES = 3_000_000
@@ -139,6 +141,49 @@ def page_text(url: str) -> str | None:
     return _text(*got) if got else None
 
 
+_META = re.compile(r"<meta\b[^>]*>", re.I)
+_ATTR = re.compile(r"""\b(name|property|content)\s*=\s*(?:"([^"]*)"|'([^']*)')""", re.I)
+
+
+def page_meta(url: str) -> dict[str, str]:
+    """The article a web page presents, as the page itself declares it for indexing (the `citation_*` tags that
+    journals, PubMed Central and institutional repositories carry): title, authors ("; " between them), year,
+    journal, volume, issue, pages and DOI. Empty when the page declares none or cannot be read. The page is the
+    publisher's own statement of who wrote the work, so a source is never cited by its host's name when the page
+    names its authors (audit of the trial documents, 2026-10-10: a paper cited as "National Library of Medicine
+    (PMC), 2023" was by three named authors, 2025)."""
+    got = _get(url)
+    if not got or "html" not in got[1].lower():
+        return {}
+    found: dict[str, list[str]] = {}
+    for tag in _META.findall(got[0][:600_000].decode("utf-8", errors="replace")):
+        attrs = {m.group(1).lower(): m.group(2) if m.group(2) is not None else m.group(3) for m in _ATTR.finditer(tag)}
+        key, value = (attrs.get("name") or attrs.get("property") or "").lower(), clean_text(attrs.get("content") or "")
+        if key.startswith("citation_") and value:
+            found.setdefault(key, []).append(value)
+    if not found.get("citation_title"):
+        return {}
+
+    def first(*keys: str) -> str:
+        return next((found[k][0] for k in keys if found.get(k)), "")
+
+    authors = []
+    for name in found.get("citation_author", []):
+        if is_organisation(name):
+            authors.append(name)
+            continue
+        family, comma, given = name.partition(",")
+        if not comma:
+            given, _, family = name.rpartition(" ")
+        authors.append(_surname_initials(family, given) if given.strip() else family.strip())
+    year = re.search(r"\b(?:19|20)\d{2}\b", first("citation_publication_date", "citation_date", "citation_online_date", "citation_year"))
+    pages = "–".join(p for p in (first("citation_firstpage"), first("citation_lastpage")) if p)
+    doi = DOI.search(first("citation_doi"))
+    return {"title": clean_title(first("citation_title")), "authors": "; ".join(clean_authors(authors)[:20]), "year": year.group(0) if year else "",
+            "container": first("citation_journal_title", "citation_conference_title", "citation_dissertation_institution", "citation_publisher"),
+            "volume": first("citation_volume"), "issue": first("citation_issue"), "pages": pages, "doi": doi.group(1).rstrip(".").lower() if doi else ""}
+
+
 def abstract_text(url: str) -> str | None:
     """The abstract of the article a URL points to, from OpenAlex, when the URL carries a DOI."""
     match = DOI.search(url)
@@ -188,7 +233,7 @@ def _json(url: str) -> dict | None:
 
 
 def _surname_initials(family: str, given: str) -> str:
-    initials = " ".join(f"{part[0]}." for part in re.split(r"[\s.-]+", given) if part[:1].isalpha())
+    initials = " ".join(f"{part[0].upper()}." for part in re.split(r"[\s.-]+", given) if part[:1].isalpha())
     return f"{family.strip()}, {initials}".strip().rstrip(",")
 
 
@@ -264,13 +309,15 @@ def _openalex_works(results: list) -> list[dict[str, str]]:
         title = item.get("display_name") or ""
         if not abstract or not title:
             continue
+        if (item.get("language") or "en") != "en":
+            continue  # the student, and PaperAid's checks, read English: a work in another language is not offered as a source
         authors = []
-        for authorship in item.get("authorships") or []:
-            name = ((authorship.get("author") or {}).get("display_name") or "").strip()
+        for name in distinct_people([((a.get("author") or {}).get("display_name") or "").strip() for a in item.get("authorships") or []]):
             if name:
                 given, _, family = name.rpartition(" ")
-                authors.append(_surname_initials(family, given) if given else family)
+                authors.append(name if is_organisation(name) else _surname_initials(family, given) if given else family)
         location = item.get("primary_location") or {}
+        source = location.get("source") or {}
         biblio = item.get("biblio") or {}
         pages = "–".join(p for p in (biblio.get("first_page"), biblio.get("last_page")) if p)
         doi = (item.get("doi") or "").removeprefix("https://doi.org/").lower()
@@ -278,10 +325,10 @@ def _openalex_works(results: list) -> list[dict[str, str]]:
             {
                 "doi": doi,
                 "url": f"https://doi.org/{doi}" if doi else (location.get("landing_page_url") or item.get("id") or ""),
-                "title": title,
-                "authors": "; ".join(authors[:20]),
+                "title": clean_title(title),
+                "authors": "; ".join(clean_authors(authors)[:20]),
                 "year": str(item.get("publication_year") or ""),
-                "container": ((location.get("source") or {}).get("display_name") or ""),
+                "container": "" if source.get("type") == "repository" else clean_container(source.get("display_name") or ""),
                 "volume": str(biblio.get("volume") or ""),
                 "issue": str(biblio.get("issue") or ""),
                 "pages": pages,
@@ -325,16 +372,19 @@ RETRACTION = {"retraction", "withdrawal", "removal"}
 
 
 def _crossref_record(message: dict, doi: str = "") -> dict[str, str]:
-    authors = [_surname_initials(a.get("family", ""), a.get("given", "")) if a.get("family") else a.get("name", "") for a in message.get("author") or []]
+    people = [a for a in message.get("author") or [] if isinstance(a, dict)]
+    kept = set(distinct_people([f"{a.get('given', '')} {a.get('family', '')}".strip() or a.get("name", "") for a in people]))
+    authors = clean_authors([_surname_initials(a.get("family", ""), a.get("given", "")) if a.get("family") else a.get("name", "") for a in people
+                             if (f"{a.get('given', '')} {a.get('family', '')}".strip() or a.get("name", "")) in kept])
     parts = ((message.get("issued") or {}).get("date-parts") or [[None]])[0]
     # A retraction or withdrawal notice registered against this work (Crossref, with Retraction Watch data).
     updates = [u.get("type", "").lower() for u in message.get("updated-by") or [] if isinstance(u, dict)]
     return {
         "doi": (doi or message.get("DOI") or "").lower(),
-        "title": " ".join((message.get("title") or [""])[0].split()),
+        "title": clean_title((message.get("title") or [""])[0]),
         "authors": "; ".join(a for a in authors if a),
         "year": str(parts[0]) if parts and parts[0] else "",
-        "container": (message.get("container-title") or [""])[0],
+        "container": clean_container((message.get("container-title") or [""])[0]),
         "volume": str(message.get("volume") or ""),
         "issue": str(message.get("issue") or ""),
         "pages": str(message.get("page") or "").replace("-", "–"),

@@ -408,6 +408,7 @@ def stage_researching(ctx: "StageContext") -> None:
         for item in checked:
             verdict = verdicts.get(item.id)
             item.support = verdict.support if verdict else "NOT_FOUND"  # an unchecked finding is never usable
+            item.caution = " ".join(verdict.note.split())[:300] if verdict and verdict.support == "PARTLY_SUPPORTED" else ""
 
     gathered = research_topics(ctx, needs, answer, settings.research_parallel)
     found = ev.dedupe([*found, *gathered])
@@ -433,6 +434,8 @@ def _for_model(items: list[EvidenceItem], passages: bool = False) -> list[dict[s
     out = []
     for i in items:
         entry = {"id": i.id, "statement": i.statement, "scope": i.scope, "source": f"{ev.author_label(i.source)}, {i.source.year or 'n.d.'}"}
+        if i.caution:
+            entry["caution"] = f"Only partly supported: {i.caution} Claim no more than the source's own words say, for the people, place and period they name."
         if passages:
             entry["sourceWords"] = i.passage
         out.append(entry)
@@ -853,6 +856,8 @@ def _checks(inp: WorkStepInput, section: PlanSection, text: SectionText, library
         ):
             problems.append("The text refers to a figure that this section does not contain.")
         problems += ev.citation_problems(plain, usable)
+        if n < len(text.paragraphs):
+            problems += ev.statistic_problems(plain)
         if n >= len(text.paragraphs) and text.table.illustrative:  # the worked example's own cells
             found = ev.figure_problems(plain, library_items, allowed + " " + example)
         elif example and n < len(text.paragraphs):  # only a sentence framed as hypothetical may use the example's numbers
@@ -1049,7 +1054,8 @@ def _strip(inp: WorkStepInput, text: SectionText, library_items: dict[str, Evide
         plain = paragraph
         for placeholder, token in protected.items():
             plain = plain.replace(token, placeholder, 1)
-        kept = ev.strip_unsupported(plain, library_items, usable, in_example) if cell else ev.strip_unsupported(plain, library_items, usable, allowed, _framed(example))
+        kept = ev.strip_unsupported(plain, library_items, usable, in_example) if cell else ev.strip_overclaims(
+            ev.strip_unsupported(plain, library_items, usable, allowed, _framed(example)), gaps=False)
         for placeholder, token in protected.items():
             kept = kept.replace(placeholder, token)
         return kept

@@ -184,6 +184,11 @@ class EvidenceItem(Camel):
     access: Literal["FULL_TEXT", "ABSTRACT", "SNIPPET"] = "SNIPPET"
     verified: bool = False  # PaperAid found the passage on the page or in the abstract
     support: Support = "NOT_FOUND"  # the second model's check of passage against statement
+    # What that check found the statement to say beyond its passage (PARTLY_SUPPORTED only): a different population,
+    # place or period, a figure, or cause where the source shows association. Given to writers and reviewers with the
+    # finding, so a sample's figure is not written as a country's (audit 2026-10-10: 98.7% of a Kampala sample became
+    # "98.7% of accredited institutions" nationally). "" for evidence saved before 2026-10-11.
+    caution: str = ""
     source: EvidenceSource
     retrieved_on: str
 

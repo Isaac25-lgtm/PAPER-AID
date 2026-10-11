@@ -97,6 +97,7 @@ class FakeModels:
         self.crossref_found: list[dict[str, str]] = []  # what a bibliographic search of any reference returns
         self.retracted: set[str] = set()  # DOIs OpenAlex reports as retracted
         self.dois: dict[str, str] = {}  # DOIs looked up for PubMed/PMC pages
+        self.meta: dict[str, dict[str, str]] = {}  # what each page declares about the article it presents
 
     def json(self, task: str, model: str, system: str, payload: dict[str, Any], schema: dict[str, Any], max_tokens: int) -> ModelResult:
         self.tasks.append(task)

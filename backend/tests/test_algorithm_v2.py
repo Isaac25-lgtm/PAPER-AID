@@ -101,10 +101,10 @@ def test_the_workflow_is_frozen_into_each_engine(monkeypatch):
 
     monkeypatch.setenv("VERTEX_PROJECT", "paperaid")
     old = current_engine(Settings())
-    assert old.workflow == 1 and old.prompts["w_needs"] == "w-needs-v1" and old.vertex_stages["w_needs"] == "planner"
+    assert old.workflow == 1 and old.prompts["w_needs"] == "w-needs-v3" and old.vertex_stages["w_needs"] == "planner"
     monkeypatch.setenv("WORKFLOW", "2")
     new = current_engine(Settings())
-    assert new.workflow == 2 and new.prompts["w_needs"] == "w-needs-v2" and new.prompts["p_needs"] == "p-needs-v2"
+    assert new.workflow == 2 and new.prompts["w_needs"] == "w-needs-v4" and new.prompts["p_needs"] == "p-needs-v2"
     assert new.vertex_stages["w_needs"] == "topics" and new.vertex_thinking["topics"] == "MEDIUM"
     assert new.vertex_thinking["planner"] == "HIGH"  # plans keep their own level
 
@@ -1215,7 +1215,7 @@ def test_the_simplified_path_researches_and_plans_the_new_way_and_keeps_the_earl
     tasks = simple.models.tasks
     assert "w_final" in tasks and not {"w_edit", "w_flag", "w_resolve", "w_plan_review"} & set(tasks)  # the plan by code checks; the review as before
     engine = get_runtime().store.get(job["id"]).quote.engine
-    assert (engine.workflow, engine.final_editor, engine.prompts["w_needs"]) == (2, False, "w-needs-v2") and document.approval is None
+    assert (engine.workflow, engine.final_editor, engine.prompts["w_needs"]) == (2, False, "w-needs-v4") and document.approval is None
     assert get_runtime().store.get(job["id"]).topics  # the routes of workflow 2's research are recorded
 
 
