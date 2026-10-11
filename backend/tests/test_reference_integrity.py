@@ -414,21 +414,51 @@ def test_a_chapter_is_cited_as_the_whole_proposal_will_be():
 def test_an_article_is_never_cited_by_the_name_of_the_site_it_is_on(offline):
     """ "Springer Nature / SpringerMedizin. (2025). Vaccine hesitancy among caregivers ...: a community-based
     cross-sectional study" (round of 11 October): a study by its researchers, cited by the site that carries it. A
-    host that says it is a journal's site or a repository, and a title that says the work is a study, are enough to
-    know the publisher of the page is not the author."""
+    named site that holds other people's articles, or a host that says outright it is a journal's site or a
+    repository, shows the page's publisher is not its author. A title never does, and neither does a host label that
+    can mean something else: what is not known to be somebody else's article keeps its publisher as its author."""
     study = "Vaccine hesitancy among caregivers of children under five years in Gulu City: a community-based cross-sectional study"
     for url, title, publisher in (
             ("https://www.springermedizin.de/prevalence-and-factors/123", study, "Springer Nature / SpringerMedizin"),
             ("https://journals.example.ac.ug/index.php/j/article/view/12", "Teacher motivation and learner performance", "Example Journal of Education"),
             ("https://repository.out.ac.tz/4816/", "The impact of teachers' motivation on pupils' performance", "The Open University of Tanzania"),
-            ("https://ir.example.ac.ug/handle/1/2", "Mobile money adoption among traders", "Example University"),
-            ("https://www.example-news.org/health/42", "Uptake of the malaria vaccine in Mukono District: a cohort study", "Example News"),
             ("https://www.thelancet.com/journals/lancet/article/PIIS0140", "Efficacy of a malaria vaccine", "The Lancet")):
         assert pipeline._web_source(_Finding(url, title=title, publisher=publisher, published="2025")) is None, url
     for url, title, publisher in (
             ("https://www.ubos.org/statistics/", "Statistical abstract 2024", "Uganda Bureau of Statistics"),
             ("https://www.who.int/publications/i/item/who-wer-9919-225-248", "Malaria vaccine: WHO position paper – May 2024", "World Health Organization"),
             ("https://www.unesco.org/en/articles/global-report-teachers", "Global report on teachers: addressing teacher shortages and transforming the profession", "UNESCO"),
-            ("https://dhsprogram.com/pubs/pdf/FR333.pdf", "Uganda Demographic and Health Survey 2022", "Uganda Bureau of Statistics")):
+            ("https://dhsprogram.com/pubs/pdf/FR333.pdf", "Uganda Demographic and Health Survey 2022", "Uganda Bureau of Statistics"),
+            # Codex's audit of 6e513af, finding 3: an organisation's own study, and a host label that means something else
+            ("https://www.example-agency.go.ug/reports/12", "Vaccine coverage: a cross-sectional study", "Example Health Agency"),
+            ("https://ir.example.com/annual-report-2025", "Annual report 2025", "Example Holdings plc"),
+            ("https://scholar.example.org/programme", "Scholarship programme report", "Example Foundation")):
         kept = pipeline._web_source(_Finding(url, title=title, publisher=publisher, published="2024"))
         assert kept is not None and kept.organisation == publisher, url
+
+
+def test_two_records_without_dois_are_one_work_only_when_everything_they_say_agrees():
+    """Codex's audit of 6e513af, finding 1: the same long title and year by "Smith, J." and by "Smith, R.", at two
+    addresses, became one reference."""
+    from itertools import permutations
+
+    title = "Teacher motivation and learner performance in government-aided primary schools"
+
+    def record(n, **details):
+        return _source(url=f"https://example.org/{n}", title=title, year="2024", **details)
+
+    for a, b in ((record(1, authors=["Smith, J."]), record(2, authors=["Smith, R."])),
+                 (record(1, authors=["Smith, J.", "Okello, P."]), record(2, authors=["Smith, J.", "Namara, P."])),
+                 (record(1, authors=["Smith, J."]), record(2, organisation="Example Institute")),  # one names a person, the other only a body
+                 (record(1, organisation="Example Institute"), record(2, organisation="Another Institute")),
+                 (record(1), record(2)),  # neither says who wrote it
+                 (record(1, authors=["Smith, J."], container="Journal of Education", volume="12"), record(2, authors=["Smith, J."], container="Journal of Education", volume="14")),
+                 (record(1, authors=["Smith, J."], container="Journal of Education"), record(2, authors=["Smith, J."], container="African Education Review"))):
+        for order in permutations([a, b]):
+            assert len(evidence.reference_list(order)) == 2, (a.authors, b.authors, a.organisation, b.organisation, a.volume, b.volume)
+    for a, b in ((record(1, authors=["Smith, J.", "Okello, P."]), record(2, authors=["Smith, J. K.", "Okello, P."])),  # initials that agree, one fuller
+                 (record(1, authors=["Smith, J.", "Okello, P."]), record(2, authors=["Smith, J."])),  # a list that stops short
+                 (record(1, organisation="Example Institute"), record(2, organisation="example institute")),
+                 (record(1, authors=["Smith, J."], container="Journal of Education", volume="12"), record(2, authors=["Smith, J."]))):
+        for order in permutations([a, b]):
+            assert len(evidence.reference_list(order)) == 1, (a.authors, b.authors, a.organisation)

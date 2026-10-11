@@ -1354,3 +1354,29 @@ After Codex's two audits the owner asked what was still open on the live path an
 but a flat lower number would stop a long piece of coursework, whose honest cost is several times a short one's: it
 needs calibrating by length, from measured costs. Calculation coursework still has no sound treatment; refusing such
 assignments at the start is the owner's decision.
+
+### Codex's audit of `6e513af` (11 October): three findings and two smaller points
+
+1. **Two records without DOIs still merged on a title, a year and a first surname.** Now everything the records say
+   must agree (`_same_authorship`, `_same_work`): the same surnames in order with initials that agree ("Smith, J."
+   and "Smith, R." are two people), or the same body where neither names a person, and the journal, volume and pages
+   wherever both give them. A record that names people and one that names none stay two entries.
+2. **A word in another clause hid a claim, and a reporting verb excused one.** The first "no" in "there is no
+   electricity in the district, and no study has ..." let the claim through, and "the study suggests a significant
+   association" passed. The claim's own clause now decides (`_BREAK`, `_OPENER`, `_said_of`): a bare "and" may only
+   join two nouns, a clause that opens a sentence ends at its comma, and a reporting verb never excuses a
+   significance claim. What code still cannot judge (a denial, a claim inside a quotation or a "that" clause, a word
+   it cannot tie to the result) is neither flagged nor passed over: the sentence is given to the reviewer to read
+   (`for_the_reviewer`, "forYourJudgement"), from `p-review-v6` and `w-evaluate-v3`, which say these are not checks
+   and decide nothing by themselves. Nothing in that list is ever removed.
+3. **An organisation's own report was rejected** for a title that said "study" or a host beginning "ir.". A page is
+   no longer judged by its title, and only a host label that says outright it is a journal's site or a repository
+   counts (`HOSTS`). What is not known to be somebody else's article keeps its publisher as its author. The cost,
+   accepted: an article on a site not on the list, with no author to be found, is again cited by the site's name.
+
+Smaller: the note that a source is dated is given only to a step priced with it (`tell_dated` on the step's frozen
+input), so a step priced before is asked exactly as it was; a past version of a chapter is lettered within itself,
+so what it shows never changes with the other chapters' later versions.
+
+Codex also noted, correctly, that on the live path the premium model is the first reviewer of a repair, not a
+guaranteed one: the standard model can still approve when the premium model cannot answer. Only workflow 2 waits.

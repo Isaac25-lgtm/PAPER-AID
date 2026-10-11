@@ -352,11 +352,17 @@ def test_page_numbers_carry_on_into_the_references(client):
 def test_a_finding_from_an_old_source_is_given_to_the_writer_and_reviewers_as_dated():
     """A 2003 paper was cited for what malaria "accounts for" today (round of 11 October)."""
     old = _item(support="SUPPORTED", source=EvidenceSource(url="https://example.org/k", title="Malaria morbidity and mortality in Uganda", year="2003"))
-    for given in (proposals._for_model([old], passages=True)[0], works._for_model([old], passages=True)[0]):
+    for given in (proposals._for_model([old], passages=True, dated=True)[0], works._for_model([old], passages=True, dated=True)[0]):
         assert given["dated"].startswith("Published in 2003.") and "never as the present position" in given["dated"] and "caution" not in given
     for year in ("2016", "2021", "", "n.d."):  # ten years or fewer before it was gathered, or no year to go by
         recent = _item(support="SUPPORTED", source=EvidenceSource(url="https://example.org/r", title="A study", year=year))
-        assert "dated" not in proposals._for_model([recent])[0] and evidence.dated(recent) == "", year
+        assert "dated" not in proposals._for_model([recent], dated=True)[0] and evidence.dated(recent) == "", year
+    # Codex's audit of 6e513af: only a step priced with it is told, so one priced before is asked exactly as it was
+    from app.proposals.models import StepInput
+    from app.works.models import WorkStepInput
+
+    assert "dated" not in proposals._for_model([old], passages=True)[0] and "dated" not in works._for_model([old], passages=True)[0]
+    assert StepInput.model_fields["tell_dated"].default is False and WorkStepInput.model_fields["tell_dated"].default is False
     assert evidence.dated(_item(source=EvidenceSource(url="https://example.org/o", title="A study", year="2015"))) != ""  # eleven years
 
 
@@ -373,3 +379,88 @@ def test_the_plan_asks_for_the_diagram_a_subject_explains_a_point_with_and_basic
     assert STEPS["w_search"].prompt == "w-search-v2" and STEPS["p_search"].prompt == "p-search-v1"  # proposals search as before
     search = (folder / "w-search-v2.md").read_text(encoding="utf-8")
     assert "open textbooks" in search and "use a company's page only for a fact about that company's own product" in search
+
+
+# --- Codex's audit of 6e513af, finding 2: the claim's own clause decides, and what code cannot judge is read ----------
+
+DISPUTED = "(OR = 1.27; 95% CI: 0.56–2.89; p = 0.043)"
+
+
+def test_a_word_in_another_clause_never_hides_a_claim():
+    """ "There is no electricity in the district, and no study has examined vaccine uptake": the first "no" let the
+    claim through."""
+    for claim in ("There is no electricity in the district, and no study has examined vaccine uptake.",
+                  "Clinics are not staffed at night; no study has examined what that costs caregivers.",
+                  "Although the district is not remote, this relationship has never been studied there.",
+                  "Because there is no register, no study has examined the eligible population."):
+        assert len(evidence.gap_problems(claim)) == 1, claim
+        assert evidence.strip_overclaims(claim) == ""
+
+
+def test_reporting_a_significant_result_still_calls_it_significant():
+    """ "The study suggests a significant association" beside the disputed figures passed: "suggests" was taken for
+    a doubt. It is how the first such sentence found was written, faithfully, from a publisher's abstract."""
+    for verb in ("suggests", "states", "claims", "reports", "found"):
+        sentence = f"The study {verb} a significant association between education and uptake {DISPUTED}."
+        assert len(evidence.statistic_problems(sentence)) == 1, verb
+    said = f"The authors state that the association is significant {DISPUTED}."
+    assert len(evidence.statistic_problems(said)) == 1
+    listed = f"Education showed a significant association with both knowledge and uptake {DISPUTED}."
+    assert evidence.statistic_findings(listed)[0] == [] and len(evidence.statistic_findings(listed)[1]) == 1  # a list's "and" may hide a new clause: read, not judged
+
+
+def test_what_code_cannot_judge_is_given_to_the_reviewer_and_never_removed():
+    denials = ("The topic is not unstudied.",
+               "It would be misleading to say that no study has examined this question.",
+               "Earlier reviews claimed that no study has examined caregivers, which later work showed to be wrong.",
+               "One author wrote that “no study has examined this question”, a claim this review does not accept.",
+               "It is not, however, unstudied.",
+               "It is not true, as some claim, that no study has examined this question.")
+    for sentence in denials:
+        problems, notes = evidence.gap_findings(sentence)
+        assert problems == [] and len(notes) == 1 and sentence in notes[0] and "could not tell" in notes[0], sentence
+        assert evidence.strip_overclaims(sentence) is sentence
+    cautions = (f"The result is inconsistent and should not be described as statistically significant {DISPUTED}.",
+                f"The association was not significant {DISPUTED}.",
+                f"Among women with no schooling the association was significant {DISPUTED}.",  # a "no" that is not about the result: the reviewer reads it
+                f"Age was significant and education showed a weaker pattern {DISPUTED}.")  # the word is another clause's: code cannot tie it to this result
+    for sentence in cautions:
+        problems, notes = evidence.statistic_findings(sentence)
+        assert problems == [] and len(notes) == 1 and "0.56–2.89" in notes[0], sentence
+        assert evidence.strip_overclaims(sentence) is sentence
+    assert evidence.for_the_reviewer([denials[0], cautions[0], "Published evidence is limited."]) == [evidence.gap_findings(denials[0])[1][0], evidence.statistic_findings(cautions[0])[1][0]]
+    assert evidence.for_the_reviewer([denials[0], cautions[0]], gaps=False) == [evidence.statistic_findings(cautions[0])[1][0]]  # coursework: the statistic only
+    assert evidence.for_the_reviewer(["The role of fathers remains largely unstudied.", "The eligible population remains unknown."]) == []
+
+
+def test_the_chapter_reviewer_is_sent_the_sentences_to_read_and_the_chapter_keeps_them(client):
+    from tests.fake_models import FakeModels
+
+    denial = "It would be misleading to say that no study has examined this question."
+    asked: list[dict] = []
+
+    def draft(payload):
+        drafted = FakeModels.proposal("p_draft", payload)
+        drafted["sections"][0]["paragraphs"][0] += " " + denial
+        return drafted
+
+    def review(payload):
+        asked.append(payload)
+        return FakeModels.proposal("p_review", payload)
+
+    client.models.overrides["p_draft"], client.models.overrides["p_review"] = draft, review
+    project_id = _with_chapter_one(client)
+    sections = [s for payload in asked for s in payload["sections"]]
+    told = [s for s in sections if s.get("forYourJudgement")]
+    assert told and all(len(s["forYourJudgement"]) == 1 and denial in s["forYourJudgement"][0] for s in told)
+    assert all(not any("claims that nothing has been studied" in c for c in s["paperaidChecks"]) for s in told)  # not a check: it decides nothing
+    assert all("forYourJudgement" not in s for s in sections if s not in told)
+    chapter = client.get(f"/api/projects/{project_id}/chapters/1", headers=STUDENT).json()
+    assert any(denial in p for s in chapter["sections"] for p in s["paragraphs"])  # delivered as written
+    from pathlib import Path
+
+    from app.ai.orchestration import STEPS
+
+    folder = Path(__file__).parents[1] / "app" / "ai" / "prompts"
+    for step in ("p_review", "w_evaluate"):
+        assert '"forYourJudgement"' in (folder / f"{STEPS[step].prompt}.md").read_text(encoding="utf-8"), step

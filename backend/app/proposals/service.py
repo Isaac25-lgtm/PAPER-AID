@@ -497,9 +497,10 @@ def chapter(rt: Runtime, user: User, project_id: str, number: int, version: int 
         raise NotFound("This chapter hasn't been written yet.")
     # A chapter is cited as the whole proposal will be: two works the download tells apart by letter carry the same
     # letters here, in the text and in this chapter's list (Codex's re-audit of 458e65b).
+    # A past version is lettered within itself, so what it shows never changes with the other chapters' later versions.
     scope = list(doc.cited)
     for other in (1, 2, 3):
-        if number != CONCEPT and other != number and (also := _chapter_doc(rt, p.chapter(other))):
+        if version is None and number != CONCEPT and other != number and (also := _chapter_doc(rt, p.chapter(other))):
             scope += also.cited
     citer = _citer(rt, p, scope)
     for earlier in (1, 2):  # APA 6 names three to five authors in full at their first citation in the proposal
@@ -699,6 +700,7 @@ def quote_step(rt: Runtime, user: User, project_id: str, step: Step, note: str, 
             raise AppError(" ".join(blockers), code="AUTHOR_INPUT_NEEDED")
     _rate_limit(rt, user, "quote", rt.settings.quotes_per_hour)
     inp = StepInput(
+        tell_dated=True,
         project_id=p.id,
         chapter=chapter,
         note=note,
@@ -770,6 +772,7 @@ def _quote_profile(rt: Runtime, user: User, p: Project) -> StepQuote:
         raise AppError("Upload your institution's research guide first.", code="NO_GUIDE")
     _rate_limit(rt, user, "quote", rt.settings.quotes_per_hour)
     inp = StepInput(
+        tell_dated=True,
         project_id=p.id, step="PROFILE", chapter=0, rulebook=p.rulebook, inputs=p.inputs, plan_version=p.plan_version,
         guide=p.guide.path, guide_name=p.guide.name, guide_sha256=p.guide.sha256,
     )

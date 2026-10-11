@@ -416,6 +416,10 @@ class StepInput(Camel):
     """What a proposal step runs on, frozen when it is priced (Codex review: a job publishes against
     its input version). Stored with the job; its hash binds the quote."""
 
+    # Findings from a source more than ten years old are given to the models as dated (`evidence.dated`). Set when the
+    # step is priced, so a step priced before is asked exactly as it was (Codex's audit of 6e513af).
+    tell_dated: bool = False
+
     project_id: str
     step: Literal["PLAN", "CHAPTER", "REVISE", "COMPLETE", "PROFILE"]
     chapter: int  # 0 for the plan

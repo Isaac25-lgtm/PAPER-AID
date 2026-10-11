@@ -80,14 +80,14 @@ def _label(item: EvidenceItem) -> str:
     return f"{evidence.author_label(item.source)}, {item.source.year or 'n.d.'}"
 
 
-def _for_model(items: list[EvidenceItem], passages: bool = False) -> list[dict[str, str]]:
+def _for_model(items: list[EvidenceItem], passages: bool = False, dated: bool = False) -> list[dict[str, str]]:
     out = []
     for i in items:
         entry = {"id": i.id, "statement": i.statement, "scope": i.scope, "source": _label(i)}
         if i.caution:
             entry["caution"] = f"Only partly supported: {i.caution} Claim no more than the source's own words say, for the people, place and period they name."
-        if dated := evidence.dated(i):
-            entry["dated"] = dated
+        if dated and (note := evidence.dated(i)):
+            entry["dated"] = note
         if passages:
             entry["sourceWords"] = i.passage
         out.append(entry)
@@ -519,16 +519,16 @@ def _registered_by_title(title: str, published: str) -> dict[str, str] | None:
 
 # Sites that hold other people's articles. Their name is never an article's author: when neither the registration
 # nor the page itself names the authors, the finding is left out (the owner's rule for references, 2026-10-11).
-# Named sites, and any host that says by its own name that it is a journal's site or an institution's repository.
+# Named sites, and a host whose first label says outright that it is a journal's site or an institution's repository.
+# A label that can mean something else is not on the list ("ir." is also investor relations, "scholar." a programme's
+# site), and a page is never judged by its title: an organisation can publish a study of its own, and is then its
+# author (Codex's audit of 6e513af, finding 3). What is not known to be somebody else's article keeps its publisher.
 HOSTS = re.compile(r"(?:^|\.)(?:ncbi\.nlm\.nih\.gov|europepmc\.org|researchgate\.net|academia\.edu|semanticscholar\.org|jstor\.org|core\.ac\.uk|"
                    r"ssrn\.com|arxiv\.org|medrxiv\.org|biorxiv\.org|researchsquare\.com|preprints\.org|zenodo\.org|sciencedirect\.com|springer\.com|"
                    r"springermedizin\.[a-z]+|springeropen\.com|tandfonline\.com|wiley\.com|sagepub\.com|emerald\.com|mdpi\.com|frontiersin\.org|plos\.org|"
                    r"biomedcentral\.com|nature\.com|oup\.com|cambridge\.org|bmj\.com|thelancet\.com|jamanetwork\.com|cell\.com|karger\.com|hindawi\.com|"
                    r"dovepress\.com|cureus\.com|ajol\.info|scielo\.[a-z.]+|doaj\.org)$"
-                   r"|^(?:journals?|ojs|ejournals?|repository|repo|dspace|eprints?|ir|etd|scholar|scholarworks|digitalcommons|openaccess)\.", re.I)
-# A title that says the work is a study: written by its researchers, whoever published the page it was found on.
-STUDY_TITLE = re.compile(r":\s*(?:an?|the)\s+(?:[\w-]+\s+){0,3}(?:study|trial|meta-analysis|experiment)\b"
-                         r"|\b(?:cross-sectional|case-control|cohort|randomi[sz]ed controlled|systematic review|scoping review|mixed[- ]methods)\b", re.I)
+                   r"|^(?:journals?|ojs|ejournals?|repository|dspace|eprints?|etd|scholarworks|digitalcommons)\.", re.I)
 
 
 # Sites PaperAid does not use as supporting evidence, by default: encyclopedias anyone can edit, question-and-answer
@@ -555,9 +555,8 @@ def _web_source(finding) -> EvidenceSource | None:
     itself declares for indexing, and only then the organisation that published it (a ministry, an agency, a
     newspaper: the real author of its own pages). A registration that names no author is completed from the page's own
     declaration (Codex's audit of 1a3b1e7, finding 7). None for an article whose authors neither names, on a site that
-    holds other people's articles or under a title that says it is a study (`HOSTS`, `STUDY_TITLE`): it is never cited
-    by the site's name. None, too, for a site PaperAid does not use as evidence (`NOT_CITABLE`). Sites are judged on
-    the address given and on the address it led to."""
+    holds other people's articles (`HOSTS`): it is never cited by the site's name. None, too, for a site PaperAid does
+    not use as evidence (`NOT_CITABLE`). Sites are judged on the address given and on the address it led to."""
     hosts = {_host(finding.url), _host(fetch.landed(finding.url))}
     if any(NOT_CITABLE.search(host) for host in hosts):
         return None
@@ -572,7 +571,7 @@ def _web_source(finding) -> EvidenceSource | None:
     if not record:
         found = _registered_by_title(declared.get("title") or finding.title, declared.get("year") or finding.published)
         record, doi = (found, found["doi"]) if found else (None, doi)
-    hosted = any(HOSTS.search(host) for host in hosts) or bool(STUDY_TITLE.search(finding.title))
+    hosted = any(HOSTS.search(host) for host in hosts)
     if record and record.get("title"):
         authors = _authors(record["authors"]) or _authors(declared.get("authors", ""))
         if not authors and hosted:
@@ -690,7 +689,7 @@ def stage_planning(ctx: "StageContext") -> None:
     usable = [i for i in _library(ctx, inp).values() if i.usable]
     rules = rulebook.rules_for(inp.rulebook)
     if inp.step == "PLAN":
-        payload = {"study": _study(inp), "level": inp.inputs.level, "rules": rules, "evidence": _for_model(usable), "note": inp.note}
+        payload = {"study": _study(inp), "level": inp.inputs.level, "rules": rules, "evidence": _for_model(usable, dated=inp.tell_dated), "note": inp.note}
         if runner._prompt_for("p_plan") not in ("p-plan-v1", "p-plan-v2"):
             low, high = rulebook.objective_range(inp.rulebook, inp.inputs.level, inp.inputs.four_objectives, inp.goal == "CONCEPT")
             payload["objectiveCount"] = {"min": low, "max": high}
@@ -718,7 +717,7 @@ def stage_planning(ctx: "StageContext") -> None:
         "chapter": inp.chapter,
         "sections": [{"key": s.key, "number": s.number, "heading": s.heading, "requirement": s.brief, "words": s.words, "table": s.table} for s in sections],
         "rules": rules,
-        "evidence": _for_model(usable),
+        "evidence": _for_model(usable, dated=inp.tell_dated),
         "sampleSize": sample.steps if sample else "",
         "note": inp.note,
         **_finish_context(ctx, inp),
@@ -965,7 +964,7 @@ def _section_items(inp: StepInput, library: dict[str, EvidenceItem], briefs: dic
         items.append(
             {
                 "key": s.key, "number": s.number, "heading": s.heading, "requirement": requirement, "words": s.words, "table": s.table,
-                "objective": s.objective, "points": brief["points"], "evidence": _for_model(assigned, passages=True),
+                "objective": s.objective, "points": brief["points"], "evidence": _for_model(assigned, passages=True, dated=inp.tell_dated),
                 "_words": " ".join(["w"] * s.words),  # batches are sized by the words each section will produce
             }
         )
@@ -1109,14 +1108,16 @@ def placed_apart(inp: StepInput, items: dict[str, dict[str, Any]], key: str, tex
     return text.paragraphs, []
 
 
-def review_item(inp: StepInput, items: dict[str, dict[str, Any]], key: str, text: SectionText, checks: list[str], apart: bool) -> dict[str, Any]:
+def review_item(inp: StepInput, items: dict[str, dict[str, Any]], key: str, text: SectionText, checks: list[str], apart: bool,
+                to_read: list[str] | None = None) -> dict[str, Any]:
     """One section as a reviewer is asked about it. `apart` (review prompts from p-review-v4, which says what
     "placedByPaperAid" is): a plan-owned section is its writer's introduction, with what PaperAid places given apart.
     Nothing a reviewer then says is set aside by code (Codex's audit of cbb99cb, finding 1: a keyword filter dropped a
-    genuine rejection); a job priced on an earlier prompt is asked exactly as it was."""
+    genuine rejection); a job priced on an earlier prompt is asked exactly as it was. `to_read` (from p-review-v6):
+    the sentences code could not judge (`evidence.for_the_reviewer`), which are not checks and decide nothing."""
     lead, statements = placed_apart(inp, items, key, text) if apart else (text.paragraphs, [])
     return {**items[key], "text": lead, **({"placedByPaperAid": statements} if statements else {}), "table": text.table.model_dump(), "paperaidChecks": checks,
-            "_words": " ".join(text.paragraphs)}
+            **({"forYourJudgement": to_read} if to_read else {}), "_words": " ".join(text.paragraphs)}
 
 
 def numbered(text: SectionText) -> list[dict[str, str]]:
@@ -1292,6 +1293,11 @@ def _checks(inp: StepInput, key: str, text: SectionText, library: dict[str, Evid
     return list(dict.fromkeys(problems))
 
 
+def _to_read(text: SectionText) -> list[str]:
+    """The sentences of a section that code could not judge (its prose, caption and cells), for its reviewer."""
+    return evidence.for_the_reviewer([*text.paragraphs, *_cells(text)])
+
+
 def _cleaned(inp: StepInput, text: SectionText, library: dict[str, EvidenceItem], usable: set[str], allowed: str) -> SectionText:
     """A section with every untraceable sentence removed, repeated until nothing more changes
     (removing a cited sentence can leave a neighbour's figure unsupported), and every sentence that still claims no
@@ -1380,7 +1386,7 @@ def _edited(ctx: "StageContext", runner: ProposalRunner, inp: StepInput, items: 
         if not asked:
             return []
         flags = runner.flag([{"id": a["id"], "before": a["before"], "after": a["after"],
-                              "evidence": _for_model([library[i] for i in dict.fromkeys(evidence.cited_ids(a["after"])) if i in library], passages=True)} for a in asked],
+                              "evidence": _for_model([library[i] for i in dict.fromkeys(evidence.cited_ids(a["after"])) if i in library], passages=True, dated=inp.tell_dated)} for a in asked],
                             {"plan": _plan(inp)})
         return [{"key": a["key"], "paragraph": a["paragraph"],
                  "problem": (flags[a["id"]].problem.strip() if a["id"] in flags else "") or "The check could not confirm this correction against its evidence."}
@@ -1460,6 +1466,7 @@ def stage_auditing(ctx: "StageContext") -> None:
             base = _base_document(ctx, inp)
     current = _owned(inp, items, current)
     apart = runner._engine.prompts.get("p_review", "p-review-v3") != "p-review-v3"  # from p-review-v4 the prompt explains "placedByPaperAid"
+    judged = runner._engine.prompts.get("p_review", "p-review-v3") not in ("p-review-v3", "p-review-v4", "p-review-v5")  # from v6 it explains "forYourJudgement"
     unresolved: dict[str, list[str]] = {}
     grades: dict[str, Grade] = {}
     stripped: list[str] = []
@@ -1472,7 +1479,7 @@ def stage_auditing(ctx: "StageContext") -> None:
     for round_ in ([] if workflow2 else runner.audit_rounds(rounds + 1)):
         ctx.activity("CHECKING", round_ + 1, rounds + 1)
         problems = {k: _checks(inp, k, t, library, allowed) for k, t in current.items()}
-        review = [review_item(inp, items, k, t, problems[k], apart) for k, t in current.items()]
+        review = [review_item(inp, items, k, t, problems[k], apart, _to_read(t) if judged else None) for k, t in current.items()]
         grades = runner.grade(review, {**common, "vetting": vetting})
         unresolved = {}
         for key in current:
@@ -1498,7 +1505,8 @@ def stage_auditing(ctx: "StageContext") -> None:
             stripped += [items[key]["heading"] for key in cleaned]
             current.update(cleaned)
             problems = {k: _checks(inp, k, current[k], library, allowed) for k in cleaned}
-            regraded = runner.grade([review_item(inp, items, k, current[k], problems[k], apart) for k in cleaned], {**common, "vetting": vetting})
+            regraded = runner.grade([review_item(inp, items, k, current[k], problems[k], apart, _to_read(current[k]) if judged else None) for k in cleaned],
+                                    {**common, "vetting": vetting})
             for key in cleaned:
                 grade = regraded.get(key)
                 grades.pop(key, None)
@@ -1722,7 +1730,7 @@ def _revision(
             current[s.key] = SectionText(key=s.key, paragraphs=s.paragraphs, table=Table(caption=s.table_caption, rows=s.table or []))
             asked = [f"Your supervisor asked: {c}" for c in inp.revise[s.key]]
             cited = [library[i] for i in evidence.cited_ids(" ".join(s.paragraphs)) if i in library and library[i].usable]
-            items[s.key] = {**items[s.key], "points": asked, "evidence": _for_model(cited, passages=True) or items[s.key]["evidence"]}
+            items[s.key] = {**items[s.key], "points": asked, "evidence": _for_model(cited, passages=True, dated=inp.tell_dated) or items[s.key]["evidence"]}
     if not current:
         raise PermanentStageError("NOTHING_TO_REVISE", "The sections your comments are on are no longer in this chapter. Nothing was charged.", "revise: no sections")
     first = [

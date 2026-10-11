@@ -430,14 +430,14 @@ def _library(ctx: "StageContext", inp: WorkStepInput) -> dict[str, EvidenceItem]
     return {i.id: i for i in ev.dedupe([*base.values(), *new])}
 
 
-def _for_model(items: list[EvidenceItem], passages: bool = False) -> list[dict[str, str]]:
+def _for_model(items: list[EvidenceItem], passages: bool = False, dated: bool = False) -> list[dict[str, str]]:
     out = []
     for i in items:
         entry = {"id": i.id, "statement": i.statement, "scope": i.scope, "source": f"{ev.author_label(i.source)}, {i.source.year or 'n.d.'}"}
         if i.caution:
             entry["caution"] = f"Only partly supported: {i.caution} Claim no more than the source's own words say, for the people, place and period they name."
-        if dated := ev.dated(i):
-            entry["dated"] = dated
+        if dated and (note := ev.dated(i)):
+            entry["dated"] = note
         if passages:
             entry["sourceWords"] = i.passage
         out.append(entry)
@@ -543,7 +543,7 @@ def stage_planning(ctx: "StageContext") -> None:
     plan_rules = [{"rule": r["id"], "requirement": r["requirement"]} for r in library.scoped_rules(rules, "PLAN")]
     payload = {
         "spec": _compact_spec(spec), "student": _student(inp), "skeleton": [s.model_dump(by_alias=True) for s in skeleton],
-        "evidence": _for_model(usable), "note": inp.note, "style": STYLE,
+        "evidence": _for_model(usable, dated=inp.tell_dated), "note": inp.note, "style": STYLE,
     }
     answer = runner.plan(payload).model_dump()
     plan = _plan_from(answer, skeleton, spec)
@@ -571,7 +571,7 @@ def stage_planning(ctx: "StageContext") -> None:
         out["planReview"] = plan_decision.model_dump(by_alias=True)
     results_decision = None
     if spec.kind == "FUNDING_PROPOSAL":
-        results_payload = {"spec": _compact_spec(spec), "student": _student(inp), "plan": plan.model_dump(by_alias=True), "evidence": _for_model(usable), "note": inp.note}
+        results_payload = {"spec": _compact_spec(spec), "student": _student(inp), "plan": plan.model_dump(by_alias=True), "evidence": _for_model(usable, dated=inp.tell_dated), "note": inp.note}
         model, lines = _results_from(runner.results(results_payload))
         results_rules = [{"rule": r["id"], "requirement": r["requirement"]} for r in library.scoped_rules(rules, "RESULTS")]
         if not runner._engine.single_reviewer:
@@ -789,7 +789,7 @@ def _section_items(inp: WorkStepInput, library_items: dict[str, EvidenceItem], o
             "minWords": max(s.min_words, round(s.words * DRAFT_FLOOR)) if tight and not s.field_id else s.min_words,
             "maxWords": min(s.max_words or 10**6, round(s.words * DRAFT_CEILING)) if tight and not s.field_id else s.max_words,
             "coverage": [coverage[c] for c in s.coverage if c in coverage], "criteria": [criteria[c] for c in s.criteria if c in criteria],
-            "field": field_limits.get(s.field_id), "evidence": _for_model(relevant, passages=True),
+            "field": field_limits.get(s.field_id), "evidence": _for_model(relevant, passages=True, dated=inp.tell_dated),
             "_words": " ".join(["w"] * s.words),
         })
     return items
@@ -931,7 +931,7 @@ def _repair_items(inp: WorkStepInput, current: dict[str, SectionText], library_i
     sections = {s.key: s for s in inp.plan.sections}
     usable = [i for i in library_items.values() if i.usable]
     keys = [k for k in fix if k in current and k in sections]
-    return [{**i, "issues": fix[i["key"]], "evidence": _for_model(_relevant(sections[i["key"]], usable), passages=True)}
+    return [{**i, "issues": fix[i["key"]], "evidence": _for_model(_relevant(sections[i["key"]], usable), passages=True, dated=inp.tell_dated)}
             for i in _review_items(inp, sections, current, problems or {}, keys)]
 
 
@@ -989,7 +989,13 @@ def _audit(ctx: "StageContext", runner: WorkRunner, inp: WorkStepInput, current:
         shown = runner._prompt_for("w_evaluate") != "w-evaluate-v1"
         cited = {k: _cited_evidence(current[k], library_items) for k in pending} if shown else {}
         judged = [i for i in items if i["rules"] or premium or _risk(sections[i["key"]], current[i["key"]]) != "low" or any(e.caution for e in cited.get(i["key"], []))]
-        judged = [{**i, "evidence": _for_model(cited[i["key"]], passages=True)} for i in judged] if shown else judged
+        judged = [{**i, "evidence": _for_model(cited[i["key"]], passages=True, dated=inp.tell_dated)} for i in judged] if shown else judged
+        if runner._prompt_for("w_evaluate") not in ("w-evaluate-v1", "w-evaluate-v2"):  # from v3 it explains "forYourJudgement"
+            # The sentences code could not judge are read by the evaluator; a section with one is always evaluated.
+            to_read = {k: ev.for_the_reviewer([numbers.strip(f) for f in [*current[k].paragraphs, *_cells(current[k])]], gaps=False) for k in pending}
+            known = {i["key"] for i in judged}
+            judged = [*judged, *[{**i, "evidence": _for_model(cited[i["key"]], passages=True, dated=inp.tell_dated)} for i in items if i["key"] not in known and to_read[i["key"]]]]
+            judged = [{**i, "forYourJudgement": to_read[i["key"]]} if to_read[i["key"]] else i for i in judged]
         checked, evaluated = runner.together(
             lambda items=items: runner.integrity([{**i, "lockedFacts": common["student"]} for i in items], {"spec": common["spec"], "student": common["student"]}),
             lambda judged=judged: runner.evaluate(judged, {**common, "tier": runner._engine.tier}))
@@ -1384,8 +1390,8 @@ def _editor_rules(spec: ResolvedSpec, plan_sections: list[PlanSection], current:
     return list(rules.values()), where
 
 
-def _evidence_for_editor(items: list[EvidenceItem]) -> list[dict[str, str]]:
-    return [{"token": f"⟦{e['id']}⟧", **e} for e in _for_model(items, passages=True)]
+def _evidence_for_editor(items: list[EvidenceItem], dated: bool = False) -> list[dict[str, str]]:
+    return [{"token": f"⟦{e['id']}⟧", **e} for e in _for_model(items, passages=True, dated=dated)]
 
 
 def _editor_request(inp: WorkStepInput, current: dict[str, SectionText], editable: list[str], library_items: dict[str, EvidenceItem],
@@ -1417,7 +1423,7 @@ def _editor_request(inp: WorkStepInput, current: dict[str, SectionText], editabl
         paragraphs = {k: shown(k, part) for k in keys}
         # Every finding while they fit in a quarter of a request; otherwise those related to these sections and those
         # their paragraphs cite, so a part's evidence shrinks with the part.
-        everything = payload_words(_evidence_for_editor(usable)) <= FINAL_PART_WORDS // 4
+        everything = payload_words(_evidence_for_editor(usable, inp.tell_dated)) <= FINAL_PART_WORDS // 4
         offered = {i.id: i for i in usable} if everything else {i.id: i for k in keys for i in _relevant(sections[k], usable)}
         offered.update({i: library_items[i] for k in keys for p in paragraphs[k] for i in ev.cited_ids(p["text"]) if i in library_items and library_items[i].usable})
         found = [{"section": k, "heading": sections[k].heading, "issues": findings[k]} for k in keys if findings.get(k)]
@@ -1426,7 +1432,7 @@ def _editor_request(inp: WorkStepInput, current: dict[str, SectionText], editabl
             "editable": [{"key": k, "heading": sections[k].heading, "words": sections[k].words, "minWords": sections[k].min_words, "maxWords": sections[k].max_words,
                           "wordsNow": _rendered_words(current[k], tokens), "paragraphs": paragraphs[k],
                           "hasTable": bool(current[k].table.rows), "hasFigure": current[k].figure is not None} for k in keys],
-            "evidence": _evidence_for_editor(list(offered.values())),
+            "evidence": _evidence_for_editor(list(offered.values()), inp.tell_dated),
             "numberTokens": numbers.for_model(tokens),
             # The real limit, and a working target a little under it: its corrections tend to add, and a draft ending
             # 29 words over a 1,000-word limit was refused (trial 2026-10-10).
@@ -1478,7 +1484,7 @@ def _unsupported(runner: WorkRunner, inp: WorkStepInput, applied: list[dict[str,
     if not asked:
         return []
     items = [{"id": a["id"], "before": a["before"], "after": a["after"],
-              "evidence": _evidence_for_editor([library_items[i] for i in dict.fromkeys(ev.cited_ids(a["after"])) if i in library_items])} for a in asked]
+              "evidence": _evidence_for_editor([library_items[i] for i in dict.fromkeys(ev.cited_ids(a["after"])) if i in library_items], inp.tell_dated)} for a in asked]
     flags = runner.flag(items, {"student": _student(inp), "numberTokens": numbers.for_model(tokens)})
     return [{"key": a["key"], "paragraph": a["paragraph"],
              "problem": (flags[a["id"]].problem.strip() if a["id"] in flags else "") or "The check could not confirm this correction against its evidence."}

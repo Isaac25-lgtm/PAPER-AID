@@ -558,6 +558,8 @@ class Work(WorkView):
 class WorkStepInput(Camel):
     """What a work step runs on, frozen when it is priced; its hash binds the quote."""
 
+    tell_dated: bool = False  # as StepInput.tell_dated: only a step priced with it is told a source is dated
+
     work_id: str
     step: Literal["READ", "PLAN", "DRAFT", "REVISE"]
     kind: WorkKind

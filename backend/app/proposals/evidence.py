@@ -94,20 +94,44 @@ def _title_key(source: EvidenceSource) -> str:
     return re.sub(r"[\W_]+", "", clean_title(source.title).casefold())  # letters and digits of any script
 
 
+def _initials(author: str) -> str:
+    return "".join(re.findall(r"[^\W\d_]", author.partition(",")[2])).casefold()
+
+
+def _same_authorship(a: EvidenceSource, b: EvidenceSource) -> bool:
+    """Both records name the same people, as far as each goes: the same surnames in the same order (one list may stop
+    short of the other) and initials that agree (one may give fewer). With no people on either side, the same body.
+    A record that names people and one that names none are not shown to be the same work."""
+    one, other = clean_authors(a.authors), clean_authors(b.authors)
+    if not one and not other:
+        return bool(a.organisation.strip()) and clean_text(a.organisation).casefold() == clean_text(b.organisation).casefold()
+    if not one or not other:
+        return False
+    for x, y in zip(one, other, strict=False):
+        first, second = _initials(x), _initials(y)
+        if _surname(x).casefold() != _surname(y).casefold() or not (first.startswith(second) or second.startswith(first)):
+            return False
+    return True
+
+
 def _same_work(a: EvidenceSource, b: EvidenceSource) -> bool:
     """Two records of one work: the same DOI or address, or one work reached by two addresses (its DOI and a page
-    that carries none). Two registrations are two works whatever their titles; without that proof the titles must be
-    the same and long enough to tell works apart ("Introduction" is not), in the same year, and by the same first
-    author where both name one (Codex's audit of 1a3b1e7, finding 1: a title and a year alone merged two papers)."""
+    that carries none). Two registrations are two works whatever their titles. Without that proof everything the
+    records say must agree: a title long enough to tell works apart ("Introduction" is not), the year, who wrote it
+    (`_same_authorship`: "Smith, J." and "Smith, R." are two people), and the journal, volume and pages wherever both
+    give them. Where identity is not shown, the records stay two entries (Codex's audits of 1a3b1e7, 458e65b and
+    6e513af)."""
     if _key(a) == _key(b):
         return True
     if a.doi and b.doi:
         return False
     title = _title_key(a)
-    if len(title) < 25 or title != _title_key(b) or a.year != b.year:
+    if len(title) < 25 or title != _title_key(b) or a.year != b.year or not _same_authorship(a, b):
         return False
-    first_a, first_b = clean_authors(a.authors)[:1], clean_authors(b.authors)[:1]
-    return not (first_a and first_b) or _surname(first_a[0]).casefold() == _surname(first_b[0]).casefold()
+    for one, other in ((clean_container(a.container), clean_container(b.container)), (a.volume, b.volume), (clean_pages(a.pages), clean_pages(b.pages))):
+        if one.strip() and other.strip() and one.strip().casefold() != other.strip().casefold():
+            return False
+    return True
 
 
 def works(sources: Iterable[EvidenceSource]) -> list[list[EvidenceSource]]:
@@ -120,7 +144,7 @@ def works(sources: Iterable[EvidenceSource]) -> list[list[EvidenceSource]]:
     unique: dict[str, EvidenceSource] = {}
     for source in sources:
         unique.setdefault(_key(source), source)
-    ordered = sorted(unique.values(), key=lambda s: (not s.doi, not s.authors))  # registered works first, then records that name an author
+    ordered = sorted(unique.values(), key=lambda s: (not s.doi, not s.authors, _key(s)))  # registered works first, then records that name an author; never the order given
     groups: list[list[EvidenceSource]] = []
     for source in ordered:
         fits = [] if source.doi else [g for g in groups if all(_same_work(known, source) for known in g)]
@@ -370,20 +394,61 @@ _RATIO = re.compile(
     r"[^!?]{0,40}?\bp\s*(?:-?\s*value)?\s*(?P<op>[<=])\s*(?P<p>0?\.\d+)", re.I)
 _SIGNIFICANT = re.compile(r"\bsignifican(?:t|tly|ce)\b", re.I)
 _CLAUSE = re.compile(r";|\b(?:and|while|whereas|but|although|though)\b", re.I)
-# Words that deny, question or attribute what follows them. Code flags, and withholds, only a plain assertion: a
-# sentence that says the claim is wrong, doubtful or somebody else's is left exactly as it is, for the reviewer
-# (Codex's re-audit of 458e65b, finding 3: "the topic is not unstudied", "it would be misleading to say that no study
-# has ...", "should not be described as statistically significant" were each removed).
-_GUARD = re.compile(
-    r"\b(?:not|no|never|neither|nor|cannot|without|hardly|scarcely|non|inconsistent|misleading|mistaken|wrong|false|untrue|incorrect|inaccurate|doubt\w*|questionable"
-    r"|caution\w*|claim\w*|argu\w*|assert\w*|contend\w*|suggest\w*|impl(?:y|ies|ied)|say|says|said|saying|state|states|stated|stating|lacked|lacks?|fail\w*)\b|n['’]t\b", re.I)
+# Where a new clause certainly begins: a semicolon, a contrast, or "and" after a comma. A bare "and" may only join
+# two nouns ("between education and uptake").
+_BREAK = re.compile(r";|\b(?:whereas|while|although|though|but)\b|,\s*and\b", re.I)
+_JOINED = re.compile(r"\bbetween\b[^,;()]{1,80}?\band\b", re.I)
+_OPENER = re.compile(r"\s*(?:although|though|because|since|while|as|if|when|where|given)\b[^,]*,", re.I)
+# Three kinds of word decide what code may conclude about a claim, and only when they stand in the claim's own
+# clause: another clause's "no" says nothing about it ("there is no electricity in the district, and no study has
+# ..."). A denial or a doubt of a significance claim makes it sound; a reporting verb does not ("the study suggests
+# a significant association" still calls it significant). For a claim that research is absent, any of the three
+# leaves code unable to say whose claim it is or whether it is made at all, and then the sentence is neither flagged
+# nor passed over: it is given to the reviewer to read (Codex's audits of 458e65b, finding 3, and 6e513af, finding 2).
+_NEGATION = re.compile(r"\b(?:not|no|never|neither|nor|cannot|without|hardly|scarcely|non|lacked|lacks?|fail\w*)\b|n['’]t\b", re.I)
+_DOUBT = re.compile(r"\b(?:inconsistent|misleading|mistaken|wrong|false|untrue|incorrect|inaccurate|doubt\w*|questionable|caution\w*)\b", re.I)
+_REPORTING = re.compile(r"\b(?:claim\w*|argu\w*|assert\w*|contend\w*|suggest\w*|impl(?:y|ies|ied)|say|says|said|saying|state|states|stated|stating|wrote|writes?|conclud\w*"
+                        r"|believ\w*|maintain\w*)\b|\bthat\s*$", re.I)
 _AFFIRMS = re.compile(r"(?:yes|y|true|sig\.?|significant|✓|✔|\*{1,3})", re.I)
+GAP_NOTE = "PaperAid's code could not tell whether this sentence claims that no research exists on its topic, or reports, denies or questions such a claim: “{}”"
+RATIO_NOTE = ("PaperAid's code could not tell whether this sentence calls a result significant whose reported {}% interval ({}–{}) includes 1 while its p-value is below "
+              "0.05, or says that it is not: “{}”")
+
+
+def _significance(clause: str) -> str:
+    """What a short text (a table cell, a heading) says about significance: "PLAIN", "DENIED" or ""."""
+    if not _SIGNIFICANT.search(clause):
+        return ""
+    return "DENIED" if _NEGATION.search(clause) or _DOUBT.search(clause) else "PLAIN"
+
+
+def _said_of(lead: str, tail: str) -> str:
+    """What the words around one result say of it. `lead` runs from the result before it (or the sentence's start)
+    up to it; `tail` from it to the next result (or the sentence's end).
+
+    "PLAIN": it is called significant, whoever is said to have found so. "DENIED": the word is negated or doubted
+    ("not significant", "should not be described as significant"). "UNSURE": the word is there but code cannot tie
+    it to this result (another clause begins between them) or cannot tell a denial from an unrelated "no". "": the
+    result is not called anything."""
+    words = list(_SIGNIFICANT.finditer(lead))
+    if words:
+        word = words[-1]
+        between = _JOINED.sub(" ", lead[word.end():])
+        if _CLAUSE.search(between):
+            return "UNSURE"  # "age was significant and education showed (OR ...)": the word belongs to another clause
+        before = _BREAK.split(lead[:word.start()])[-1]
+        return "DENIED" if _NEGATION.search(before) or _DOUBT.search(before) else "PLAIN"
+    first = _SIGNIFICANT.search(_BREAK.split(tail)[0])
+    if first:
+        before = _BREAK.split(tail)[0][:first.start()]
+        if _CLAUSE.search(_JOINED.sub(" ", before)):
+            return "UNSURE"
+        return "DENIED" if _NEGATION.search(before) or _DOUBT.search(before) else "PLAIN"
+    return ""
 
 
 def _called_significant(text: str) -> bool:
-    """The words plainly say a result is significant. "Not statistically significant", "no significant ..." and
-    "should not be described as significant" do not, and neither does any clause that denies or questions."""
-    return bool(_SIGNIFICANT.search(text)) and not _GUARD.search(text)
+    return _significance(text) == "PLAIN"
 
 
 def _quoted(text: str, at: int) -> bool:
@@ -391,16 +456,31 @@ def _quoted(text: str, at: int) -> bool:
     return before.count("“") > before.count("”") or before.count('"') % 2 == 1
 
 
+def gap_findings(paragraph: str) -> tuple[list[str], list[str]]:
+    """(problems, sentences for the reviewer) about claims that research on a topic does not exist. A problem is the
+    plain assertion, in the writer's own voice. A sentence is for the reviewer when the claim's own clause negates,
+    doubts or reports it, or the claim stands inside a quotation: code neither flags nor passes over what it cannot
+    judge. A hedged claim ("remains largely unstudied") is the wording asked for, and is neither."""
+    problems: list[str] = []
+    notes: list[str] = []
+    for sentence in sentences(paragraph):
+        for found in ABSOLUTE_GAP.finditer(sentence):
+            lead = sentence[:found.start()]
+            if _HEDGED.search(lead):
+                continue
+            opener = _OPENER.match(lead)  # "Although the district is not remote, ...": that clause ends at its comma
+            own = _CLAUSE.split(lead[opener.end():] if opener else lead)[-1]
+            if _quoted(sentence, found.start()) or _NEGATION.search(own) or _DOUBT.search(own) or _REPORTING.search(own):
+                notes.append(GAP_NOTE.format(sentence.strip()[:400]))
+            else:
+                problems.append(f"“{found.group(0)}” claims that nothing has been studied or is known. State the gap as what the sources found do not show (for example "
+                                "“the studies found did not examine ...” or “published evidence on ... is limited”), never that no study exists.")
+            break
+    return problems[:1], list(dict.fromkeys(notes))
+
+
 def gap_problems(paragraph: str) -> list[str]:
-    """A statement, in the writer's own voice, that research on a topic does not exist."""
-    for found in ABSOLUTE_GAP.finditer(paragraph):
-        before = paragraph[:found.start()]
-        lead = re.split(r"(?<=[.!?])\s+", before)[-1]  # what the sentence has said before the claim
-        if _HEDGED.search(before) or _GUARD.search(lead) or _quoted(paragraph, found.start()):
-            continue
-        return [f"“{found.group(0)}” claims that nothing has been studied or is known. State the gap as what the sources found do not show (for example "
-                "“the studies found did not examine ...” or “published evidence on ... is limited”), never that no study exists."]
-    return []
+    return gap_findings(paragraph)[0]
 
 
 def _disagreeing(sentence: str) -> list[re.Match[str]]:
@@ -417,23 +497,39 @@ def _disagreeing(sentence: str) -> list[re.Match[str]]:
     return found
 
 
-def statistic_problems(paragraph: str) -> list[str]:
-    """A ratio called significant while its own 95% interval includes 1 and its p-value is below 0.05. The two do
-    not agree, whoever reported them (the audit of 2026-10-10 found one copied faithfully from a publisher's
-    abstract): it is told as the source reports it, never as a significant association. Code corrects no figure.
-    The word must belong to that result: the clause that leads to it or the one that follows it, never another
-    result's in the same sentence ("age was significant (...), whereas education was not (...)")."""
-    problems = []
+def statistic_findings(paragraph: str) -> tuple[list[str], list[str]]:
+    """(problems, sentences for the reviewer) about a ratio whose own 95% interval includes 1 while its p-value is
+    below 0.05. The two do not agree, whoever reported them (the audit of 2026-10-10 found one copied faithfully
+    from a publisher's abstract). A problem: the words that lead to the result, or follow it, plainly call it
+    significant (`_said_of`), whoever they say found so; never another result's words in the same sentence. For the
+    reviewer: the word is negated or doubted, which is usually a sound sentence and sometimes is not ("among women
+    with no schooling the association was significant"), or cannot be tied to this result. Code corrects no figure."""
+    problems: list[str] = []
+    notes: list[str] = []
     for sentence in sentences(paragraph):
         every = list(_RATIO.finditer(sentence))
         for m in _disagreeing(sentence):
             n = next(i for i, other in enumerate(every) if other.start() == m.start())
-            lead = _CLAUSE.split(sentence[every[n - 1].end() if n else 0:m.start()])[-1]
-            tail = _CLAUSE.split(sentence[m.end():every[n + 1].start() if n + 1 < len(every) else len(sentence)])[0]
-            if _called_significant(lead) or _called_significant(tail):
+            said = _said_of(sentence[every[n - 1].end() if n else 0:m.start()], sentence[m.end():every[n + 1].start() if n + 1 < len(every) else len(sentence)])
+            if said == "PLAIN":
                 problems.append(f"The {m.group('level')}% interval reported ({m.group('low')}–{m.group('high')}) includes 1 while the p-value ({m.group('op')} {m.group('p')}) is below 0.05: "
                                 "these do not agree. Do not call this result significant; say what the source reports and that its interval includes 1, or leave the result out.")
-    return problems
+            elif said:  # denied, or not tied to this result: the reviewer reads it
+                notes.append(RATIO_NOTE.format(m.group("level"), m.group("low"), m.group("high"), sentence.strip()[:400]))
+    return problems, list(dict.fromkeys(notes))
+
+
+def statistic_problems(paragraph: str) -> list[str]:
+    return statistic_findings(paragraph)[0]
+
+
+def for_the_reviewer(texts: Iterable[str], gaps: bool = True) -> list[str]:
+    """The sentences of these texts (a section's paragraphs, caption and cells) that code could not judge, each to be
+    read by the reviewer. They are not problems: nothing is repaired or withheld because of one."""
+    notes: list[str] = []
+    for text in texts:
+        notes += statistic_findings(text)[1] + (gap_findings(text)[1] if gaps else [])
+    return list(dict.fromkeys(notes))
 
 
 def row_text(header: list[str], row: list[str]) -> str:

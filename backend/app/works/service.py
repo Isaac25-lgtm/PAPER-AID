@@ -659,6 +659,7 @@ def quote_step(rt: Runtime, user: User, work_id: str, step: Step, note: str, bun
     _rate_limit(rt, user, "quote", rt.settings.quotes_per_hour)
     band = _band(spec, step)
     inp = WorkStepInput(
+        tell_dated=True,
         work_id=k.id, step=step, kind=k.kind, variant=k.variant, mode=k.mode, level=spec.level, citation=spec.citation_style, inputs=k.inputs,
         sources=[s for s in k.sources if step == "READ" or s.role == "READING"], spec=spec if step != "READ" else None,
         plan=k.plan if step in ("DRAFT", "REVISE") else None, plan_version=k.plan_version, results=k.results if step in ("DRAFT", "REVISE") else None,
