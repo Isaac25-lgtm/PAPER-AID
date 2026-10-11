@@ -86,6 +86,8 @@ def _for_model(items: list[EvidenceItem], passages: bool = False) -> list[dict[s
         entry = {"id": i.id, "statement": i.statement, "scope": i.scope, "source": _label(i)}
         if i.caution:
             entry["caution"] = f"Only partly supported: {i.caution} Claim no more than the source's own words say, for the people, place and period they name."
+        if dated := evidence.dated(i):
+            entry["dated"] = dated
         if passages:
             entry["sourceWords"] = i.passage
         out.append(entry)
@@ -517,9 +519,16 @@ def _registered_by_title(title: str, published: str) -> dict[str, str] | None:
 
 # Sites that hold other people's articles. Their name is never an article's author: when neither the registration
 # nor the page itself names the authors, the finding is left out (the owner's rule for references, 2026-10-11).
+# Named sites, and any host that says by its own name that it is a journal's site or an institution's repository.
 HOSTS = re.compile(r"(?:^|\.)(?:ncbi\.nlm\.nih\.gov|europepmc\.org|researchgate\.net|academia\.edu|semanticscholar\.org|jstor\.org|core\.ac\.uk|"
-                   r"ssrn\.com|arxiv\.org|zenodo\.org|sciencedirect\.com|springer\.com|tandfonline\.com|wiley\.com|sagepub\.com|emerald\.com|"
-                   r"mdpi\.com|frontiersin\.org|plos\.org|biomedcentral\.com|nature\.com|oup\.com|cambridge\.org|ajol\.info|scielo\.[a-z.]+|doaj\.org)$", re.I)
+                   r"ssrn\.com|arxiv\.org|medrxiv\.org|biorxiv\.org|researchsquare\.com|preprints\.org|zenodo\.org|sciencedirect\.com|springer\.com|"
+                   r"springermedizin\.[a-z]+|springeropen\.com|tandfonline\.com|wiley\.com|sagepub\.com|emerald\.com|mdpi\.com|frontiersin\.org|plos\.org|"
+                   r"biomedcentral\.com|nature\.com|oup\.com|cambridge\.org|bmj\.com|thelancet\.com|jamanetwork\.com|cell\.com|karger\.com|hindawi\.com|"
+                   r"dovepress\.com|cureus\.com|ajol\.info|scielo\.[a-z.]+|doaj\.org)$"
+                   r"|^(?:journals?|ojs|ejournals?|repository|repo|dspace|eprints?|ir|etd|scholar|scholarworks|digitalcommons|openaccess)\.", re.I)
+# A title that says the work is a study: written by its researchers, whoever published the page it was found on.
+STUDY_TITLE = re.compile(r":\s*(?:an?|the)\s+(?:[\w-]+\s+){0,3}(?:study|trial|meta-analysis|experiment)\b"
+                         r"|\b(?:cross-sectional|case-control|cohort|randomi[sz]ed controlled|systematic review|scoping review|mixed[- ]methods)\b", re.I)
 
 
 # Sites PaperAid does not use as supporting evidence, by default: encyclopedias anyone can edit, question-and-answer
@@ -545,9 +554,10 @@ def _web_source(finding) -> EvidenceSource | None:
     """Whose work a web page is, in this order: its registration (by DOI, then by its exact title), what the page
     itself declares for indexing, and only then the organisation that published it (a ministry, an agency, a
     newspaper: the real author of its own pages). A registration that names no author is completed from the page's own
-    declaration (Codex's audit of 1a3b1e7, finding 7). None for an article on a hosting site whose authors neither
-    names, and for a site PaperAid does not use as evidence (`NOT_CITABLE`), judged on the address given and on the
-    address it led to."""
+    declaration (Codex's audit of 1a3b1e7, finding 7). None for an article whose authors neither names, on a site that
+    holds other people's articles or under a title that says it is a study (`HOSTS`, `STUDY_TITLE`): it is never cited
+    by the site's name. None, too, for a site PaperAid does not use as evidence (`NOT_CITABLE`). Sites are judged on
+    the address given and on the address it led to."""
     hosts = {_host(finding.url), _host(fetch.landed(finding.url))}
     if any(NOT_CITABLE.search(host) for host in hosts):
         return None
@@ -562,7 +572,7 @@ def _web_source(finding) -> EvidenceSource | None:
     if not record:
         found = _registered_by_title(declared.get("title") or finding.title, declared.get("year") or finding.published)
         record, doi = (found, found["doi"]) if found else (None, doi)
-    hosted = any(HOSTS.search(host) for host in hosts)
+    hosted = any(HOSTS.search(host) for host in hosts) or bool(STUDY_TITLE.search(finding.title))
     if record and record.get("title"):
         authors = _authors(record["authors"]) or _authors(declared.get("authors", ""))
         if not authors and hosted:

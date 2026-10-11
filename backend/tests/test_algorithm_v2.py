@@ -1501,12 +1501,15 @@ def test_on_workflow_2_the_premium_model_approves_the_wording_that_is_delivered(
     assert engine.vertex_routes["p_review"] == ["vertex:gemini-3.1-pro-preview"] and engine.vertex_routes["w_plan_review"] == ["vertex:gemini-3.1-pro-preview"]
 
 
-def test_workflow_1_keeps_the_sign_off_it_was_priced_with(client):
+def test_on_workflow_1_the_premium_model_re_checks_a_repair_and_the_standard_model_only_stands_in(client):
+    """Owner, 2026-10-11: repaired wording is re-checked by the premium model on the live path too. There the
+    standard model stands in when the premium one cannot answer; on workflow 2 nothing does."""
     from app.ai.orchestration import current_engine
     from app.runtime import get_runtime
 
     engine = current_engine(get_runtime().settings)
-    assert engine.workflow == 1 and engine.vertex_signoff[0] != "vertex:gemini-3.1-pro-preview" and len(engine.vertex_routes["w_final"]) == 2  # as priced: unchanged
+    assert engine.workflow == 1 and engine.vertex_signoff == ["vertex:gemini-3.1-pro-preview", "vertex:gemini-3.8-flash"]
+    assert engine.vertex_routes["w_final"] == ["vertex:gemini-3.1-pro-preview", "vertex:gemini-3.8-flash"] and engine.vertex_thinking["final_signoff"] == "MEDIUM"
 
 
 def test_on_workflow_2_an_approval_review_waits_for_the_premium_model(simple):

@@ -409,3 +409,26 @@ def test_a_chapter_is_cited_as_the_whole_proposal_will_be():
     assert evidence.Citer(library, "APA7", whole).render("Recognition matters ⟦E000002⟧.") == "Recognition matters (Smith, 2024b)."
     assert evidence.reference_list([second], "APA7", among=[first, second]) == [evidence.reference(second, "APA7", "b")]
     assert "(2024). Non-financial" in evidence.reference_list([second])[0]  # a document that cites it alone
+
+
+def test_an_article_is_never_cited_by_the_name_of_the_site_it_is_on(offline):
+    """ "Springer Nature / SpringerMedizin. (2025). Vaccine hesitancy among caregivers ...: a community-based
+    cross-sectional study" (round of 11 October): a study by its researchers, cited by the site that carries it. A
+    host that says it is a journal's site or a repository, and a title that says the work is a study, are enough to
+    know the publisher of the page is not the author."""
+    study = "Vaccine hesitancy among caregivers of children under five years in Gulu City: a community-based cross-sectional study"
+    for url, title, publisher in (
+            ("https://www.springermedizin.de/prevalence-and-factors/123", study, "Springer Nature / SpringerMedizin"),
+            ("https://journals.example.ac.ug/index.php/j/article/view/12", "Teacher motivation and learner performance", "Example Journal of Education"),
+            ("https://repository.out.ac.tz/4816/", "The impact of teachers' motivation on pupils' performance", "The Open University of Tanzania"),
+            ("https://ir.example.ac.ug/handle/1/2", "Mobile money adoption among traders", "Example University"),
+            ("https://www.example-news.org/health/42", "Uptake of the malaria vaccine in Mukono District: a cohort study", "Example News"),
+            ("https://www.thelancet.com/journals/lancet/article/PIIS0140", "Efficacy of a malaria vaccine", "The Lancet")):
+        assert pipeline._web_source(_Finding(url, title=title, publisher=publisher, published="2025")) is None, url
+    for url, title, publisher in (
+            ("https://www.ubos.org/statistics/", "Statistical abstract 2024", "Uganda Bureau of Statistics"),
+            ("https://www.who.int/publications/i/item/who-wer-9919-225-248", "Malaria vaccine: WHO position paper – May 2024", "World Health Organization"),
+            ("https://www.unesco.org/en/articles/global-report-teachers", "Global report on teachers: addressing teacher shortages and transforming the profession", "UNESCO"),
+            ("https://dhsprogram.com/pubs/pdf/FR333.pdf", "Uganda Demographic and Health Survey 2022", "Uganda Bureau of Statistics")):
+        kept = pipeline._web_source(_Finding(url, title=title, publisher=publisher, published="2024"))
+        assert kept is not None and kept.organisation == publisher, url

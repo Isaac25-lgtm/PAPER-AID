@@ -1324,3 +1324,33 @@ LibreOffice's rendering of the contents field is not verified on the development
 Also: a chapter's preview is cited as the combined proposal will be (letters told apart among everything the
 proposal's chapters cite, in the text and in that chapter's list). The contents field and the page numbers were
 checked in Word 16 on an exported proposal; LibreOffice was not available to check.
+
+## 2026-10-11 — The live path: what still needed fixing before a pilot (owner: "fix what needs fixing")
+
+After Codex's two audits the owner asked what was still open on the live path and said to fix what needed fixing.
+
+- **The premium model re-checks a repair** (`final_signoff_model`, with the standard model as its stand-in in
+  `gemini_fallbacks`). Until now a review after a repair went to the standard model, so repaired wording, the wording
+  most likely to be wrong, could be approved without the premium model ever reading it. The owner's rule (the premium
+  model approves what is delivered) now holds on the live path wherever the premium model can answer; the standard
+  model stands in only when it cannot. On workflow 2 nothing stands in, as before. Quotes already priced every review
+  round at the premium rate, so no price or budget changes; a job that needs a repair costs a little more to run.
+- **A finding from an old source is given as dated** (`evidence.dated`, more than ten years between the source and
+  the day it was gathered): the writer and the reviewers are told to give its figures as that year's. Said in words,
+  never enforced by code: an old source is often the right one for a theory.
+- **An article is never cited by the name of the site it is on.** Beside the named sites, a host that says it is a
+  journal's site or a repository (`journals.`, `repository.`, `ir.` ...) and a title that says the work is a study
+  (`STUDY_TITLE`) mean the page's publisher is not its author: with no author found, the finding is left out.
+- **Diagrams where a subject explains a point with one** (`w-plan-v6`). The drawing of graphs from data was already
+  shared by every path, but only a question that used the word got one. The plan now asks for the graph a subject
+  conventionally uses (supply and demand, a subsidy, a market structure's curves), one to a section, never as
+  decoration. Coursework only, as before: a concept note's or funding proposal's numbers are evidence or the
+  applicant's own.
+- **Basic questions** (`w-draft-v7`, `w-search-v2`): the plain way of saying a thing first, with examples of what not
+  to write taken from PaperAid's own output; for a standard account, textbooks, open textbooks and universities'
+  course material before a company's page. Proposals keep `p-search-v1`.
+
+**Not changed, and why.** The cap on what a job may spend is loose (about $11 allowed for a draft that costs $0.30),
+but a flat lower number would stop a long piece of coursework, whose honest cost is several times a short one's: it
+needs calibrating by length, from measured costs. Calculation coursework still has no sound treatment; refusing such
+assignments at the start is the owner's decision.

@@ -43,6 +43,21 @@ def evidence_id(source_key: str, passage: str) -> str:
     return "E" + hashlib.sha256(f"{source_key.lower()}|{words}".encode()).hexdigest()[:6]
 
 
+DATED_AFTER = 10  # years between a source and the day its finding was gathered
+
+
+def dated(item: EvidenceItem) -> str:
+    """What a writer and a reviewer are told about a finding from an old source, with the finding: a figure from it is
+    that year's figure. A 2003 paper was cited for what malaria "accounts for" today (round of 11 October 2026). Said
+    in words, never enforced by code: an old source is often the right one for a theory or a history."""
+    year = re.fullmatch(r"(?:19|20)\d{2}", item.source.year or "")
+    gathered = re.match(r"(?:19|20)\d{2}", item.retrieved_on or "")
+    if not year or not gathered or int(gathered.group(0)) - int(year.group(0)) <= DATED_AFTER:
+        return ""
+    return (f"Published in {year.group(0)}. A figure or a description of the situation from it is given as that time's, with its year "
+            f"(“in {year.group(0)}, ...”), never as the present position; for the present, use a recent finding or say none was found.")
+
+
 def dedupe(items: Iterable[EvidenceItem]) -> list[EvidenceItem]:
     """One entry per id; a usable copy wins over one that could not be confirmed."""
     kept: dict[str, EvidenceItem] = {}

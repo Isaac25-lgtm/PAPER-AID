@@ -436,6 +436,8 @@ def _for_model(items: list[EvidenceItem], passages: bool = False) -> list[dict[s
         entry = {"id": i.id, "statement": i.statement, "scope": i.scope, "source": f"{ev.author_label(i.source)}, {i.source.year or 'n.d.'}"}
         if i.caution:
             entry["caution"] = f"Only partly supported: {i.caution} Claim no more than the source's own words say, for the people, place and period they name."
+        if dated := ev.dated(i):
+            entry["dated"] = dated
         if passages:
             entry["sourceWords"] = i.passage
         out.append(entry)

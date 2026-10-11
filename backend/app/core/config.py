@@ -89,7 +89,11 @@ class Settings(BaseSettings):
     premium_audit_thinking: Thinking = "HIGH"
     fix_model: str = "gemini-3.8-flash"  # targeted repairs of what an audit named
     fix_thinking: Thinking = "MEDIUM"
-    final_signoff_model: str = "gemini-3.8-flash"  # re-review after a repair: were the findings resolved?
+    # The re-review after a repair (were the findings resolved, and did nothing break?). The premium model's since
+    # 2026-10-11 (owner): repaired wording is the wording most likely to be wrong, and the owner's rule is that the
+    # premium model approves what is delivered. The standard model stands in only when the premium one cannot answer
+    # (`gemini_fallbacks`); on workflow 2 nothing stands in (`freeze_vertex`).
+    final_signoff_model: str = "gemini-3.1-pro-preview"
     final_signoff_thinking: Thinking = "MEDIUM"  # it checks named findings; the premium audit keeps HIGH
     # The algorithm revision of 2026-10-09 (owner, with Codex's plan). WORKFLOW is frozen into every quote's engine
     # (Engine.workflow), so a job keeps the algorithm it was priced with. 1: as before. 2: see Engine.workflow.
@@ -117,7 +121,7 @@ class Settings(BaseSettings):
     # only if they cost no more in any billing dimension. The premium auditor is a preview model on shared
     # capacity: a live run was rate-limited four times in five minutes, so its review goes to the first
     # auditor's model rather than failing the job after its retries. GEMINI_FALLBACKS={} turns this off.
-    gemini_fallbacks: dict[str, list[str]] = {"premium_audit": ["first_audit"]}
+    gemini_fallbacks: dict[str, list[str]] = {"premium_audit": ["first_audit"], "final_signoff": ["first_audit"]}
     paperaid_gemini_models: dict[str, GeminiModel] = CONFIRMED_MODELS
     vertex_prices: dict[str, VertexPrice] = VERIFIED_VERTEX_PRICES
     model_unit_prices: dict[str, float] = {}  # derived from vertex_prices: "vertex:model:unit" → USD per unit

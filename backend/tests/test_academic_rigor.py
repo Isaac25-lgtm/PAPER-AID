@@ -345,3 +345,31 @@ def test_page_numbers_carry_on_into_the_references(client):
     numbering = re.findall(r"<w:pgNumType[^>]*>", xml)
     assert len(numbering) == 3 and ['w:start="1"' in n for n in numbering] == [True, True, False]  # the preliminary pages, the first chapter, then on
     assert 'w:fmt="lowerRoman"' in numbering[0] and all('w:fmt="decimal"' in n for n in numbering[1:])
+
+
+# --- the owner's go-ahead of 11 October: what still needed fixing on the live path -----------------------------------
+
+def test_a_finding_from_an_old_source_is_given_to_the_writer_and_reviewers_as_dated():
+    """A 2003 paper was cited for what malaria "accounts for" today (round of 11 October)."""
+    old = _item(support="SUPPORTED", source=EvidenceSource(url="https://example.org/k", title="Malaria morbidity and mortality in Uganda", year="2003"))
+    for given in (proposals._for_model([old], passages=True)[0], works._for_model([old], passages=True)[0]):
+        assert given["dated"].startswith("Published in 2003.") and "never as the present position" in given["dated"] and "caution" not in given
+    for year in ("2016", "2021", "", "n.d."):  # ten years or fewer before it was gathered, or no year to go by
+        recent = _item(support="SUPPORTED", source=EvidenceSource(url="https://example.org/r", title="A study", year=year))
+        assert "dated" not in proposals._for_model([recent])[0] and evidence.dated(recent) == "", year
+    assert evidence.dated(_item(source=EvidenceSource(url="https://example.org/o", title="A study", year="2015"))) != ""  # eleven years
+
+
+def test_the_plan_asks_for_the_diagram_a_subject_explains_a_point_with_and_basic_answers_are_plain():
+    from pathlib import Path
+
+    from app.ai.orchestration import STEPS
+
+    folder = Path(__file__).parents[1] / "app" / "ai" / "prompts"
+    plan = (folder / f"{STEPS['w_plan'].prompt}.md").read_text(encoding="utf-8")
+    assert "asks for the graph by name and says what it must show, whether or not the question uses the word" in plan and "none where a diagram would only decorate" in plan
+    draft = (folder / f"{STEPS['w_draft'].prompt}.md").read_text(encoding="utf-8")
+    assert "Say a thing the plain way first" in draft and "Plain is not casual" in draft and "give each one as \"figure\" data" in draft
+    assert STEPS["w_search"].prompt == "w-search-v2" and STEPS["p_search"].prompt == "p-search-v1"  # proposals search as before
+    search = (folder / "w-search-v2.md").read_text(encoding="utf-8")
+    assert "open textbooks" in search and "use a company's page only for a fact about that company's own product" in search

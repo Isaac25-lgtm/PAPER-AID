@@ -173,15 +173,16 @@ STEPS: dict[str, Step] = {
     # v3 (academic audit, 2026-10-11): the evidence a question's demand calls for (standard accounts for a question that asks to describe or explain).
     "w_needs": Step("ANALYST", Stage.RESEARCHING, "w-needs-v3", 4000),
     "w_extract": Step("ANALYST", Stage.RESEARCHING, "p-extract-v1", 4000),
-    "w_search": Step("ANALYST", Stage.RESEARCHING, "p-search-v1", 4000),
+    # w-search-v2 (2026-10-11): for a standard account, textbooks and teaching material before a company's page. Proposals keep p-search-v1.
+    "w_search": Step("ANALYST", Stage.RESEARCHING, "w-search-v2", 4000),
     "w_verify": Step("INTEGRITY", Stage.RESEARCHING, "verify-v1", 6000),
-    "w_plan": Step("WRITER", Stage.PLANNING, "w-plan-v5", 12000),  # v2: claims within the evidence, a repair changes only what was raised; v3: says the plan is internal (Codex audit of 9239dd0); v4: the applicant's own facts never asserted either way, no page claims (live funding runs 2026-10-03); v5 (2026-10-11): a direct answer at the depth the command words and the level ask for
+    "w_plan": Step("WRITER", Stage.PLANNING, "w-plan-v6", 12000),  # v2: claims within the evidence, a repair changes only what was raised; v3: says the plan is internal (Codex audit of 9239dd0); v4: the applicant's own facts never asserted either way, no page claims (live funding runs 2026-10-03); v5 (2026-10-11): a direct answer at the depth the command words and the level ask for
     "w_plan_review": Step("EVALUATOR", Stage.PLANNING, "w-plan-review-v2", 6000),  # v2: blocking issues apart from suggestions; a repair is checked against the earlier issues (live funding runs 2026-10-03)
     "w_results": Step("WRITER", Stage.PLANNING, "w-results-v3", 16000),  # v2: says the Results Model is internal (Codex audit of 9239dd0); v3: measurement rules (live funding runs 2026-10-03)
     "w_results_review": Step("EVALUATOR", Stage.PLANNING, "w-results-review-v4", 8000),  # v2: blocking issues apart from suggestions; a repair is checked against the earlier issues
     # v4: only explicitly hypothetical prose uses example numbers; v5 (academic audit, 2026-10-11): cautions, gaps, ratios, the answer each command word
     # asks for at the student's level, ordinary examples from their setting.
-    "w_draft": Step("WRITER", Stage.DRAFTING, "w-draft-v6", 16000),
+    "w_draft": Step("WRITER", Stage.DRAFTING, "w-draft-v7", 16000),
     "w_integrity": Step("INTEGRITY", Stage.AUDITING, "w-integrity-v1", 6000),
     # v2 (Codex's audit of 1a3b1e7): the evaluator reads each section beside the evidence it cites, cautions included.
     "w_evaluate": Step("EVALUATOR", Stage.AUDITING, "w-evaluate-v2", 8000),
