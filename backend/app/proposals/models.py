@@ -419,6 +419,9 @@ class StepInput(Camel):
     # Findings from a source more than ten years old are given to the models as dated (`evidence.dated`). Set when the
     # step is priced, so a step priced before is asked exactly as it was (Codex's audit of 6e513af).
     tell_dated: bool = False
+    # The day the step was priced, told to the models with their work: a reviewer with no date called sources of 2025
+    # and 2026 "future-dated" (confirmation round, 2026-10-12). Frozen here, so a step is asked the same on a retry.
+    today: str = ""
 
     project_id: str
     step: Literal["PLAN", "CHAPTER", "REVISE", "COMPLETE", "PROFILE"]

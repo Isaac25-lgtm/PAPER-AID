@@ -218,6 +218,18 @@ def _notes_to_student(inp: WorkStepInput, paragraph: str) -> list[str]:
     return [s for s in ev.sentences(paragraph) if NOTE_TO_STUDENT.search(s)]
 
 
+def _mark_copied(current: dict[str, SectionText], keys: list[str], library_items: dict[str, EvidenceItem]) -> list[str]:
+    """A source's own wording that the repairs left in these sections is marked as the quotation it is, as in a
+    chapter (`ev.quote_copied`), before the wording is reviewed for the last time. Returns the sections changed."""
+    changed = []
+    for key in keys:
+        told = [ev.quote_copied(p, library_items) for p in current[key].paragraphs]
+        if told != current[key].paragraphs:
+            current[key] = current[key].model_copy(update={"paragraphs": told})
+            changed.append(key)
+    return changed
+
+
 def _examples_allowed(inp: WorkStepInput) -> bool:
     """Hypothetical worked examples and drawn graphs belong to coursework answers only; a funding
     proposal's or concept note's numbers must always be evidence or the applicant's own (finding 4)."""
@@ -833,7 +845,7 @@ def _common(inp: WorkStepInput) -> dict[str, Any]:
     return {
         "spec": _compact_spec(_spec(inp)), "student": _student(inp), "position": inp.plan.position if inp.plan else "", "title": inp.plan.title if inp.plan else inp.inputs.title,
         "numberTokens": numbers.for_model(tokens), "results": inp.results.model_dump(by_alias=True) if inp.results else None,
-        "style": STYLE, "note": inp.note,
+        "style": STYLE, "note": inp.note, **({"today": inp.today} if inp.today else {}),
         "rulesForWriting": [
             "Cite only with evidence tokens exactly as given (for example ⟦E1a2b3c⟧); never type a citation by hand.",
             "Use a number token whenever a figure from the budget, Results Model, call or the student's answers is needed; never type such a figure yourself.",
@@ -1146,6 +1158,7 @@ def _final(ctx: "StageContext", runner: WorkRunner, inp: WorkStepInput, current:
                      for s in inp.plan.sections if s.key in current],
         "rules": [{"rule": r["id"], "requirement": r["requirement"], "severity": r["severity"]} for r in doc_rules],
         "coverage": [c.model_dump(by_alias=True) for c in spec.coverage], "priorities": spec.priorities,
+        **({"today": inp.today} if inp.today else {}),
     }
     return runner.final(payload), doc_rules
 
@@ -1288,7 +1301,8 @@ def _final_review(runner: WorkRunner, inp: WorkStepInput, document: WorkDocument
     base = {"spec": _compact_spec(spec), "student": _student(inp), "position": inp.plan.position if inp.plan else "",
             "rules": [{"rule": r["id"], "requirement": r["requirement"], "severity": r["severity"],
                        **({"sections": rule_sections[r["id"]]} if rule_sections and r["id"] in rule_sections else {})} for r in doc_rules],
-            "coverage": [c.model_dump(by_alias=True) for c in spec.coverage], "priorities": spec.priorities}
+            "coverage": [c.model_dump(by_alias=True) for c in spec.coverage], "priorities": spec.priorities,
+            **({"today": inp.today} if inp.today else {})}
     # Every whole request stays within FINAL_PART_WORDS (Codex audit 2026-10-01; Codex review 2026-10-07,
     # finding 8): what every part repeats (specification, rules, the student's context, front matter, the
     # manifest) and the sign-off's room for earlier findings come off first, then a tenth for the request's
@@ -1850,6 +1864,7 @@ def stage_auditing(ctx: "StageContext") -> None:
     if not workflow2:
         review(targets)
     stripped: list[str] = []
+    quoted: list[str] = []  # sections where a source's own wording was marked as a quotation
     fix_notes: list[str] = []
 
     def repair_for(final: "Final", doc_rules: list[dict[str, Any]]) -> dict[str, list[str]]:
@@ -1889,6 +1904,7 @@ def stage_auditing(ctx: "StageContext") -> None:
     def settle_wording() -> None:
         """Compression and withholding, then whatever they changed is checked again (not repaired)."""
         _compress_to_limits(ctx, runner, inp, current, tokens, library_items, editable)
+        quoted.extend(k for k in _mark_copied(current, list(editable), library_items) if k not in quoted)
         for key in list(editable):
             cleaned = _strip(inp, current[key], library_items, allowed)
             if cleaned != current[key]:
@@ -2035,6 +2051,9 @@ def stage_auditing(ctx: "StageContext") -> None:
     warnings = []
     if stripped:
         warnings.append(f"PaperAid withheld sentences it could not trace to confirmed evidence or your own details in: {', '.join(stripped)}.")
+    if marked := [headings.get(k, k) for k in quoted if k not in reverted]:
+        warnings.append(f"PaperAid put quotation marks around words taken directly from a source in: {', '.join(marked)}. Read each quotation: keep it, or put the point "
+                        "in your own words.")
     if concerns:
         warnings.append("Some points still need your attention: " + " | ".join(concerns)[:800])
     share = len(editable) / len(targets) if base is not None and targets else 1.0

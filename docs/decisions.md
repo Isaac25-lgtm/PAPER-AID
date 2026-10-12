@@ -1467,3 +1467,30 @@ The interrupted gate was investigated read-only: Windows System event 1074 recor
 off at 2026-10-11 22:09:26, exactly when `release_qual2.log` last changed. The local interruption is therefore
 consistent with shutdown, not a recorded test failure. Claude must run a fresh gate to completion; the old log
 is not a passing result.
+
+### Verified and released (12 October)
+
+Codex's four fixes were read, run and released as `6f728f6`. The five sentences reproduced on `b14b50f` are kept and
+given to the reviewer, and both plain controls are still caught; with `evidence.py` and `service.py` put back to
+`b14b50f`, 14 of the 21 new tests fail. The gate ran to completion (1,462 backend tests) and all four browser
+journeys passed on the commit.
+
+The refused Chapter Three was run again on real models and delivered: its Quality Control section now describes the
+planned pilot pre-test, the expert review and the reliability testing as what the study will do, with no result
+invented.
+
+A confirmation round on the released code (two courseworks, a funding proposal, a funding concept note, a research
+concept note, a full proposal; real models) delivered every document. None spoke to the student, repeated a
+sentence across sections or carried a site's name as a title. Two defects were left and are fixed in the commit that
+follows:
+
+- **A coursework kept a run of a source's words after its repairs.** A chapter's were marked as a quotation before
+  approval; a work's were only reported. Works now mark them too (`_mark_copied`), before the wording's last review,
+  and the student is told where.
+- **Reviewers called sources dated 2025 and 2026 "future-dated"**, and the student was shown the warning: no model
+  was told what day it is. The day a step is priced is now frozen with it (`today` on the step's input) and given
+  with the work to writers and reviewers; a step priced before is asked as it was.
+
+The round's times (22 to 35 minutes a document) say nothing about the product: single model calls took up to five
+minutes and connections were lost while the same machine was uploading a build and running the gate and the browser
+journeys. Speed under load remains to be measured properly, on a quiet machine or in production.

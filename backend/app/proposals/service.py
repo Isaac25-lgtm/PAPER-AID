@@ -701,6 +701,7 @@ def quote_step(rt: Runtime, user: User, project_id: str, step: Step, note: str, 
     _rate_limit(rt, user, "quote", rt.settings.quotes_per_hour)
     inp = StepInput(
         tell_dated=True,
+        today=utcnow().date().isoformat(),
         project_id=p.id,
         chapter=chapter,
         note=note,
@@ -773,6 +774,7 @@ def _quote_profile(rt: Runtime, user: User, p: Project) -> StepQuote:
     _rate_limit(rt, user, "quote", rt.settings.quotes_per_hour)
     inp = StepInput(
         tell_dated=True,
+        today=utcnow().date().isoformat(),
         project_id=p.id, step="PROFILE", chapter=0, rulebook=p.rulebook, inputs=p.inputs, plan_version=p.plan_version,
         guide=p.guide.path, guide_name=p.guide.name, guide_sha256=p.guide.sha256,
     )

@@ -944,6 +944,7 @@ def _common(inp: StepInput, sample_steps: str) -> dict[str, Any]:
         "chapter": {"number": inp.chapter, "title": spec["title"], "purpose": spec["purpose"]},
         "sampleSize": sample_steps,
         "note": inp.note,
+        **({"today": inp.today} if inp.today else {}),
     }
 
 

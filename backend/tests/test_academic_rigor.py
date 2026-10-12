@@ -619,3 +619,50 @@ def test_a_sign_off_objection_is_something_a_marker_would_count():
     assert "A small matter of wording that a repair left behind" in new and "is not an objection" in new
     assert "Every blocking finding in `previousAudit` is resolved" in new and "Approve only when nothing blocking remains" in new  # what v1 required still stands
     assert new.replace(new[new.index("An objection at sign-off"):new.index("Report every unresolved")], "") == old
+
+
+# --- the confirmation round of 12 October -----------------------------------------------------------------------------
+
+def test_coursework_wording_a_repair_left_copied_is_marked_as_a_quotation():
+    """A coursework kept sixteen of a source's words in a row after its repairs: a chapter's were marked as a
+    quotation before approval, a coursework's were only reported."""
+    from app.proposals.ai import SectionText, Table
+    from app.works import pipeline as works_pipeline
+
+    library = _cited()
+    copied = "Its weakness is plain. In a cross-sectional study, the investigator measures the outcome and the exposures in the study participants at the same time ⟦E0a1b2c⟧."
+    own = "Because exposure and outcome are recorded together, the order of events is unknown ⟦E0a1b2c⟧."
+    current = {"theme1": SectionText(key="theme1", paragraphs=[copied, "A second paragraph in the writer's own words."], table=Table(caption="", rows=[])),
+               "theme2": SectionText(key="theme2", paragraphs=[own], table=Table(caption="", rows=[]))}
+    untouched = current["theme2"]
+    assert works_pipeline._mark_copied(current, ["theme1", "theme2"], library) == ["theme1"]
+    assert current["theme1"].paragraphs[0] == ("Its weakness is plain. “In a cross-sectional study, the investigator measures the outcome and the exposures in the study "
+                                               "participants at the same time” ⟦E0a1b2c⟧.")
+    assert current["theme1"].paragraphs[1] == "A second paragraph in the writer's own words." and current["theme2"] is untouched
+    assert works_pipeline._mark_copied(current, ["theme1", "theme2"], library) == []  # nothing left to mark
+    assert evidence.copied_problems(current["theme1"].paragraphs[0], library) == []
+
+
+def test_the_models_are_told_what_day_it_is(works_client):
+    """Reviewers called sources dated 2025 and 2026 "future-dated", and the student was shown the warning. The day a
+    step is priced is frozen with it and given with the work; a step priced before is asked as it was."""
+    import re
+
+    from app.proposals.models import StepInput
+    from app.works.models import WorkStepInput
+    from tests.test_works import _coursework, _run, _work
+
+    assert StepInput.model_fields["today"].default == "" and WorkStepInput.model_fields["today"].default == ""
+    client = works_client
+    seen: dict[str, dict] = {}
+    for task in ("w_draft", "w_evaluate", "w_final"):
+        client.models.overrides[task] = lambda payload, task=task: (seen.setdefault(task, payload), client.models.default(task, payload))[1]
+    work = _coursework(client)
+    _run(client, work["id"], "PLAN")
+    work = _work(client, work["id"])
+    client.post(f"/api/works/{work['id']}/plan/approve", headers=STUDENT, json={"baseVersion": work["planVersion"]})
+    _, job = _run(client, work["id"], "DRAFT")
+    assert job["status"] == "COMPLETED", job.get("failure")
+    assert set(seen) == {"w_draft", "w_evaluate", "w_final"}
+    for task, payload in seen.items():
+        assert re.fullmatch(r"20\d\d-\d\d-\d\d", payload["today"]), task
