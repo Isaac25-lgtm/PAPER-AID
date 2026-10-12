@@ -408,7 +408,9 @@ _OPENER = re.compile(r"\s*(?:although|though|because|since|while|as|if|when|wher
 # leaves code unable to say whose claim it is or whether it is made at all, and then the sentence is neither flagged
 # nor passed over: it is given to the reviewer to read (Codex's audits of 458e65b, finding 3, and 6e513af, finding 2).
 _NEGATION = re.compile(r"\b(?:not|no|never|neither|nor|cannot|without|hardly|scarcely|non|lacked|lacks?|fail\w*)\b|n['’]t\b", re.I)
-_DOUBT = re.compile(r"\b(?:inconsistent|misleading|mistaken|wrong|false|untrue|incorrect|inaccurate|doubt\w*|questionable|caution\w*)\b", re.I)
+_DOUBT = re.compile(r"\b(?:inconsistent|misleading|mistaken|wrong|false|untrue|incorrect|inaccurate|contradict\w*|unsupported|unjustified|doubt\w*|questionable|caution\w*)\b", re.I)
+_CONDITIONAL = re.compile(r"\s*(?:if|unless|whether|were|had|should|suppose|supposing|assume|assuming|imagine|hypothetically)\b", re.I)
+_QUOTATION = re.compile(r'“[^”]*”|"[^"]*"|‘[^’]*’')
 _REPORTING = re.compile(r"\b(?:claim\w*|argu\w*|assert\w*|contend\w*|suggest\w*|impl(?:y|ies|ied)|say|says|said|saying|state|states|stated|stating|wrote|writes?|conclud\w*"
                         r"|believ\w*|maintain\w*)\b|\bthat\s*$", re.I)
 _AFFIRMS = re.compile(r"(?:yes|y|true|sig\.?|significant|✓|✔|\*{1,3})", re.I)
@@ -455,7 +457,12 @@ def _called_significant(text: str) -> bool:
 
 def _quoted(text: str, at: int) -> bool:
     before = text[:at]
-    return before.count("“") > before.count("”") or before.count('"') % 2 == 1
+    return before.count("“") > before.count("”") or before.count('"') % 2 == 1 or before.count("‘") > before.count("’")
+
+
+def _conditional_or_question(sentence: str) -> bool:
+    """Code cannot treat a condition or a question as an assertion. The reviewer reads its full context."""
+    return bool(_CONDITIONAL.match(sentence)) or sentence.rstrip().endswith("?")
 
 
 def gap_findings(paragraph: str) -> tuple[list[str], list[str]]:
@@ -472,7 +479,8 @@ def gap_findings(paragraph: str) -> tuple[list[str], list[str]]:
                 continue
             opener = _OPENER.match(lead)  # "Although the district is not remote, ...": that clause ends at its comma
             own = _CLAUSE.split(lead[opener.end():] if opener else lead)[-1]
-            if _quoted(sentence, found.start()) or _NEGATION.search(own) or _DOUBT.search(own) or _REPORTING.search(own):
+            if (_conditional_or_question(sentence) or _quoted(sentence, found.start()) or _NEGATION.search(own)
+                    or _DOUBT.search(own) or _REPORTING.search(own)):
                 notes.append(GAP_NOTE.format(sentence.strip()[:400]))
             else:
                 problems.append(f"“{found.group(0)}” claims that nothing has been studied or is known. State the gap as what the sources found do not show (for example "
@@ -512,7 +520,22 @@ def statistic_findings(paragraph: str) -> tuple[list[str], list[str]]:
         every = list(_RATIO.finditer(sentence))
         for m in _disagreeing(sentence):
             n = next(i for i, other in enumerate(every) if other.start() == m.start())
-            said = _said_of(sentence[every[n - 1].end() if n else 0:m.start()], sentence[m.end():every[n + 1].start() if n + 1 < len(every) else len(sentence)])
+            start = every[n - 1].end() if n else 0
+            end = every[n + 1].start() if n + 1 < len(every) else len(sentence)
+            lead, tail = sentence[start:m.start()], sentence[m.end():end]
+            said = _said_of(lead, tail)
+            words = list(_SIGNIFICANT.finditer(lead))
+            after = _SIGNIFICANT.search(_BREAK.split(tail)[0]) if not words else None
+            at = None
+            if words:
+                at = start + words[-1].start()
+            elif after:
+                at = m.end() + after.start()
+            # Quotation marks and a criticism AFTER the figures also change whose claim this is. An unrelated
+            # negative word can make this uncertain, never automatically sound: the reviewer must decide.
+            if said == "PLAIN" and (_conditional_or_question(sentence) or (at is not None and _quoted(sentence, at))
+                                    or _NEGATION.search(tail) or _DOUBT.search(tail)):
+                said = "UNSURE"
             if said == "PLAIN":
                 problems.append(f"The {m.group('level')}% interval reported ({m.group('low')}–{m.group('high')}) includes 1 while the p-value ({m.group('op')} {m.group('p')}) is below 0.05: "
                                 "these do not agree. Do not call this result significant; say what the source reports and that its interval includes 1, or leave the result out.")
@@ -559,11 +582,14 @@ def _word_spans(text: str) -> list[tuple[str, int, int]]:
     return [(m.group(0).casefold(), m.start(), m.end()) for m in re.finditer(r"[^\W_]+(?:['’][^\W_]+)*|\x00+", blanked)]
 
 
-def _copied_run(sentence: str, passages: list[str]) -> tuple[int, int, int] | None:
+def _copied_run(sentence: str, passages: list[str], quoted: list[tuple[int, int]] | None = None) -> tuple[int, int, int] | None:
     """The longest run of a source's own words in the sentence, outside quotation marks: (words, start, end) in the
     sentence, or None when no run reaches COPIED_RUN."""
     spans = _word_spans(sentence)
-    mine = [w for w, _, _ in spans]
+    quoted = [(m.start(), m.end()) for m in _QUOTATION.finditer(sentence)] if quoted is None else quoted
+    # Quoted words BREAK a match; they are excluded before choosing the longest run. Otherwise a long quotation
+    # hides a shorter unquoted passage, and adding quotation marks makes the check falsely report no problem.
+    mine = ["\x00" if any(low <= start < high for low, high in quoted) else word for word, start, _ in spans]
     best: tuple[int, int, int] | None = None
     for passage in passages:
         theirs = [w for w, _, _ in _word_spans(passage)]
@@ -576,9 +602,18 @@ def _copied_run(sentence: str, passages: list[str]) -> tuple[int, int, int] | No
                     if current[j] >= COPIED_RUN and (best is None or current[j] > best[0]):
                         best = (current[j], spans[i - current[j]][1], spans[i - 1][2])
             previous = current
-    if best is None or _quoted(sentence, best[1]):
-        return None
     return best
+
+
+def _copy_sentences(paragraph: str) -> Iterable[tuple[int, str, list[tuple[int, int]]]]:
+    """Sentence-local quote positions, including quotations that span a sentence boundary."""
+    quoted = [(m.start(), m.end()) for m in _QUOTATION.finditer(paragraph)]
+    offset = 0
+    for sentence in sentences(paragraph):
+        start = paragraph.find(sentence, offset)
+        end = start + len(sentence)
+        yield start, sentence, [(max(0, low - start), min(len(sentence), high - start)) for low, high in quoted if low < end and high > start]
+        offset = end
 
 
 def _passages_for(sentence: str, paragraph: str, library: dict[str, EvidenceItem]) -> list[str]:
@@ -591,8 +626,8 @@ def copied_problems(paragraph: str, library: dict[str, EvidenceItem]) -> list[st
     quotation marks. A citation does not make a source's own wording the student's: it is paraphrased or quoted
     (the quality round of 2026-10-11 found runs of 22 words, in 20 of one coursework's 57 sentences)."""
     problems = []
-    for sentence in sentences(paragraph):
-        found = _copied_run(sentence, _passages_for(sentence, paragraph, library))
+    for _, sentence, quoted in _copy_sentences(paragraph):
+        found = _copied_run(sentence, _passages_for(sentence, paragraph, library), quoted)
         if found:
             opening = " ".join(sentence[found[1]:found[2]].split()[:6])
             problems.append(f"A sentence carries {found[0]} words in a row from its source's own wording (“{opening} ...”). Say it in your own words, or keep the exact "
@@ -604,17 +639,15 @@ def quote_copied(paragraph: str, library: dict[str, EvidenceItem]) -> str:
     """The last line of defence for copied wording: what the repair rounds left is marked as the quotation it is,
     so nothing printed passes a source's words off as the student's. Nothing else changes; the same paragraph when
     there is nothing to mark."""
-    out = []
-    changed = False
-    for sentence in sentences(paragraph):
-        for _ in range(3):
-            found = _copied_run(sentence, _passages_for(sentence, paragraph, library))
-            if not found:
-                break
-            sentence = f"{sentence[:found[1]]}“{sentence[found[1]:found[2]]}”{sentence[found[2]:]}"
-            changed = True
-        out.append(sentence)
-    return " ".join(out) if changed else paragraph
+    mark: list[tuple[int, int]] = []
+    for start, sentence, quoted in _copy_sentences(paragraph):
+        passages = _passages_for(sentence, paragraph, library)
+        while (found := _copied_run(sentence, passages, quoted)) is not None:
+            mark.append((start + found[1], start + found[2]))
+            quoted.append((found[1], found[2]))  # each iteration excludes its run: no arbitrary three-run limit
+    for low, high in sorted(mark, reverse=True):  # original offsets and all unrelated whitespace stay intact
+        paragraph = f"{paragraph[:low]}“{paragraph[low:high]}”{paragraph[high:]}"
+    return paragraph
 
 
 def repeated_sentences(texts: list[tuple[str, list[str]]]) -> dict[str, list[str]]:

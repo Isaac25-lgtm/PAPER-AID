@@ -504,7 +504,7 @@ def chapter(rt: Runtime, user: User, project_id: str, number: int, version: int 
             scope += also.cited
     citer = _citer(rt, p, scope)
     for earlier in (1, 2):  # APA 6 names three to five authors in full at their first citation in the proposal
-        if earlier < number != CONCEPT and (prior := _chapter_doc(rt, p.chapter(earlier))):
+        if version is None and earlier < number != CONCEPT and (prior := _chapter_doc(rt, p.chapter(earlier))):
             _render(prior, citer, None)
     sources = [citer.library[i].source for i in doc.cited if i in citer.library]
     return ChapterView(

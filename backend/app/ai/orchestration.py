@@ -152,8 +152,9 @@ STEPS: dict[str, Step] = {
     # v5: those statements are the student's and cannot be changed here, but they are not beyond question: an unsound one
     # is told to the student as a note on their plan (Codex's re-audit of d4d2bc7: v4 called them "correct as they stand").
     # v6 (Codex's audit of 6e513af): the sentences code could not judge are given to be read ("forYourJudgement"); so from w-evaluate-v3.
-    "p_review": Step("lead", Stage.AUDITING, "p-review-v6", 8000),
-    "p_review_peer": Step("writer", Stage.AUDITING, "p-review-v6", 8000),
+    # v7: attribution, quotation and conditional wording are judged against the evidence, never automatically passed.
+    "p_review": Step("lead", Stage.AUDITING, "p-review-v7", 8000),
+    "p_review_peer": Step("writer", Stage.AUDITING, "p-review-v7", 8000),
     "p_fix": Step("writer", Stage.AUDITING, "p-fix-v5", 16000),  # v3: the same rules as p-draft-v3
     "p_readiness": Step("lead", Stage.AUDITING, "p-readiness-v1", 8000),
     # Workflow 2 (algorithm revision 2026-10-09): the final editor of a chapter's sections, as for works (w_edit).
@@ -188,7 +189,7 @@ STEPS: dict[str, Step] = {
     "w_draft": Step("WRITER", Stage.DRAFTING, "w-draft-v8", 16000),
     "w_integrity": Step("INTEGRITY", Stage.AUDITING, "w-integrity-v1", 6000),
     # v2 (Codex's audit of 1a3b1e7): the evaluator reads each section beside the evidence it cites, cautions included.
-    "w_evaluate": Step("EVALUATOR", Stage.AUDITING, "w-evaluate-v3", 8000),
+    "w_evaluate": Step("EVALUATOR", Stage.AUDITING, "w-evaluate-v4", 8000),
     "w_repair": Step("WRITER", Stage.AUDITING, "w-repair-v8", 16000),  # v5: explicit hypothetical framing and graph preservation; v6: the rules of w-draft-v5
     "w_adjudicate": Step("ADJUDICATOR", Stage.AUDITING, "w-adjudicate-v1", 4000),
     "w_final": Step("EVALUATOR", Stage.AUDITING, "w-final-v2", 8000),  # v2: the exact deliverable, every verdict required (Sol with one final reviewer)

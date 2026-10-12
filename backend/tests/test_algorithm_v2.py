@@ -1411,7 +1411,7 @@ def test_a_reviewer_is_shown_what_paperaid_places_apart_and_its_rejection_still_
     assert "p_fix" in client.models.tasks  # and was sent to the writer to put right
     objectives = seen["objectives"]
     assert objectives["placedByPaperAid"][0].endswith("General Objective") and not any("General Objective" in p for p in objectives["text"])
-    assert get_runtime().store.get(job["id"]).quote.engine.prompts["p_review"] == "p-review-v6"
+    assert get_runtime().store.get(job["id"]).quote.engine.prompts["p_review"] == "p-review-v7"
 
 
 def test_a_job_priced_on_the_earlier_review_prompt_is_asked_as_it_was():

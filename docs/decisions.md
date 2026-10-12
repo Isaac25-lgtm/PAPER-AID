@@ -1441,3 +1441,29 @@ student, or carried a site's name as a title.
 - News sites and university marketing blogs are still cited for facts and definitions that have better sources.
 - The same facts are restated across a concept note's background, problem statement and justification.
 - Under load (ten to sixteen jobs at once on one machine) courseworks took 8.5 to 21.7 minutes; searches timed out.
+
+## 2026-10-12 — Four confirmed audit findings on `b14b50f` implemented locally
+
+The owner asked Codex to implement the four findings Claude reproduced. These changes are not a release record;
+Claude will run the regression tests and release gate. No paid calls, commit, push or deployment were made for this work.
+
+- Conditional claims and questions are not treated as plain assertions. A quoted significance claim or criticism
+  after its figures is also uncertain. `gap_findings` and `statistic_findings` send these to `forYourJudgement`,
+  without automatically removing them. Plain absolute gaps and significance overclaims remain blocking findings.
+- New reviewer prompts `p-review-v7` and `w-evaluate-v4` distinguish reporting, criticising and endorsing a claim.
+  Attribution and quotation grant no automatic approval; evidence, scope and reasoning still determine the verdict.
+  Earlier prompt files and hashes remain available to frozen engines. No new model step or provider route is added.
+- Historical chapter views render citation order within that version alone, including APA 6 first-citation names.
+  Current views still use the combined proposal's citation context.
+- Copied wording is searched only outside quoted spans. An existing long quotation cannot hide a shorter unquoted
+  run. Every remaining run is marked, without a three-run cutoff; quotation positions are tracked across sentences
+  and insertion preserves unrelated whitespace and citation tokens. Chapter changes still precede final approval.
+
+Validation left to Claude: the new regressions, affected suites, full gate, and the refused Chapter Three on real
+models. That real-model rerun needs paid-call authorization. These fixes do not decide whether partial chapters
+should be enabled, change the existing premium-review fallback, or enable the newer workflows.
+
+The interrupted gate was investigated read-only: Windows System event 1074 records a Start-menu-initiated power
+off at 2026-10-11 22:09:26, exactly when `release_qual2.log` last changed. The local interruption is therefore
+consistent with shutdown, not a recorded test failure. Claude must run a fresh gate to completion; the old log
+is not a passing result.

@@ -433,10 +433,14 @@ def test_what_code_cannot_judge_is_given_to_the_reviewer_and_never_removed():
     assert evidence.for_the_reviewer(["The role of fathers remains largely unstudied.", "The eligible population remains unknown."]) == []
 
 
-def test_the_chapter_reviewer_is_sent_the_sentences_to_read_and_the_chapter_keeps_them(client):
+@pytest.mark.parametrize("denial", [
+    "It would be misleading to say that no study has examined this question.",
+    "If no study has examined caregivers in Mukono District, this survey would be the first to do so.",
+    "Were it true that this relationship has never been studied, a scoping review would be the right first step.",
+])
+def test_the_chapter_reviewer_is_sent_the_sentences_to_read_and_the_chapter_keeps_them(client, denial):
     from tests.fake_models import FakeModels
 
-    denial = "It would be misleading to say that no study has examined this question."
     asked: list[dict] = []
 
     def draft(payload):
