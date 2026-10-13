@@ -603,7 +603,7 @@ def test_the_prompts_carry_what_the_round_showed():
     assert "Saying what will be done is not inventing a result" in prompt("p_draft") and "describing a planned step is not inventing a result" in prompt("p_fix")
     review = prompt("p_plan_review")
     assert "is not invented merely because neither the student nor the evidence stated it" in review and "Never ask for the plan's proposals to be emptied" in review
-    assert STEPS["p_plan_review"].prompt == STEPS["p_plan_review_peer"].prompt == "p-plan-review-v3"
+    assert STEPS["p_plan_review"].prompt == STEPS["p_plan_review_peer"].prompt == "p-plan-review-v4"
 
 
 def test_a_sign_off_objection_is_something_a_marker_would_count():

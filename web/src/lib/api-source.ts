@@ -251,6 +251,7 @@ export function createApiSource({ config, getAuthHeaders }: Options): DataSource
       updateDetails: (id, inputs, titlePage, citation) =>
         request<Project>(`/api/projects/${id}/details`, { method: 'POST', body: JSON.stringify({ inputs, titlePage, citation }) }),
       confirmSampling: (id, baseVersion) => request<Project>(`/api/projects/${id}/sampling`, { method: 'POST', body: JSON.stringify({ baseVersion }) }),
+      confirmPopulationFrame: (id, baseVersion) => request<Project>(`/api/projects/${id}/population-frame`, { method: 'POST', body: JSON.stringify({ baseVersion }) }),
       confirmSetting: (id, studyArea, population, baseVersion) =>
         request<Project>(`/api/projects/${id}/setting`, { method: 'POST', body: JSON.stringify({ studyArea, population, baseVersion }) }),
       savePlan: (id, plan, baseVersion) => request<Project>(`/api/projects/${id}/plan`, { method: 'POST', body: JSON.stringify({ plan, baseVersion }) }),

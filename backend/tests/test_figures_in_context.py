@@ -34,7 +34,7 @@ def test_chapter_one_about_children_aged_6_24_months_is_written_and_kept(client)
     months and cross-reference Section 1.9; the chapter completes with those sentences intact."""
     plan = {**PLAN, "title": f"Factors associated with malaria vaccine uptake among {AGED} in Lira District",
             "population": f"Caregivers of {AGED}", "specificObjectives": [f"To estimate the proportion of {AGED} who will have received age-appropriate doses", *PLAN["specificObjectives"][1:]]}
-    client.models.overrides["p_finalise"] = lambda payload: plan if "title" in payload["draft"] else payload["draft"]  # the plan, not Chapter One's briefs
+    client.models.overrides["p_finalise"] = lambda payload: {**plan, "methods": payload["draft"].get("methods")} if "title" in payload["draft"] else payload["draft"]
     from tests.fake_models import FakeModels
 
     def draft(payload):

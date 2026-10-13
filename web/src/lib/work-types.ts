@@ -188,6 +188,8 @@ export interface BudgetLine {
   unit: string
   unitCost: number
   enteredTotal: number | null
+  /** The applicant says the line costs the budget nothing (given in kind): known at no cost, never a gap. */
+  inKind?: boolean
   year: number
   activityIds: string[]
   support: boolean

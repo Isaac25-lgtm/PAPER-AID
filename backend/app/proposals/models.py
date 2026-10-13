@@ -52,6 +52,9 @@ class ProposalInputs(Camel):
     population_size: int | None = Field(default=None, ge=1, le=100_000_000)
     population_source: str = Field(default="", max_length=300)
     expected_participants: int | None = Field(default=None, ge=1, le=1_000_000)
+    design_effect: float | None = Field(default=None, gt=0, le=100, allow_inf_nan=False)
+    nonresponse_rate: float | None = Field(default=None, ge=0, lt=1, allow_inf_nan=False)
+    sampling_adjustment_source: str = Field(default="", max_length=300)
     # Bachelor's, Postgraduate Diploma and Master's: three specific objectives, four only when the student asks
     # (owner decision 2026-10-08, the standard guide); PhD follows the handbook. Older releases ignore it.
     four_objectives: bool = False
@@ -90,6 +93,44 @@ class AlignmentRow(Camel):
     analysis: str = Field(max_length=1000)  # how it will be analysed
 
 
+class MethodVariable(Camel):
+    """A proposed measurement, not an observed result or a certified clinical definition."""
+
+    id: str = Field(pattern=r"^V[1-9][0-9]?$", max_length=3)
+    label: str = Field(min_length=1, max_length=200)
+    role: Literal["OUTCOME", "PREDICTOR", "ADJUSTMENT", "MEDIATOR", "MODERATOR", "EXPLORATORY"]
+    scale: Literal["BINARY", "NOMINAL", "ORDINAL", "CONTINUOUS", "COUNT", "TEXT", "UNKNOWN"]
+    definition: str = Field(default="", max_length=500)
+    unit: str = Field(default="", max_length=150)
+    instrument: str = Field(default="", max_length=300)
+    period: str = Field(default="", max_length=150)
+    rationale: str = Field(default="", max_length=400)
+
+
+class ObjectiveMethod(Camel):
+    objective: int = Field(ge=1, le=8)
+    outcome_id: str = Field(default="", max_length=3)
+    predictor_ids: list[str] = Field(default_factory=list, max_length=24)
+    estimator: Literal["DESCRIPTIVE", "BINARY_LOGISTIC", "MULTINOMIAL_LOGISTIC", "ORDINAL_LOGISTIC", "LINEAR", "POISSON", "NEGATIVE_BINOMIAL", "THEMATIC", "OTHER"]
+    rationale: str = Field(default="", max_length=500)
+    diagnostics: str = Field(default="", max_length=500)
+    transformation: str = Field(default="", max_length=400)
+
+
+class MethodsContract(Camel):
+    """Versioned research decisions shared by plan, chapter reviews and framework. Missing on legacy plans.
+    Unknown protocol details stay unknown; a schema is never proof that a method is appropriate."""
+
+    version: Literal[1] = 1
+    variables: list[MethodVariable] = Field(default_factory=list, max_length=24)
+    objectives: list[ObjectiveMethod] = Field(default_factory=list, max_length=8)
+    selection_units: str = Field(default="", max_length=500)
+    population_frame: str = Field(default="", max_length=500)
+    recruitment: str = Field(default="", max_length=500)
+    ethics: str = Field(default="", max_length=600)
+    population_origin: Literal["USER_SUPPLIED", "UNKNOWN"] = "UNKNOWN"  # set by code, never by a model
+
+
 SampleMethod = Literal["YAMANE", "COCHRAN", "KREJCIE_MORGAN", "CENSUS", "SATURATION", "AUTHOR_STATED", "NOT_APPLICABLE"]
 
 
@@ -105,6 +146,9 @@ class SampleSize(Camel):
     proportion: float = Field(default=0.5, gt=0, lt=1)
     stated: int | None = Field(default=None, ge=1, le=1_000_000)  # the student's own number (qualitative, or a stated size)
     rationale: str = Field(default="", max_length=600)
+    design_effect: float | None = Field(default=None, gt=0, le=100, allow_inf_nan=False)
+    nonresponse_rate: float | None = Field(default=None, ge=0, lt=1, allow_inf_nan=False)
+    adjustment_source: str = Field(default="", max_length=300)
 
 
 class ResearchGap(Camel):
@@ -151,6 +195,7 @@ class ProposalPlan(Camel):
     # Standard sampling settings PaperAid put in because the plan gave none, for a method that calculates
     # a sample from them: the student acknowledges them before approving (Codex audit 2026-09-30).
     sampling_assumed: list[str] = []
+    methods: MethodsContract | None = None
 
 
 class EvidenceSource(Camel):
@@ -167,7 +212,7 @@ class EvidenceSource(Camel):
     issue: str = ""
     pages: str = ""
     doi: str = ""
-    kind: Literal["ARTICLE", "REPORT", "WEB"] = "WEB"
+    kind: Literal["ARTICLE", "BOOK", "REPORT", "WEB"] = "WEB"
     metadata: Literal["CROSSREF", "OPENALEX", "PAGE"] = "PAGE"
 
 
@@ -296,7 +341,7 @@ class PlanReview(Camel):
 class Acknowledgment(Camel):
     """A student's explicit acknowledgment, tied to the exact plan version and text it was given for."""
 
-    kind: Literal["OBJECTIONS", "SAMPLING"]
+    kind: Literal["OBJECTIONS", "SAMPLING", "FRAME"]
     plan_version: int
     text_sha256: str
     at: datetime = Field(default_factory=utcnow)
@@ -422,6 +467,7 @@ class StepInput(Camel):
     # The day the step was priced, told to the models with their work: a reviewer with no date called sources of 2025
     # and 2026 "future-dated" (confirmation round, 2026-10-12). Frozen here, so a step is asked the same on a retry.
     today: str = ""
+    academic_policy: Literal[0, 1] = 0  # frozen at pricing; legacy steps retain their previous semantic checks
 
     project_id: str
     step: Literal["PLAN", "CHAPTER", "REVISE", "COMPLETE", "PROFILE"]
@@ -467,4 +513,5 @@ class ChapterDocument(Camel):
     full_price: int = 0  # a partly written chapter: its full price when first written (UGX)
     paid: int = 0  # what the draft and its finishes have been charged so far; a finish costs at most the rest
     approval: Approval | None = None  # workflow 2: the final editor's decision on the sections this version wrote
+    framework_plan: ProposalPlan | None = None  # file storage only: the plan that supplied this version's framework
     words: int

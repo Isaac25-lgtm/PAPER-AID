@@ -32,6 +32,31 @@ def _pct(value: float) -> str:
 
 
 def calculate(s: SampleSize) -> SampleResult:
+    base = _base(s)
+    if base.size is None or (s.design_effect is None and s.nonresponse_rate is None):
+        return base
+    if s.method not in ("YAMANE", "COCHRAN", "KREJCIE_MORGAN"):
+        return SampleResult(None, base.steps, base.figures, "Design-effect and non-response adjustments apply to a calculated quantitative sample, not a census or a stated qualitative sample.")
+    if not s.adjustment_source.strip():
+        return SampleResult(None, base.steps, base.figures, "Give the rationale or source for the sampling adjustments you supplied.")
+    effect, response = s.design_effect, s.nonresponse_rate
+    size = base.size
+    steps, figures = base.steps, base.figures
+    if effect is not None:
+        size = math.ceil(size * effect)
+        steps += f" Applying the supplied design effect {effect:g}: ceil({base.size} × {effect:g}) = {size:,}."
+        figures += f" {effect:g} {size}"
+    if response is not None:
+        adjusted = math.ceil(size / (1 - response))
+        steps += f" Allowing the supplied {_pct(response)} non-response: ceil({size} / (1 − {response:g})) = {adjusted:,} invitations."
+        size = adjusted
+        figures += f" {response:g} {_pct(response)} {size} 1"
+    if s.population is not None and size > s.population:
+        return SampleResult(None, steps, figures, "The adjusted recruitment target exceeds the stated accessible population. Review the sampling design and assumptions; PaperAid has not capped or changed them.")
+    return SampleResult(size, steps + " These are supplied assumptions, not evidence of statistical power.", figures)
+
+
+def _base(s: SampleSize) -> SampleResult:
     e, p, level, n_pop = s.margin, s.proportion, s.confidence, s.population
     if s.method == "NOT_APPLICABLE":
         return SampleResult(None, "", "")

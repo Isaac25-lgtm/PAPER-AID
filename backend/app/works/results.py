@@ -2,8 +2,10 @@
 The logframe, workplan and M&E table are built here by code from the one model, so they can never
 disagree with it or with each other (FP-073 to FP-075)."""
 
+import re
+
 from app.works.budget import Check
-from app.works.models import Indicator, ResolvedSpec, ResultsModel
+from app.works.models import Activity, Indicator, ResolvedSpec, ResultsModel
 
 # Each indicator rule checks its own field (validators-v3): the applicant settles baselines and targets,
 # PaperAid the rest, so each is reported, and owned, separately.
@@ -74,6 +76,30 @@ def checks(model: ResultsModel | None, spec: ResolvedSpec) -> list[Check]:
                       ("FP-075", "The M&E table is built from the indicators.")):
         out.append((rid, "PASS", note))
     return out
+
+
+TIMED = re.compile(r"\b(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|eighteen)[\s-]+(?:weeks?|months?)\b|\bmonths?\s+\d+|\bquarters?\s+\d+", re.I)
+
+
+def schedule_note(model: ResultsModel | None, months: int | None, text: str, holds_workplan: bool) -> str:
+    """The schedule a funding proposal commits to, for the reviewer of a section that prints the workplan or speaks
+    of weeks or months: every activity's months, exactly as the workplan draws them. A proposal promised set-up, two
+    six-month cycles one after the other and a later follow-up inside twelve months, while each activity's own
+    months fitted the project (independent audit, 2026-10-12). Whether what the section promises fits is a
+    judgement: code gives the months and decides nothing, and activities may well run at the same time."""
+    if model is None or not model.activities or not (holds_workplan or TIMED.search(text)):
+        return ""
+
+    def when(a: Activity) -> str:
+        if not a.start_month or not a.end_month:
+            return "no months given"
+        return f"month {a.start_month}" if a.start_month == a.end_month else f"months {a.start_month} to {a.end_month}"
+
+    rows = "; ".join(f"{a.id} ({a.statement[:70].rstrip()}): {when(a)}" for a in model.activities)
+    return (f"The schedule this proposal commits to, as PaperAid prints it in the workplan{f', for a project of {months} months' if months else ''}: {rows}. "
+            "Read what this section says about timing against it: time to set up before the first delivery, how long each cycle or cohort lasts, whether they follow "
+            "one another or run together, and any follow-up after the last one must fit these months and the project's length. Activities may run at the same time: "
+            "that is a defect only where the text says one follows another.")
 
 
 TO_ADD = "[to be added]"  # a figure only the applicant gives, not entered yet

@@ -26,7 +26,7 @@ from app.jobs import state
 from app.jobs.models import Approval, Job, JobStatus, ReadinessItem, Stage, TopicRoute, Wallet, utcnow
 from app.pricing.billing import settle_completed
 from app.pricing.quote import round_up
-from app.proposals import decisions, evidence, profile, rulebook, sampling
+from app.proposals import decisions, evidence, methods, profile, rulebook, sampling
 from app.proposals.ai import LOST_SEARCH, Correction, Grade, ProposalRunner, SectionText, Table
 from app.proposals.models import (
     ChapterDocument,
@@ -80,7 +80,7 @@ def _label(item: EvidenceItem) -> str:
     return f"{evidence.author_label(item.source)}, {item.source.year or 'n.d.'}"
 
 
-def _for_model(items: list[EvidenceItem], passages: bool = False, dated: bool = False) -> list[dict[str, str]]:
+def _for_model(items: list[EvidenceItem], passages: bool = False, dated: bool = False, provenance: bool = False) -> list[dict[str, str]]:
     out = []
     for i in items:
         entry = {"id": i.id, "statement": i.statement, "scope": i.scope, "source": _label(i)}
@@ -90,17 +90,35 @@ def _for_model(items: list[EvidenceItem], passages: bool = False, dated: bool = 
             entry["dated"] = note
         if passages:
             entry["sourceWords"] = i.passage
+        if provenance:
+            entry.update(evidence.source_context(i))
         out.append(entry)
     return out
 
 
 def _study(inp: StepInput) -> dict[str, Any]:
-    return inp.inputs.model_dump(by_alias=True)
+    data = inp.inputs.model_dump(by_alias=True)
+    for key in ("designEffect", "nonresponseRate", "samplingAdjustmentSource"):
+        if data.get(key) in (None, ""):
+            data.pop(key, None)
+    return data
 
 
 def _plan(inp: StepInput) -> dict[str, Any]:
     assert inp.plan is not None
-    return inp.plan.model_dump(by_alias=True)
+    return _plan_data(inp.plan)
+
+
+def _plan_data(plan: ProposalPlan) -> dict[str, Any]:
+    """A plan as a model is given it. What a plan without the methods contract or sampling adjustments never had is
+    left out, so such a plan is asked about exactly as it was before those fields existed."""
+    data = plan.model_dump(by_alias=True)
+    if data.get("methods") is None:
+        data.pop("methods", None)
+    for key in ("designEffect", "nonresponseRate", "adjustmentSource"):
+        if data.get("sampleSize", {}).get(key) in (None, ""):
+            data.get("sampleSize", {}).pop(key, None)
+    return data
 
 
 def _allowed_text(inp: StepInput, extra: str = "") -> str:
@@ -488,32 +506,47 @@ def _scholarly_source(work: dict[str, str]) -> EvidenceSource:
     data, origin = (record, "CROSSREF") if record and record.get("title") else (work, "OPENALEX")
     return EvidenceSource(
         url=work["url"],
-        title=data["title"],
+        title=_registered_title(data),
         # a registration that names no author: the index's own record of who wrote it, never an entry without one
         authors=_authors(data.get("authors", "")) or _authors(work.get("authors", "")),
         year=data.get("year", ""),
-        container=data.get("container", ""),
+        container=(data.get("publisher", "") or data.get("container", "")) if "book" in data.get("type", "") else data.get("container", ""),
         volume=data.get("volume", ""),
         issue=data.get("issue", ""),
         pages=data.get("pages", ""),
         doi=work.get("doi", ""),
-        kind="ARTICLE" if "article" in (data.get("type") or "") or data.get("container") else "REPORT",
+        kind="BOOK" if "book" in (data.get("type") or "") else "ARTICLE" if "article" in (data.get("type") or "") or data.get("container") else "REPORT",
         metadata=origin,  # type: ignore[arg-type]
     )
+
+
+def _registered_title(record: dict[str, str]) -> str:
+    title, subtitle = record.get("title", ""), record.get("subtitle", "")
+    return f"{title}: {subtitle}" if subtitle and not title.casefold().endswith(subtitle.casefold()) else title
 
 
 def _registered_by_title(title: str, published: str) -> dict[str, str] | None:
     """A web page that is a registered article (a journal's own page without a DOI in its address):
     its authors, journal and DOI from Crossref, taken only for the same title and, when the page gives
     one, the same year, so it is cited by its authors rather than its journal's name."""
-    wanted = re.sub(r"[^a-z0-9]", "", title.casefold())
+    def plain(text: str) -> str:
+        return re.sub(r"[^a-z0-9]", "", text.casefold())
+
+    wanted = plain(title)
     if len(wanted) < 20:
         return None
     year = YEAR.search(published)
     for record in fetch.crossref_search(title, rows=3) or []:
         same_year = not year or not record.get("year") or record["year"] == year.group(0)
-        if record.get("doi") and record.get("authors") and re.sub(r"[^a-z0-9]", "", record.get("title", "").casefold()) == wanted and same_year:
+        if not (record.get("doi") and record.get("authors") and same_year):
+            continue
+        if plain(record.get("title", "")) == wanted:
             return record
+        # A book's subtitle is registered apart from its title: the page's full title is the two together, exactly
+        # ("A Tale of Two Cultures: Qualitative and Quantitative Research in the Social Sciences" was cited by its
+        # press, independent audit 2026-10-12). Nothing looser than the whole title is taken for the same work.
+        if record.get("subtitle") and plain(record.get("title", "") + record["subtitle"]) == wanted:
+            return {**record, "title": f"{record['title']}: {record['subtitle']}"}
     return None
 
 
@@ -577,8 +610,10 @@ def _web_source(finding) -> EvidenceSource | None:
         if not authors and hosted:
             return None  # registered, but nobody is named as its author by the registration or by the page
         return EvidenceSource(
-            url=finding.url, title=record["title"], authors=authors, organisation="" if authors else finding.publisher.strip(), year=record["year"],
-            container=record["container"], volume=record["volume"], issue=record["issue"], pages=record["pages"], doi=doi, kind="ARTICLE", metadata="CROSSREF",
+            url=finding.url, title=_registered_title(record), authors=authors, organisation="" if authors else finding.publisher.strip(), year=record["year"],
+            container=(record.get("publisher") or record["container"]) if "book" in record.get("type", "") else record["container"],
+            volume=record["volume"], issue=record["issue"], pages=record["pages"], doi=doi,
+            kind="BOOK" if "book" in record.get("type", "") else "ARTICLE", metadata="CROSSREF",
         )
     if declared.get("authors"):
         return EvidenceSource(
@@ -586,6 +621,10 @@ def _web_source(finding) -> EvidenceSource | None:
             volume=declared["volume"], issue=declared["issue"], pages=declared["pages"], doi=doi, kind="ARTICLE" if declared["container"] else "REPORT", metadata="PAGE",
         )
     if declared or hosted:
+        return None
+    if metadata.bare_site(finding.publisher):
+        # No person and no body is named, only where the page lives ("gu.ac.ug", "icpac.net"). An address wrote nothing:
+        # with its real authors not found, the finding is not used (independent audit, 2026-10-12).
         return None
     year = YEAR.search(finding.published)
     title = finding.title.strip()
@@ -695,18 +734,24 @@ def stage_planning(ctx: "StageContext") -> None:
     usable = [i for i in _library(ctx, inp).values() if i.usable]
     rules = rulebook.rules_for(inp.rulebook)
     if inp.step == "PLAN":
-        payload = {"study": _study(inp), "level": inp.inputs.level, "rules": rules, "evidence": _for_model(usable, dated=inp.tell_dated), "note": inp.note}
+        payload = {"study": _study(inp), "level": inp.inputs.level, "rules": rules,
+                   "evidence": _for_model(usable, passages=bool(getattr(inp, "academic_policy", 0)), dated=inp.tell_dated, provenance=bool(getattr(inp, "academic_policy", 0))), "note": inp.note,
+                   **({"today": inp.today} if inp.today else {})}
+        if runner._prompt_for("p_plan") == "p-plan-v6":
+            payload["methodsContractVersion"] = 1
         if runner._prompt_for("p_plan") not in ("p-plan-v1", "p-plan-v2"):
             low, high = rulebook.objective_range(inp.rulebook, inp.inputs.level, inp.inputs.four_objectives, inp.goal == "CONCEPT")
             payload["objectiveCount"] = {"min": low, "max": high}
         final, draft, critique = runner.negotiate("plan", payload)
 
         def settled(answer: dict[str, Any]) -> ProposalPlan:
+            if runner._prompt_for("p_plan") == "p-plan-v6" and not isinstance(answer.get("methods"), dict):
+                raise PermanentStageError("PLAN_INVALID", "PaperAid could not preserve this plan's methods crosswalk. Nothing was charged; please try again.", "methods contract missing from final plan")
             return _confirmed_gap(_student_figures_only(_plan_from_model(answer), inp), {i.id for i in usable})
 
         plan = settled(final)
         if not runner._engine.single_reviewer:  # older engines: both approvals, as they were priced
-            runner.approve_plan({**payload, "finalPlan": plan.model_dump(by_alias=True)})
+            runner.approve_plan({**payload, "finalPlan": _plan_data(plan)})
             ctx.put_json("plan.json", {"plan": plan.model_dump(by_alias=True), "draft": draft, "critique": critique.model_dump()})
             return
         plan, review = _reviewed_plan(runner, payload, plan, usable, settled,
@@ -723,9 +768,10 @@ def stage_planning(ctx: "StageContext") -> None:
         "chapter": inp.chapter,
         "sections": [{"key": s.key, "number": s.number, "heading": s.heading, "requirement": s.brief, "words": s.words, "table": s.table} for s in sections],
         "rules": rules,
-        "evidence": _for_model(usable, dated=inp.tell_dated),
+        "evidence": _for_model(usable, dated=inp.tell_dated, provenance=bool(getattr(inp, "academic_policy", 0))),
         "sampleSize": sample.steps if sample else "",
         "note": inp.note,
+        **({"today": inp.today} if inp.today else {}),
         **_finish_context(ctx, inp),
     }
     final, draft, critique = runner.negotiate("briefs", payload)
@@ -746,7 +792,8 @@ def _reviewed_plan(runner: ProposalRunner, payload: dict[str, Any], plan: Propos
     code_issues = [*code_issues, *rules(plan)]  # the guide's code-checkable rules (objective counts, primary question, hypothesis pairs)
     review = PlanReview(outcome="NOT_REVIEWED", reason="REVIEW_UNAVAILABLE")
     for round_ in runner.audit_rounds(REVIEW_REPAIRS + 1):
-        approved, objections, reason = runner.review_plan({**payload, "finalPlan": _as_reviewed(plan)})
+        approved, objections, reason = runner.review_plan({**payload, "finalPlan": _as_reviewed(plan),
+                                                          **({"academicMethods": methods.context(plan)} if plan.methods else {})})
         objections = [*code_issues, *objections]
         if approved and not code_issues:
             return plan, PlanReview(outcome="APPROVED")
@@ -754,7 +801,7 @@ def _reviewed_plan(runner: ProposalRunner, payload: dict[str, Any], plan: Propos
                             reason="CODE_RULE" if approved and code_issues else reason, objections=list(dict.fromkeys(objections))[:20])
         if round_ == REVIEW_REPAIRS or runner.budget_reached or review.outcome == "NOT_REVIEWED":
             break
-        plan = settled(runner.repair_plan(payload, plan.model_dump(by_alias=True), review.objections))
+        plan = settled(runner.repair_plan(payload, _plan_data(plan), review.objections))
         plan, code_issues = _typed_citations(plan, usable)
         code_issues = [*code_issues, *rules(plan)]
     return plan, review
@@ -765,6 +812,11 @@ def _as_reviewed(plan: ProposalPlan) -> dict[str, Any]:
     margin or proportion for a power analysis or a qualitative sample) are left out: they only hold
     standard placeholder values, which read as contradictions (real-model pilot 2026-09-30)."""
     data = plan.model_dump(by_alias=True)
+    if plan.methods is None:
+        data.pop("methods", None)
+    for key in ("designEffect", "nonresponseRate", "adjustmentSource"):
+        if data["sampleSize"].get(key) in (None, ""):
+            data["sampleSize"].pop(key, None)
     if plan.sample_size.method not in QUANTITATIVE:
         for key in ("margin", "proportion", "confidence"):
             data["sampleSize"].pop(key, None)
@@ -924,11 +976,26 @@ def _student_figures_only(plan: ProposalPlan, inp: StepInput) -> ProposalPlan:
         size = size.model_copy(update={"population": None, "population_source": ""})
         asks.append("How many people are in the accessible population, and where does that figure come from?")
     elif size.population is not None:
-        size = size.model_copy(update={"population_source": student.population_source or size.population_source})
+        size = size.model_copy(update={"population_source": student.population_source if getattr(inp, "academic_policy", 0) else student.population_source or size.population_source})
     if size.stated is not None and size.stated != student.expected_participants:
         size = size.model_copy(update={"stated": None})
         asks.append("How many participants do you expect to include, and why is that enough?")
-    return plan.model_copy(update={"sample_size": size, "questions_for_student": list(dict.fromkeys(asks))})
+    # These adjustments are never selected by a model. The explicit input is copied, or absent.
+    size = size.model_copy(update={"design_effect": student.design_effect, "nonresponse_rate": student.nonresponse_rate,
+                                   "adjustment_source": student.sampling_adjustment_source})
+    contract = plan.methods
+    if contract is not None:
+        contract = contract.model_copy(update={"population_origin": "USER_SUPPLIED" if size.population is not None and size.population == student.population_size else "UNKNOWN"})
+        if size.population is not None:
+            asks.append(f"Confirm that your population figure ({size.population:,}) counts the eligible study population, not a wider administrative population; confirm its source and date.")
+    variables = plan.variables
+    if contract is not None and plan.study_type in ("QUANTITATIVE", "MIXED"):
+        from app.proposals.models import Variables
+
+        variables = Variables(independent=[v.label for v in contract.variables if v.role == "PREDICTOR"],
+                              dependent=[v.label for v in contract.variables if v.role == "OUTCOME"],
+                              intervening=[f"{v.label} ({v.role.lower()})" for v in contract.variables if v.role not in ("PREDICTOR", "OUTCOME")])
+    return plan.model_copy(update={"sample_size": size, "methods": contract, "variables": variables, "questions_for_student": list(dict.fromkeys(asks))})
 
 
 # --- DRAFTING ------------------------------------------------------------------------------------
@@ -943,6 +1010,7 @@ def _common(inp: StepInput, sample_steps: str) -> dict[str, Any]:
         "rules": rulebook.rules_for(inp.rulebook),
         "chapter": {"number": inp.chapter, "title": spec["title"], "purpose": spec["purpose"]},
         "sampleSize": sample_steps,
+        **({"academicMethods": methods.context(inp.plan, inp.inputs)} if inp.plan.methods else {}),
         "note": inp.note,
         **({"today": inp.today} if inp.today else {}),
     }
@@ -971,7 +1039,7 @@ def _section_items(inp: StepInput, library: dict[str, EvidenceItem], briefs: dic
         items.append(
             {
                 "key": s.key, "number": s.number, "heading": s.heading, "requirement": requirement, "words": s.words, "table": s.table,
-                "objective": s.objective, "points": brief["points"], "evidence": _for_model(assigned, passages=True, dated=inp.tell_dated),
+                "objective": s.objective, "points": brief["points"], "evidence": _for_model(assigned, passages=True, dated=inp.tell_dated, provenance=bool(getattr(inp, "academic_policy", 0))),
                 "_words": " ".join(["w"] * s.words),  # batches are sized by the words each section will produce
             }
         )
@@ -1287,12 +1355,16 @@ def _checks(inp: StepInput, key: str, text: SectionText, library: dict[str, Evid
         problems += evidence.citation_problems(paragraph, usable)
         problems += evidence.figure_problems(paragraph, library, allowed)
         problems += evidence.gap_problems(paragraph) + evidence.statistic_problems(paragraph) + evidence.copied_problems(paragraph, library)
+        if getattr(inp, "academic_policy", 0):
+            problems += evidence.provision_problems(paragraph, library)
         if tense:
             problems += evidence.tense_problems(paragraph)
     table_allowed = _table_allowed(inp, allowed)
     for cell in _cells(text):  # a caption and a cell are read as prose is, and a row with its headings
         found = evidence.citation_problems(cell, usable) + evidence.figure_problems(cell, library, table_allowed)
         found += evidence.gap_problems(cell) + evidence.statistic_problems(cell)
+        if getattr(inp, "academic_policy", 0):
+            found += evidence.provision_problems(cell, library)
         problems += [f"In the table: {p}" for p in found]
     problems += [f"In the table: {p}" for p in evidence.table_problems(text.table.rows)]
     if not any(p.strip() for p in text.paragraphs):
@@ -1300,9 +1372,9 @@ def _checks(inp: StepInput, key: str, text: SectionText, library: dict[str, Evid
     return list(dict.fromkeys(problems))
 
 
-def _to_read(text: SectionText) -> list[str]:
+def _to_read(text: SectionText, library: dict[str, EvidenceItem] | None = None) -> list[str]:
     """The sentences of a section that code could not judge (its prose, caption and cells), for its reviewer."""
-    return evidence.for_the_reviewer([*text.paragraphs, *_cells(text)])
+    return evidence.for_the_reviewer([*text.paragraphs, *_cells(text)], library=library)
 
 
 def _cleaned(inp: StepInput, text: SectionText, library: dict[str, EvidenceItem], usable: set[str], allowed: str) -> SectionText:
@@ -1393,7 +1465,7 @@ def _edited(ctx: "StageContext", runner: ProposalRunner, inp: StepInput, items: 
         if not asked:
             return []
         flags = runner.flag([{"id": a["id"], "before": a["before"], "after": a["after"],
-                              "evidence": _for_model([library[i] for i in dict.fromkeys(evidence.cited_ids(a["after"])) if i in library], passages=True, dated=inp.tell_dated)} for a in asked],
+                              "evidence": _for_model([library[i] for i in dict.fromkeys(evidence.cited_ids(a["after"])) if i in library], passages=True, dated=inp.tell_dated, provenance=bool(getattr(inp, "academic_policy", 0)))} for a in asked],
                             {"plan": _plan(inp)})
         return [{"key": a["key"], "paragraph": a["paragraph"],
                  "problem": (flags[a["id"]].problem.strip() if a["id"] in flags else "") or "The check could not confirm this correction against its evidence."}
@@ -1478,6 +1550,7 @@ def stage_auditing(ctx: "StageContext") -> None:
     grades: dict[str, Grade] = {}
     stripped: list[str] = []
     quoted: list[str] = []
+    unnumbered: list[str] = []
     approval: Approval | None = None
     if workflow2:
         current, grades, unresolved, stripped, approval = _edited(ctx, runner, inp, items, current, library, allowed, {**common, "vetting": vetting})
@@ -1487,7 +1560,7 @@ def stage_auditing(ctx: "StageContext") -> None:
     for round_ in ([] if workflow2 else runner.audit_rounds(rounds + 1)):
         ctx.activity("CHECKING", round_ + 1, rounds + 1)
         problems = {k: _checks(inp, k, t, library, allowed) for k, t in current.items()}
-        review = [review_item(inp, items, k, t, problems[k], apart, _to_read(t) if judged else None) for k, t in current.items()]
+        review = [review_item(inp, items, k, t, problems[k], apart, _to_read(t, library if getattr(inp, "academic_policy", 0) else None) if judged else None) for k, t in current.items()]
         grades = runner.grade(review, {**common, "vetting": vetting})
         unresolved = {}
         for key in current:
@@ -1510,17 +1583,24 @@ def stage_auditing(ctx: "StageContext") -> None:
         # exact wording that is delivered (Codex, plan review 2026-09-29).
         # A source's own wording that the repair rounds left is marked as the quotation it is, before the same
         # approval (quality round 2026-10-11): what is printed never passes a source's words off as the student's.
-        marked = {key: text.model_copy(update={"paragraphs": told}) for key, text in current.items()
-                  if (told := [evidence.quote_copied(p, library) for p in text.paragraphs]) != text.paragraphs}
+        marked: dict[str, SectionText] = {}
+        for key, text in current.items():
+            as_quoted = [evidence.quote_copied(p, library) for p in text.paragraphs]
+            told = [evidence.drop_provisions(p, library) for p in as_quoted] if getattr(inp, "academic_policy", 0) else as_quoted
+            if as_quoted != text.paragraphs:
+                quoted.append(items[key]["heading"])
+            if told != as_quoted:
+                unnumbered.append(items[key]["heading"])
+            if told != text.paragraphs:
+                marked[key] = text.model_copy(update={"paragraphs": told})
         current.update(marked)
-        quoted += [items[key]["heading"] for key in marked]
         cleaned = {key: tidy for key, text in current.items() if (tidy := _cleaned(inp, text, library, usable, allowed)) != text}
         if cleaned or marked:
             stripped += [items[key]["heading"] for key in cleaned]
             current.update(cleaned)
             cleaned = {key: current[key] for key in dict.fromkeys([*marked, *cleaned])}
             problems = {k: _checks(inp, k, current[k], library, allowed) for k in cleaned}
-            regraded = runner.grade([review_item(inp, items, k, current[k], problems[k], apart, _to_read(current[k]) if judged else None) for k in cleaned],
+            regraded = runner.grade([review_item(inp, items, k, current[k], problems[k], apart, _to_read(current[k], library if getattr(inp, "academic_policy", 0) else None) if judged else None) for k in cleaned],
                                     {**common, "vetting": vetting})
             for key in cleaned:
                 grade = regraded.get(key)
@@ -1568,6 +1648,9 @@ def stage_auditing(ctx: "StageContext") -> None:
     if quoted:
         warnings.append("PaperAid put quotation marks around words taken directly from a source in: " + ", ".join(dict.fromkeys(quoted))
                         + ". Read each quotation: keep it, or put the point in your own words.")
+    if unnumbered:
+        warnings.append("PaperAid left out the section number of a law where its source was not the law itself, in: " + ", ".join(dict.fromkeys(unnumbered))
+                        + ". Check the number in the law's own text before you add it.")
     unreviewed = [f"{items[k]['number']} {items[k]['heading']}" for k in current if k not in grades]
     if unreviewed:
         warnings.append(f"PaperAid could not fully check these sections this time, so read them carefully: {', '.join(unreviewed)}.")
@@ -1718,6 +1801,7 @@ def _completed(inp: StepInput, base: ChapterDocument, written: ChapterDocument) 
     document = ChapterDocument(
         number=base.number, title=base.title, plan_version=base.plan_version, sections=sections, cited=cited, words=words,
         missing=[k for k in base.missing if k not in fresh], to_align=list(base.to_align),
+        framework_plan=inp.plan if "framework" in fresh else base.framework_plan,
     )
     return document, done
 
@@ -1748,7 +1832,7 @@ def _revision(
             current[s.key] = SectionText(key=s.key, paragraphs=s.paragraphs, table=Table(caption=s.table_caption, rows=s.table or []))
             asked = [f"Your supervisor asked: {c}" for c in inp.revise[s.key]]
             cited = [library[i] for i in evidence.cited_ids(" ".join(s.paragraphs)) if i in library and library[i].usable]
-            items[s.key] = {**items[s.key], "points": asked, "evidence": _for_model(cited, passages=True, dated=inp.tell_dated) or items[s.key]["evidence"]}
+            items[s.key] = {**items[s.key], "points": asked, "evidence": _for_model(cited, passages=True, dated=inp.tell_dated, provenance=bool(getattr(inp, "academic_policy", 0))) or items[s.key]["evidence"]}
     if not current:
         raise PermanentStageError("NOTHING_TO_REVISE", "The sections your comments are on are no longer in this chapter. Nothing was charged.", "revise: no sections")
     first = [
@@ -1779,6 +1863,7 @@ def _merge(base: ChapterDocument, revised: ChapterDocument, keys: set[str]) -> t
             cited += [i for i in evidence.cited_ids(field) if i not in cited]
     words = sum(len(evidence.ANY_TOKEN.sub(" ", p).split()) for s in sections for p in s.paragraphs)
     merged = ChapterDocument(number=base.number, title=base.title, plan_version=revised.plan_version, sections=sections, cited=cited, words=words,
+                             framework_plan=revised.framework_plan if "framework" in fresh else base.framework_plan,
                              to_align=[k for k in base.to_align if k not in fresh],
                              # what the chapter still lacks and has cost is not the revision's to forget (Codex audit, finding 5)
                              missing=list(base.missing), full_price=base.full_price, paid=base.paid)
@@ -1829,13 +1914,14 @@ def _document(inp: StepInput, current: dict[str, SectionText], items: dict[str, 
         )
     words = sum(len(evidence.ANY_TOKEN.sub(" ", p).split()) for s in sections for p in s.paragraphs)
     spec = rulebook.chapter_spec(inp.rulebook, inp.chapter)
-    return ChapterDocument(number=inp.chapter, title=spec["title"], plan_version=inp.plan_version, sections=sections, cited=cited, words=words)
+    return ChapterDocument(number=inp.chapter, title=spec["title"], plan_version=inp.plan_version, sections=sections, cited=cited, words=words,
+                           framework_plan=inp.plan.model_copy(deep=True) if any(s.key == "framework" for s in sections) else None)
 
 
 def _table(table: Table) -> list[list[str]] | None:
     rows = [[c.strip() for c in r] for r in table.rows if any(c.strip() for c in r)]
-    width = len(rows[0]) if rows else 0
-    return [r[:width] + [""] * (width - len(r)) for r in rows] if len(rows) >= 2 and width >= 2 else None
+    width = max((len(r) for r in rows), default=0)
+    return [r + [""] * (width - len(r)) for r in rows] if len(rows) >= 2 and width >= 2 else None
 
 
 def _readiness(
@@ -1933,6 +2019,9 @@ def _readiness(
                           + "; ".join(inp.plan.sampling_assumed) + ". Confirm them with your supervisor, or set your own in the plan.")[:600],
                 )
             )
+        if inp.plan.methods is not None and size.population is not None:
+            items.append(ReadinessItem(id="C3-FRAME", question="Does your population figure count the eligible sampling frame?", basis="AUTHOR", chapter=3,
+                                       status="NEEDS_REVIEW", note="This population and its stated source came from you; PaperAid has not independently verified them. Confirm scope, eligibility and date before using the sample calculation."))
     return items
 
 

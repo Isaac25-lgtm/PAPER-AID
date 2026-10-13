@@ -4,7 +4,8 @@ import { Button } from '../../components/ui/button'
 import { Checkbox, Input, Select, TextArea } from '../../components/ui/field'
 import { Alert, Card } from '../../components/ui/primitives'
 import { DataError, useData } from '../../lib/data'
-import type { AlignmentRow, EvidenceItem, Project, ProposalPlan, ResearchGap, SampleMethod, SampleSize, StudyType } from '../../lib/proposal-types'
+import type { AlignmentRow, EvidenceItem, MethodsContract, Project, ProposalPlan, ResearchGap, SampleMethod, SampleSize, StudyType } from '../../lib/proposal-types'
+import { MethodsEditor } from './methods-editor'
 import { PlanStatusBadge, ReviewNotice, STUDY_TYPES } from './shared'
 
 const METHODS: Record<SampleMethod, string> = {
@@ -120,9 +121,15 @@ export function PlanEditor({ project, onSaved }: { project: Project; onSaved: (p
     setDirty(true)
   }
   const setSize = (patch: Partial<SampleSize>) => set({ sampleSize: { ...plan.sampleSize, ...patch } })
+  const setMethods = (next: MethodsContract) => set({ methods: next, variables: plan.studyType === 'QUANTITATIVE' || plan.studyType === 'MIXED' ? {
+    independent: next.variables.filter((v) => v.role === 'PREDICTOR').map((v) => v.label),
+    dependent: next.variables.filter((v) => v.role === 'OUTCOME').map((v) => v.label),
+    intervening: next.variables.filter((v) => v.role !== 'PREDICTOR' && v.role !== 'OUTCOME').map((v) => `${v.label} (${v.role.toLowerCase()})`),
+  } : plan.variables })
   const setObjectives = (objectives: string[]) => {
     const rows: AlignmentRow[] = objectives.map((_, i) => plan.alignment.find((r) => r.objective === i + 1) ?? { objective: i + 1, data: '', collection: '', analysis: '' })
-    set({ specificObjectives: objectives, alignment: rows })
+    set({ specificObjectives: objectives, alignment: rows, ...(plan.methods ? { methods: { ...plan.methods, objectives: objectives.map((_, i) =>
+      plan.methods!.objectives.find((o) => o.objective === i + 1) ?? { objective: i + 1, outcomeId: '', predictorIds: [], estimator: 'OTHER' as const, rationale: '', diagnostics: '', transformation: '' }) } } : {}) })
   }
   const setRow = (objective: number, patch: Partial<AlignmentRow>) =>
     set({ alignment: plan.alignment.map((r) => (r.objective === objective ? { ...r, ...patch } : r)) })
@@ -253,7 +260,7 @@ export function PlanEditor({ project, onSaved }: { project: Project; onSaved: (p
         </div>
         <TextArea label="Sampling technique and procedure" rows={2} value={plan.sampling} onChange={(e) => set({ sampling: e.target.value })} />
         <TextArea label="Inclusion and exclusion criteria" rows={2} value={plan.inclusion} onChange={(e) => set({ inclusion: e.target.value })} />
-        {plan.studyType !== 'QUALITATIVE' && plan.studyType !== 'NON_EMPIRICAL' && (
+        {!plan.methods && plan.studyType !== 'QUALITATIVE' && plan.studyType !== 'NON_EMPIRICAL' && (
           <div className="grid gap-4 sm:grid-cols-3">
             <Input label="Independent variables" value={plan.variables.independent.join(', ')} onChange={(e) => set({ variables: { ...plan.variables, independent: list(e.target.value) } })} hint="Separate with commas" />
             <Input label="Dependent variables" value={plan.variables.dependent.join(', ')} onChange={(e) => set({ variables: { ...plan.variables, dependent: list(e.target.value) } })} />
@@ -262,6 +269,7 @@ export function PlanEditor({ project, onSaved }: { project: Project; onSaved: (p
         )}
         <TextArea label="Theory or framework, and why it fits" rows={2} value={plan.theory} onChange={(e) => set({ theory: e.target.value })} />
         <TextArea label="Scope (geographical, time and content)" rows={2} value={plan.scope} onChange={(e) => set({ scope: e.target.value })} />
+        {plan.methods && <MethodsEditor value={plan.methods} onChange={setMethods} />}
       </Card>
 
       <Card className="space-y-3 p-5">
@@ -321,6 +329,17 @@ export function PlanEditor({ project, onSaved }: { project: Project; onSaved: (p
             </Select>
             <Input label="Expected proportion (p)" type="number" step={0.05} min={0.05} max={0.95} value={plan.sampleSize.proportion} onChange={(e) => setSize({ proportion: Number(e.target.value) })} />
           </div>
+        )}
+        {(plan.sampleSize.method === 'YAMANE' || plan.sampleSize.method === 'KREJCIE_MORGAN' || plan.sampleSize.method === 'COCHRAN') && (
+          <details className="rounded-lg border border-line p-3">
+            <summary className="cursor-pointer text-sm font-medium">Sampling adjustments supplied by you or your supervisor</summary>
+            <p className="my-2 text-sm text-fg-muted">Leave these blank if not established. No default design effect or non-response rate is applied. The base calculation alone does not establish statistical power.</p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Input label="Design effect" type="number" step="any" min={0.001} max={100} value={plan.sampleSize.designEffect ?? ''} onChange={(e) => setSize({ designEffect: e.target.value ? Number(e.target.value) : null })} />
+              <Input label="Expected non-response (%)" type="number" step="any" min={0} max={99.9} value={plan.sampleSize.nonresponseRate == null ? '' : plan.sampleSize.nonresponseRate * 100} onChange={(e) => setSize({ nonresponseRate: e.target.value ? Number(e.target.value) / 100 : null })} />
+            </div>
+            <Input label="Source or rationale for these assumptions" value={plan.sampleSize.adjustmentSource ?? ''} maxLength={300} onChange={(e) => setSize({ adjustmentSource: e.target.value })} />
+          </details>
         )}
         {(plan.sampleSize.method === 'SATURATION' || plan.sampleSize.method === 'AUTHOR_STATED') && (
           <div className="grid gap-4 sm:grid-cols-2">

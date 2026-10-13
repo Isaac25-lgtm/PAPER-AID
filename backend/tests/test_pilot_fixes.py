@@ -12,5 +12,5 @@ def test_an_over_long_plan_field_ends_at_a_complete_sentence():
 
 def test_a_plan_is_not_refused_for_lacking_the_proposals_reference_list():
     prompt = PROMPTS[STEPS["p_plan_review"].prompt]
-    assert STEPS["p_plan_review"].prompt == STEPS["p_plan_review_peer"].prompt == "p-plan-review-v3"
+    assert STEPS["p_plan_review"].prompt == STEPS["p_plan_review_peer"].prompt == "p-plan-review-v4"
     assert "never carries a reference list" in prompt and "apply to the chapters, not to this plan" in prompt

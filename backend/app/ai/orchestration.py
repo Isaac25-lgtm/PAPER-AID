@@ -134,28 +134,28 @@ STEPS: dict[str, Step] = {
     # Plan, and each chapter's section briefs: lead drafts → writer critiques → lead finalises.
     # v2: the research-gap builder; v3: objective count, primary question, hypothesis pairs, question tense (2026-10-08);
     # v4 (academic audit, 2026-10-11): wording for what the design can show, variables as measured, a study the student can carry out.
-    "p_plan": Step("lead", Stage.PLANNING, "p-plan-v5", 12000),
+    "p_plan": Step("lead", Stage.PLANNING, "p-plan-v6", 12000),
     "p_brief": Step("lead", Stage.PLANNING, "p-brief-v2", 12000),
     "p_critique": Step("writer", Stage.PLANNING, "p-critique-v1", 8000),
     "p_guide": Step("writer", Stage.PLANNING, "p-guide-v1", 8000),
-    "p_finalise": Step("lead", Stage.PLANNING, "p-finalise-v4", 12000),
+    "p_finalise": Step("lead", Stage.PLANNING, "p-finalise-v5", 12000),
     # v3 (quality round 2026-10-11): what a plan proposes (variables, theory, design) is not "invented"; only a statement of fact nobody gave is.
-    "p_plan_review": Step("lead", Stage.PLANNING, "p-plan-review-v3", 8000),
-    "p_plan_review_peer": Step("writer", Stage.PLANNING, "p-plan-review-v3", 8000),
+    "p_plan_review": Step("lead", Stage.PLANNING, "p-plan-review-v4", 8000),
+    "p_plan_review_peer": Step("writer", Stage.PLANNING, "p-plan-review-v4", 8000),
     # Chapter: writer drafts → code checks → lead reviews → writer fixes (bounded rounds) → lead readiness.
     # v3 (academic audit, 2026-10-11): a partly supported finding's caution, gaps as limits of the evidence, association before effect, plain language.
     # p-plan-v5, p-draft-v4, p-fix-v4, w-draft-v6, w-repair-v7 (Codex's audit of 1a3b1e7, findings 2 and 8): significance as the source reports it and by the
     # value of no difference (1 for a ratio, 0 for a difference); cause only where the design can identify one, whatever the design is called.
     # p-draft-v5, p-fix-v5, w-draft-v8, w-repair-v8 (quality round 2026-10-11): a source's meaning in the writer's own words, never its wording.
-    "p_draft": Step("writer", Stage.DRAFTING, "p-draft-v5", 16000),
+    "p_draft": Step("writer", Stage.DRAFTING, "p-draft-v6", 16000),
     # v4 (2026-10-10): a plan-owned section is reviewed as the writer's introduction, with what PaperAid places given apart.
     # v5: those statements are the student's and cannot be changed here, but they are not beyond question: an unsound one
     # is told to the student as a note on their plan (Codex's re-audit of d4d2bc7: v4 called them "correct as they stand").
     # v6 (Codex's audit of 6e513af): the sentences code could not judge are given to be read ("forYourJudgement"); so from w-evaluate-v3.
     # v7: attribution, quotation and conditional wording are judged against the evidence, never automatically passed.
-    "p_review": Step("lead", Stage.AUDITING, "p-review-v7", 8000),
-    "p_review_peer": Step("writer", Stage.AUDITING, "p-review-v7", 8000),
-    "p_fix": Step("writer", Stage.AUDITING, "p-fix-v5", 16000),  # v3: the same rules as p-draft-v3
+    "p_review": Step("lead", Stage.AUDITING, "p-review-v8", 8000),
+    "p_review_peer": Step("writer", Stage.AUDITING, "p-review-v8", 8000),
+    "p_fix": Step("writer", Stage.AUDITING, "p-fix-v6", 16000),  # v3: the same rules as p-draft-v3
     "p_readiness": Step("lead", Stage.AUDITING, "p-readiness-v1", 8000),
     # Workflow 2 (algorithm revision 2026-10-09): the final editor of a chapter's sections, as for works (w_edit).
     "p_edit": Step("lead", Stage.AUDITING, "p-edit-v1", 16000),
@@ -186,13 +186,15 @@ STEPS: dict[str, Step] = {
     "w_results_review": Step("EVALUATOR", Stage.PLANNING, "w-results-review-v4", 8000),  # v2: blocking issues apart from suggestions; a repair is checked against the earlier issues
     # v4: only explicitly hypothetical prose uses example numbers; v5 (academic audit, 2026-10-11): cautions, gaps, ratios, the answer each command word
     # asks for at the student's level, ordinary examples from their setting.
-    "w_draft": Step("WRITER", Stage.DRAFTING, "w-draft-v8", 16000),
+    # w-draft-v9, w-repair-v9, w-evaluate-v5 (independent audit, 2026-10-12): a funding proposal's ceiling is never its request, a request is never a
+    # costed budget while costs are gaps, and timing follows the activities' own months; the evaluator reads the printed schedule beside the section.
+    "w_draft": Step("WRITER", Stage.DRAFTING, "w-draft-v10", 16000),
     "w_integrity": Step("INTEGRITY", Stage.AUDITING, "w-integrity-v1", 6000),
     # v2 (Codex's audit of 1a3b1e7): the evaluator reads each section beside the evidence it cites, cautions included.
-    "w_evaluate": Step("EVALUATOR", Stage.AUDITING, "w-evaluate-v4", 8000),
-    "w_repair": Step("WRITER", Stage.AUDITING, "w-repair-v8", 16000),  # v5: explicit hypothetical framing and graph preservation; v6: the rules of w-draft-v5
+    "w_evaluate": Step("EVALUATOR", Stage.AUDITING, "w-evaluate-v6", 8000),
+    "w_repair": Step("WRITER", Stage.AUDITING, "w-repair-v10", 16000),  # v5: explicit hypothetical framing and graph preservation; v6: the rules of w-draft-v5
     "w_adjudicate": Step("ADJUDICATOR", Stage.AUDITING, "w-adjudicate-v1", 4000),
-    "w_final": Step("EVALUATOR", Stage.AUDITING, "w-final-v2", 8000),  # v2: the exact deliverable, every verdict required (Sol with one final reviewer)
+    "w_final": Step("EVALUATOR", Stage.AUDITING, "w-final-v3", 8000),  # v2: the exact deliverable, every verdict required (Sol with one final reviewer)
     "w_compress": Step("WRITER", Stage.AUDITING, "w-compress-v1", 12000),
     # Workflow 2 (algorithm revision 2026-10-09, the owner's one fixed principle): the premium model reviews the
     # finished document once, corrects it directly and gives the final decision (w_edit). A standard-model check may
@@ -483,11 +485,18 @@ def priced_engine(settings: Settings) -> Engine:
 WORKFLOW_PROMPTS: dict[int, dict[str, str]] = {2: {"w_needs": "w-needs-v4", "p_needs": "p-needs-v2"}}  # w-needs-v4: v2 with the rule of v3
 
 
+# The plan prompts of an engine priced with METHODS_CONTRACT off: the ones before the methods contract (p-plan-v6,
+# p-finalise-v5, p-plan-review-v4), so a new plan is asked for, finalised and reviewed exactly as it was.
+METHODS_OFF = {"p_plan": "p-plan-v5", "p_finalise": "p-finalise-v4", "p_plan_review": "p-plan-review-v3", "p_plan_review_peer": "p-plan-review-v3"}
+
+
 def current_engine(settings: Settings) -> Engine:
     """The engine a run priced now will execute with (see `Engine`)."""
     prompts = {task: step.prompt for task, step in STEPS.items()}
     if settings.workflow >= 2:
         prompts.update(WORKFLOW_PROMPTS[2])
+    if not settings.methods_contract:
+        prompts.update(METHODS_OFF)
     return freeze_vertex(settings, Engine(lead_model=settings.lead_model, writer_model=settings.writer_model, ai_check_model=settings.ai_check_model,
                   ai_check_peer_model=settings.ai_check_peer_model, routine_model=settings.routine_model, drafting_model=settings.drafting_model,
                   require_dual_approval=settings.require_dual_approval, explicit_coverage=True, frontier_guidance=settings.frontier_guidance,

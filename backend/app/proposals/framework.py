@@ -170,7 +170,7 @@ def _png(image: Image.Image) -> bytes:
     return out.getvalue()
 
 
-def draw(variables: Variables, style: Style = "MONO") -> bytes | None:
+def draw(variables: Variables, style: Style = "MONO", *, neutral: bool = False, links: list[tuple[int, int]] | None = None) -> bytes | None:
     """The framework as a PNG, or None when the study has no independent and dependent variables."""
     palette = PALETTES.get(style, PALETTES["MONO"])
     independent = [_label(v) for v in variables.independent if v.strip()]
@@ -211,22 +211,32 @@ def draw(variables: Variables, style: Style = "MONO") -> bytes | None:
         targets.append((y, y + box.height))
         y += box.height + GAP
     first, last = targets[0][0], targets[-1][1]
-    for ay, ty in zip(anchors, arrow_ends(len(anchors), targets), strict=True):
-        _arrow(d, MARGIN + COLUMN + 8, ay, rx - 10, ty, palette.arrow, width=4 if len(anchors) > 8 else 5)
+    if links is None:  # legacy diagrams retain the previous layout
+        for ay, ty in zip(anchors, arrow_ends(len(anchors), targets), strict=True):
+            _arrow(d, MARGIN + COLUMN + 8, ay, rx - 10, ty, palette.arrow, width=4 if len(anchors) > 8 else 5)
+    else:
+        for target in range(len(targets)):
+            linked = [origin for origin, dest in links if dest == target and 0 <= origin < len(anchors)]
+            top_target, bottom_target = targets[target]
+            for n, origin in enumerate(linked):
+                ty = top_target + (bottom_target - top_target) * (n + 1) / (len(linked) + 1)
+                _arrow(d, MARGIN + COLUMN + 8, anchors[origin], rx - 10, ty, palette.arrow, width=4)
     bottom = top + body
     if middle is not None:
         mx = (WIDTH - middle.width) // 2
         my = bottom + 80 + 50
-        d.text((mx, bottom + 80), "Intervening variables" if len(intervening) > 1 else "Intervening variable", font=label_font, fill=palette.muted)
+        label = "Additional factors (see methods for roles)" if neutral else ("Intervening variables" if len(intervening) > 1 else "Intervening variable")
+        d.text((mx, bottom + 80), label, font=label_font, fill=palette.muted)
         middle.draw(d, mx, my, WHITE, palette.muted, palette.ink, dashed=True)
         cx = WIDTH / 2
-        _arrow(d, cx, bottom + 66, cx, (first + last) / 2 + 14, palette.muted, width=4, dashed=True)  # from above its label onto the associations
+        if not neutral:
+            _arrow(d, cx, bottom + 66, cx, (first + last) / 2 + 14, palette.muted, width=4, dashed=True)
         bottom = my + middle.height
     note_font = _font(24)
     legend_y = bottom + 40
     _arrow(d, MARGIN, legend_y + 14, MARGIN + 90, legend_y + 14, palette.arrow, width=4)
     d.text((MARGIN + 110, legend_y), "association this study will examine (not proven cause)", font=note_font, fill=palette.muted)
-    if middle is not None:
+    if middle is not None and not neutral:
         _arrow(d, WIDTH // 2 + 60, legend_y + 14, WIDTH // 2 + 150, legend_y + 14, palette.muted, width=4, dashed=True)
         d.text((WIDTH // 2 + 170, legend_y), "may affect the association", font=note_font, fill=palette.muted)
     return _png(image)
@@ -300,10 +310,20 @@ def figure(plan: ProposalPlan | None, style: Style = "MONO") -> bytes | None:
     qualitative study; None when neither applies (a desk review, for example)."""
     if plan is None:
         return None
-    png = draw(plan.variables, style)
+    png = draw(plan.variables, style, neutral=plan.methods is not None, links=method_links(plan))
     if png is None and plan.study_type == "QUALITATIVE":
         png = draw_concepts(plan, style)
     return png
+
+
+def method_links(plan: ProposalPlan) -> list[tuple[int, int]] | None:
+    """Only associations named by the typed crosswalk. Ordering boxes must not invent an X-to-Y link."""
+    if plan.methods is None:
+        return None
+    predictors = {v.id: n for n, v in enumerate(v for v in plan.methods.variables if v.role == "PREDICTOR")}
+    outcomes = {v.id: n for n, v in enumerate(v for v in plan.methods.variables if v.role == "OUTCOME")}
+    return sorted({(predictors[p], outcomes[row.outcome_id]) for row in plan.methods.objectives for p in row.predictor_ids
+                   if p in predictors and row.outcome_id in outcomes})
 
 
 def note(plan: ProposalPlan | None) -> str:
@@ -341,7 +361,19 @@ def describe_plan(plan: ProposalPlan | None) -> str:
         return ""
     kind = draw_kind(plan)
     if kind == "VARIABLES":
-        return describe(plan.variables)
+        text = describe(plan.variables)
+        if plan.methods is not None:
+            links = method_links(plan) or []
+            pairs = [f"{plan.variables.independent[a]} and {plan.variables.dependent[b]}" for a, b in links]
+            text = "The study will examine the association between " + "; ".join(pairs) + "." if pairs else "No predictor-to-outcome association has been specified in the methods yet."
+            unlinked = [v for n, v in enumerate(plan.variables.independent) if not any(a == n for a, _ in links)]
+            if unlinked:
+                text += " Proposed factors not yet linked to an objective: " + "; ".join(unlinked) + "."
+        if plan.methods is not None and plan.variables.intervening:
+            # Use the actual typed roles, not the legacy overloaded label.
+            text += " Additional factors: " + "; ".join(f"{v.label} ({v.role.lower()}): {v.rationale or 'rationale to be confirmed'}"
+                                                       for v in plan.methods.variables if v.role not in ("PREDICTOR", "OUTCOME")) + ". No moderation or mediation arrow is implied."
+        return text
     if kind == "CONCEPTS":
         centre, areas = concepts(plan)
         return f"The study explores {centre[0].lower() + centre[1:]} through {_series([a[0].lower() + a[1:] for a in areas])}."

@@ -65,3 +65,22 @@ def test_the_framework_is_edited_from_the_workspace(client):
     word = Document(io.BytesIO(client.get(f"{url}/export", headers=STUDENT).content))
     assert any(p.text == "Note. " + edited["frameworkNote"] for p in word.paragraphs)  # the same note as the app
     assert client.get(f"{url}/framework.png", headers=STUDENT).content[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_the_student_s_edit_of_the_variables_redraws_the_figure_of_a_written_chapter(client):
+    """The chapter keeps the plan its framework was written from. For a plan without the methods contract that record
+    never holds the figure back: the workspace picture, the chapter's own view and the Word file all show the
+    variables as the student has just set them, and the section is marked for review."""
+    from tests.test_proposal_v2 import _with_chapter_one
+
+    url = f"/api/projects/{_with_chapter_one(client)}"
+    project = client.get(url, headers=STUDENT).json()
+    before = client.get(f"{url}/framework.png", headers=STUDENT).content
+    variables = {**project["plan"]["variables"], "independent": [*project["plan"]["variables"]["independent"], "Household income"]}
+    edited = client.post(f"{url}/framework", headers=STUDENT, json={"baseVersion": project["planVersion"], "variables": variables}).json()
+    assert "Household income" in edited["plan"]["variables"]["independent"]
+    after = client.get(f"{url}/framework.png", headers=STUDENT).content
+    assert after[:8] == b"\x89PNG\r\n\x1a\n" and after != before  # the picture in the workspace
+    chapter = client.get(f"{url}/chapters/1", headers=STUDENT).json()
+    assert any("Household income" in item for column in chapter["framework"] for item in column["items"])  # the chapter's own view
+    assert any("Conceptual Framework" in s for s in next(c for c in edited["chapters"] if c["number"] == 1)["needsReview"])

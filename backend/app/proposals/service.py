@@ -312,6 +312,14 @@ def save_plan(rt: Runtime, user: User, project_id: str, plan: ProposalPlan, base
             if (before.margin, before.proportion, before.confidence) != (after.margin, after.proportion, after.confidence):
                 assumed = []
         edited = plan.model_copy(update={"sampling_assumed": assumed})
+        if p.plan is not None and p.plan.methods is not None and edited.methods is None:
+            raise AppError("Keep the study's methods crosswalk when editing its decisions.", code="METHODS_REQUIRED")
+        if edited.methods is not None:
+            from app.proposals import methods
+
+            edited = edited.model_copy(update={"methods": edited.methods.model_copy(update={"population_origin": "USER_SUPPLIED" if edited.sample_size.population is not None else "UNKNOWN"})})
+            if methods.framework_variables(edited) != edited.variables:
+                raise AppError("The framework variables and the methods crosswalk disagree. Edit the measurements and roles together under study details.", code="METHODS_MISMATCH")
         if p.plan is not None and not decisions.changed(p.plan, edited) and edited.questions_for_student == p.plan.questions_for_student:
             return p  # nothing changed: keep the approval
         p.plan, p.plan_status, p.plan_version = edited, "DRAFT", p.plan_version + 1
@@ -481,7 +489,7 @@ def _render(doc: ChapterDocument, citer: evidence.Citer, plan: ProposalPlan | No
         RenderedSection(
             key=s.key, number=s.number, heading=s.heading, paragraphs=[citer.render(par) for par in s.paragraphs],
             table=[[citer.render(cell) for cell in row] for row in s.table] if s.table else None,
-            table_caption=citer.render(s.table_caption), needs_review=f"{s.number} {s.heading}" in stale,
+            table_caption=citer.render(evidence.caption_text(s.table_caption)), needs_review=f"{s.number} {s.heading}" in stale,
         )
         for s in doc.sections
     ]
@@ -510,10 +518,12 @@ def chapter(rt: Runtime, user: User, project_id: str, number: int, version: int 
     return ChapterView(
         number=number, title=doc.title, version=version or stored.current, plan_version=doc.plan_version, sections=_render(doc, citer, p.plan),
         readiness=[i.model_copy(update={"status": "PASS", "note": "You confirmed the standard sample-size settings PaperAid assumed."})
-                   if i.id == "C3-ASSUMED" and sampling_confirmed(p) else i for i in doc.readiness],
+                   if i.id == "C3-ASSUMED" and doc.plan_version == p.plan_version and sampling_confirmed(p) else
+                   i.model_copy(update={"status": "PASS", "note": "You confirmed this figure counts the eligible sampling frame; it remains student-supplied, not independently verified."})
+                   if i.id == "C3-FRAME" and doc.plan_version == p.plan_version and _frame_confirmed(p) else i for i in doc.readiness],
         warnings=doc.warnings, words=doc.words,
         references=evidence.reference_list(sources, p.citation, among=[citer.library[i].source for i in scope if i in citer.library]),
-        framework=[FrameworkColumn(label=label, items=items) for label, items in proposal_export.framework_columns(p.plan)]
+        framework=[FrameworkColumn(label=label, items=items) for label, items in proposal_export.framework_columns(_figure_plan(p, doc))]
         if number in (1, CONCEPT) and any(s.key == "framework" for s in doc.sections) else [],
         missing=[f"{s.number} {s.heading}" for s in rulebook.sections(p.rulebook, number, p.inputs.level, p.plan) if s.key in doc.missing] if p.plan and doc.missing else [],
         to_align=[s.key for s in doc.sections if s.key in doc.to_align],
@@ -700,6 +710,7 @@ def quote_step(rt: Runtime, user: User, project_id: str, step: Step, note: str, 
             raise AppError(" ".join(blockers), code="AUTHOR_INPUT_NEEDED")
     _rate_limit(rt, user, "quote", rt.settings.quotes_per_hour)
     inp = StepInput(
+        academic_policy=1,
         tell_dated=True,
         today=utcnow().date().isoformat(),
         project_id=p.id,
@@ -773,6 +784,7 @@ def _quote_profile(rt: Runtime, user: User, p: Project) -> StepQuote:
         raise AppError("Upload your institution's research guide first.", code="NO_GUIDE")
     _rate_limit(rt, user, "quote", rt.settings.quotes_per_hour)
     inp = StepInput(
+        academic_policy=1,
         tell_dated=True,
         today=utcnow().date().isoformat(),
         project_id=p.id, step="PROFILE", chapter=0, rulebook=p.rulebook, inputs=p.inputs, plan_version=p.plan_version,
@@ -1110,7 +1122,7 @@ def compare(rt: Runtime, user: User, project_id: str, number: int, older: int, n
         for s in doc.sections:
             lines = [citer.render(par) for par in s.paragraphs]
             if s.table:
-                lines.append(f"Table: {citer.render(s.table_caption)}".rstrip())
+                lines.append(f"Table: {citer.render(evidence.caption_text(s.table_caption))}".rstrip())
                 lines += [" | ".join(citer.render(cell) for cell in row) for row in s.table]
             out[s.key] = (s.number, s.heading, lines)
         return out
@@ -1315,6 +1327,15 @@ def edit_framework(rt: Runtime, user: User, project_id: str, base_version: int, 
             if bool(edited.independent) != bool(edited.dependent):
                 raise AppError("A framework needs at least one independent and one dependent variable.", code="FRAMEWORK_INCOMPLETE")
             if edited != p.plan.variables:
+                if p.plan.methods is not None:
+                    from app.proposals import methods
+
+                    try:
+                        contract = methods.edit_framework(p.plan, edited)
+                    except ValueError as exc:
+                        raise AppError("This framework edit would disconnect its methods: " + str(exc)[:300] + " Edit them together under study details.", code="METHODS_MISMATCH") from exc
+                    p.plan = p.plan.model_copy(update={"methods": contract})
+                    edited = methods.framework_variables(p.plan)
                 p.plan = p.plan.model_copy(update={"variables": edited})
                 p.plan_version += 1
         return p
@@ -1353,7 +1374,42 @@ def framework_png(rt: Runtime, user: User, project_id: str) -> bytes:
     """The conceptual framework figure drawn from the plan's variables (none for a study without
     independent and dependent variables)."""
     p = _owned(rt, user, project_id)
-    png = framework.figure(p.plan, p.framework_style)
+    first = CONCEPT if p.goal == "CONCEPT" else 1
+    document = _chapter_doc(rt, p.chapter(first))
+    png = framework.figure(_figure_plan(p, document), p.framework_style)
     if png is None:
         raise NotFound("This study has no conceptual framework figure.")
     return png
+
+
+def _figure_plan(p: Project, document: ChapterDocument | None) -> ProposalPlan | None:
+    from app.proposals.methods import figure_plan
+
+    return figure_plan(p.plan, document.framework_plan if document else None)
+
+
+def _frame_confirmed(p: Project) -> bool:
+    from app.proposals.methods import frame_confirmed
+
+    return frame_confirmed(p)
+
+
+def confirm_population_frame(rt: Runtime, user: User, project_id: str, base_version: int) -> ProjectView:
+    """A student confirmation of the exact eligible frame, never independent verification or a waiver of a contradiction."""
+    from app.proposals import methods
+
+    def apply(p: Project) -> Project:
+        if p.plan_version != base_version:
+            raise Conflict("Your plan changed. Reload it and confirm the current population figure.", code="PLAN_CHANGED")
+        if p.plan is None or p.plan.methods is None or p.plan.sample_size.population is None:
+            raise AppError("There is no population figure to confirm.", code="NOTHING_TO_CONFIRM")
+        if not p.plan.sample_size.population_source.strip() or not p.plan.methods.population_frame.strip():
+            raise AppError("Give the source and the eligible sampling frame under study details before confirming the figure.", code="FRAME_INCOMPLETE")
+        if methods.problems(p.plan):
+            raise AppError("Correct the methods crosswalk before confirming its population.", code="METHODS_MISMATCH")
+        if not methods.frame_confirmed(p):
+            p.acknowledgments.append(Acknowledgment(kind="FRAME", plan_version=p.plan_version, text_sha256=methods.frame_signature(p.plan)))
+            p.acknowledgments = p.acknowledgments[-50:]
+        return p
+
+    return view(rt, _change(rt, user, project_id, apply))

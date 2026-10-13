@@ -171,7 +171,7 @@ def test_an_over_long_field_from_the_model_is_shortened_to_a_whole_sentence(clie
     """Found in a real-model run: a long analysis plan must not fail the step. It ends at a complete
     sentence (a sentence cut mid-way made both reviewers refuse a plan: Phase 4 pilot)."""
     long_plan = {**PLAN, "alignment": [{**PLAN["alignment"][0], "analysis": "Binary logistic regression will be used. " * 60}, *PLAN["alignment"][1:]]}
-    client.models.overrides["p_finalise"] = lambda payload: long_plan
+    client.models.overrides["p_finalise"] = lambda payload: {**long_plan, "methods": payload["draft"].get("methods")}
     project = _create(client)
     job = _run(client, project["id"], "PLAN")
     assert job["status"] == "COMPLETED", job
@@ -182,7 +182,7 @@ def test_an_over_long_field_from_the_model_is_shortened_to_a_whole_sentence(clie
 def test_an_over_long_run_on_field_fails_the_plan_without_charge(fixed_client):
     """No sentence end to cut at: never delivered cut mid-way (Codex review 2026-09-30 #7)."""
     long_plan = {**PLAN, "alignment": [{**PLAN["alignment"][0], "analysis": "Binary logistic regression " * 80}, *PLAN["alignment"][1:]]}
-    fixed_client.models.overrides["p_finalise"] = lambda payload: long_plan
+    fixed_client.models.overrides["p_finalise"] = lambda payload: {**long_plan, "methods": payload["draft"].get("methods")}
     project = _create(fixed_client)
     job = _run(fixed_client, project["id"], "PLAN")
     assert job["status"] == "FAILED" and job["failure"]["code"] == "PLAN_INVALID" and job["billing"]["charged"] == 0
@@ -508,7 +508,7 @@ def test_a_sampling_setting_out_of_range_takes_its_standard_value_not_the_plan(c
     """A qualitative plan with a margin or proportion of 0 lost the whole plan on the live site
     (PLAN_INVALID greater_than, 2026-09-30); the settings now fall back to their standard values."""
     sampled = {**PLAN, "sampleSize": {**PLAN.get("sampleSize", {}), "method": "SATURATION", "margin": 0, "proportion": 0, "confidence": 80, "population": 0}}
-    client.models.overrides["p_finalise"] = lambda payload: sampled
+    client.models.overrides["p_finalise"] = lambda payload: {**sampled, "methods": payload["draft"].get("methods")}
     project = _create(client)
     job = _run(client, project["id"], "PLAN")
     assert job["status"] == "COMPLETED", job
@@ -523,7 +523,7 @@ def test_a_quantitative_plan_missing_its_sampling_settings_asks_the_student_to_c
     """Codex audit 2026-09-30, second round: a Cochran plan with a margin and proportion of 0 is never
     quietly calculated on assumed values; the student is asked to confirm them before approving."""
     sampled = {**PLAN, "sampleSize": {**PLAN.get("sampleSize", {}), "method": "COCHRAN", "margin": 0, "proportion": 0}}
-    client.models.overrides["p_finalise"] = lambda payload: sampled
+    client.models.overrides["p_finalise"] = lambda payload: {**sampled, "methods": payload["draft"].get("methods")}
     project = _create(client)
     job = _run(client, project["id"], "PLAN")
     assert job["status"] == "COMPLETED", job

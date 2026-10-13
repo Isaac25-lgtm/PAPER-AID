@@ -43,6 +43,9 @@ export interface ProposalInputs {
   expectedParticipants: number | null
   /** Bachelor's, PGD and Master's: four specific objectives instead of the standard three (owner decision 2026-10-08). */
   fourObjectives?: boolean
+  designEffect?: number | null
+  nonresponseRate?: number | null
+  samplingAdjustmentSource?: string
 }
 
 export interface TitlePage {
@@ -63,6 +66,9 @@ export interface SampleSize {
   proportion: number
   stated: number | null
   rationale: string
+  designEffect?: number | null
+  nonresponseRate?: number | null
+  adjustmentSource?: string
 }
 
 export interface AlignmentRow {
@@ -105,6 +111,40 @@ export interface ProposalPlan {
   questionsForStudent: string[]
   /** Standard sampling settings PaperAid assumed; approving needs the student's acknowledgment. */
   samplingAssumed?: string[]
+  methods?: MethodsContract | null
+}
+
+export interface MethodVariable {
+  id: string
+  label: string
+  role: 'OUTCOME' | 'PREDICTOR' | 'ADJUSTMENT' | 'MEDIATOR' | 'MODERATOR' | 'EXPLORATORY'
+  scale: 'BINARY' | 'NOMINAL' | 'ORDINAL' | 'CONTINUOUS' | 'COUNT' | 'TEXT' | 'UNKNOWN'
+  definition: string
+  unit: string
+  instrument: string
+  period: string
+  rationale: string
+}
+
+export interface ObjectiveMethod {
+  objective: number
+  outcomeId: string
+  predictorIds: string[]
+  estimator: 'DESCRIPTIVE' | 'BINARY_LOGISTIC' | 'MULTINOMIAL_LOGISTIC' | 'ORDINAL_LOGISTIC' | 'LINEAR' | 'POISSON' | 'NEGATIVE_BINOMIAL' | 'THEMATIC' | 'OTHER'
+  rationale: string
+  diagnostics: string
+  transformation: string
+}
+
+export interface MethodsContract {
+  version: 1
+  variables: MethodVariable[]
+  objectives: ObjectiveMethod[]
+  selectionUnits: string
+  populationFrame: string
+  recruitment: string
+  ethics: string
+  populationOrigin: 'USER_SUPPLIED' | 'UNKNOWN'
 }
 
 export interface ChapterVersion {

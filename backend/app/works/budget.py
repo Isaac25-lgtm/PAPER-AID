@@ -14,7 +14,7 @@ ROUND = 0.005  # half a cent: sums are compared after rounding to cents
 
 
 def line_total(line: BudgetLine) -> float:
-    return round(line.quantity * line.unit_cost, 2)
+    return 0.0 if line.in_kind else round(line.quantity * line.unit_cost, 2)
 
 
 @dataclass(frozen=True)
@@ -27,9 +27,16 @@ class Totals:
     by_year: dict[int, float]
 
 
+def known(line: BudgetLine) -> bool:
+    """The line's cost is known: its quantity and unit cost are entered, or the applicant marked it as given in kind.
+    A cost of nothing is not a known cost: lines are created without figures, so zero means "not entered yet"."""
+    return line.in_kind or bool(line.quantity and line.unit_cost)
+
+
 def complete(budget: Budget) -> bool:
-    """Every line has its quantity and unit cost (the applicant's figures)."""
-    return all(li.quantity and li.unit_cost for li in budget.lines)
+    """There is a budget and every line's cost is known (the applicant's figures). A budget with no lines is not
+    complete: nothing has been costed (independent audit, 2026-10-12: `all` of no lines is true)."""
+    return bool(budget.lines) and all(known(li) for li in budget.lines)
 
 
 def totals(budget: Budget) -> Totals:

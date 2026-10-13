@@ -659,6 +659,7 @@ def quote_step(rt: Runtime, user: User, work_id: str, step: Step, note: str, bun
     _rate_limit(rt, user, "quote", rt.settings.quotes_per_hour)
     band = _band(spec, step)
     inp = WorkStepInput(
+        academic_policy=1,
         tell_dated=True,
         today=utcnow().date().isoformat(),
         work_id=k.id, step=step, kind=k.kind, variant=k.variant, mode=k.mode, level=spec.level, citation=spec.citation_style, inputs=k.inputs,
@@ -929,7 +930,7 @@ def export_docx(rt: Runtime, user: User, work_id: str, version: int | None = Non
         data = rt.files.get(entry.docx_path)  # exactly the Word file built and checked when the step completed
     else:  # a version written before Word files were kept: built again from the same stored content
         data = export.build(doc, spec, doc.results_snapshot, doc.budget_snapshot, load_library(rt.files, k.evidence_files),
-                            {key: (v[0], v[1]) for key, v in doc.number_values.items()}, draft=doc.status == "NOT_READY")
+                            {key: (v[0], v[1]) for key, v in doc.number_values.items()}, draft=True)
     _change(rt, user, work_id, lambda w: w)  # downloading renews the work
     safe = "".join(c for c in doc.title[:80] if c.isalnum() or c in " -_").strip() or "Document"
     return data, f"{safe}{' – exploratory draft' if doc.exploratory else ''}.docx"
@@ -1142,7 +1143,7 @@ def continue_after_plan(rt: Runtime, work_id: str, plan_job: str) -> None:
         stop(f"The draft could not start: {exc.message}")
 
 
-BUDGET_FIGURES = {"quantity", "unit_cost", "entered_total"}
+BUDGET_FIGURES = {"quantity", "unit_cost", "entered_total", "in_kind"}
 # The checks a change of figures can change (Codex audit 2026-10-01: every one is worked out again,
 # the length limits too, on the rebuilt document: bigger tables can push a strict limit over).
 FIGURE_VALIDATORS = ("results.", "budget.", "staff.", "timeline.", "tables.", "numbers.", "limits.")
@@ -1203,7 +1204,7 @@ def apply_figures(rt: Runtime, user: User, work_id: str) -> WorkView:
              if i.id in compliance.FIGURE_JUDGED else i for i in items]
     updated.readiness = items
     updated.status = compliance.overall(items, spec.exploratory)  # type: ignore[assignment]
-    data = export.build(updated, spec, k.results, k.budget, library_items, tokens, draft=updated.status == "NOT_READY")
+    data = export.build(updated, spec, k.results, k.budget, library_items, tokens, draft=True)
     tag = secrets.token_hex(4)
     doc_path, docx_path = f"{k.storage_prefix()}/documents/figures_{tag}.json", f"{k.storage_prefix()}/documents/figures_{tag}.docx"
     rt.files.put(doc_path, updated.model_dump_json(by_alias=True).encode(), "application/json")

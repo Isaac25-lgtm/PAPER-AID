@@ -230,8 +230,32 @@ class Citer:
 
         # One pass in reading order, so APA 6's "first citation" is the first in the text (Codex
         # audit 2026-09-28 #14: narrative citations used to be rendered after every parenthetical one).
-        text = CITATION.sub(one, text)
+        text = CITATION.sub(one, self._without_typed_names(text))
         return re.sub(r"\s+([.,;:])", r"\1", text).strip()
+
+    def _without_typed_names(self, text: str) -> str:
+        """A narrative token prints its author's name. A writer who also typed that name just before the token
+        got it twice: "As Mann Mann (2003) observes", "The Centers for Disease Control and Prevention Centers for
+        Disease Control and Prevention (2012) notes" (independent audit, 2026-10-12). Only the exact name this very
+        token will print, standing immediately before it, is taken out; nothing else in the sentence is touched."""
+        out, last = [], 0
+        for match in re.finditer(r"⟦(E[0-9a-f]{6})\|n⟧", text):
+            item = self.library.get(match.group(1))
+            before = text[last:match.start()]
+            if item is not None:
+                labels = {author_label(item.source, self.style, first, True) for first in (True, False)}
+                # a body's name typed without the abbreviation it prints with: "Critical Appraisal Skills Programme (CASP UK)"
+                labels |= {re.sub(r"\s*\([^()]*\)$", "", label) for label in labels}
+                for label in sorted(labels, key=len, reverse=True):
+                    typed = re.search(r"(?<![\w])" + re.escape(label) + r"\s*$", before) if label and not label.startswith("“") else None
+                    if typed:
+                        before = before[:typed.start()]
+                        break
+            out.append(before)
+            out.append(match.group(0))
+            last = match.end()
+        out.append(text[last:])
+        return "".join(out)
 
 
 def _ended(title: str) -> str:
@@ -317,6 +341,12 @@ def same_source(a: EvidenceSource, b: EvidenceSource) -> bool:
 
 def cited_ids(text: str) -> list[str]:
     return [m.group(1) for m in TOKEN.finditer(text)]
+
+
+def source_context(item: EvidenceItem) -> dict[str, str]:
+    """Recorded provenance, not a certificate of suitability. Source kinds come from metadata, not model guesses."""
+    return {"sourceKind": item.source.kind, "metadataOrigin": item.source.metadata, "access": item.access,
+            "retrievedOn": item.retrieved_on, "sourceTitle": item.source.title, "sourceUrl": item.source.url}
 
 
 def citation_problems(text: str, usable: set[str]) -> list[str]:
@@ -548,13 +578,133 @@ def statistic_problems(paragraph: str) -> list[str]:
     return statistic_findings(paragraph)[0]
 
 
-def for_the_reviewer(texts: Iterable[str], gaps: bool = True) -> list[str]:
+def for_the_reviewer(texts: Iterable[str], gaps: bool = True, library: dict[str, EvidenceItem] | None = None) -> list[str]:
     """The sentences of these texts (a section's paragraphs, caption and cells) that code could not judge, each to be
-    read by the reviewer. They are not problems: nothing is repaired or withheld because of one."""
+    read by the reviewer. They are not problems: nothing is repaired or withheld because of one. With the `library`,
+    an exact provision of a law that code could not take out by itself is among them."""
     notes: list[str] = []
     for text in texts:
         notes += statistic_findings(text)[1] + (gap_findings(text)[1] if gaps else [])
+        if library is not None:
+            notes += provision_findings(text, library)[1]
     return list(dict.fromkeys(notes))
+
+
+# An exact provision of a law ("Section 13(5)(2c) of the Education Act 2008"). A report about a law can number its
+# provisions wrongly, and the one PaperAid cited had (independent audit, 2026-10-12: the duty is in section 6(2)(c)).
+# A quote check proves only that the report says so. So a provision's number is printed only when a source cited for
+# it is the law itself; otherwise the law is named without the number and the point stays with the source that
+# reports it. Code never supplies or corrects a number.
+_PART = r"(?:(?:sub-?)?sections?|articles?|regulations?|clauses?|rules?|ss?\.|art\.)"
+_NUMBER = r"\d+[A-Za-z]?(?:\s*[\(\[]\s*\w+\s*[\)\]])*"
+PROVISION = re.compile(rf"\b{_PART}\s+{_NUMBER}", re.I)
+INSTRUMENT = re.compile(r"\b((?:[A-Z][\w'’&-]*,?\s+(?:(?:of|and|for|on|the)\s+)?){0,6}(?:Act|Constitution|Regulations?|Statute|Ordinance|Decree|Convention|Charter|Code))\b")
+_LABELLED = re.compile(rf"\b{_PART}\s+{_NUMBER}(?:\s*,\s*(?:sub-?sections?|paragraphs?)\s+{_NUMBER})?\s+of\s+(the\s+)?", re.I)
+_BRACKETED = re.compile(rf"\s*\(\s*{_PART}\s+\d[^()]*(?:\([^()]*\)[^()]*)*\)", re.I)
+LAW_SITES = re.compile(r"(?:^|\.)(?:ulii\.org|kenyalaw\.org|saflii\.org|tanzlii\.org|laws\.africa|africanlii\.org|legislation\.gov\.uk|parliament\.go\.ug"
+                       r"|constituteproject\.org|treaties\.un\.org|ohchr\.org)$")
+
+
+def _is_the_law(instrument: str, source: EvidenceSource) -> bool:
+    """A conservative candidate for the named instrument, never a host-wide certification.
+    A legal publisher also carries judgments and commentary; a report can name an Act in its title.
+    The verified passage and provision still have to match below, and meaning remains a review judgement."""
+    from urllib.parse import urlsplit
+
+    host = (urlsplit(source.url).hostname or "").casefold().rstrip(".")
+    if source.kind == "ARTICLE" or re.search(r"\b(?:brief|commentary|analysis|summary|study|review|judgment|judgement)\b", source.title, re.I):
+        return False
+    if not (LAW_SITES.search(host) or host.endswith((".go.ug", ".gov.uk", ".gov"))):
+        return False
+    title = set(re.findall(r"[^\W\d_]+", clean_title(source.title).casefold()))
+    words = [w for w in re.findall(r"[^\W\d_]+", instrument.casefold()) if w not in ("the", "of", "and", "for", "on")]
+    return bool(words) and all(w in title for w in words)
+
+
+def _provision_key(text: str) -> str:
+    text = re.sub(r"^(?:sub-?)?sections?|^ss?\.", "section", text, flags=re.I)
+    text = re.sub(r"^articles?|^art\.", "article", text, flags=re.I)
+    return re.sub(r"\W", "", text.casefold())
+
+
+def _unproved_provision(sentence: str, paragraph: str, library: dict[str, EvidenceItem]) -> tuple[str, str] | None:
+    """(the provision, the instrument) when the sentence gives an exact provision of a named law and none of the
+    sources cited for it provides a matching verified provision of that law. Every provision is checked;
+    an earlier supported number cannot vouch for a later one, and an uncited assertion remains unconfirmed."""
+    provisions, instruments = list(PROVISION.finditer(sentence)), list(INSTRUMENT.finditer(sentence))
+    if not provisions or not instruments:
+        return None
+    # A citation in a neighbouring sentence must not vouch for this sentence's provision.
+    ids = [i for i in dict.fromkeys(cited_ids(sentence)) if i in library]
+    for provision in provisions:
+        earlier = [m for m in instruments if m.end() <= provision.start()]
+        following = next((m for m in instruments if m.start() >= provision.end()), None)
+        # "Section 6 of the Education Act" points forward; "Education Act (Section 6)"
+        # points back. Do not attach the latter to a different law later in the sentence.
+        instrument = following if following and re.match(r"\s+of\b", sentence[provision.end():], re.I) else earlier[-1] if earlier else following
+        if instrument is None:
+            continue
+        years = re.findall(r"\b(?:19|20)\d{2}\b", sentence[instrument.start():instrument.end() + 8])
+        if any(library[i].usable and _is_the_law(instrument.group(1), library[i].source)
+               and (not years or all(y in library[i].source.title for y in years))
+               and any(_provision_key(p.group()) == _provision_key(provision.group()) for p in PROVISION.finditer(library[i].passage)) for i in ids):
+            continue
+        return provision.group(0), instrument.group(1).strip()
+    return None
+
+
+def _without_label(sentence: str) -> str:
+    def named(match: re.Match[str]) -> str:
+        the = match.group(1) or ""
+        return (the.capitalize() if match.start() == 0 else the) if the else ""
+
+    return _BRACKETED.sub("", _LABELLED.sub(named, sentence))
+
+
+def provision_findings(paragraph: str, library: dict[str, EvidenceItem]) -> tuple[list[str], list[str]]:
+    """(problems, sentences for the reviewer). A problem where the number can be taken out and the sentence still
+    names the law ("Section 6 of the Education Act" becomes "the Education Act"); a sentence for the reviewer where it
+    is written some other way, which code leaves exactly as it is."""
+    problems, notes = [], []
+    for sentence in sentences(paragraph):
+        found = _unproved_provision(sentence, paragraph, library)
+        if not found:
+            continue
+        if (_conditional_or_question(sentence) or _quoted(sentence, PROVISION.search(sentence).start())
+                or re.search(r"\b(?:according to|claims?|reported|reports|stated|states|argues?|asserts?)\b", sentence, re.I)
+                or _DOUBT.search(sentence) or _NEGATION.search(sentence)):
+            notes.append(f"Read this legal claim against its cited passage: its exact provision of the {found[1]} is not confirmed from the named law's own text: “{sentence.strip()}”")
+        elif _without_label(sentence) != sentence:
+            problems.append(f"“{found[0]}” gives an exact provision of the {found[1]} without a verified matching passage in that law itself (it may be on the word of a source that is not the law itself). "
+                            "Cite the named law's verified provision, or explicitly attribute the account to its secondary source without asserting the unconfirmed number. Removing a number does not verify the legal meaning.")
+        else:
+            notes.append(f"PaperAid's code could not confirm this provision of the {found[1]} from the law itself; its cited source is a report about the law: “{sentence.strip()[:400]}”")
+    return list(dict.fromkeys(problems)), list(dict.fromkeys(notes))
+
+
+def provision_problems(paragraph: str, library: dict[str, EvidenceItem]) -> list[str]:
+    return provision_findings(paragraph, library)[0]
+
+
+_NEVER_A_NAME = re.compile(r"(?:The|A|An|In|Within|Under|Across|At|On|By|For|From|This|These|That|Those|Its|Their|Such|Each|Every|Some|Most|Many|All|Both|With|Without)\s")
+
+
+def drop_provisions(paragraph: str, library: dict[str, EvidenceItem]) -> str:
+    """The last line of defence: a provision's number that the repairs left, on the word of a source that is not the
+    law, is taken out and the law still named. The same paragraph when there is nothing to take out."""
+    out, changed = [], False
+    for sentence in sentences(paragraph):
+        if (provision_findings(sentence, library)[0] and cited_ids(sentence)
+                and (plain := _without_label(sentence)) != sentence):
+            # Keep the account explicitly attributed. Removing a wrong number must not transform
+            # a secondary source's account into PaperAid's own certification of a legal duty.
+            # The sentence's first letter is lowered only for a word that is never a name ("The", "In", "Under"):
+            # "Uganda's Education Act" and "UNESCO" keep their capitals, after a colon.
+            reports = "The cited sources report" if len(set(cited_ids(sentence))) > 1 else "The cited source reports"
+            sentence = f"{reports} that {plain[0].lower()}{plain[1:]}" if _NEVER_A_NAME.match(plain) else f"{reports}: {plain}"
+            changed = True
+        out.append(sentence)
+    return " ".join(out) if changed else paragraph
 
 
 def row_text(header: list[str], row: list[str]) -> str:
@@ -667,6 +817,15 @@ def repeated_sentences(texts: list[tuple[str, list[str]]]) -> dict[str, list[str
                                                      "and here say something that takes the argument further.")
                 seen.setdefault(same, key)
     return {key: list(dict.fromkeys(problems))[:3] for key, problems in found.items()}
+
+
+_NUMBERED = re.compile(r"\s*(?:table|figure|fig\.)\s*\d+(?:\.\d+)*\s*[:.–—-]\s*", re.I)
+
+
+def caption_text(caption: str) -> str:
+    """A table's or figure's caption without a number of its own. Code numbers them, once, in the order they print:
+    a writer's "Table 3.1: Work Plan" printed as "Table 3.1: Table 3.1: Work Plan" (independent audit, 2026-10-12)."""
+    return _NUMBERED.sub("", caption, count=1) if _NUMBERED.match(caption) else caption
 
 
 def table_problems(rows: list[list[str]]) -> list[str]:

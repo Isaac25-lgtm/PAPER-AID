@@ -1494,3 +1494,64 @@ follows:
 The round's times (22 to 35 minutes a document) say nothing about the product: single model calls took up to five
 minutes and connections were lost while the same machine was uploading a build and running the gate and the browser
 journeys. Speed under load remains to be measured properly, on a quiet machine or in production.
+
+
+## 2026-10-13 — Codex's academic takeover and hardening, verified by Claude before release
+
+The owner asked Codex to complete Claude's unfinished work while Claude's tokens were exhausted. Academic work is the priority; the existing pipeline, approval routes, bounded repair rounds, queue, lease ownership, continuations and credit settlement remain intact. No paid or live AI calls, deployment, commit or push occurred during the takeover.
+
+Claude's citation-prefix, caption, draft-scope, book-subtitle, source-author and small funding fixes were retained and completed. The legal guard was hardened: neither a host nor a title proves a provision; the named instrument, year and verified matching passage are required. All provisions in a sentence are checked. Unconfirmed secondary accounts stay explicitly attributed, and conditions, quotations and criticism remain for review. Cleaning occurs before re-review. Proposal tables are padded without losing cells and numbered consistently within each chapter.
+
+New proposal plans carry a version-1 methods crosswalk with measurement IDs, roles, scales, definitions, units, instruments, windows and objective estimators. Code refuses structural contradictions; clinical definitions, analytical suitability, causality, recruitment and ethics remain contextual decisions for the existing reviewers and the researcher. User-owned N and its stated source are never relabelled independently verified. Design effect and non-response are optional supplied assumptions with a rationale, not stock defaults. A new FRAME acknowledgment confirms the exact eligible sampling frame before complete export; it does not prevent Chapter One or a draft download and does not waive contradictions.
+
+The framework is retained with the chapter artifact, and later revisions of other sections do not change it. Typed diagrams draw only links declared in the methods crosswalk; additional factors do not imply an unplanned mediation or moderation model. Changes to methods invalidate dependent sections. Optional study-details editing remains available after generation; no new mandatory Start page or internal plan-review step was added to the user journey.
+
+New works final reviews receive the actual cited evidence and its scope/provenance, bound to the displayed sections and printed references. The whole request, including evidence and reserved history room, is measured before a call. An oversized or unsupported review is unavailable, never an approval; evidence is not truncated to force a fit. Larger requests can increase tokens, parts or existing repair work, so real-model cost and latency need measurement.
+
+New prompt versions: p-plan-v6, p-finalise-v5, p-plan-review-v4, p-review-v8, p-draft-v6, p-fix-v6, w-draft-v10, w-repair-v10, w-evaluate-v6, w-final-v3. Existing released prompt bytes are retained. New input academicPolicy=1 freezes the additional semantic checks; legacy inputs default to 0 and keep their previous request behaviour. Legacy method and sampling decision hashes are preserved when the optional fields are absent.
+
+Heavy funding dependencies, changing the live reviewer/fallback algorithm, enabling workflow 2/final editor, paid trials and release are separate follow-up work. Offline tests do not certify model judgement, scientific validity, production reliability or performance under load. Verification details and remaining limitations are in docs/Codex_Handoff_20261013_Academic_Takeover.md.
+
+### Verified before release (13 October, Claude)
+
+The owner asked for the takeover to be verified and tested before it was committed and published. The whole diff
+against `b808f41` was read. Four things were changed, each with its test, and one was measured.
+
+**The methods contract is built and switched off (`METHODS_CONTRACT`, off).** With it, every new proposal and
+academic concept plan depends on the model returning the methods object in a strict shape: an id that is not `V1` to
+`V99`, a unit over 150 characters without a sentence end, an outcome written "N/A" or a plan without the object each
+stop the plan outright (`PLAN_INVALID`), and its code checks join the plan's review. No real model has been asked for
+that object, and the last change to what a plan's reviewer accepts cost one proposal in three until a real run showed
+it (11 October). So it follows the rule for every unproven change to the algorithm (`WORKFLOW`, `FINAL_EDITOR`): an
+engine priced with the setting off asks for, finalises and reviews a plan with the prompts it was proven on
+(`METHODS_OFF`: `p-plan-v5`, `p-finalise-v4`, `p-plan-review-v3`), and nothing else of the engine differs. A plan made
+that way has no contract, so the frame confirmation, the typed framework and the methods editor do not appear. Turn
+it on only after a paid trial of real plans: at least D11, D12, D14 and D21, and a qualitative study.
+
+**The student's edit of the framework still redraws the figure.** The snapshot of the plan a chapter's framework was
+written from was used for every plan, so "Edit the variables" (owner, 8 October) changed nothing the student could
+see, in the workspace, the chapter or the Word file, until the section was revised. The snapshot now governs only a
+plan with the contract (`methods.figure_plan`); any other is drawn from the study as it stands, as before. With the
+contract on, an edit does not reach the figure until the section is revised: the owner should confirm that is wanted
+before the contract is switched on.
+
+**A number taken out of a legal sentence never lowercases a name.** "Uganda's Education Act (Section 13) …" became
+"The cited source reports that uganda's …". The first letter is lowered only for a word that is never a name;
+otherwise the account follows a colon. Two cited sources are named as two.
+
+**A plan without the contract is given to its repairer as it was.** The plan's repair request (and an older engine's
+approval) carried the new fields empty (`methods`, the sampling adjustments); `_plan_data` leaves out what such a plan
+never had, as the other requests already did, so the live plan loop asks exactly what it asked before.
+
+**The final review with its evidence, measured without a model.** The request building was replayed on the 32
+documents the quality round delivered. Every one can still be reviewed. Coursework and concept notes still take one
+review call, its request about twice as long (3,100 to 5,700 words of the 7,000 allowed); funding proposals go from
+one or two calls to three or four, in every review round. Spend caps (4 to 34 dollars) are far above what a document
+has cost (0.2 to 1 dollar). So funding proposals will take longer to review and cost a little more; nothing can no
+longer be reviewed. A section that cites so much that its evidence alone passes the limit would be refused
+(uncharged): none of the 32 came near it.
+
+Still unproven, because only real models can show it: whether reviewers that now read the source's own words, and
+are told an organisation's page is not primary evidence for a clinical, causal or legal conclusion, approve as many
+documents as before; what the wider requests do to time; whether the funding notes (schedule, uncosted budget) are
+read as intended. These need the owner's approval for paid runs.

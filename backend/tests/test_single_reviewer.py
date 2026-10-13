@@ -196,7 +196,7 @@ def test_standard_sampling_settings_need_an_explicit_versioned_acknowledgment(cl
     from app.runtime import get_runtime
 
     sampled = {**PLAN, "sampleSize": {**PLAN.get("sampleSize", {}), "method": "COCHRAN", "margin": 0, "proportion": 0}}
-    client.models.overrides["p_finalise"] = lambda payload: sampled if payload.get("kind") == "plan" else payload["draft"]  # a chapter's briefs are finalised too
+    client.models.overrides["p_finalise"] = lambda payload: {**sampled, "methods": payload["draft"].get("methods")} if payload.get("kind") == "plan" else payload["draft"]
     project = _project(client)
     assert _plan_step(client, project["id"])["status"] == "COMPLETED"
     view = client.get(f"/api/projects/{project['id']}", headers=STUDENT).json()

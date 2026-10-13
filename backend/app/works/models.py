@@ -355,6 +355,7 @@ class BudgetLine(Camel):
     unit: str = Field(default="", max_length=40)
     unit_cost: float = Field(ge=0)
     entered_total: float | None = None  # what the student typed as the line's total, if anything
+    in_kind: bool = False  # the applicant says this line costs the budget nothing (given in kind): known, at no cost
     year: int = Field(default=1, ge=1, le=10)
     activity_ids: list[str] = []
     support: bool = False  # a declared support or administrative cost (not tied to one activity)
@@ -560,6 +561,7 @@ class WorkStepInput(Camel):
 
     tell_dated: bool = False  # as StepInput.tell_dated: only a step priced with it is told a source is dated
     today: str = ""  # as StepInput.today
+    academic_policy: Literal[0, 1] = 0  # source-support and legal checks, only for steps priced with them
 
     work_id: str
     step: Literal["READ", "PLAN", "DRAFT", "REVISE"]

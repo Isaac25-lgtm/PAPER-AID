@@ -101,10 +101,22 @@ PLAN_SCHEMA_V3 = _obj(
     }
 )
 
+METHODS_SCHEMA = _obj({
+    "version": {"type": "integer", "enum": [1]},
+    "variables": _list(_obj({"id": _S, "label": _S, "role": _enum("OUTCOME", "PREDICTOR", "ADJUSTMENT", "MEDIATOR", "MODERATOR", "EXPLORATORY"),
+                             "scale": _enum("BINARY", "NOMINAL", "ORDINAL", "CONTINUOUS", "COUNT", "TEXT", "UNKNOWN"),
+                             "definition": _S, "unit": _S, "instrument": _S, "period": _S, "rationale": _S})),
+    "objectives": _list(_obj({"objective": {"type": "integer"}, "outcomeId": _S, "predictorIds": _STRS,
+                              "estimator": _enum("DESCRIPTIVE", "BINARY_LOGISTIC", "MULTINOMIAL_LOGISTIC", "ORDINAL_LOGISTIC", "LINEAR", "POISSON", "NEGATIVE_BINOMIAL", "THEMATIC", "OTHER"),
+                              "rationale": _S, "diagnostics": _S, "transformation": _S})),
+    "selectionUnits": _S, "populationFrame": _S, "recruitment": _S, "ethics": _S,
+})
+PLAN_SCHEMA_V4 = _obj({**PLAN_SCHEMA_V3["properties"], "methods": METHODS_SCHEMA})
+
 
 def plan_schema(prompt: str) -> dict[str, Any]:
     """The plan's answer format for the prompt version a step was priced with."""
-    return PLAN_SCHEMA if prompt == "p-plan-v1" else PLAN_SCHEMA_V2 if prompt == "p-plan-v2" else PLAN_SCHEMA_V3
+    return PLAN_SCHEMA if prompt == "p-plan-v1" else PLAN_SCHEMA_V2 if prompt == "p-plan-v2" else PLAN_SCHEMA_V4 if prompt == "p-plan-v6" else PLAN_SCHEMA_V3
 
 
 CRITIQUE_SCHEMA = _obj({"items": _list(_obj({"field": _S, "problem": _S, "proposal": _S})), "overall": _S})

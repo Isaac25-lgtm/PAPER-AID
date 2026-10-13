@@ -53,6 +53,22 @@ PLAN = {
 }
 
 
+def methods_answer(plan: dict[str, Any]) -> dict[str, Any]:
+    """A complete dummy methods contract for the new schema. Overrides can supply intentionally bad contracts.
+    This is test data, not a statistical recommendation or a second implementation of the checks."""
+    variables = [{"id": "V1", "label": "vaccine uptake", "role": "OUTCOME", "scale": "BINARY", "definition": "Receipt recorded on the child card",
+                  "unit": "Eligible child", "instrument": "Child card", "period": "Survey date", "rationale": "Outcome to be assessed"}]
+    variables += [{"id": f"V{n}", "label": name, "role": "PREDICTOR", "scale": "UNKNOWN", "definition": "", "unit": "Caregiver",
+                   "instrument": "Questionnaire", "period": "Survey date", "rationale": "Measurement to be confirmed"}
+                  for n, name in enumerate(plan["variables"]["independent"], start=2)]
+    return {"version": 1, "variables": variables,
+            "objectives": [{"objective": n, "outcomeId": "V1", "predictorIds": ["V2"] if len(variables) > 1 else [], "estimator": "DESCRIPTIVE",
+                            "rationale": "Test analysis", "diagnostics": "To be reviewed", "transformation": ""}
+                           for n in range(1, len(plan["specificObjectives"]) + 1)],
+            "selectionUnits": "Parishes and households", "populationFrame": "Eligible households in the study district, date to be confirmed",
+            "recruitment": "Selection from the eligible frame", "ethics": "Permissions will be sought before recruitment"}
+
+
 def profile_answer(payload: dict[str, Any]) -> dict[str, Any]:
     """A guide read into a profile: the reference structure under another university's headings, with
     one section of its own, its own formatting and one point it leaves open. A text that is not a
@@ -260,7 +276,7 @@ class FakeModels:
                 "contribution": "The objectives measure each determinant among Mukono caregivers.",
                 "evidence": [*cited, "Enot0found"],  # one id that was never given: code must drop it
             }
-            return {**PLAN, "researchGap": gap}
+            return {**PLAN, "researchGap": gap, **({"methods": methods_answer(PLAN)} if payload.get("methodsContractVersion") == 1 else {})}
         if task == "p_profile":
             return profile_answer(payload)
         if task == "p_profile_critique":

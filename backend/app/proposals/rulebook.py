@@ -225,9 +225,13 @@ def plan_problems(rulebook_id: str, plan: ProposalPlan, level: Level | None = No
             problems.append(f"Objective {i} needs its data, collection method and analysis in the alignment table.")
     if any(r.objective < 1 or r.objective > len(objectives) for r in plan.alignment):
         problems.append("The alignment table has a row for an objective that does not exist.")
+    if len(rows) != len(plan.alignment):
+        problems.append("The alignment table must have exactly one row per objective; remove duplicate rows.")
     if plan.questions_kind == "HYPOTHESES" and plan.study_type in ("QUALITATIVE", "NON_EMPIRICAL"):
         problems.append("Hypotheses are for studies with statistical testing; use research questions or propositions for this study.")
-    return problems
+    from app.proposals import methods
+
+    return [*problems, *methods.problems(plan)]
 
 
 def plan_advice(rulebook_id: str, plan: ProposalPlan) -> list[str]:

@@ -24,7 +24,8 @@ def decisions(plan: ProposalPlan) -> dict[str, Any]:
         "area": plan.study_area,
         "population": plan.population,
         "sampling": [plan.sampling, plan.inclusion],
-        "sample_size": plan.sample_size.model_dump(),
+        "sample_size": {k: v for k, v in plan.sample_size.model_dump().items()
+                        if k not in ("design_effect", "nonresponse_rate", "adjustment_source") or v not in (None, "")},
         "variables": plan.variables.model_dump(),
         "theory": plan.theory,
         "scope": plan.scope,
@@ -32,6 +33,8 @@ def decisions(plan: ProposalPlan) -> dict[str, Any]:
         "questions_kind": plan.questions_kind,
         "gap": plan.research_gap.model_dump(),
     }
+    if plan.methods is not None:
+        out["methods"] = plan.methods.model_dump()
     if plan.primary_question.strip() or plan.alternative_hypotheses:  # p-plan-v3 on: absent from older plans, so their hashes are unchanged
         out["primary_question"] = plan.primary_question
         out["alternatives"] = plan.alternative_hypotheses
@@ -94,7 +97,10 @@ def depends_on(chapter: int, key: str, plan: ProposalPlan) -> list[str]:
     table |= {(4, k): v for (c, k), v in table.items() if c == 1}
     table[(4, "literature")] = ["title", "problem", "gap", "theory", *objectives]
     table[(4, "methodology")] = ["study_type", "design", "area", "population", "sampling", "sample_size", *rows]
-    return table.get((chapter, key), list(decisions(plan)))
+    required = table.get((chapter, key), list(decisions(plan)))
+    if plan.methods is not None and (chapter in (3, 4) or key in ("framework", "theory", "scope", "population")):
+        required = list(dict.fromkeys([*required, "methods"]))
+    return required
 
 
 def stamp(chapter: int, key: str, plan: ProposalPlan) -> dict[str, str]:
@@ -105,7 +111,9 @@ def stamp(chapter: int, key: str, plan: ProposalPlan) -> dict[str, str]:
 def stale(document: ChapterDocument, plan: ProposalPlan) -> list[str]:
     """Headings of the sections whose decisions have changed since they were written."""
     current = hashes(plan)
-    return [f"{s.number} {s.heading}" for s in document.sections if any(current.get(d) != h for d, h in s.depends.items())]
+    return [f"{s.number} {s.heading}" for s in document.sections
+            if any(current.get(d) != h for d, h in s.depends.items())
+            or (plan.methods is not None and "methods" in depends_on(document.number, s.key, plan) and "methods" not in s.depends)]
 
 
 def changed(before: ProposalPlan | None, after: ProposalPlan) -> list[str]:

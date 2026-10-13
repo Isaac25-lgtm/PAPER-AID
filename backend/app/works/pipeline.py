@@ -230,6 +230,18 @@ def _mark_copied(current: dict[str, SectionText], keys: list[str], library_items
     return changed
 
 
+def _unnumber(current: dict[str, SectionText], keys: list[str], library_items: dict[str, EvidenceItem]) -> list[str]:
+    """A law's provision number that the repairs left on the word of a source that is not the law is taken out of
+    these sections, the law still named (`ev.drop_provisions`). Returns the sections changed."""
+    changed = []
+    for key in keys:
+        told = [ev.drop_provisions(p, library_items) for p in current[key].paragraphs]
+        if told != current[key].paragraphs:
+            current[key] = current[key].model_copy(update={"paragraphs": told})
+            changed.append(key)
+    return changed
+
+
 def _examples_allowed(inp: WorkStepInput) -> bool:
     """Hypothetical worked examples and drawn graphs belong to coursework answers only; a funding
     proposal's or concept note's numbers must always be evidence or the applicant's own (finding 4)."""
@@ -459,7 +471,7 @@ def _library(ctx: "StageContext", inp: WorkStepInput) -> dict[str, EvidenceItem]
     return {i.id: i for i in ev.dedupe([*base.values(), *new])}
 
 
-def _for_model(items: list[EvidenceItem], passages: bool = False, dated: bool = False) -> list[dict[str, str]]:
+def _for_model(items: list[EvidenceItem], passages: bool = False, dated: bool = False, provenance: bool = False) -> list[dict[str, str]]:
     out = []
     for i in items:
         entry = {"id": i.id, "statement": i.statement, "scope": i.scope, "source": f"{ev.author_label(i.source)}, {i.source.year or 'n.d.'}"}
@@ -469,6 +481,8 @@ def _for_model(items: list[EvidenceItem], passages: bool = False, dated: bool = 
             entry["dated"] = note
         if passages:
             entry["sourceWords"] = i.passage
+        if provenance:
+            entry.update(ev.source_context(i))
         out.append(entry)
     return out
 
@@ -578,7 +592,7 @@ def stage_planning(ctx: "StageContext") -> None:
     plan_rules = [{"rule": r["id"], "requirement": r["requirement"]} for r in library.scoped_rules(rules, "PLAN")]
     payload = {
         "spec": _compact_spec(spec), "student": _student(inp), "skeleton": [s.model_dump(by_alias=True) for s in skeleton],
-        "evidence": _for_model(usable, dated=inp.tell_dated), "note": inp.note, "style": STYLE,
+        "evidence": _for_model(usable, dated=inp.tell_dated, provenance=bool(getattr(inp, "academic_policy", 0))), "note": inp.note, "style": STYLE,
     }
     answer = runner.plan(payload).model_dump()
     plan = _plan_from(answer, skeleton, spec)
@@ -606,7 +620,7 @@ def stage_planning(ctx: "StageContext") -> None:
         out["planReview"] = plan_decision.model_dump(by_alias=True)
     results_decision = None
     if spec.kind == "FUNDING_PROPOSAL":
-        results_payload = {"spec": _compact_spec(spec), "student": _student(inp), "plan": plan.model_dump(by_alias=True), "evidence": _for_model(usable, dated=inp.tell_dated), "note": inp.note}
+        results_payload = {"spec": _compact_spec(spec), "student": _student(inp), "plan": plan.model_dump(by_alias=True), "evidence": _for_model(usable, dated=inp.tell_dated, provenance=bool(getattr(inp, "academic_policy", 0))), "note": inp.note}
         model, lines = _results_from(runner.results(results_payload))
         results_rules = [{"rule": r["id"], "requirement": r["requirement"]} for r in library.scoped_rules(rules, "RESULTS")]
         if not runner._engine.single_reviewer:
@@ -824,7 +838,7 @@ def _section_items(inp: WorkStepInput, library_items: dict[str, EvidenceItem], o
             "minWords": max(s.min_words, round(s.words * DRAFT_FLOOR)) if tight and not s.field_id else s.min_words,
             "maxWords": min(s.max_words or 10**6, round(s.words * DRAFT_CEILING)) if tight and not s.field_id else s.max_words,
             "coverage": [coverage[c] for c in s.coverage if c in coverage], "criteria": [criteria[c] for c in s.criteria if c in criteria],
-            "field": field_limits.get(s.field_id), "evidence": _for_model(relevant, passages=True, dated=inp.tell_dated),
+            "field": field_limits.get(s.field_id), "evidence": _for_model(relevant, passages=True, dated=inp.tell_dated, provenance=bool(getattr(inp, "academic_policy", 0))),
             "_words": " ".join(["w"] * s.words),
         })
     return items
@@ -894,6 +908,8 @@ def _checks(inp: WorkStepInput, section: PlanSection, text: SectionText, library
             problems.append("The text refers to a figure that this section does not contain.")
         problems += ev.citation_problems(plain, usable)
         problems += ev.statistic_problems(plain)  # prose, a caption and a cell alike
+        if getattr(inp, "academic_policy", 0):
+            problems += ev.provision_problems(plain, library_items)
         if n < len(text.paragraphs):
             problems += [f"This sentence is a note to the student, not part of the document: “{s.strip()[:140]}”. The document speaks as the applicant. Remove the note; "
                          "where a figure or fact only they can give is missing, the sentence is written around its marked gap and says nothing about the gap."
@@ -970,7 +986,7 @@ def _repair_items(inp: WorkStepInput, current: dict[str, SectionText], library_i
     sections = {s.key: s for s in inp.plan.sections}
     usable = [i for i in library_items.values() if i.usable]
     keys = [k for k in fix if k in current and k in sections]
-    return [{**i, "issues": fix[i["key"]], "evidence": _for_model(_relevant(sections[i["key"]], usable), passages=True, dated=inp.tell_dated)}
+    return [{**i, "issues": fix[i["key"]], "evidence": _for_model(_relevant(sections[i["key"]], usable), passages=True, dated=inp.tell_dated, provenance=bool(getattr(inp, "academic_policy", 0)))}
             for i in _review_items(inp, sections, current, problems or {}, keys)]
 
 
@@ -995,6 +1011,17 @@ def progress(ctx: "StageContext", step: str, round_: int) -> None:
         return j
 
     ctx.update(mark)
+
+
+def _funding_facts(inp: WorkStepInput, current: dict[str, SectionText], key: str) -> list[str]:
+    """What code can state, and only a reviewer can judge, about a funding proposal's section: the printed schedule
+    beside what the section says of timing, and that the budget has no total where it gives a headline amount."""
+    from app.works.export import TABLES_AFTER
+
+    text = " ".join(current[key].paragraphs)
+    workplan = next((k for k in TABLES_AFTER["workplan"] if k in current), "")
+    facts = [results_engine.schedule_note(inp.results, _spec(inp).duration_months, numbers.strip(text), key == workplan), numbers.uncosted_note(text, inp.budget)]
+    return [f for f in facts if f]
 
 
 def _audit(ctx: "StageContext", runner: WorkRunner, inp: WorkStepInput, current: dict[str, SectionText], targets: list[str], rounds: int | None = None) -> dict[str, Any]:
@@ -1025,7 +1052,8 @@ def _audit(ctx: "StageContext", runner: WorkRunner, inp: WorkStepInput, current:
         # finding and what remains is shown with the document's checks. In a revision it rides along with a repair
         # that is happening anyway and never counts against the section: a requested change is not undone for it.
         again = ev.repeated_sentences([(s.key, [numbers.strip(p) for p in current[s.key].paragraphs]) for s in inp.plan.sections if s.key in current])
-        advice = {k: [*[a for p in current[k].paragraphs for a in ev.copied_problems(numbers.strip(p), library_items)][:3], *again.get(k, [])] for k in pending}
+        advice = {k: [*[a for p in current[k].paragraphs for a in ev.copied_problems(numbers.strip(p), library_items)][:3], *again.get(k, []),
+                      *([a for p in current[k].paragraphs for a in ev.provision_problems(numbers.strip(p), library_items)][:2] if getattr(inp, "academic_policy", 0) else [])] for k in pending}
         if inp.step != "REVISE":
             problems = {k: [*found, *advice[k]] for k, found in problems.items()}
         items = _review_items(inp, sections, current, problems, pending)
@@ -1036,12 +1064,19 @@ def _audit(ctx: "StageContext", runner: WorkRunner, inp: WorkStepInput, current:
         shown = runner._prompt_for("w_evaluate") != "w-evaluate-v1"
         cited = {k: _cited_evidence(current[k], library_items) for k in pending} if shown else {}
         judged = [i for i in items if i["rules"] or premium or _risk(sections[i["key"]], current[i["key"]]) != "low" or any(e.caution for e in cited.get(i["key"], []))]
-        judged = [{**i, "evidence": _for_model(cited[i["key"]], passages=True, dated=inp.tell_dated)} for i in judged] if shown else judged
+        judged = [{**i, "evidence": _for_model(cited[i["key"]], passages=True, dated=inp.tell_dated, provenance=bool(getattr(inp, "academic_policy", 0)))} for i in judged] if shown else judged
         if runner._prompt_for("w_evaluate") not in ("w-evaluate-v1", "w-evaluate-v2"):  # from v3 it explains "forYourJudgement"
             # The sentences code could not judge are read by the evaluator; a section with one is always evaluated.
-            to_read = {k: ev.for_the_reviewer([numbers.strip(f) for f in [*current[k].paragraphs, *_cells(current[k])]], gaps=False) for k in pending}
+            to_read = {k: ev.for_the_reviewer([numbers.strip(f) for f in [*current[k].paragraphs, *_cells(current[k])]], gaps=False,
+                                             library=library_items if getattr(inp, "academic_policy", 0) else None) for k in pending}
             known = {i["key"] for i in judged}
-            judged = [*judged, *[{**i, "evidence": _for_model(cited[i["key"]], passages=True, dated=inp.tell_dated)} for i in items if i["key"] not in known and to_read[i["key"]]]]
+            judged = [*judged, *[{**i, "evidence": _for_model(cited[i["key"]], passages=True, dated=inp.tell_dated, provenance=bool(getattr(inp, "academic_policy", 0)))} for i in items if i["key"] not in known and to_read[i["key"]]]]
+            if inp.spec is not None and inp.spec.kind == "FUNDING_PROPOSAL" and runner._prompt_for("w_evaluate") not in ("w-evaluate-v3", "w-evaluate-v4"):
+                # From w-evaluate-v5 a funding proposal's section is read beside the schedule it commits to and, while
+                # the budget has no total, with the amounts it gives named (independent audit, 2026-10-12).
+                to_read = {k: [*to_read[k], *_funding_facts(inp, current, k)] for k in pending}
+                known = {i["key"] for i in judged}
+                judged = [*judged, *[{**i, "evidence": _for_model(cited[i["key"]], passages=True, dated=inp.tell_dated, provenance=bool(getattr(inp, "academic_policy", 0)))} for i in items if i["key"] not in known and to_read[i["key"]]]]
             judged = [{**i, "forYourJudgement": to_read[i["key"]]} if to_read[i["key"]] else i for i in judged]
         checked, evaluated = runner.together(
             lambda items=items: runner.integrity([{**i, "lockedFacts": common["student"]} for i in items], {"spec": common["spec"], "student": common["student"]}),
@@ -1303,6 +1338,27 @@ def _final_review(runner: WorkRunner, inp: WorkStepInput, document: WorkDocument
                        **({"sections": rule_sections[r["id"]]} if rule_sections and r["id"] in rule_sections else {})} for r in doc_rules],
             "coverage": [c.model_dump(by_alias=True) for c in spec.coverage], "priorities": spec.priorities,
             **({"today": inp.today} if inp.today else {})}
+    # The live path's final review previously read citations but not their verified passages.
+    # For newly priced work, each part now carries the evidence cited by the sections it shows.
+    # Never truncate a quotation to force a fit; the real payload, evidence and history included,
+    # is measured below before any call. Older priced work keeps its previous request.
+    source_ids = {s.key: list(dict.fromkeys(i for field in [*s.paragraphs, s.table_caption, *[c for row in s.table or [] for c in row]]
+                                           for i in ev.cited_ids(field))) for s in document.sections}
+    if getattr(inp, "academic_policy", 0) and ask is None and any(i not in library_items or not library_items[i].usable for ids in source_ids.values() for i in ids):
+        return None  # an unsupported citation must never disappear from the review's evidence silently
+    letters = ev.year_letters([library_items[i].source for i in document.cited if i in library_items], spec.citation_style)
+
+    def with_evidence(part: dict[str, Any]) -> dict[str, Any]:
+        out = extra(part) if extra else {}
+        if not getattr(inp, "academic_policy", 0) or ask is not None:
+            return out
+        ids = list(dict.fromkeys(i for s in part["sections"] for i in source_ids.get(s["key"], [])))
+        offered = [library_items[i] for i in ids if i in library_items and library_items[i].usable]
+        return {**out, "citedEvidence": [{**item, **ev.source_context(e),
+                                        "reference": ev.reference(e.source, spec.citation_style, letters.get(ev._key(e.source), ""))}
+                                       for item, e in zip(_for_model(offered, passages=True, dated=inp.tell_dated, provenance=bool(getattr(inp, "academic_policy", 0))), offered, strict=True)],
+                "sectionEvidence": {s["key"]: source_ids.get(s["key"], []) for s in part["sections"]},
+                "evidenceScope": "Verified passages for these sections only; metadata or a citation is not proof of the document's claim. Judge support, scope, and source suitability."}
     # Every whole request stays within FINAL_PART_WORDS (Codex audit 2026-10-01; Codex review 2026-10-07,
     # finding 8): what every part repeats (specification, rules, the student's context, front matter, the
     # manifest) and the sign-off's room for earlier findings come off first, then a tenth for the request's
@@ -1359,7 +1415,7 @@ def _final_review(runner: WorkRunner, inp: WorkStepInput, document: WorkDocument
         # the request as it will be sent, with everything the editor's part carries besides the document
         if all(payload_words({**base, "document": {"front": whole["front"], "sections": part["sections"],
                                                         "tables": part["tables"], "references": part["references"], "notes": part["notes"]},
-                              "manifest": manifest, "part": f"{n} of {len(parts)}", **(extra(part) if extra else {})}) + history_room <= FINAL_PART_WORDS
+                              "manifest": manifest, "part": f"{n} of {len(parts)}", **with_evidence(part)}) + history_room <= FINAL_PART_WORDS
                for n, part in enumerate(parts, start=1)):
             break
         bound = max(20, bound // 2)
@@ -1369,7 +1425,7 @@ def _final_review(runner: WorkRunner, inp: WorkStepInput, document: WorkDocument
     given: list[Final] = []
     for n, part in enumerate(parts, start=1):
         document_part = {"front": whole["front"], "sections": part["sections"], "tables": part["tables"], "references": part["references"], "notes": part["notes"]}
-        answer = (ask or runner.final)({**base, "document": document_part, "manifest": manifest, "part": f"{n} of {len(parts)}", **(extra(part) if extra else {})})
+        answer = (ask or runner.final)({**base, "document": document_part, "manifest": manifest, "part": f"{n} of {len(parts)}", **with_evidence(part)})
         if answer is None or not _complete(answer, rule_ids, coverage_ids, priorities):
             return None
         given.append(answer)
@@ -1865,6 +1921,7 @@ def stage_auditing(ctx: "StageContext") -> None:
         review(targets)
     stripped: list[str] = []
     quoted: list[str] = []  # sections where a source's own wording was marked as a quotation
+    unnumbered: list[str] = []  # sections where a law's provision number, unproved by its source, was taken out
     fix_notes: list[str] = []
 
     def repair_for(final: "Final", doc_rules: list[dict[str, Any]]) -> dict[str, list[str]]:
@@ -1905,6 +1962,8 @@ def stage_auditing(ctx: "StageContext") -> None:
         """Compression and withholding, then whatever they changed is checked again (not repaired)."""
         _compress_to_limits(ctx, runner, inp, current, tokens, library_items, editable)
         quoted.extend(k for k in _mark_copied(current, list(editable), library_items) if k not in quoted)
+        if getattr(inp, "academic_policy", 0):
+            unnumbered.extend(k for k in _unnumber(current, list(editable), library_items) if k not in unnumbered)
         for key in list(editable):
             cleaned = _strip(inp, current[key], library_items, allowed)
             if cleaned != current[key]:
@@ -2044,9 +2103,9 @@ def stage_auditing(ctx: "StageContext") -> None:
 
     # The Word file is built once before the step can complete and be charged: a document that cannot
     # be exported fails here, without charge, never at the student's download (Codex audit, second round).
-    built = export.build(document, spec, inp.results, inp.budget, library_items, tokens, draft=document.status == "NOT_READY")
+    built = export.build(document, spec, inp.results, inp.budget, library_items, tokens, draft=True)
     if runner._engine.workflow >= 2:  # read back before anything is published: the file carries the accepted text, whole and in order
-        export.verify(built, document, spec, inp.results, inp.budget, library_items, tokens, draft=document.status == "NOT_READY")
+        export.verify(built, document, spec, inp.results, inp.budget, library_items, tokens, draft=True)
     ctx.put_bytes("document.docx", built)
     warnings = []
     if stripped:
@@ -2054,6 +2113,9 @@ def stage_auditing(ctx: "StageContext") -> None:
     if marked := [headings.get(k, k) for k in quoted if k not in reverted]:
         warnings.append(f"PaperAid put quotation marks around words taken directly from a source in: {', '.join(marked)}. Read each quotation: keep it, or put the point "
                         "in your own words.")
+    if plain := [headings.get(k, k) for k in unnumbered if k not in reverted]:
+        warnings.append(f"PaperAid left out the section number of a law where its source was not the law itself, in: {', '.join(plain)}. Check the number in the law's "
+                        "own text before you add it.")
     if concerns:
         warnings.append("Some points still need your attention: " + " | ".join(concerns)[:800])
     share = len(editable) / len(targets) if base is not None and targets else 1.0

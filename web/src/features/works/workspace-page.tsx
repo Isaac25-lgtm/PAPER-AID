@@ -91,7 +91,7 @@ function StartingSoon({ onCheck }: { onCheck: () => void }) {
 /** The figures only the applicant gives that are still missing (the same list the panel asks for). */
 function missingFigures(work: Work) {
   const indicators = (work.results?.indicators ?? []).filter((i) => i.target === null || (i.baseline === null && !i.baselinePlan && i.level !== 'output'))
-  const lines = (work.budget?.lines ?? []).filter((l) => !l.quantity || !l.unitCost)
+  const lines = (work.budget?.lines ?? []).filter((l) => !l.inKind && (!l.quantity || !l.unitCost))
   return { indicators, lines, count: indicators.length + lines.length }
 }
 
@@ -290,6 +290,10 @@ function FiguresPanel({ work, onChange, disabled }: { work: Work; onChange: (w: 
                   <Input label={`Quantity${line.unit ? ` (${line.unit})` : ''}`} inputMode="decimal" value={now.quantity || ''} onChange={(e) => setLine(line.id, { quantity: num(e.target.value) ?? 0 })} />
                   <Input label={`Unit cost (${budget.currency})`} inputMode="decimal" value={now.unitCost || ''} onChange={(e) => setLine(line.id, { unitCost: num(e.target.value) ?? 0 })} />
                 </div>
+                <label className="mt-1.5 flex items-center gap-2 text-sm text-fg-muted">
+                  <input type="checkbox" className="size-4 accent-brand-700" checked={now.inKind ?? false} onChange={(e) => setLine(line.id, { inKind: e.target.checked })} />
+                  Given in kind: it costs this budget nothing
+                </label>
               </div>
             )
           })}

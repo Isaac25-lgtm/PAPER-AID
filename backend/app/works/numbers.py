@@ -74,6 +74,24 @@ def values(spec: ResolvedSpec, results: ResultsModel | None, money_plan: Budget 
     return out
 
 
+HEADLINE = {"ceiling": "the call's ceiling", "answer.amount_requested": "the amount the applicant said they request", "answer.budget_envelope": "the applicant's indicative budget"}
+
+
+def uncosted_note(text: str, money_plan: Budget | None) -> str:
+    """For the reviewer of a funding proposal's section that gives a headline amount while the budget has no total:
+    its lines are not costed yet, or there are none. A ceiling had read as the project's budget and a proposed
+    request as a costed one (independent audit, 2026-10-12). Found by the token the sentence carries, never by its
+    wording; whether the sentence misleads is the reviewer's to say."""
+    if money_plan is not None and budget_engine.complete(money_plan):
+        return ""
+    given = [name for path, name in HEADLINE.items() if f"⟦N:{path}⟧" in text]
+    if not given:
+        return ""
+    return (f"No budget total exists yet: the costs of the budget's lines are still to be entered, so PaperAid has added nothing up. This section gives {' and '.join(given)}. "
+            "The ceiling is the most the funder gives, never what this project costs or asks for; an amount the applicant named is a proposed request still to be "
+            "reconciled with the budget's lines, never a costed, detailed or validated total. Raise an issue only where a sentence says otherwise.")
+
+
 def for_model(tokens: dict[str, tuple[str, str]]) -> list[dict[str, Any]]:
     """What the writer is told about each token: its exact spelling, its value and its meaning."""
     return [{"token": f"⟦N:{path}⟧", "value": text, "meaning": meaning} for path, (text, meaning) in sorted(tokens.items())]

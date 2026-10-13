@@ -20,7 +20,7 @@ from docx.oxml.ns import nsdecls, qn
 from docx.shared import Inches, Pt
 
 from app.formatting.apply import _page_field_paragraph, _set_font, _set_page_numbering
-from app.proposals import decisions, evidence, rulebook
+from app.proposals import decisions, evidence, methods, rulebook
 from app.proposals import framework as framework_figure
 from app.proposals.models import ChapterDocument, EvidenceItem, Project, ProposalPlan
 
@@ -37,6 +37,10 @@ def final_blockers(project: Project, chapters: dict[int, ChapterDocument]) -> li
             problems.append(f"Add {label} to the title page details.")
     if project.plan is None or project.plan_status != "APPROVED":
         problems.append("Approve your plan.")
+    if project.plan is not None:
+        problems.extend(methods.problems(project.plan))
+        if not methods.frame_confirmed(project):
+            problems.append("Confirm that your population figure counts the eligible sampling frame, with its source and date, in Chapter Three's workspace.")
     for n in (1, 2, 3):
         doc = chapters.get(n)
         if doc is None:
@@ -107,7 +111,7 @@ def institution_of(project: Project, book: dict) -> str:
     return ""
 
 
-def _title_page(doc, project: Project, draft: bool) -> None:
+def _title_page(doc, project: Project, draft: bool, chapters: dict[int, ChapterDocument] | None = None) -> None:
     plan, page, inputs = project.plan, project.title_page, project.inputs
     book = rulebook.load(project.rulebook)
     level = book["levels"][inputs.level]["label"]
@@ -128,6 +132,30 @@ def _title_page(doc, project: Project, draft: bool) -> None:
     if draft:
         _centered(doc, "")
         _centered(doc, f"Draft prepared with PaperAid, {date.today():%d %B %Y}: not yet complete for submission.")
+        for line in draft_scope(chapters or {}):  # what this file holds, so a part is never read as the whole
+            _centered(doc, line)
+        if plan is not None:
+            for line in methods.provenance(plan):
+                _centered(doc, line)
+
+
+def draft_scope(chapters: dict[int, ChapterDocument]) -> list[str]:
+    """What a draft holds and what is still to write, for its cover: "Written so far: Chapters One and Two of three.
+    Still to write: Chapter Three." A reader given a draft of two chapters took it for an incomplete proposal that
+    claimed to be whole (independent audit, 2026-10-12)."""
+    def named(numbers: list[int]) -> str:
+        words = [ORDINALS[n].capitalize() for n in numbers]
+        return ("Chapter " if len(words) == 1 else "Chapters ") + (" and ".join([", ".join(words[:-1]), words[-1]]) if len(words) > 1 else words[0])
+
+    written = sorted(n for n in chapters if n in ORDINALS)
+    waiting = [n for n in sorted(ORDINALS) if n not in written]
+    unfinished = [f"{ORDINALS[n].capitalize()} ({len(chapters[n].missing)} of its sections)" for n in written if chapters[n].missing]
+    lines = [f"Written so far: {named(written)} of three." if written else "No chapter is written yet."]
+    if waiting:
+        lines.append(f"Still to write: {named(waiting)}.")
+    if unfinished:
+        lines.append("Not yet finished: Chapter " + ", Chapter ".join(unfinished) + ".")
+    return lines
 
 
 def _form_page(doc, heading: str, lines: list[str]) -> None:
@@ -194,7 +222,8 @@ def framework_columns(plan: ProposalPlan | None) -> list[tuple[str, list[str]]]:
     v = plan.variables
     columns = [("Independent variables" if len(v.independent) > 1 else "Independent variable", v.independent)]
     if v.intervening:
-        columns.append(("Intervening variables" if len(v.intervening) > 1 else "Intervening variable", v.intervening))
+        columns.append(("Additional factors (see methods for roles)" if plan.methods is not None else
+                        ("Intervening variables" if len(v.intervening) > 1 else "Intervening variable"), v.intervening))
     columns.append(("Dependent variables" if len(v.dependent) > 1 else "Dependent variable", v.dependent))
     return columns
 
@@ -237,7 +266,7 @@ def _framework(doc, columns: list[tuple[str, list[str]]], figure: str = "Figure 
 def build(project: Project, chapters: dict[int, ChapterDocument], library: dict[str, EvidenceItem], draft: bool) -> bytes:
     doc = Document()
     _setup(doc, project.rulebook)
-    _title_page(doc, project, draft)
+    _title_page(doc, project, draft, chapters)
 
     prelim = doc.add_section(WD_SECTION.NEW_PAGE)
     name = project.title_page.student_name.strip()
@@ -272,9 +301,12 @@ def build(project: Project, chapters: dict[int, ChapterDocument], library: dict[
         doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
         doc.add_heading("List of Tables", level=1)
         listing = evidence.Citer(library, project.citation, everything)  # its own state: the body's first citations are unaffected (M19)
-        for i, (n, s) in enumerate(tables, start=1):
-            doc.add_paragraph(f"Table {n}.{i}: {listing.render(s.table_caption) or s.heading}")
-    has_figure = framework_figure.draw_kind(project.plan) != "NONE" if project.plan else False
+        counts: dict[int, int] = {}
+        for n, s in tables:
+            counts[n] = counts.get(n, 0) + 1
+            doc.add_paragraph(f"Table {n}.{counts[n]}: {listing.render(evidence.caption_text(s.table_caption)) or s.heading}")
+    figure_plan = methods.figure_plan(project.plan, chapters[1].framework_plan if 1 in chapters else None)
+    has_figure = framework_figure.draw_kind(figure_plan) != "NONE" if figure_plan else False
     has_figure = has_figure and 1 in chapters and any(s.key == "framework" for s in chapters[1].sections)
     if has_figure:
         doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
@@ -284,8 +316,8 @@ def build(project: Project, chapters: dict[int, ChapterDocument], library: dict[
 
     citer = evidence.Citer(library, project.citation, everything)
     cited: list[str] = []
-    table_count = 0
     for n in (1, 2, 3):
+        table_count = 0
         chapter = chapters.get(n)
         if chapter is None:
             continue
@@ -306,14 +338,14 @@ def build(project: Project, chapters: dict[int, ChapterDocument], library: dict[
                 p = doc.add_paragraph(citer.render(paragraph))
                 p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
             if n == 1 and s.key == "framework" and has_figure:
-                _framework(doc, framework_columns(project.plan), plan=project.plan, style=project.framework_style)
+                _framework(doc, framework_columns(figure_plan), plan=figure_plan, style=project.framework_style)
             if s.table:
                 table_count += 1
                 for field in [s.table_caption, *[c for row in s.table for c in row]]:
                     cited += [i for i in evidence.cited_ids(field) if i not in cited]
                 caption = doc.add_paragraph()
-                caption.add_run(f"Table {n}.{table_count}: {citer.render(s.table_caption) or s.heading}").bold = True
-                grid = doc.add_table(rows=len(s.table), cols=len(s.table[0]))
+                caption.add_run(f"Table {n}.{table_count}: {citer.render(evidence.caption_text(s.table_caption)) or s.heading}").bold = True
+                grid = doc.add_table(rows=len(s.table), cols=max(len(row) for row in s.table))
                 grid.style = "Table Grid"
                 for r, row in enumerate(s.table):
                     for c, value in enumerate(row):
@@ -340,7 +372,7 @@ def concept(project: Project, paper: ChapterDocument, library: dict[str, Evidenc
     each annotated with what the confirmed evidence from it shows."""
     doc = Document()
     _setup(doc, project.rulebook)
-    plan, page, inputs = project.plan, project.title_page, project.inputs
+    plan, page, inputs = methods.figure_plan(project.plan, paper.framework_plan), project.title_page, project.inputs
     doc.add_heading("CONCEPT PAPER", level=1)
     _centered(doc, (plan.title if plan else inputs.topic), bold=True, space_after=12)
     level = rulebook.load(project.rulebook)["levels"][inputs.level]["label"]

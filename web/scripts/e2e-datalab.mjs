@@ -152,12 +152,12 @@ try {
   step('the analysis report is written, shown and downloads as Word')
 
   await page.goto(`${base}/app/work`)
-  await page.getByText('Exam results by sex').first().waitFor()
+  await page.locator('main').getByText('Exam results by sex').first().waitFor()
   step('Your work lists the Data Lab project')
 
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto(page.url().replace('/app/work', '/app/datalab'))
-  await page.getByText('Exam results by sex').first().click()
+  await page.locator('main').getByText('Exam results by sex').first().click()
   await page.getByRole('button', { name: /Download Word/ }).waitFor()
   const wide = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)
   await shot('dl5-phone')

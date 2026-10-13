@@ -422,6 +422,8 @@ def _crossref_record(message: dict, doi: str = "") -> dict[str, str]:
     return {
         "doi": (doi or message.get("DOI") or "").lower(),
         "title": clean_title((message.get("title") or [""])[0]),
+        "subtitle": clean_title((message.get("subtitle") or [""])[0]),  # a book's is registered apart from its title
+        "publisher": clean_text(message.get("publisher") or ""),
         "authors": "; ".join(a for a in authors if a),
         "year": str(parts[0]) if parts and parts[0] else "",
         "container": clean_container((message.get("container-title") or [""])[0]),

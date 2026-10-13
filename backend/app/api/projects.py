@@ -256,6 +256,11 @@ def confirm_sampling(project_id: str, body: SamplingConfirmation, user: User = D
     return projects.confirm_sampling(rt, user, project_id, body.base_version)
 
 
+@router.post("/{project_id}/population-frame", response_model=ProjectView)
+def confirm_population_frame(project_id: str, body: SamplingConfirmation, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> ProjectView:
+    return projects.confirm_population_frame(rt, user, project_id, body.base_version)
+
+
 class FrameworkEdit(Camel):
     base_version: int
     style: Literal["MONO", "GREEN", "BLUE"] | None = None

@@ -103,15 +103,22 @@ def _budget_tables(budget: Budget) -> tuple[list[list[str]], list[list[str]]]:
     summary = [["Category", "Amount"], *[[k, money(v, complete)] for k, v in sorted(t.by_category.items())], ["Total", money(t.total, complete)]]
     detail = [["Line", "Description", "Quantity", "Unit", "Unit cost", "Total", "Year", "Activities"]]
     for li in budget.lines:
-        known = bool(li.quantity and li.unit_cost)
-        detail.append([li.id, li.description, f"{li.quantity:g}" if li.quantity else TO_ADD, li.unit, money(li.unit_cost, bool(li.unit_cost)), money(budget_engine.line_total(li), known),
-                       str(li.year), ", ".join(li.activity_ids) or ("Support" if li.support else "")])
+        if li.in_kind:  # the applicant's own statement: it costs this budget nothing, and prints as that, not as a gap
+            figures = [f"{li.quantity:g}" if li.quantity else "", li.unit, IN_KIND, money(0)]
+        else:
+            figures = [f"{li.quantity:g}" if li.quantity else TO_ADD, li.unit, money(li.unit_cost, bool(li.unit_cost)), money(budget_engine.line_total(li), budget_engine.known(li))]
+        detail.append([li.id, li.description, *figures, str(li.year), ", ".join(li.activity_ids) or ("Support" if li.support else "")])
     return summary, detail
 
 
 COVER_FIELDS = (("name", "Name"), ("reg", "Registration number"), ("course", "Course"), ("lecturer", "Lecturer"), ("institution", "Institution"), ("due", "Date"))
 EXPLORATORY = "Exploratory draft: not every eligibility criterion is met, so this is not ready to submit."
 DRAFT_LABEL = "Draft: some requirements still need your attention (see PaperAid's checklist)."
+# A file whose checks pass can still print figures only its author can give. It is a checked draft, not a document
+# ready to send: the label says so on the file itself (independent audit, 2026-10-12).
+GAPS_LABEL = "Draft: the figures marked “to be added” are yours to give before this is ready to submit."
+GAP = "to be added]"  # how both kinds of marked gap end (numbers.TO_ADD, results.TO_ADD)
+IN_KIND = "In kind"
 
 
 @dataclass(frozen=True)
@@ -128,8 +135,9 @@ class Block:
 def layout(document: WorkDocument, spec: ResolvedSpec, results: ResultsModel | None, budget: Budget | None, library: dict[str, EvidenceItem],
            tokens: dict[str, tuple[str, str]], draft: bool) -> list[Block]:
     """The document as delivered: citations and figures filled in, tables that print (at least a header
-    and one row), the reference list and the last-page note. `draft` adds the not-ready label, which
-    only the stored file carries: it is decided after the final review, from its result."""
+    and one row), the reference list and the last-page note. `draft` adds the label of a file that is not ready
+    (its checklist says so, or it prints a marked gap), which only the stored file carries: it is decided after
+    the final review, from its result."""
     citer = ev.Citer(library, spec.citation_style, document.cited)
 
     def show(text: str) -> str:
@@ -146,6 +154,7 @@ def layout(document: WorkDocument, spec: ResolvedSpec, results: ResultsModel | N
         blocks.append(Block("label", EXPLORATORY))
     elif draft and document.status == "NOT_READY":
         blocks.append(Block("label", DRAFT_LABEL))
+    front = len(blocks)
     generated: dict[str, list[tuple[list[list[str]], str]]] = {}
     for key, _, rows, caption in generated_tables(document, spec, results, budget):
         generated.setdefault(key, []).append((rows, caption))
@@ -184,6 +193,8 @@ def layout(document: WorkDocument, spec: ResolvedSpec, results: ResultsModel | N
         blocks += [Block("reference", entry) for entry in ev.reference_list([library[i].source for i in cited], spec.citation_style)]
     if document.ai_note:
         blocks.append(Block("note", document.ai_note))
+    if draft and not document.exploratory and document.status != "NOT_READY" and any(GAP in b.text or any(GAP in c for row in b.rows for c in row) for b in blocks):
+        blocks.insert(front, Block("label", GAPS_LABEL))
     return blocks
 
 
@@ -204,7 +215,7 @@ def build(document: WorkDocument, spec: ResolvedSpec, results: ResultsModel | No
             label = doc.add_paragraph()
             label.alignment = WD_ALIGN_PARAGRAPH.CENTER
             run = label.add_run(block.text)
-            run.italic = block.text in (EXPLORATORY, DRAFT_LABEL)
+            run.italic = block.text in (EXPLORATORY, DRAFT_LABEL, GAPS_LABEL)
         elif block.kind == "heading":
             doc.add_heading(block.text, level=1 if not spec.fields else 2)
         elif block.kind == "paragraph":

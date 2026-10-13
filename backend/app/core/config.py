@@ -103,6 +103,12 @@ class Settings(BaseSettings):
     # premium model correcting and deciding at the end; without it the earlier final review stays, with one repair
     # round for coursework so a draft cannot go round the loop past ten minutes. Frozen as Engine.final_editor.
     final_editor: bool = True
+    # The methods contract of new proposal plans (Codex, 2026-10-13, `app.proposals.methods`: measurements with ids,
+    # roles and scales, and one analysis row per objective). On, a new plan depends on the model returning that object
+    # in a strict shape, and a plan without it fails; no real model has been asked for it yet. So it is off until a
+    # trial proves it, as WORKFLOW is: off, a new plan is asked for exactly as before (`METHODS_OFF`). Frozen with
+    # each engine's prompts, so a plan keeps the contract it was priced with.
+    methods_contract: bool = False
     # Choosing research topics is a narrow task: its own stage, so its thinking level can differ from planning's
     # (HIGH there took up to 100 s for a list of topics, 8 October).
     topics_model: str = "gemini-3.8-flash"

@@ -1,0 +1,589 @@
+{
+ "provision": [
+  {
+   "where": "q-rc/4/job_e932b24b1b7d-cd4ee6dc14a09ba9d395098d.json",
+   "paragraph": "Globally, school meal programmes enhance school participation, increasing enrolment by an average benchmark of 9 percent while significantly improving attendance rates and decreasing drop-out rates ⟦E6a097b⟧. Across Sub-Saharan Africa, school feeding coverage expanded rapidly between 2022 and 2024, with government-led initiatives reaching an additional 20 million children across the continent ⟦E7d37dc⟧. Within Uganda, national policy under 2013 Ministry of Education and Sports guidelines and Section 13(5)(2c) of the Education Act 2008 places the primary responsibility of providing school meals upon parents and guardians rather than establishing a state-funded framework ⟦Eb90c35⟧. In the food-insecure Karamoja region, school feeding initiatives providing breakfast and lunch have been shown to improve attendance, especially among female learners and during periods of domestic food insecurity ⟦E2c5399⟧. Despite existing feeding initiatives, over 40 percent of primary pupils enrolled under Universal Primary Education in Karamoja fail to complete the primary cycle, with similar trends documented in Kotido District ⟦E0ca700⟧, demonstrating the critical need for an empirical investigation into local feeding practices and attendance.",
+   "evidence": [
+    {
+     "id": "E6a097b",
+     "chapter": 4,
+     "need": "What are the latest global and sub-Saharan African coverage rates of school feeding programmes and their documented benchmark impacts on primary school attendance?",
+     "statement": "Global evidence synthesized by the World Food Programme indicates that school meal programmes increase school enrolment by an average benchmark of 9 percent while significantly improving attendance and decreasing drop-out rates.",
+     "passage": "School meal programmes can increase enrolment by an average of 9 percent, while significantly increasing attendance rates and decreasing drop-out rates.",
+     "scope": "School meal programmes globally, 2022",
+     "access": "FULL_TEXT",
+     "verified": true,
+     "support": "SUPPORTED",
+     "caution": "",
+     "source": {
+      "url": "https://publications.wfp.org/2022/state-of-school-feeding/",
+      "title": "State of School Feeding Worldwide 2022",
+      "authors": [],
+      "organisation": "World Food Programme",
+      "year": "2023",
+      "container": "World Food Programme",
+      "volume": "",
+      "issue": "",
+      "pages": "",
+      "doi": "",
+      "kind": "REPORT",
+      "metadata": "PAGE"
+     },
+     "retrievedOn": "2026-10-11"
+    },
+    {
+     "id": "E7d37dc",
+     "chapter": 4,
+     "need": "What are the latest global and sub-Saharan African coverage rates of school feeding programmes and their documented benchmark impacts on primary school attendance?",
+     "statement": "In Sub-Saharan Africa, the number of children reached by school feeding programmes expanded significantly between 2022 and 2024, with government-led initiatives driving an increase of 20 million children across the continent.",
+     "passage": "Twenty million more children in Sub-Saharan Africa are now receiving school meals through government-led programmes than in 2022, according to the latest edition of the State of School Feeding Worldwide, a flagship global biennial report released today by the United Nations World Food Programme (WFP).",
+     "scope": "Sub-Saharan Africa, 2022–2024",
+     "access": "FULL_TEXT",
+     "verified": true,
+     "support": "SUPPORTED",
+     "caution": "",
+     "source": {
+      "url": "https://www.wfp.org/news/wfp-report-20-million-more-children-sub-saharan-africa-now-receive-government-led-school-meals",
+      "title": "WFP report: 20 million more children in Sub-Saharan Africa now receive government-led school meals",
+      "authors": [],
+      "organisation": "World Food Programme",
+      "year": "2025",
+      "container": "World Food Programme",
+      "volume": "",
+      "issue": "",
+      "pages": "",
+      "doi": "",
+      "kind": "REPORT",
+      "metadata": "PAGE"
+     },
+     "retrievedOn": "2026-10-11"
+    },
+    {
+     "id": "Eb90c35",
+     "chapter": 0,
+     "need": "What national policies and institutional guidelines govern school feeding programmes in Uganda?",
+     "statement": "School feeding in Uganda operates under 2013 Ministry of Education and Sports guidelines and Section 13(5)(2c) of the Education Act 2008, which place primary responsibility for providing food on parents and guardians.",
+     "passage": "The MoES developed guidelines in 2013 with the aim of assisting the implementation of a parent– led school feeding programme to improve child health, nutrition and educational performance. The guidelines were issued in conformity with the Education Act (Article 13, sub-section 5[2c])",
+     "scope": "Primary schools, Uganda, 2008–2024",
+     "access": "FULL_TEXT",
+     "verified": true,
+     "support": "SUPPORTED",
+     "caution": "",
+     "source": {
+      "url": "https://educationoutloud.org/wp-content/uploads/2026/07/SCHOOL-FEEDING-BRIEF-CSBAG.pdf",
+      "title": "Policy Brief: Enhancing School Feeding in Uganda",
+      "authors": [],
+      "organisation": "Education Out Loud",
+      "year": "2024",
+      "container": "Education Out Loud",
+      "volume": "",
+      "issue": "",
+      "pages": "",
+      "doi": "",
+      "kind": "REPORT",
+      "metadata": "PAGE"
+     },
+     "retrievedOn": "2026-10-11"
+    },
+    {
+     "id": "E2c5399",
+     "chapter": 0,
+     "need": "What empirical evidence demonstrates the effect of school feeding interventions on pupil attendance in pastoralist communities in Uganda?",
+     "statement": "World Food Programme school feeding initiatives in Karamoja providing breakfast and lunch to over 150,000 primary school pupils improved attendance, especially among female learners and during periods of domestic food insecurity.",
+     "passage": "Under these programmes, pupils received two daily meals: porridge for breakfast and a lunch consisting mainly of beans and maize. This approach proved successful, especially in improving school attendance among girls and reducing dropout rates during seasons when food was scarce at home.",
+     "scope": "Primary schools across the Karamoja region, Uganda, covering WFP evaluations from 2005 through 2022",
+     "access": "FULL_TEXT",
+     "verified": true,
+     "support": "PARTLY_SUPPORTED",
+     "caution": "The passage supports the effects on attendance among girls and during food scarcity, but does not mention the figure of over 150,000 pupils.",
+     "source": {
+      "url": "https://rsisinternational.org/journals/ijriss/articles/school-feeding-programme-in-universal-primary-education-upe-schools-of-uganda-the-case-study-of-bukomansimbi-district/",
+      "title": "Evaluation of School Feeding Initiatives and Policy Sustainability in Karamoja",
+      "authors": [],
+      "organisation": "RSIS International",
+      "year": "2025",
+      "container": "RSIS International",
+      "volume": "",
+      "issue": "",
+      "pages": "",
+      "doi": "",
+      "kind": "REPORT",
+      "metadata": "PAGE"
+     },
+     "retrievedOn": "2026-10-11"
+    },
+    {
+     "id": "E0ca700",
+     "chapter": 0,
+     "need": "What are the current primary school attendance, dropout, and enrolment statistics in Kotido District and the Karamoja sub-region?",
+     "statement": "More than 40 percent of learners enrolled under Universal Primary Education in the Karamoja sub-region fail to finish primary school, with similar trends documented in Kotido District.",
+     "passage": "Data from the Moroto District Education Office indicates that over 40 percent of children enrolled in UPE schools do not complete the primary cycle. Similar trends are being reported in Kotido, Napak, and Kaabong districts.",
+     "scope": "Universal Primary Education pupils, Kotido, Moroto, Napak, and Kaabong districts (Karamoja), Uganda, 2025",
+     "access": "FULL_TEXT",
+     "verified": true,
+     "support": "SUPPORTED",
+     "caution": "",
+     "source": {
+      "url": "https://www.independent.co.ug/parents-blamed-for-increasing-school-dropouts-in-karamoja/",
+      "title": "Karamoja: Parents blamed for high school dropout rates",
+      "authors": [],
+      "organisation": "The Independent (Uganda)",
+      "year": "2025",
+      "container": "The Independent (Uganda)",
+      "volume": "",
+      "issue": "",
+      "pages": "",
+      "doi": "",
+      "kind": "REPORT",
+      "metadata": "PAGE"
+     },
+     "retrievedOn": "2026-10-11"
+    }
+   ]
+  },
+  {
+   "where": "q-rc/4/job_e932b24b1b7d-cd4ee6dc14a09ba9d395098d.json",
+   "paragraph": "Universal Primary Education policy aims to ensure consistent daily attendance and primary school completion for all enrolled pupils in Kotido District. However, primary schools in the Karamoja region record an estimated 74.2 percent dropout rate and a retention rate of only 24.2 percent ⟦Ec4fe6e⟧, with over 40 percent of enrolled learners failing to finish primary school in Kotido District ⟦E0ca700⟧. In the absence of a fully state-funded national framework, school feeding relies on parental food or cash cost-sharing contributions under Section 13(5)(2c) of the Education Act 2008 and ministry circulars ⟦Eb90c35⟧⟦Ec6e018⟧. Pervasive learner absenteeism and early school dropout continue to impede educational attainment and literacy outcomes across Kotido District. Published evidence from the region has not established how specific operational feeding dimensions—including daily meal regularity, meal modalities, and parental cost-sharing compliance—relate to pupil attendance in government-aided primary schools in Kotido District.",
+   "evidence": [
+    {
+     "id": "Ec4fe6e",
+     "chapter": 0,
+     "need": "What are the current primary school attendance, dropout, and enrolment statistics in Kotido District and the Karamoja sub-region?",
+     "statement": "Primary schools in the Karamoja region record an estimated 74.2 percent dropout rate and a retention rate of only 24.2 percent.",
+     "passage": "Learner retention in Karamoja Primary Schools remains very low with only 24.2 % retention and 74.2% drop out rate. This threatens basic level skill acquisition.",
+     "scope": "Primary school learners, Karamoja region, Uganda, 2026",
+     "access": "SNIPPET",
+     "verified": true,
+     "support": "SUPPORTED",
+     "caution": "",
+     "source": {
+      "url": "https://rsisinternational.org/journals/ijrsi/view/effect-of-sports-participation-on-learner-retention-of-primary-school-children-in-karamoja-region-uganda",
+      "title": "Effect of Sports Participation on Learner Retention of Primary School Children in Karamoja Region, Uganda",
+      "authors": [
+       "Opio, P.",
+       "Wamukoya, E. K.",
+       "Bukhala, P. W."
+      ],
+      "organisation": "",
+      "year": "2026",
+      "container": "International Journal of Research and Scientific Innovation",
+      "volume": "13",
+      "issue": "7",
+      "pages": "5837–5847",
+      "doi": "10.51244/ijrsi.2026.1307000428",
+      "kind": "ARTICLE",
+      "metadata": "CROSSREF"
+     },
+     "retrievedOn": "2026-10-11"
+    },
+    {
+     "id": "E0ca700",
+     "chapter": 0,
+     "need": "What are the current primary school attendance, dropout, and enrolment statistics in Kotido District and the Karamoja sub-region?",
+     "statement": "More than 40 percent of learners enrolled under Universal Primary Education in the Karamoja sub-region fail to finish primary school, with similar trends documented in Kotido District.",
+     "passage": "Data from the Moroto District Education Office indicates that over 40 percent of children enrolled in UPE schools do not complete the primary cycle. Similar trends are being reported in Kotido, Napak, and Kaabong districts.",
+     "scope": "Universal Primary Education pupils, Kotido, Moroto, Napak, and Kaabong districts (Karamoja), Uganda, 2025",
+     "access": "FULL_TEXT",
+     "verified": true,
+     "support": "SUPPORTED",
+     "caution": "",
+     "source": {
+      "url": "https://www.independent.co.ug/parents-blamed-for-increasing-school-dropouts-in-karamoja/",
+      "title": "Karamoja: Parents blamed for high school dropout rates",
+      "authors": [],
+      "organisation": "The Independent (Uganda)",
+      "year": "2025",
+      "container": "The Independent (Uganda)",
+      "volume": "",
+      "issue": "",
+      "pages": "",
+      "doi": "",
+      "kind": "REPORT",
+      "metadata": "PAGE"
+     },
+     "retrievedOn": "2026-10-11"
+    },
+    {
+     "id": "Eb90c35",
+     "chapter": 0,
+     "need": "What national policies and institutional guidelines govern school feeding programmes in Uganda?",
+     "statement": "School feeding in Uganda operates under 2013 Ministry of Education and Sports guidelines and Section 13(5)(2c) of the Education Act 2008, which place primary responsibility for providing food on parents and guardians.",
+     "passage": "The MoES developed guidelines in 2013 with the aim of assisting the implementation of a parent– led school feeding programme to improve child health, nutrition and educational performance. The guidelines were issued in conformity with the Education Act (Article 13, sub-section 5[2c])",
+     "scope": "Primary schools, Uganda, 2008–2024",
+     "access": "FULL_TEXT",
+     "verified": true,
+     "support": "SUPPORTED",
+     "caution": "",
+     "source": {
+      "url": "https://educationoutloud.org/wp-content/uploads/2026/07/SCHOOL-FEEDING-BRIEF-CSBAG.pdf",
+      "title": "Policy Brief: Enhancing School Feeding in Uganda",
+      "authors": [],
+      "organisation": "Education Out Loud",
+      "year": "2024",
+      "container": "Education Out Loud",
+      "volume": "",
+      "issue": "",
+      "pages": "",
+      "doi": "",
+      "kind": "REPORT",
+      "metadata": "PAGE"
+     },
+     "retrievedOn": "2026-10-11"
+    },
+    {
+     "id": "Ec6e018",
+     "chapter": 0,
+     "need": "What national policies and institutional guidelines govern school feeding programmes in Uganda?",
+     "statement": "In the absence of a fully state-funded national feeding framework, Uganda's Ministry of Education and Sports instituted a cost-sharing circular directing parents to contribute food or cash for school feeding.",
+     "passage": "In 2013, the Ministry of Education and Sports issued a policy circular requiring parents to contribute either food or money to support school feeding through a “Cost-Sharing” model.",
+     "scope": "Universal Primary Education (UPE) schools, Uganda, 2013–2025",
+     "access": "FULL_TEXT",
+     "verified": true,
+     "support": "SUPPORTED",
+     "caution": "",
+     "source": {
+      "url": "https://rsisinternational.org/journals/ijriss/articles/school-feeding-programme-in-universal-primary-education-upe-schools-of-uganda-the-case-study-of-bukomansimbi-district/",
+      "title": "School Feeding Programme in Universal Primary Education (UPE) Schools of Uganda: The Case Study of Bukomansimbi District",
+      "authors": [
+       "Vincent, K.",
+       "Zaharah Faridah, K."
+      ],
+      "organisation": "",
+      "year": "2025",
+      "container": "International Journal of Research and Innovation in Social Science",
+      "volume": "IX",
+      "issue": "V",
+      "pages": "4913–4925",
+      "doi": "10.47772/ijriss.2025.905000379",
+      "kind": "ARTICLE",
+      "metadata": "CROSSREF"
+     },
+     "retrievedOn": "2026-10-11"
+    }
+   ]
+  }
+ ],
+ "doubled": [
+  {
+   "where": "q2-cw/documents/job_769b3f3064f2-f4897335f9d569c4e3fcac38.json",
+   "paragraph": "The practical efficiency of cross-sectional investigations makes them an appealing choice in public health research. Epidemiological work requires balancing scientific precision with operational feasibility, and cross-sectional designs offer distinct practical advantages. As Mann ⟦Ec5a13f|n⟧ observes, these studies are relatively fast and straightforward to carry out when establishing disease prevalence. Unlike prospective methods requiring prolonged observation across subsequent years, cross-sectional surveys evaluate a population at a single point in time. This approach avoids logistical hurdles such as participant dropout, lengthy administrative delays, and mounting staff costs. Furthermore, capturing a snapshot of population health allows researchers to evaluate multiple factors across a community simultaneously ⟦Eb93782⟧. By gathering data quickly, health departments obtain an immediate baseline estimate of community health, providing rapid empirical support when emergent concerns demand prompt investigation.",
+   "evidence": [
+    {
+     "id": "Ec5a13f",
+     "chapter": 0,
+     "need": "How do cross-sectional studies compare to cohort and case-control designs regarding feasibility, cost, and evidence strength in public health research?",
+     "statement": "Cross-sectional designs are relatively fast and easy to conduct to establish disease prevalence, but unlike prospective cohort designs that track chronological events, they cannot distinguish cause from effect.",
+     "passage": "Cohort studies are used to study incidence, causes, and prognosis. Because they measure events in chronological order they can be used to distinguish between cause and effect. Cross sectional studies are used to determine prevalence. They are relatively quick and easy but do not permit distinction between cause and effect.",
+     "scope": "Observational epidemiologic and public health study designs.",
+     "access": "FULL_TEXT",
+     "verified": true,
+     "support": "SUPPORTED",
+     "caution": "",
+     "source": {
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC1726024/",
+      "title": "Observational research methods. Research design II: cohort, cross sectional, and case-control studies",
+      "authors": [
+       "Mann, C. J."
+      ],
+      "organisation": "",
+      "year": "2003",
+      "container": "Emergency Medicine Journal",
+      "volume": "20",
+      "issue": "1",
+      "pages": "54–60",
+      "doi": "10.1136/emj.20.1.54",
+      "kind": "ARTICLE",
+      "metadata": "CROSSREF"
+     },
+     "retrievedOn": "2026-10-11"
+    },
+    {
+     "id": "Eb93782",
+     "chapter": 0,
+     "need": "How do cross-sectional studies function as an initial step for hypothesis generation prior to longitudinal or experimental investigation?",
+     "statement": "Because cross-sectional studies capture simultaneous snapshots of exposures and outcomes without establishing temporal order, they primarily serve to identify correlations and generate hypotheses for prospective designs.",
+     "passage": "Unlike cohort or experimental designs that establish temporal sequence, cross-sectional studies provide a “snapshot” of associations in a population. They are particularly valuable for estimating prevalence, identifying correlations, and generating hypotheses for further research",
+     "scope": "Epidemiology and movement science methodology, 2025",
+     "access": "FULL_TEXT",
+     "verified": true,
+     "support": "SUPPORTED",
+     "caution": "",
+     "source": {
+      "url": "https://brookbushinstitute.com/glossary/cross-sectional-study",
+      "title": "Cross-Sectional Study: Definition, Examples, Strengths, Limitations",
+      "authors": [],
+      "organisation": "Brookbush Institute",
+      "year": "2025",
+      "container": "Brookbush Institute",
+      "volume": "",
+      "issue": "",
+      "pages": "",
+      "doi": "",
+      "kind": "REPORT",
+      "metadata": "PAGE"
+     },
+     "retrievedOn": "2026-10-11"
+    }
+   ]
+  },
+  {
+   "where": "q2-cw/documents/job_769b3f3064f2-f4897335f9d569c4e3fcac38.json",
+   "paragraph": "At the community level, cross-sectional designs effectively capture a broad range of public health measures. The Centers for Disease Control and Prevention ⟦E9671fa|n⟧ notes that these studies are routinely utilised to document the prevalence of health behaviours, health states, and health outcomes in communities. In practice, this encompasses assessing behaviours such as smoking rates, monitoring preventative health states like measles vaccination coverage, and tracking chronic conditions including hypertension and diabetes ⟦E9671fa⟧. Measuring these indicators gives public health authorities a clear picture of overall disease distribution. Rather than focusing narrowly on patients seeking hospital care, community-based surveys gather data across wider populations, including individuals who might otherwise remain unrecorded in clinical datasets. Consequently, these studies provide reliable estimates of chronic condition burdens and health habits within the public.",
+   "evidence": [
+    {
+     "id": "E9671fa",
+     "chapter": 0,
+     "need": "What are the fundamental methodological characteristics and primary public health applications of cross-sectional study designs?",
+     "statement": "In cross-sectional observational studies, exposures and health outcomes are measured simultaneously to assess the prevalence of health behaviors, health states, and chronic outcomes within a community.",
+     "passage": "Cross-sectional studies are used routinely to document the prevalence in a community of health behaviors (prevalence of smoking), health states (prevalence of vaccination against measles), and health outcomes, particularly chronic conditions (hypertension, diabetes).",
+     "scope": "Epidemiologic study methodology and public health practice, United States",
+     "access": "FULL_TEXT",
+     "verified": true,
+     "support": "PARTLY_SUPPORTED",
+     "caution": "The passage confirms cross-sectional studies document the prevalence of health behaviors, health states, and chronic health outcomes in a community, but it does not mention that exposures and health outcomes are measured simultaneously.",
+     "source": {
+      "url": "https://archive.cdc.gov/www_cdc_gov/csels/dsepd/ss1978/lesson1/section7.html",
+      "title": "Lesson 1: Introduction to Epidemiology - Section 7: Analytic Epidemiology",
+      "authors": [],
+      "organisation": "Centers for Disease Control and Prevention",
+      "year": "2012",
+      "container": "Centers for Disease Control and Prevention",
+      "volume": "",
+      "issue": "",
+      "pages": "",
+      "doi": "",
+      "kind": "REPORT",
+      "metadata": "PAGE"
+     },
+     "retrievedOn": "2026-10-11"
+    }
+   ]
+  },
+  {
+   "where": "q2-cw/documents/job_769b3f3064f2-f4897335f9d569c4e3fcac38.json",
+   "paragraph": "Accurate prevalence estimates derived from cross-sectional surveys directly support evidence-informed planning and healthcare distribution. According to the Critical Appraisal Skills Programme ⟦Ea70b82|n⟧, identifying the prevalence and patterns of diseases or behaviours enables cross-sectional studies to inform public health interventions, policy decisions, and the strategic allocation of resources. When agencies recognise how widely a condition is distributed, they can target preventive programmes where community need is highest. For instance, discovering a high prevalence of undiagnosed hypertension or low vaccination coverage allows services to deploy community screening or targeted education. Because public health budgets are constrained, knowing the proportion of people living with specific health states ensures that supplies, funding, and clinical staff are directed toward interventions offering immediate practical benefits ⟦Ea70b82⟧.",
+   "evidence": [
+    {
+     "id": "Ea70b82",
+     "chapter": 0,
+     "need": "What are the key strengths and practical advantages of cross-sectional studies in assessing population disease prevalence and informing health policy?",
+     "statement": "Cross-sectional studies enable concurrent comparisons across population subgroups to clarify disease prevalence and patterns, directly informing resource allocation and public health interventions.",
+     "passage": "By identifying the prevalence and patterns of diseases or behaviors, cross-sectional studies can inform public health interventions, policy-making, and resource allocation for immediate impact.",
+     "scope": "Epidemiology and public health research methods",
+     "access": "FULL_TEXT",
+     "verified": true,
+     "support": "PARTLY_SUPPORTED",
+     "caution": "The passage supports that cross-sectional studies identify prevalence and patterns of diseases to inform public health interventions and resource allocation, but it does not mention concurrent comparisons across population subgroups.",
+     "source": {
+      "url": "https://casp-uk.net/news/what-is-a-cross-sectional-study",
+      "title": "What is a Cross-Sectional Study?",
+      "authors": [],
+      "organisation": "Critical Appraisal Skills Programme (CASP UK)",
+      "year": "2024",
+      "container": "Critical Appraisal Skills Programme (CASP UK)",
+      "volume": "",
+      "issue": "",
+      "pages": "",
+      "doi": "",
+      "kind": "REPORT",
+      "metadata": "PAGE"
+     },
+     "retrievedOn": "2026-10-11"
+    }
+   ]
+  },
+  {
+   "where": "q2-cw/documents/job_769b3f3064f2-f4897335f9d569c4e3fcac38.json",
+   "paragraph": "Beyond descriptive utility, cross-sectional studies serve an important role in early-stage scientific inquiry by identifying correlations and generating hypotheses ⟦Eb93782⟧. The Critical Appraisal Skills Programme ⟦E06fd0b|n⟧ explains that these studies are especially valuable in preliminary research phases, helping investigators explore associations that warrant further study. When cross-sectional data reveal an unexpected statistical link between an environmental exposure and a health outcome, researchers can design subsequent studies to test that relationship in detail. Because these designs observe associations without altering conditions or manipulating exposures, any identified connection serves primarily to generate hypotheses rather than provide definitive proof ⟦Eacb4a3⟧. In this manner, cross-sectional research operates as a screening mechanism that prioritises areas of concern and directs future public health research investments.",
+   "evidence": [
+    {
+     "id": "Eb93782",
+     "chapter": 0,
+     "need": "How do cross-sectional studies function as an initial step for hypothesis generation prior to longitudinal or experimental investigation?",
+     "statement": "Because cross-sectional studies capture simultaneous snapshots of exposures and outcomes without establishing temporal order, they primarily serve to identify correlations and generate hypotheses for prospective designs.",
+     "passage": "Unlike cohort or experimental designs that establish temporal sequence, cross-sectional studies provide a “snapshot” of associations in a population. They are particularly valuable for estimating prevalence, identifying correlations, and generating hypotheses for further research",
+     "scope": "Epidemiology and movement science methodology, 2025",
+     "access": "FULL_TEXT",
+     "verified": true,
+     "support": "SUPPORTED",
+     "caution": "",
+     "source": {
+      "url": "https://brookbushinstitute.com/glossary/cross-sectional-study",
+      "title": "Cross-Sectional Study: Definition, Examples, Strengths, Limitations",
+      "authors": [],
+      "organisation": "Brookbush Institute",
+      "year": "2025",
+      "container": "Brookbush Institute",
+      "volume": "",
+      "issue": "",
+      "pages": "",
+      "doi": "",
+      "kind": "REPORT",
+      "metadata": "PAGE"
+     },
+     "retrievedOn": "2026-10-11"
+    },
+    {
+     "id": "E06fd0b",
+     "chapter": 0,
+     "need": "How do cross-sectional studies function as an initial step for hypothesis generation prior to longitudinal or experimental investigation?",
+     "statement": "Cross-sectional designs serve to generate preliminary hypotheses by identifying potential associations that can subsequently be tested through more rigorous longitudinal or cohort study designs.",
+     "passage": "Cross-sectional studies are particularly useful for generating hypotheses in the early stages of research, enabling researchers to explore potential associations and relationships that may warrant further investigation.",
+     "scope": "Observational research methodology in epidemiology and health research, 2024",
+     "access": "FULL_TEXT",
+     "verified": true,
+     "support": "PARTLY_SUPPORTED",
+     "caution": "The passage supports that cross-sectional studies are useful for generating hypotheses and exploring potential associations, but does not specifically mention longitudinal or cohort designs.",
+     "source": {
+      "url": "https://casp-uk.net/news/what-is-a-cross-sectional-study",
+      "title": "What is a Cross-Sectional Study?",
+      "authors": [],
+      "organisation": "Critical Appraisal Skills Programme (CASP)",
+      "year": "2024",
+      "container": "Critical Appraisal Skills Programme (CASP)",
+      "volume": "",
+      "issue": "",
+      "pages": "",
+      "doi": "",
+      "kind": "REPORT",
+      "metadata": "PAGE"
+     },
+     "retrievedOn": "2026-10-11"
+    },
+    {
+     "id": "Eacb4a3",
+     "chapter": 0,
+     "need": "How do cross-sectional studies function as an initial step for hypothesis generation prior to longitudinal or experimental investigation?",
+     "statement": "Because cross-sectional research measures existing variables without manipulation or temporal tracking, detected associations remain hypothesis-generating starting points rather than confirmatory evidence.",
+     "passage": "Because a cross-sectional study reveals association but not manipulation, any relationship it finds may be produced by a confounding variable the researcher never controlled for. This is why the design is often described as hypothesis-generating.",
+     "scope": "Epidemiological and psychological research methodology, 2026",
+     "access": "FULL_TEXT",
+     "verified": true,
+     "support": "SUPPORTED",
+     "caution": "",
+     "source": {
+      "url": "https://www.simplypsychology.org/what-is-a-cross-sectional-study.html",
+      "title": "Cross-Sectional Study Design | Definition, Types, & Examples",
+      "authors": [],
+      "organisation": "Simply Psychology",
+      "year": "2026",
+      "container": "Simply Psychology",
+      "volume": "",
+      "issue": "",
+      "pages": "",
+      "doi": "",
+      "kind": "REPORT",
+      "metadata": "PAGE"
+     },
+     "retrievedOn": "2026-10-11"
+    }
+   ]
+  },
+  {
+   "where": "q2-cw/documents/job_769b3f3064f2-f4897335f9d569c4e3fcac38.json",
+   "paragraph": "Despite descriptive strengths, cross-sectional designs face severe structural constraints regarding causal inference. As Kim ⟦Ef5c18f|n⟧ points out, cross-sectional studies cannot infer causality because the chronological sequence between variables is unknown, meaning they cannot resolve questions about disease causes or intervention outcomes. Because exposure and outcome are assessed concurrently at a single point in time, researchers cannot determine whether the presumed risk factor preceded the disease or emerged as a consequence of it. Mann ⟦Ec5a13f|n⟧ highlights this limitation by comparing cross-sectional studies with prospective cohort investigations. Whereas cohort designs track chronological events over time to analyse incidence, causes, and prognosis—thereby distinguishing cause from effect—cross-sectional designs measure prevalence and do not permit cause and effect to be separated ⟦Ec5a13f⟧. This inability to establish temporal precedence leaves open the possibility of reverse causation, where an outcome influences the exposure.",
+   "evidence": [
+    {
+     "id": "Ef5c18f",
+     "chapter": 0,
+     "need": "How do cross-sectional studies compare to cohort and case-control designs regarding feasibility, cost, and evidence strength in public health research?",
+     "statement": "While cross-sectional studies are inexpensive and useful for evaluating disease prevalence, they lack temporal ordering to establish causality, unlike cohort designs which are more costly and time-consuming but effective for demonstrating cause-and-effect relationships.",
+     "passage": "These studies are often used to assess the prevalence of acute or chronic conditions but cannot be used to answer questions about the causes of disease or the results of interventions. That is, cross-sectional data cannot be used to infer causality because temporality is not known.",
+     "scope": "Observational and clinical study designs in health and medical research.",
+     "access": "FULL_TEXT",
+     "verified": true,
+     "support": "PARTLY_SUPPORTED",
+     "caution": "The passage supports that cross-sectional studies assess prevalence and cannot infer causality because temporality is unknown, but it does not mention cost, or cohort designs and their characteristics.",
+     "source": {
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC11009715/",
+      "title": "Overview of clinical study designs",
+      "authors": [
+       "Kim, S."
+      ],
+      "organisation": "",
+      "year": "2023",
+      "container": "Clinical and Experimental Emergency Medicine",
+      "volume": "11",
+      "issue": "1",
+      "pages": "33–42",
+      "doi": "10.15441/ceem.23.036",
+      "kind": "ARTICLE",
+      "metadata": "CROSSREF"
+     },
+     "retrievedOn": "2026-10-11"
+    },
+    {
+     "id": "Ec5a13f",
+     "chapter": 0,
+     "need": "How do cross-sectional studies compare to cohort and case-control designs regarding feasibility, cost, and evidence strength in public health research?",
+     "statement": "Cross-sectional designs are relatively fast and easy to conduct to establish disease prevalence, but unlike prospective cohort designs that track chronological events, they cannot distinguish cause from effect.",
+     "passage": "Cohort studies are used to study incidence, causes, and prognosis. Because they measure events in chronological order they can be used to distinguish between cause and effect. Cross sectional studies are used to determine prevalence. They are relatively quick and easy but do not permit distinction between cause and effect.",
+     "scope": "Observational epidemiologic and public health study designs.",
+     "access": "FULL_TEXT",
+     "verified": true,
+     "support": "SUPPORTED",
+     "caution": "",
+     "source": {
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC1726024/",
+      "title": "Observational research methods. Research design II: cohort, cross sectional, and case-control studies",
+      "authors": [
+       "Mann, C. J."
+      ],
+      "organisation": "",
+      "year": "2003",
+      "container": "Emergency Medicine Journal",
+      "volume": "20",
+      "issue": "1",
+      "pages": "54–60",
+      "doi": "10.1136/emj.20.1.54",
+      "kind": "ARTICLE",
+      "metadata": "CROSSREF"
+     },
+     "retrievedOn": "2026-10-11"
+    }
+   ]
+  }
+ ],
+ "caption": [
+  {
+   "where": "q-prop3/3/job_f377ab890627-0df127770d261f0f97135d24.json",
+   "caption": "Table 3.1: Work Plan and Activity Schedule"
+  }
+ ],
+ "site_author": [
+  {
+   "where": "q-prop3",
+   "source": {
+    "url": "https://gu.ac.ug/publication/determinants-of-adoption-of-climate-smart-agricultural-technologies-among-smallholder-coffee-farmers-in-western-uganda/",
+    "title": "Cogent Social Sciences",
+    "authors": [],
+    "organisation": "gu.ac.ug",
+    "year": "2025",
+    "container": "gu.ac.ug",
+    "volume": "",
+    "issue": "",
+    "pages": "",
+    "doi": "",
+    "kind": "REPORT",
+    "metadata": "PAGE"
+   }
+  },
+  {
+   "where": "q-prop3",
+   "source": {
+    "url": "https://www.icpac.net/publications/adoption-of-climate-smart-agricultural-technologies-and-practices-in-drylands-in-uganda-evidence-from-a-microlevel-study-in-nakasongola-district/",
+    "title": "Agriculture is the most important sector in Uganda's economy, but it continues to experience challenges of erratic rainfall variability and environmental degradation",
+    "authors": [],
+    "organisation": "icpac.net",
+    "year": "2019",
+    "container": "icpac.net",
+    "volume": "",
+    "issue": "",
+    "pages": "",
+    "doi": "",
+    "kind": "REPORT",
+    "metadata": "PAGE"
+   }
+  }
+ ]
+}

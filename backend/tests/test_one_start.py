@@ -352,7 +352,7 @@ def test_assumed_sample_settings_no_longer_stop_the_proposal(client):
     nothing is recorded as the student's consent, and Chapter Three asks them to confirm (C3-ASSUMED)."""
     from tests.fake_models import PLAN as BASE
 
-    client.models.overrides["p_finalise"] = lambda payload: {**BASE, "sampleSize": {**BASE["sampleSize"], "margin": 7, "population": 4200, "populationSource": "District records, 2025"}} if "title" in payload["draft"] else payload["draft"]
+    client.models.overrides["p_finalise"] = lambda payload: {**BASE, "methods": payload["draft"].get("methods"), "sampleSize": {**BASE["sampleSize"], "margin": 7, "population": 4200, "populationSource": "District records, 2025"}} if "title" in payload["draft"] else payload["draft"]
     from tests.test_proposals import DETAILS
 
     figures = {**DETAILS["inputs"], "populationSize": 4200, "populationSource": "District records, 2025"}  # the student's own N

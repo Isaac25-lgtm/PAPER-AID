@@ -154,6 +154,9 @@ function FrameworkCard({ project, running, onChange }: { project: Project; runni
         {hasVariables && !editing && (
           <Button variant="secondary" size="sm" disabled={running} onClick={() => setEditing(true)}>Edit the variables</Button>
         )}
+        {project.chapters.some((c) => c.needsReview.some((s) => /framework/i.test(s))) && (
+          <p className="text-sm text-amber-800">These are your proposed changes. The document keeps its earlier framework until you revise that section; affected methodology sections also need review.</p>
+        )}
         {editing && (
           <div className="space-y-4">
             {GROUPS.map((g) => (
@@ -712,6 +715,18 @@ function Workspace({ project, onChange, onReload }: { project: Project; onChange
               <Button size="sm" variant="secondary" disabled={running}
                 onClick={() => data.projects.confirmSampling(project.id, project.planVersion).then((p) => { onChange(p); setRefreshed((n) => n + 1) }).catch(failed)}>
                 I confirm these settings
+              </Button>
+            </Card>
+          )}
+          {chapter && chapter.readiness.some((i) => i.id === 'C3-FRAME' && i.status === 'NEEDS_REVIEW') && (
+            <Card className="space-y-2 p-5">
+              <p className="text-base font-semibold">Confirm the eligible population</p>
+              <p className="text-sm text-fg-muted">Your figure: {project.plan?.sampleSize.population?.toLocaleString()}. Source you stated: {project.plan?.sampleSize.populationSource || 'not supplied'}.</p>
+              <p className="text-sm text-fg-muted">{project.plan?.methods?.populationFrame}</p>
+              <p className="text-sm text-fg-muted">Confirm that this figure counts people eligible for this study, with the right area and date. This is your confirmation, not independent verification by PaperAid.</p>
+              <Button size="sm" variant="secondary" disabled={running}
+                onClick={() => data.projects.confirmPopulationFrame(project.id, project.planVersion).then((p) => { onChange(p); setRefreshed((n) => n + 1) }).catch(failed)}>
+                I have checked this figure and frame
               </Button>
             </Card>
           )}
