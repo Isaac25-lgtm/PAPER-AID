@@ -17,6 +17,7 @@ from app.core.config import get_settings
 from app.core.errors import AppError
 from app.core.flood import FloodGuard, client_address
 from app.core.logging import log, request_id, setup_logging
+from app.core.uploads import UploadGuard
 from app.jobs import service
 from app.runtime import get_runtime
 
@@ -46,7 +47,12 @@ def create_app() -> FastAPI:
     settings = get_settings()
     setup_logging(settings.log_level)
     role = resolve_role(settings.env, os.environ.get("SERVICE_ROLE"))
-    app = FastAPI(title="PaperAid API", version="0.1.0", lifespan=lifespan, docs_url="/api/docs", openapi_url="/api/openapi.json")
+    app = FastAPI(title="PaperAid API", version="0.1.0", lifespan=lifespan,
+                  docs_url=None if settings.env == "production" else "/api/docs",
+                  openapi_url=None if settings.env == "production" else "/api/openapi.json",
+                  redoc_url=None if settings.env == "production" else "/redoc")
+    if role in ("api", "all"):
+        app.add_middleware(UploadGuard, settings=settings)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.allowed_origins,

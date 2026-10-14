@@ -258,6 +258,8 @@ def crosstab(ctx: Context, spec: AnalysisSpec) -> AnalysisResult:
     title = f"{rv.title()} by {cv.title()}"
     data, left_out = _complete(ctx, [rv.name, cv.name])
     rows_x, cols_x = _text_values(data[rv.name]), _text_values(data[cv.name])
+    if rows_x.nunique() > 20 or cols_x.nunique() > 20:
+        return _not_estimable(ctx, spec, title, "One of these variables has more than 20 categories; group them first.", len(data), left_out)
     table = pd.crosstab(rows_x, cols_x)
     table = table.loc[_level_order(rv, list(table.index)), _level_order(cv, list(table.columns))]
     if table.shape[0] < 2 or table.shape[1] < 2:

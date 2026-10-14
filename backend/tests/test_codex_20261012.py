@@ -46,7 +46,7 @@ def test_plain_overclaims_are_still_blocked(sentence):
 def test_new_reviewer_prompts_do_not_grant_automatic_approval_for_attribution():
     folder = Path(__file__).parents[1] / "app" / "ai" / "prompts"
     registered = json.loads((folder / "released.json").read_text(encoding="utf-8"))
-    assert STEPS["p_review"].prompt == STEPS["p_review_peer"].prompt == "p-review-v8"
+    assert STEPS["p_review"].prompt == STEPS["p_review_peer"].prompt == "p-review-v9"
     assert STEPS["w_evaluate"].prompt == "w-evaluate-v6"
     for key in ("p-review-v8", "w-evaluate-v4", "w-evaluate-v5", "w-evaluate-v6"):
         text = (folder / f"{key}.md").read_text(encoding="utf-8")

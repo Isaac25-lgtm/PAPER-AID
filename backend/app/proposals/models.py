@@ -214,6 +214,9 @@ class EvidenceSource(Camel):
     doi: str = ""
     kind: Literal["ARTICLE", "BOOK", "REPORT", "WEB"] = "WEB"
     metadata: Literal["CROSSREF", "OPENALEX", "PAGE"] = "PAGE"
+    retracted: bool = False
+    retraction_checked: bool = False
+    preprint: bool = False  # explicit registry/index status, never a model's guess
 
 
 class EvidenceItem(Camel):
@@ -239,7 +242,7 @@ class EvidenceItem(Camel):
 
     @property
     def usable(self) -> bool:
-        return self.verified and self.support in ("SUPPORTED", "PARTLY_SUPPORTED")
+        return self.verified and not self.source.retracted and self.support in ("SUPPORTED", "PARTLY_SUPPORTED")
 
 
 class ChapterVersion(Camel):
@@ -467,7 +470,8 @@ class StepInput(Camel):
     # The day the step was priced, told to the models with their work: a reviewer with no date called sources of 2025
     # and 2026 "future-dated" (confirmation round, 2026-10-12). Frozen here, so a step is asked the same on a retry.
     today: str = ""
-    academic_policy: Literal[0, 1] = 0  # frozen at pricing; legacy steps retain their previous semantic checks
+    academic_policy: Literal[0, 1, 2, 3] = 0  # 3: supported brief points and explicit calculation assumptions
+    calculation_source: EvidenceSource | None = None  # frozen method identity, not an empirical evidence item
 
     project_id: str
     step: Literal["PLAN", "CHAPTER", "REVISE", "COMPLETE", "PROFILE"]
@@ -503,6 +507,7 @@ class ChapterDocument(Camel):
     plan_version: int
     sections: list[ChapterSection]
     cited: list[str]  # evidence ids cited, in order of first use
+    calculation_source: EvidenceSource | None = None
     readiness: list[ReadinessItem] = []
     warnings: list[str] = []
     revised: list[str] = []  # a revision: the sections it delivered new text for

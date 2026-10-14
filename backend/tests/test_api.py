@@ -535,14 +535,16 @@ def test_real_mode_runs_every_step_of_the_algorithm_in_order(real_client):
 def test_a_long_stage_continues_in_a_new_delivery_without_paying_twice(real_client, monkeypatch):
     from datetime import timedelta
 
+    from app.ai import orchestration
     from app.jobs import pipeline
 
     monkeypatch.setattr(pipeline, "STAGE_WORK_LIMIT", timedelta(0))  # hand off after every paid call
     real_client.models.overrides["analyse"] = _analyse_all
-    # Handing off after every call makes this long paper run about 70 deliveries, each re-preparing its
-    # stage (about 2 s in the estimate and the re-analysis) before one call: about 110 s on a laptop.
-    # The deadline allows for that (Codex audit 2026-09-30: 60 s timed out on slower machines).
-    job_id, job = _submit(real_client, REFINE_FORMAT, name="dissertation_long.docx", timeout=400)
+    # Exercise many resumptions with bounded batches instead of reparsing a maximum-length
+    # paper on every synthetic handoff. Maximum-size intake has separate fixture tests.
+    # Keep both invariants below: >=10 continuations and no duplicate provider request.
+    monkeypatch.setattr(orchestration, "BATCH_WORDS", 300)
+    job_id, job = _submit(real_client, REFINE_FORMAT, name="simple_essay.docx", timeout=200)
     assert job["status"] == "COMPLETED", job
     admin = real_client.get(f"/api/admin/jobs/{job_id}", headers=ADMIN).json()
     assert sum(e["label"].startswith("Continuing") for e in admin["events"]) >= 10  # it really continued, many times
@@ -588,9 +590,13 @@ def test_a_quote_is_not_saved_for_files_that_changed_while_pricing(client, monke
     job_id = client.post("/api/jobs", headers=STUDENT).json()["id"]
     _upload(client, job_id, "source", "simple_essay.docx")
     original = service._rate_limit
+    changed = False
 
     def upload_meanwhile(*args, **kwargs):
-        _upload(client, job_id, "source", "fake_headings.docx")  # lands between reading the job and saving the quote
+        nonlocal changed
+        if not changed:
+            changed = True
+            _upload(client, job_id, "source", "fake_headings.docx")  # lands between reading the job and saving the quote
         return original(*args, **kwargs)
 
     monkeypatch.setattr(service, "_rate_limit", upload_meanwhile)
@@ -1449,7 +1455,9 @@ def test_running_out_of_budget_mid_review_delivers_what_was_verified(real_client
         return models.default("review", payload)
 
     models.overrides["review"] = review
-    _, job = _submit(real_client, REFINE_FORMAT, name="dissertation_long.docx", timeout=180)
+    # BATCH_WORDS=60 already forces multiple review batches. This test checks partial
+    # delivery after a spending stop; the separate maximum-length test covers a long file.
+    _, job = _submit(real_client, REFINE_FORMAT, name="simple_essay.docx", timeout=180)
     assert len(reviews) >= 2, "the paper must need more than one review batch"
     assert job["status"] == "COMPLETED" and job["outcome"] == "PARTIAL"
     assert job["refinement"]["refinedBlocks"] >= 1 and job["refinement"]["keptOriginal"] >= 1

@@ -471,7 +471,7 @@ def _library(ctx: "StageContext", inp: WorkStepInput) -> dict[str, EvidenceItem]
     return {i.id: i for i in ev.dedupe([*base.values(), *new])}
 
 
-def _for_model(items: list[EvidenceItem], passages: bool = False, dated: bool = False, provenance: bool = False) -> list[dict[str, str]]:
+def _for_model(items: list[EvidenceItem], passages: bool = False, dated: bool = False, provenance: bool | int = False) -> list[dict[str, str]]:
     out = []
     for i in items:
         entry = {"id": i.id, "statement": i.statement, "scope": i.scope, "source": f"{ev.author_label(i.source)}, {i.source.year or 'n.d.'}"}
@@ -482,7 +482,7 @@ def _for_model(items: list[EvidenceItem], passages: bool = False, dated: bool = 
         if passages:
             entry["sourceWords"] = i.passage
         if provenance:
-            entry.update(ev.source_context(i))
+            entry.update(ev.source_context(i, status=provenance >= 2))
         out.append(entry)
     return out
 
@@ -592,7 +592,7 @@ def stage_planning(ctx: "StageContext") -> None:
     plan_rules = [{"rule": r["id"], "requirement": r["requirement"]} for r in library.scoped_rules(rules, "PLAN")]
     payload = {
         "spec": _compact_spec(spec), "student": _student(inp), "skeleton": [s.model_dump(by_alias=True) for s in skeleton],
-        "evidence": _for_model(usable, dated=inp.tell_dated, provenance=bool(getattr(inp, "academic_policy", 0))), "note": inp.note, "style": STYLE,
+        "evidence": _for_model(usable, dated=inp.tell_dated, provenance=getattr(inp, "academic_policy", 0)), "note": inp.note, "style": STYLE,
     }
     answer = runner.plan(payload).model_dump()
     plan = _plan_from(answer, skeleton, spec)
@@ -620,7 +620,7 @@ def stage_planning(ctx: "StageContext") -> None:
         out["planReview"] = plan_decision.model_dump(by_alias=True)
     results_decision = None
     if spec.kind == "FUNDING_PROPOSAL":
-        results_payload = {"spec": _compact_spec(spec), "student": _student(inp), "plan": plan.model_dump(by_alias=True), "evidence": _for_model(usable, dated=inp.tell_dated, provenance=bool(getattr(inp, "academic_policy", 0))), "note": inp.note}
+        results_payload = {"spec": _compact_spec(spec), "student": _student(inp), "plan": plan.model_dump(by_alias=True), "evidence": _for_model(usable, dated=inp.tell_dated, provenance=getattr(inp, "academic_policy", 0)), "note": inp.note}
         model, lines = _results_from(runner.results(results_payload))
         results_rules = [{"rule": r["id"], "requirement": r["requirement"]} for r in library.scoped_rules(rules, "RESULTS")]
         if not runner._engine.single_reviewer:
@@ -838,7 +838,7 @@ def _section_items(inp: WorkStepInput, library_items: dict[str, EvidenceItem], o
             "minWords": max(s.min_words, round(s.words * DRAFT_FLOOR)) if tight and not s.field_id else s.min_words,
             "maxWords": min(s.max_words or 10**6, round(s.words * DRAFT_CEILING)) if tight and not s.field_id else s.max_words,
             "coverage": [coverage[c] for c in s.coverage if c in coverage], "criteria": [criteria[c] for c in s.criteria if c in criteria],
-            "field": field_limits.get(s.field_id), "evidence": _for_model(relevant, passages=True, dated=inp.tell_dated, provenance=bool(getattr(inp, "academic_policy", 0))),
+            "field": field_limits.get(s.field_id), "evidence": _for_model(relevant, passages=True, dated=inp.tell_dated, provenance=getattr(inp, "academic_policy", 0)),
             "_words": " ".join(["w"] * s.words),
         })
     return items
@@ -986,7 +986,7 @@ def _repair_items(inp: WorkStepInput, current: dict[str, SectionText], library_i
     sections = {s.key: s for s in inp.plan.sections}
     usable = [i for i in library_items.values() if i.usable]
     keys = [k for k in fix if k in current and k in sections]
-    return [{**i, "issues": fix[i["key"]], "evidence": _for_model(_relevant(sections[i["key"]], usable), passages=True, dated=inp.tell_dated, provenance=bool(getattr(inp, "academic_policy", 0)))}
+    return [{**i, "issues": fix[i["key"]], "evidence": _for_model(_relevant(sections[i["key"]], usable), passages=True, dated=inp.tell_dated, provenance=getattr(inp, "academic_policy", 0))}
             for i in _review_items(inp, sections, current, problems or {}, keys)]
 
 
@@ -1064,19 +1064,19 @@ def _audit(ctx: "StageContext", runner: WorkRunner, inp: WorkStepInput, current:
         shown = runner._prompt_for("w_evaluate") != "w-evaluate-v1"
         cited = {k: _cited_evidence(current[k], library_items) for k in pending} if shown else {}
         judged = [i for i in items if i["rules"] or premium or _risk(sections[i["key"]], current[i["key"]]) != "low" or any(e.caution for e in cited.get(i["key"], []))]
-        judged = [{**i, "evidence": _for_model(cited[i["key"]], passages=True, dated=inp.tell_dated, provenance=bool(getattr(inp, "academic_policy", 0)))} for i in judged] if shown else judged
+        judged = [{**i, "evidence": _for_model(cited[i["key"]], passages=True, dated=inp.tell_dated, provenance=getattr(inp, "academic_policy", 0))} for i in judged] if shown else judged
         if runner._prompt_for("w_evaluate") not in ("w-evaluate-v1", "w-evaluate-v2"):  # from v3 it explains "forYourJudgement"
             # The sentences code could not judge are read by the evaluator; a section with one is always evaluated.
             to_read = {k: ev.for_the_reviewer([numbers.strip(f) for f in [*current[k].paragraphs, *_cells(current[k])]], gaps=False,
                                              library=library_items if getattr(inp, "academic_policy", 0) else None) for k in pending}
             known = {i["key"] for i in judged}
-            judged = [*judged, *[{**i, "evidence": _for_model(cited[i["key"]], passages=True, dated=inp.tell_dated, provenance=bool(getattr(inp, "academic_policy", 0)))} for i in items if i["key"] not in known and to_read[i["key"]]]]
+            judged = [*judged, *[{**i, "evidence": _for_model(cited[i["key"]], passages=True, dated=inp.tell_dated, provenance=getattr(inp, "academic_policy", 0))} for i in items if i["key"] not in known and to_read[i["key"]]]]
             if inp.spec is not None and inp.spec.kind == "FUNDING_PROPOSAL" and runner._prompt_for("w_evaluate") not in ("w-evaluate-v3", "w-evaluate-v4"):
                 # From w-evaluate-v5 a funding proposal's section is read beside the schedule it commits to and, while
                 # the budget has no total, with the amounts it gives named (independent audit, 2026-10-12).
                 to_read = {k: [*to_read[k], *_funding_facts(inp, current, k)] for k in pending}
                 known = {i["key"] for i in judged}
-                judged = [*judged, *[{**i, "evidence": _for_model(cited[i["key"]], passages=True, dated=inp.tell_dated, provenance=bool(getattr(inp, "academic_policy", 0)))} for i in items if i["key"] not in known and to_read[i["key"]]]]
+                judged = [*judged, *[{**i, "evidence": _for_model(cited[i["key"]], passages=True, dated=inp.tell_dated, provenance=getattr(inp, "academic_policy", 0))} for i in items if i["key"] not in known and to_read[i["key"]]]]
             judged = [{**i, "forYourJudgement": to_read[i["key"]]} if to_read[i["key"]] else i for i in judged]
         checked, evaluated = runner.together(
             lambda items=items: runner.integrity([{**i, "lockedFacts": common["student"]} for i in items], {"spec": common["spec"], "student": common["student"]}),
@@ -1356,7 +1356,7 @@ def _final_review(runner: WorkRunner, inp: WorkStepInput, document: WorkDocument
         offered = [library_items[i] for i in ids if i in library_items and library_items[i].usable]
         return {**out, "citedEvidence": [{**item, **ev.source_context(e),
                                         "reference": ev.reference(e.source, spec.citation_style, letters.get(ev._key(e.source), ""))}
-                                       for item, e in zip(_for_model(offered, passages=True, dated=inp.tell_dated, provenance=bool(getattr(inp, "academic_policy", 0))), offered, strict=True)],
+                                       for item, e in zip(_for_model(offered, passages=True, dated=inp.tell_dated, provenance=getattr(inp, "academic_policy", 0)), offered, strict=True)],
                 "sectionEvidence": {s["key"]: source_ids.get(s["key"], []) for s in part["sections"]},
                 "evidenceScope": "Verified passages for these sections only; metadata or a citation is not proof of the document's claim. Judge support, scope, and source suitability."}
     # Every whole request stays within FINAL_PART_WORDS (Codex audit 2026-10-01; Codex review 2026-10-07,

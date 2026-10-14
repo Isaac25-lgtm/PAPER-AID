@@ -659,7 +659,7 @@ def quote_step(rt: Runtime, user: User, work_id: str, step: Step, note: str, bun
     _rate_limit(rt, user, "quote", rt.settings.quotes_per_hour)
     band = _band(spec, step)
     inp = WorkStepInput(
-        academic_policy=1,
+        academic_policy=2,
         tell_dated=True,
         today=utcnow().date().isoformat(),
         work_id=k.id, step=step, kind=k.kind, variant=k.variant, mode=k.mode, level=spec.level, citation=spec.citation_style, inputs=k.inputs,

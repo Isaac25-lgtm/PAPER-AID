@@ -459,7 +459,7 @@ def run_op(rt: Runtime, op_id: str) -> None:
         _end_op(rt, project_id, op, attempt, written, exc.message, exc.code)
         return
     except Exception as exc:  # the worker boundary: an unexpected failure ends this piece of work, the project stays as it was
-        log(logger, logging.ERROR, "data work failed", projectId=project_id, kind=op.kind, error=type(exc).__name__)
+        log(logger, logging.ERROR, "data work failed", projectId=project_id, kind=op.kind, errorType=type(exc).__name__)
         _end_op(rt, project_id, op, attempt, written, STOPPED, "OP_FAILED")
         return
     obsolete: list[str] = []
@@ -1212,8 +1212,9 @@ def start_report(rt: Runtime, user: User, project_id: str, analysis_ids: list[st
                            "missing_objectives": missing}
     last = rt.store.get(p.jobs[-1]) if p.jobs else None
     if last is not None and resumable(rt, last):
-        before = ReportInput.model_validate_json(rt.files.get(f"{last.storage_prefix()}/internal/{INPUT}"))
-        if before.version == p.current and {r.id for r in before.analyses} == {a.id for a in chosen} and resume_step(rt, user, last.id):
+        saved_input = f"{last.storage_prefix()}/internal/{INPUT}"
+        before = ReportInput.model_validate_json(rt.files.get(saved_input)) if rt.files.exists(saved_input) else None
+        if before is not None and before.version == p.current and {r.id for r in before.analyses} == {a.id for a in chosen} and resume_step(rt, user, last.id):
             # The same report stopped for a temporary reason, on the same data: resumed where it stopped.
             job = rt.store.get(last.id)
             assert job is not None
@@ -1516,8 +1517,9 @@ def start_themes(rt: Runtime, user: User, project_id: str) -> JobView:
                                                  anonymisation_version=d.anonymisation_version) for d in p.documents])
     last = rt.store.get(p.jobs[-1]) if p.jobs else None
     if last is not None and resumable(rt, last) and last.selection.datalab == "THEMES":
-        before = qual.QualInput.model_validate_json(rt.files.get(f"{last.storage_prefix()}/internal/{qual.INPUT}"))
-        if {(d.id, d.sha256) for d in before.documents} == {(d.id, d.sha256) for d in inp.documents} and resume_step(rt, user, last.id):
+        saved_input = f"{last.storage_prefix()}/internal/{qual.INPUT}"
+        before = qual.QualInput.model_validate_json(rt.files.get(saved_input)) if rt.files.exists(saved_input) else None
+        if before is not None and {(d.id, d.sha256) for d in before.documents} == {(d.id, d.sha256) for d in inp.documents} and resume_step(rt, user, last.id):
             job = rt.store.get(last.id)
             assert job is not None
             return job.view()

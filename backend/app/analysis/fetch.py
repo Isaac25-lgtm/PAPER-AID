@@ -11,7 +11,6 @@ sent. What is read is untrusted text: it is only searched for the quotation, nev
 """
 
 import html
-import io
 import ipaddress
 import json
 import logging
@@ -22,10 +21,9 @@ from typing import Literal
 from urllib.parse import quote, urljoin, urlsplit, urlunsplit
 
 import httpx
-from pypdf import PdfReader
-from pypdf.errors import PdfReadError
 
 from app.analysis.metadata import clean_authors, clean_container, clean_text, clean_title, distinct_entries, distinct_people, is_organisation, without_markers
+from app.documents.pdf_io import source_pdf_text
 
 logger = logging.getLogger("paperaid.fetch")
 
@@ -72,11 +70,7 @@ def _pinned(url: str) -> tuple[str, dict[str, str], dict[str, str]] | None:
 
 def _text(body: bytes, content_type: str) -> str | None:
     if "pdf" in content_type or body[:5] == b"%PDF-":
-        try:
-            reader = PdfReader(io.BytesIO(body))
-            return " ".join((page.extract_text() or "") for page in reader.pages[:60])
-        except (PdfReadError, ValueError, KeyError, OSError):
-            return None
+        return source_pdf_text(body)
     if "html" in content_type or "text" in content_type:
         page = body.decode("utf-8", errors="replace")
         return html.unescape(MARKUP.sub(" ", TAGS.sub(" ", page)))

@@ -16,7 +16,7 @@ from typing import Protocol
 
 from pydantic import ValidationError
 
-from app.core.errors import LimiterUnavailable, PermanentStageError
+from app.core.errors import LimiterUnavailable, PermanentStageError, RetryableStageError
 from app.datalab.models import DataProject
 from app.jobs.models import Job, JobStatus, LedgerEntry, Wallet
 from app.proposals.models import Project
@@ -41,6 +41,7 @@ class JobStore(Protocol):
     def create_if_open(self, job: Job) -> bool: ...
     def get(self, job_id: str) -> Job | None: ...
     def update(self, job_id: str, mutate: Mutator) -> Job | None: ...
+    def update_ai_spend(self, job_id: str, day: str, limit: float, admission: bool, mutate: Mutator) -> Job | None: ...
     def delete(self, job_id: str) -> None: ...
     def list(
         self, owner_uid: str | None, statuses: set[JobStatus] | None, service: str | None, cursor: str | None, limit: int
@@ -104,6 +105,18 @@ class JobStore(Protocol):
 MAX_RECORD_BYTES = 900_000
 
 
+def _spend_change(before: Job, after: Job, ledger: dict, limit: float, admission: bool) -> dict:
+    spent = round(ledger.get("spent", 0.0) + after.cost_usd - before.cost_usd, 6)
+    reserved = round(ledger.get("reserved", 0.0) + after.reserved_usd - before.reserved_usd, 6)
+    if reserved < -0.000001 or spent < -0.000001:
+        raise RetryableStageError("SPEND_LEDGER_MISSING", "PaperAid could not verify its processing budget. Your work is saved; please try again later.")
+    if admission and spent + reserved > limit + 0.000001:
+        raise RetryableStageError("DAILY_SPEND_LIMIT", "PaperAid has reached its daily processing budget. Your work is saved; please try again later.")
+    # Actual provider usage is recorded even if a provider exceeded its conservative estimate.
+    # Refusing an already-bought response must never erase that expense from the ledger.
+    return {"spent": max(0.0, spent), "reserved": max(0.0, reserved)}
+
+
 def _new_entries(seen: set[str], wallet: Wallet) -> list[LedgerEntry]:
     """Entries a transaction added. The wallet keeps only its recent entries for display; each new
     entry is also written as its own record, in the same transaction, so the history is complete."""
@@ -148,6 +161,8 @@ class LocalJobStore:
         # a failed write in between) is applied before anything is read again, so the two files
         # can never be seen disagreeing.
         self._journal = root / "pending-pair.json"
+        self._ai_spend = root / "ai-spend"
+        self._ai_spend.mkdir(parents=True, exist_ok=True)
         self._projects = root / "projects"
         self._projects.mkdir(parents=True, exist_ok=True)
         self._works = root / "works"
@@ -164,7 +179,13 @@ class LocalJobStore:
         if not self._journal.exists():
             return
         pending = json.loads(self._journal.read_text(encoding="utf-8"))
-        self._write_wallet(Wallet.model_validate(pending["wallet"]))
+        if pending.get("wallet"):
+            self._write_wallet(Wallet.model_validate(pending["wallet"]))
+        if pending.get("spendDay"):
+            path = self._ai_spend / f"{pending['spendDay']}.json"
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(pending["spend"]), encoding="utf-8")
+            tmp.replace(path)
         if pending.get("job"):  # a wallet-only change has no job (Codex audit 56c4f83 M10)
             self._write(Job.model_validate(pending["job"]))
         if pending.get("project"):
@@ -214,6 +235,26 @@ class LocalJobStore:
             if result is not None:
                 self._write(result)
             return result
+
+    def update_ai_spend(self, job_id: str, day: str, limit: float, admission: bool, mutate: Mutator) -> Job | None:
+        if not day or any(c not in "0123456789-" for c in day):
+            raise ValueError("invalid spend day")
+        with self._lock:
+            before = self.get(job_id)
+            if before is None:
+                return None
+            path = self._ai_spend / f"{day}.json"
+            ledger = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+            after = mutate(before.model_copy(deep=True))
+            if after is None:
+                return None
+            changed = _spend_change(before, after, ledger, limit, admission)
+            # Reuse the crash-replay journal: the allowance and job cannot disagree after restart.
+            tmp = self._journal.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"job": json.loads(_dump(after)), "spendDay": day, "spend": changed}), encoding="utf-8")
+            tmp.replace(self._journal)
+            self._recover()
+            return after
 
     def delete(self, job_id: str) -> None:
         with self._lock:
@@ -664,6 +705,28 @@ class FirestoreJobStore:
 
     def delete(self, job_id: str) -> None:
         self._jobs.document(job_id).delete()
+
+    def update_ai_spend(self, job_id: str, day: str, limit: float, admission: bool, mutate: Mutator) -> Job | None:
+        if not day or any(c not in "0123456789-" for c in day):
+            raise ValueError("invalid spend day")
+        ref, budget_ref = self._jobs.document(job_id), self._db.collection("ai_spend").document(day)
+
+        @self._fs.transactional
+        def run(transaction) -> Job | None:
+            snap = ref.get(transaction=transaction)
+            if not snap.exists:
+                return None
+            budget = budget_ref.get(transaction=transaction)
+            before = Job.model_validate(snap.to_dict())
+            result = mutate(before.model_copy(deep=True))
+            if result is not None:
+                ledger = budget.to_dict() if budget.exists else {}
+                changed = _spend_change(before, result, ledger, limit, admission)
+                transaction.set(ref, json.loads(_dump(result)))
+                transaction.set(budget_ref, changed)
+            return result
+
+        return run(self._db.transaction())
 
     def list(self, owner_uid, statuses, service, cursor, limit):
         query = self._jobs

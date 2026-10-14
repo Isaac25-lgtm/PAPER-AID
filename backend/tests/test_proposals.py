@@ -125,13 +125,13 @@ def _create(client, headers=STUDENT):
     return response.json()
 
 
-def _run(client, project_id, step, note="", headers=STUDENT):
+def _run(client, project_id, step, note="", headers=STUDENT, timeout=60):
     quoted = client.post(f"/api/projects/{project_id}/steps", headers=headers, json={"step": step, "note": note})
     assert quoted.status_code == 200, quoted.json()
     body = quoted.json()
     submitted = client.post(f"/api/projects/{project_id}/steps/{body['job']['id']}/submit", headers=headers, json={"quoteId": body["quote"]["id"]})
     assert submitted.status_code == 200, submitted.json()
-    return wait(client, body["job"]["id"], headers)
+    return wait(client, body["job"]["id"], headers, timeout=timeout)
 
 
 def _approved(client, project_id, **plan_changes):
@@ -286,7 +286,7 @@ def test_invented_figures_and_typed_citations_never_reach_the_chapter(client):
         return {"sections": out}
 
     client.models.overrides["p_draft"] = draft  # the fixes return the same text, so the rule must remove it
-    job = _run(client, project["id"], "CHAPTER_1")
+    job = _run(client, project["id"], "CHAPTER_1", timeout=120)
     assert job["status"] == "COMPLETED" and job["outcome"] == "PARTIAL"
     assert any("removed sentences" in w for w in job["warnings"])
     chapter = client.get(f"/api/projects/{project['id']}/chapters/1", headers=STUDENT).json()

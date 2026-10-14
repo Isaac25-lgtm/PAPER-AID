@@ -42,7 +42,7 @@ from app.latex.convert import convert as to_latex
 from app.latex.package import compile_pdf
 from app.latex.package import project as latex_project
 from app.pricing.quote import bound_quote, fixed_price, proposal_usd, with_margin
-from app.proposals import decisions, evidence, feedback, framework, profile, rulebook, sampling
+from app.proposals import calculation_references, decisions, evidence, feedback, framework, profile, rulebook, sampling
 from app.proposals import export as proposal_export
 from app.proposals.models import (
     Acknowledgment,
@@ -487,7 +487,8 @@ def _render(doc: ChapterDocument, citer: evidence.Citer, plan: ProposalPlan | No
     stale = set(decisions.stale(doc, plan)) if plan else set()
     return [
         RenderedSection(
-            key=s.key, number=s.number, heading=s.heading, paragraphs=[citer.render(par) for par in s.paragraphs],
+            key=s.key, number=s.number, heading=s.heading,
+            paragraphs=[calculation_references.render(citer.render(par), doc.calculation_source, citer) if s.key == "sampling" else citer.render(par) for par in s.paragraphs],
             table=[[citer.render(cell) for cell in row] for row in s.table] if s.table else None,
             table_caption=citer.render(evidence.caption_text(s.table_caption)), needs_review=f"{s.number} {s.heading}" in stale,
         )
@@ -507,14 +508,22 @@ def chapter(rt: Runtime, user: User, project_id: str, number: int, version: int 
     # letters here, in the text and in this chapter's list (Codex's re-audit of 458e65b).
     # A past version is lettered within itself, so what it shows never changes with the other chapters' later versions.
     scope = list(doc.cited)
+    extra = [doc.calculation_source] if doc.calculation_source else []
     for other in (1, 2, 3):
         if version is None and number != CONCEPT and other != number and (also := _chapter_doc(rt, p.chapter(other))):
             scope += also.cited
+            if also.calculation_source:
+                extra.append(also.calculation_source)
     citer = _citer(rt, p, scope)
+    among = [citer.library[i].source for i in scope if i in citer.library] + extra
+    if extra:
+        citer.letters = evidence.year_letters(among, p.citation)
     for earlier in (1, 2):  # APA 6 names three to five authors in full at their first citation in the proposal
         if version is None and earlier < number != CONCEPT and (prior := _chapter_doc(rt, p.chapter(earlier))):
             _render(prior, citer, None)
     sources = [citer.library[i].source for i in doc.cited if i in citer.library]
+    if doc.calculation_source:
+        sources.append(doc.calculation_source)
     return ChapterView(
         number=number, title=doc.title, version=version or stored.current, plan_version=doc.plan_version, sections=_render(doc, citer, p.plan),
         readiness=[i.model_copy(update={"status": "PASS", "note": "You confirmed the standard sample-size settings PaperAid assumed."})
@@ -522,7 +531,7 @@ def chapter(rt: Runtime, user: User, project_id: str, number: int, version: int 
                    i.model_copy(update={"status": "PASS", "note": "You confirmed this figure counts the eligible sampling frame; it remains student-supplied, not independently verified."})
                    if i.id == "C3-FRAME" and doc.plan_version == p.plan_version and _frame_confirmed(p) else i for i in doc.readiness],
         warnings=doc.warnings, words=doc.words,
-        references=evidence.reference_list(sources, p.citation, among=[citer.library[i].source for i in scope if i in citer.library]),
+        references=evidence.reference_list(sources, p.citation, among=among),
         framework=[FrameworkColumn(label=label, items=items) for label, items in proposal_export.framework_columns(_figure_plan(p, doc))]
         if number in (1, CONCEPT) and any(s.key == "framework" for s in doc.sections) else [],
         missing=[f"{s.number} {s.heading}" for s in rulebook.sections(p.rulebook, number, p.inputs.level, p.plan) if s.key in doc.missing] if p.plan and doc.missing else [],
@@ -710,7 +719,8 @@ def quote_step(rt: Runtime, user: User, project_id: str, step: Step, note: str, 
             raise AppError(" ".join(blockers), code="AUTHOR_INPUT_NEEDED")
     _rate_limit(rt, user, "quote", rt.settings.quotes_per_hour)
     inp = StepInput(
-        academic_policy=1,
+        academic_policy=3,
+        calculation_source=calculation_references.source(p.plan.sample_size.method) if chapter == 3 and p.plan else None,
         tell_dated=True,
         today=utcnow().date().isoformat(),
         project_id=p.id,
@@ -784,7 +794,7 @@ def _quote_profile(rt: Runtime, user: User, p: Project) -> StepQuote:
         raise AppError("Upload your institution's research guide first.", code="NO_GUIDE")
     _rate_limit(rt, user, "quote", rt.settings.quotes_per_hour)
     inp = StepInput(
-        academic_policy=1,
+        academic_policy=3,
         tell_dated=True,
         today=utcnow().date().isoformat(),
         project_id=p.id, step="PROFILE", chapter=0, rulebook=p.rulebook, inputs=p.inputs, plan_version=p.plan_version,

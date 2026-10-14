@@ -45,6 +45,15 @@ def test_typography_and_symbols_map_to_latex():
     assert escape("“Quoted” — 10°C ≥ 3 α") == r"``Quoted'' --- 10\textdegree{}C $\geq$ 3 $\alpha$"
 
 
+@pytest.mark.skipif(not HAS_TEX, reason="no LaTeX engine installed")
+def test_generated_sampling_formula_with_unicode_minus_compiles():
+    # The real proposal Word export used U+2212 in this formula and its PDF failed.
+    result = convert(_docx("n = χ²Np(1−p) / [d²(N−1) + χ²p(1−p)]."))
+    assert "−" not in result.tex and "$-$" in result.tex
+    pdf, problem = compile_pdf(result)
+    assert pdf is not None and pdf.startswith(b"%PDF"), problem
+
+
 def test_structure_is_carried_over_faithfully():
     tex = convert(fixture_bytes("lists_and_captions.docx")).tex
     assert r"\begin{enumerate}" in tex and r"\begin{itemize}" in tex and r"\begin{tabular}" in tex

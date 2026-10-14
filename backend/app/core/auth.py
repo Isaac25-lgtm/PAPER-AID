@@ -27,7 +27,14 @@ def _firebase(settings: Settings):
 
 
 def current_user(request: Request, settings: Settings = Depends(get_settings)) -> User:
-    return _verified_user(request, settings, need_app_check=True)
+    # Upload admission verifies the same credential before multipart parsing. Reuse only that
+    # fully checked identity, never an optional/public-endpoint verification.
+    verified = request.scope.get("paperaid.verified_user")
+    if verified is not None:
+        return verified
+    user = _verified_user(request, settings, need_app_check=True)
+    request.scope["paperaid.verified_user"] = user
+    return user
 
 
 def _verified_user(request: Request, settings: Settings, need_app_check: bool) -> User:

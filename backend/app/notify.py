@@ -204,7 +204,7 @@ def _email(rt: Runtime, to: str, subject: str, text: str) -> bool:
                        json={"personalizations": [{"to": [{"email": to}]}], "from": {"email": s.notify_from, "name": "PaperAid"}, "subject": subject,
                              "content": [{"type": "text/plain", "value": text}]})
     except httpx.HTTPError as exc:  # a message that can't be sent never affects the work; it is tried again
-        log(logger, logging.WARNING, "email not sent", error=type(exc).__name__)
+        log(logger, logging.WARNING, "email not sent", errorType=type(exc).__name__)
         return False
     if r.status_code >= 300:
         log(logger, logging.WARNING, "email not sent", status=r.status_code)
@@ -218,7 +218,7 @@ def _sms(rt: Runtime, phone: str, text: str) -> bool:
         r = httpx.post("https://api.africastalking.com/version1/messaging", timeout=15, headers={"apiKey": s.africastalking_api_key, "Accept": "application/json"},
                        data={"username": s.africastalking_username, "to": phone, "message": text[:300], **({"from": s.sms_sender} if s.sms_sender else {})})
     except httpx.HTTPError as exc:
-        log(logger, logging.WARNING, "sms not sent", error=type(exc).__name__)
+        log(logger, logging.WARNING, "sms not sent", errorType=type(exc).__name__)
         return False
     if r.status_code >= 300:
         log(logger, logging.WARNING, "sms not sent", status=r.status_code)

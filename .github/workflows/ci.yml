@@ -15,13 +15,24 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -e ".[dev,cloud]"  # cloud: the production auth and task-verification paths are tested too
+      - run: pip install -c constraints.txt -e ".[dev,cloud]"
       - run: ruff check app tests
+      - name: Generate synthetic fixtures before mounting tests read-only
+        run: python tests/fixtures/generate.py
+      - name: Build the candidate image
+        run: docker build --build-arg WITH_LIBREOFFICE=true -t paperaid-ci .
+      - name: Check native rendering and installed dependency consistency
+        run: |
+          docker run --rm --entrypoint python paperaid-ci -m app.works.render
+          docker run --rm --entrypoint python paperaid-ci -m pip check
       - name: pytest
-        # Failing tests are also printed as annotations, so they show on the commit page.
+        # Test the candidate Linux image, adding only constrained test dependencies to the
+        # disposable container. Provider boundaries are blocked by tests/conftest.py.
         run: |
           set -o pipefail
-          pytest -q -rfE 2>&1 | tee pytest.txt || { grep -E "^(FAILED|ERROR)" pytest.txt | head -20 | sed 's/^/::error::/'; exit 1; }
+          docker run --rm --user 0 -v "$PWD/..:/workspace:ro" --entrypoint sh paperaid-ci -c \
+            'pip install --no-cache-dir -c /srv/constraints.txt pytest pytest-xdist statsmodels && python -c "import app, pytest; assert app.__file__.startswith(\"/srv/app/\"); raise SystemExit(pytest.main([\"/workspace/backend/tests\", \"-q\", \"-rfE\", \"-p\", \"no:cacheprovider\", \"--basetemp=/tmp/pt\"]))"' \
+            2>&1 | tee pytest.txt || { grep -E "^(FAILED|ERROR)" pytest.txt | head -20 | sed 's/^/::error::/'; exit 1; }
 
   web:
     runs-on: ubuntu-latest

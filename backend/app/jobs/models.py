@@ -612,7 +612,18 @@ class JobFailure(Camel):
     retryable: bool
 
 
+class CallIntent(Camel):
+    """A potentially billed request's allowance survives a worker crash. No student wording."""
+
+    fingerprint: str
+    amount: float
+    day: str = ""  # daily-budget admission day, UTC; empty if the operator cap is unset
+    phase: Literal["estimate", "job"] = "job"
+    owner: str = ""  # fenced attempt that admitted it
+
+
 class ModelCall(Camel):
+    call_id: str = ""  # joins a durable pre-call allowance; absent on historical records
     stage: Stage
     phase: Literal["estimate", "job"] = "job"
     provider: str
@@ -768,6 +779,7 @@ class JobView(Camel):
 class Job(JobView):
     """The full server record. Never returned to browsers directly."""
 
+    pending_calls: dict[str, CallIntent] = {}  # metadata only, never prompts or responses
     owner_uid: str
     owner_email: str
     source: StoredFile | None = None  # type: ignore[assignment]  # narrower stored variant of FileMeta

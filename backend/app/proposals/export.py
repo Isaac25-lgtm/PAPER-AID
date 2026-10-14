@@ -20,7 +20,7 @@ from docx.oxml.ns import nsdecls, qn
 from docx.shared import Inches, Pt
 
 from app.formatting.apply import _page_field_paragraph, _set_font, _set_page_numbering
-from app.proposals import decisions, evidence, methods, rulebook
+from app.proposals import calculation_references, decisions, evidence, methods, rulebook
 from app.proposals import framework as framework_figure
 from app.proposals.models import ChapterDocument, EvidenceItem, Project, ProposalPlan
 
@@ -315,6 +315,9 @@ def build(project: Project, chapters: dict[int, ChapterDocument], library: dict[
     _footer_numbers(prelim, "lowerRoman")
 
     citer = evidence.Citer(library, project.citation, everything)
+    extra = [c.calculation_source for c in chapters.values() if c.calculation_source is not None]
+    if extra:
+        citer.letters = evidence.year_letters([library[i].source for i in everything if i in library] + extra, project.citation)
     cited: list[str] = []
     for n in (1, 2, 3):
         table_count = 0
@@ -335,7 +338,10 @@ def build(project: Project, chapters: dict[int, ChapterDocument], library: dict[
                     doc.add_heading(paragraph.strip(), level=3)
                     continue
                 cited += [i for i in evidence.cited_ids(paragraph) if i not in cited]
-                p = doc.add_paragraph(citer.render(paragraph))
+                rendered = citer.render(paragraph)
+                if s.key == "sampling":
+                    rendered = calculation_references.render(rendered, chapter.calculation_source, citer)
+                p = doc.add_paragraph(rendered)
                 p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
             if n == 1 and s.key == "framework" and has_figure:
                 _framework(doc, framework_columns(figure_plan), plan=figure_plan, style=project.framework_style)
@@ -354,10 +360,10 @@ def build(project: Project, chapters: dict[int, ChapterDocument], library: dict[
                         if r == 0:
                             for run in cell.paragraphs[0].runs:
                                 run.bold = True
-    if cited:
+    if cited or extra:
         _continue_numbers(doc.add_section(WD_SECTION.NEW_PAGE))
         doc.add_heading("REFERENCES", level=1)
-        for entry in evidence.reference_list([library[i].source for i in cited if i in library], project.citation):
+        for entry in evidence.reference_list([library[i].source for i in cited if i in library] + extra, project.citation):
             p = doc.add_paragraph(entry)
             p.paragraph_format.left_indent = Inches(0.5)
             p.paragraph_format.first_line_indent = Inches(-0.5)

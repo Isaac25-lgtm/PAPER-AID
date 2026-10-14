@@ -2,14 +2,17 @@
 browser checked. Runs before any file is stored for processing or sent to a model."""
 
 import io
+import json
 import math
+import subprocess
+import sys
 import zipfile
 from pathlib import PurePosixPath
 
-from app.core.errors import InvalidDocument
+from app.core.errors import InvalidDocument, LimitExceeded
 from app.documents.docx_io import read_docx
 from app.documents.model import DocumentModel
-from app.documents.pdf_io import read_pdf
+from app.documents.pdf_io import _PARSER_SLOT, PDF_TIMEOUT_SEC, _worker_limits, read_pdf
 
 ZIP_MAGIC = b"PK\x03\x04"
 OLE_MAGIC = bytes.fromhex("D0CF11E0A1B11AE1")
@@ -69,15 +72,49 @@ def inspect_upload(data: bytes, filename: str, max_bytes: int, max_words: int, m
         if not data.startswith(ZIP_MAGIC):
             raise _reject("INVALID_CONTAINER", "This isn't a valid Word document. Open it in Word and save it as .docx again.")
         _check_docx_archive(data)
-        model = read_docx(data)
+        model = _isolated_docx(data, max_words)
         model.page_count = max(1, math.ceil(model.word_count / 300))
     else:
         if b"%PDF-" not in data[:1024]:
             raise _reject("INVALID_CONTAINER", "This isn't a valid PDF file.")
-        model = read_pdf(data, max_pdf_pages)
+        model = read_pdf(data, max_pdf_pages, max_words)
 
     if model.word_count < min_words:
         raise _reject("NO_TEXT", "We couldn't find enough text in this document to work with.")
     if model.word_count > max_words:
         raise _reject("DOCUMENT_TOO_LONG", f"This document is longer than the {max_words:,}-word limit. Upload the chapters you need separately.")
     return model
+
+
+def _isolated_docx(data: bytes, max_words: int) -> DocumentModel:
+    """ZIP byte bounds alone cannot bound the memory of a hostile XML tree."""
+    if not _PARSER_SLOT.acquire(timeout=5):
+        raise LimitExceeded("Another document is being read. Please try your upload again shortly.", code="DOCUMENT_READER_BUSY")
+    try:
+        try:
+            result = subprocess.run([sys.executable, "-m", "app.documents.intake", "--docx-worker", str(max_words)], input=data,
+                                    capture_output=True, timeout=PDF_TIMEOUT_SEC, check=False)
+        except subprocess.TimeoutExpired as exc:
+            raise InvalidDocument("This Word file is too complex to read safely. Save a simpler copy and try again.", code="DOCUMENT_RESOURCE_LIMIT") from exc
+        if result.returncode != 0:
+            raise InvalidDocument("We couldn't read this Word file safely. Open it in Word and save it as .docx again.", code="INVALID_CONTAINER")
+        answer = json.loads(result.stdout)
+        if "error" in answer:
+            raise InvalidDocument(answer["message"], code=answer["error"])
+        return DocumentModel.model_validate(answer)
+    finally:
+        _PARSER_SLOT.release()
+
+
+def _docx_worker() -> None:
+    _worker_limits()
+    model = read_docx(sys.stdin.buffer.read())
+    max_words = int(sys.argv[2])
+    if model.word_count > max_words:
+        sys.stdout.write(json.dumps({"error": "DOCUMENT_TOO_LONG", "message": f"This document is longer than the {max_words:,}-word limit. Upload the chapters you need separately."}))
+    else:
+        sys.stdout.write(model.model_dump_json())
+
+
+if __name__ == "__main__" and len(sys.argv) == 3 and sys.argv[1] == "--docx-worker":
+    _docx_worker()

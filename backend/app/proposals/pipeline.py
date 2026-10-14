@@ -26,7 +26,7 @@ from app.jobs import state
 from app.jobs.models import Approval, Job, JobStatus, ReadinessItem, Stage, TopicRoute, Wallet, utcnow
 from app.pricing.billing import settle_completed
 from app.pricing.quote import round_up
-from app.proposals import decisions, evidence, methods, profile, rulebook, sampling
+from app.proposals import calculation_references, decisions, evidence, methods, profile, rulebook, sampling
 from app.proposals.ai import LOST_SEARCH, Correction, Grade, ProposalRunner, SectionText, Table
 from app.proposals.models import (
     ChapterDocument,
@@ -80,7 +80,7 @@ def _label(item: EvidenceItem) -> str:
     return f"{evidence.author_label(item.source)}, {item.source.year or 'n.d.'}"
 
 
-def _for_model(items: list[EvidenceItem], passages: bool = False, dated: bool = False, provenance: bool = False) -> list[dict[str, str]]:
+def _for_model(items: list[EvidenceItem], passages: bool = False, dated: bool = False, provenance: bool | int = False) -> list[dict[str, str]]:
     out = []
     for i in items:
         entry = {"id": i.id, "statement": i.statement, "scope": i.scope, "source": _label(i)}
@@ -91,7 +91,7 @@ def _for_model(items: list[EvidenceItem], passages: bool = False, dated: bool = 
         if passages:
             entry["sourceWords"] = i.passage
         if provenance:
-            entry.update(evidence.source_context(i))
+            entry.update(evidence.source_context(i, status=provenance >= 2))
         out.append(entry)
     return out
 
@@ -464,6 +464,7 @@ def _from_index(runner: ProposalRunner, need: str, query: str, chapter: int, tod
     outcome, works = fetch.openalex_find(query, from_year, pool)
     route.index = outcome
     route.candidates += len(works)
+    works = [w for w in works if not w.get("retracted")]
     if keep is not None:
         works = research.rank_works(works, need, query, keep)
     route.kept += len(works)
@@ -517,6 +518,9 @@ def _scholarly_source(work: dict[str, str]) -> EvidenceSource:
         doi=work.get("doi", ""),
         kind="BOOK" if "book" in (data.get("type") or "") else "ARTICLE" if "article" in (data.get("type") or "") or data.get("container") else "REPORT",
         metadata=origin,  # type: ignore[arg-type]
+        retracted=bool(data.get("retracted") or work.get("retracted")),
+        retraction_checked="retracted" in work or bool(data.get("retracted")),
+        preprint=data.get("type", "") in ("posted-content", "preprint") or work.get("type", "") == "preprint",
     )
 
 
@@ -614,6 +618,7 @@ def _web_source(finding) -> EvidenceSource | None:
             container=(record.get("publisher") or record["container"]) if "book" in record.get("type", "") else record["container"],
             volume=record["volume"], issue=record["issue"], pages=record["pages"], doi=doi,
             kind="BOOK" if "book" in record.get("type", "") else "ARTICLE", metadata="CROSSREF",
+            retracted=bool(record.get("retracted")), preprint=record.get("type", "") in ("posted-content", "preprint"),
         )
     if declared.get("authors"):
         return EvidenceSource(
@@ -673,7 +678,34 @@ def _library(ctx: "StageContext", inp: StepInput) -> dict[str, EvidenceItem]:
     """The project's library at pricing time plus what this step gathered."""
     library = load_library(ctx.rt.files, inp.evidence_files)
     new = [EvidenceItem.model_validate(i) for i in ctx.get_json("evidence.json")] if ctx.has("evidence.json") else []
-    return {i.id: i for i in evidence.dedupe([*library.values(), *new])}
+    combined = {i.id: i for i in evidence.dedupe([*library.values(), *new])}
+    if getattr(inp, "academic_policy", 0) >= 2:
+        # One lookup per distinct DOI per UTC day of this job, not one per paragraph. A missing
+        # lookup is not evidence of a retraction; don't invent a positive/negative finding.
+        today = utcnow().date().isoformat()
+        cached = ctx.get_json("retractions.json") if ctx.has("retractions.json") else {}
+        statuses = cached.get("dois", {}) if cached.get("day") == today else {}
+        changed = False
+        for item in combined.values():
+            if item.source.doi and item.source.retraction_checked and item.retrieved_on == today and item.source.doi not in statuses:
+                statuses[item.source.doi] = item.source.retracted
+                changed = True
+        missing = sorted({i.source.doi for i in combined.values() if i.source.doi and i.source.doi not in statuses})
+        if missing and ctx.job.stage in (Stage.PLANNING, Stage.AUDITING):
+            # Bound concurrency instead of adding one network delay after another to a chapter.
+            # The existing fetcher imposes its own per-request deadline and retry bounds.
+            with ThreadPoolExecutor(max_workers=3) as pool:
+                statuses.update(zip(missing, pool.map(fetch.openalex_retracted, missing), strict=True))
+            changed = True
+        for item in combined.values():
+            doi = item.source.doi
+            if doi and statuses.get(doi) is True:
+                item.source.retracted = True
+            if doi:
+                item.source.retraction_checked = statuses.get(doi) is not None
+        if changed:
+            ctx.put_json("retractions.json", {"day": today, "dois": statuses})
+    return combined
 
 
 # --- PLANNING -------------------------------------------------------------------------------------
@@ -735,7 +767,7 @@ def stage_planning(ctx: "StageContext") -> None:
     rules = rulebook.rules_for(inp.rulebook)
     if inp.step == "PLAN":
         payload = {"study": _study(inp), "level": inp.inputs.level, "rules": rules,
-                   "evidence": _for_model(usable, passages=bool(getattr(inp, "academic_policy", 0)), dated=inp.tell_dated, provenance=bool(getattr(inp, "academic_policy", 0))), "note": inp.note,
+                   "evidence": _for_model(usable, passages=bool(getattr(inp, "academic_policy", 0)), dated=inp.tell_dated, provenance=getattr(inp, "academic_policy", 0)), "note": inp.note,
                    **({"today": inp.today} if inp.today else {})}
         if runner._prompt_for("p_plan") == "p-plan-v6":
             payload["methodsContractVersion"] = 1
@@ -768,7 +800,7 @@ def stage_planning(ctx: "StageContext") -> None:
         "chapter": inp.chapter,
         "sections": [{"key": s.key, "number": s.number, "heading": s.heading, "requirement": s.brief, "words": s.words, "table": s.table} for s in sections],
         "rules": rules,
-        "evidence": _for_model(usable, dated=inp.tell_dated, provenance=bool(getattr(inp, "academic_policy", 0))),
+        "evidence": _for_model(usable, dated=inp.tell_dated, provenance=getattr(inp, "academic_policy", 0)),
         "sampleSize": sample.steps if sample else "",
         "note": inp.note,
         **({"today": inp.today} if inp.today else {}),
@@ -1010,6 +1042,8 @@ def _common(inp: StepInput, sample_steps: str) -> dict[str, Any]:
         "rules": rulebook.rules_for(inp.rulebook),
         "chapter": {"number": inp.chapter, "title": spec["title"], "purpose": spec["purpose"]},
         "sampleSize": sample_steps,
+        **({"sampleCalculationBasis": "Calculated by code from the approved plan's assumptions. The population and its source are student-supplied, not independently verified; the proportion, confidence and margin are calculation assumptions, not observed study findings."}
+           if inp.academic_policy >= 3 and sample_steps else {}),
         **({"academicMethods": methods.context(inp.plan, inp.inputs)} if inp.plan.methods else {}),
         "note": inp.note,
         **({"today": inp.today} if inp.today else {}),
@@ -1035,11 +1069,19 @@ def _section_items(inp: StepInput, library: dict[str, EvidenceItem], briefs: dic
             continue
         brief = briefs.get(s.key, {"points": [], "evidence": []})
         assigned = [library[i] for i in brief["evidence"] if i in library and library[i].usable]
+        points = brief["points"]
+        if inp.academic_policy >= 3:
+            sample = sampling.calculate(inp.plan.sample_size) if inp.chapter == 3 else None
+            allowed = _allowed_text(inp, sample.figures if sample else "")
+            # An internal model brief is not authority for a scientific threshold. Do not
+            # turn an unsupported planning suggestion into a mandatory review criterion.
+            cited = " ".join(f"⟦{i.id}⟧" for i in assigned)
+            points = [p for p in points if not evidence.figure_problems(p + " " + cited, library, allowed)]
         requirement = s.brief + PLACED if s.from_plan else s.brief
         items.append(
             {
                 "key": s.key, "number": s.number, "heading": s.heading, "requirement": requirement, "words": s.words, "table": s.table,
-                "objective": s.objective, "points": brief["points"], "evidence": _for_model(assigned, passages=True, dated=inp.tell_dated, provenance=bool(getattr(inp, "academic_policy", 0))),
+                "objective": s.objective, "points": points, "evidence": _for_model(assigned, passages=True, dated=inp.tell_dated, provenance=getattr(inp, "academic_policy", 0)),
                 "_words": " ".join(["w"] * s.words),  # batches are sized by the words each section will produce
             }
         )
@@ -1332,6 +1374,7 @@ def align_document(doc: ChapterDocument, before: str, after: str, level: Level, 
         status="NEEDS_REVIEW" if (to_align or missing) else "PASS",
         note=(" ".join(changes) or "Restructured to your guide's order, numbering and headings; the earlier version is kept.")[:600]))
     return doc.model_copy(update={"sections": sections, "cited": cited, "words": words, "missing": missing, "to_align": to_align,
+                                  "calculation_source": doc.calculation_source if any(s.key == "sampling" and calculation_references.has_mention(s.paragraphs, doc.calculation_source) for s in sections) else None,
                                   "readiness": readiness, "revised": [], "warnings": []})
 
 
@@ -1465,7 +1508,7 @@ def _edited(ctx: "StageContext", runner: ProposalRunner, inp: StepInput, items: 
         if not asked:
             return []
         flags = runner.flag([{"id": a["id"], "before": a["before"], "after": a["after"],
-                              "evidence": _for_model([library[i] for i in dict.fromkeys(evidence.cited_ids(a["after"])) if i in library], passages=True, dated=inp.tell_dated, provenance=bool(getattr(inp, "academic_policy", 0)))} for a in asked],
+                              "evidence": _for_model([library[i] for i in dict.fromkeys(evidence.cited_ids(a["after"])) if i in library], passages=True, dated=inp.tell_dated, provenance=getattr(inp, "academic_policy", 0))} for a in asked],
                             {"plan": _plan(inp)})
         return [{"key": a["key"], "paragraph": a["paragraph"],
                  "problem": (flags[a["id"]].problem.strip() if a["id"] in flags else "") or "The check could not confirm this correction against its evidence."}
@@ -1802,6 +1845,7 @@ def _completed(inp: StepInput, base: ChapterDocument, written: ChapterDocument) 
         number=base.number, title=base.title, plan_version=base.plan_version, sections=sections, cited=cited, words=words,
         missing=[k for k in base.missing if k not in fresh], to_align=list(base.to_align),
         framework_plan=inp.plan if "framework" in fresh else base.framework_plan,
+        calculation_source=written.calculation_source if "sampling" in fresh else base.calculation_source,
     )
     return document, done
 
@@ -1832,7 +1876,7 @@ def _revision(
             current[s.key] = SectionText(key=s.key, paragraphs=s.paragraphs, table=Table(caption=s.table_caption, rows=s.table or []))
             asked = [f"Your supervisor asked: {c}" for c in inp.revise[s.key]]
             cited = [library[i] for i in evidence.cited_ids(" ".join(s.paragraphs)) if i in library and library[i].usable]
-            items[s.key] = {**items[s.key], "points": asked, "evidence": _for_model(cited, passages=True, dated=inp.tell_dated, provenance=bool(getattr(inp, "academic_policy", 0))) or items[s.key]["evidence"]}
+            items[s.key] = {**items[s.key], "points": asked, "evidence": _for_model(cited, passages=True, dated=inp.tell_dated, provenance=getattr(inp, "academic_policy", 0)) or items[s.key]["evidence"]}
     if not current:
         raise PermanentStageError("NOTHING_TO_REVISE", "The sections your comments are on are no longer in this chapter. Nothing was charged.", "revise: no sections")
     first = [
@@ -1863,6 +1907,7 @@ def _merge(base: ChapterDocument, revised: ChapterDocument, keys: set[str]) -> t
             cited += [i for i in evidence.cited_ids(field) if i not in cited]
     words = sum(len(evidence.ANY_TOKEN.sub(" ", p).split()) for s in sections for p in s.paragraphs)
     merged = ChapterDocument(number=base.number, title=base.title, plan_version=revised.plan_version, sections=sections, cited=cited, words=words,
+                             calculation_source=revised.calculation_source if "sampling" in fresh else base.calculation_source,
                              framework_plan=revised.framework_plan if "framework" in fresh else base.framework_plan,
                              to_align=[k for k in base.to_align if k not in fresh],
                              # what the chapter still lacks and has cost is not the revision's to forget (Codex audit, finding 5)
@@ -1915,6 +1960,7 @@ def _document(inp: StepInput, current: dict[str, SectionText], items: dict[str, 
     words = sum(len(evidence.ANY_TOKEN.sub(" ", p).split()) for s in sections for p in s.paragraphs)
     spec = rulebook.chapter_spec(inp.rulebook, inp.chapter)
     return ChapterDocument(number=inp.chapter, title=spec["title"], plan_version=inp.plan_version, sections=sections, cited=cited, words=words,
+                           calculation_source=inp.calculation_source if any(s.key == "sampling" and calculation_references.has_mention(s.paragraphs, inp.calculation_source) for s in sections) else None,
                            framework_plan=inp.plan.model_copy(deep=True) if any(s.key == "framework" for s in sections) else None)
 
 
@@ -2137,7 +2183,11 @@ def stage_exporting(ctx: "StageContext") -> None:
     if ctx.has("evidence.json"):
         ctx.assert_owner()
         evidence_path = f"{project.storage_prefix()}/evidence/{job_id}-{ctx.owner}.json"
-        ctx.rt.files.put(evidence_path, ctx.get_bytes("evidence.json"), "application/json")
+        # Retraction decisions made during planning/review must survive into the project's
+        # reusable library. Export applies the saved decisions without another lookup.
+        data = (json.dumps([i.model_dump(mode="json", by_alias=True) for i in _library(ctx, inp).values()]).encode()
+                if getattr(inp, "academic_policy", 0) >= 2 else ctx.get_bytes("evidence.json"))
+        ctx.rt.files.put(evidence_path, data, "application/json")
     chapter_path = ""
     document: ChapterDocument | None = None
     if inp.step in ("CHAPTER", "REVISE", "COMPLETE"):

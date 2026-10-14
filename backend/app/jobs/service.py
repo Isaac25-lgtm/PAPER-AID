@@ -277,6 +277,7 @@ FileRole = Literal["source", "guideline"]
 def upload_file(rt: Runtime, user: User, job_id: str, role: FileRole, filename: str, data: bytes) -> FileMeta:
     """Attach the paper ("source") or the university formatting guide ("guideline") to a draft."""
     job = _owned(rt, user, job_id)
+    _rate_limit(rt, user, "upload", rt.settings.uploads_per_hour)
     if job.status not in (JobStatus.DRAFT, JobStatus.QUOTED):
         raise Conflict("This job has already been submitted. Start a new job to upload another file.")
     if _estimating(job):
@@ -662,6 +663,10 @@ def submit(rt: Runtime, user: User, job_id: str, quote_id: str, project_gate: Pr
             return None
         if any(availability(settings, user).get(service.value) != "available" for service in j.quote.selection.services()):
             return None
+        # All starts contend on this owner's wallet. On a Firestore conflict the transaction
+        # reruns this fresh count; on the local store it runs under the store's reentrant lock.
+        # The earlier preflight alone cannot enforce the limit under simultaneous Starts.
+        _check_active_limit(rt, j.owner_uid)
         if j.quote.guideline_sha256 is not None and (j.guideline is None or j.guideline.sha256 != j.quote.guideline_sha256):
             return None
         q = j.quote
@@ -989,7 +994,7 @@ SUPPORT_FIELDS = frozenset(
         "project_id", "work_id", "datalab_id", "outputs", "failure", "created_at", "queued_at", "completed_at", "expires_at",
         "owner_uid", "owner_email", "completed_stages", "generation", "attempts", "lease_until", "lease_owner", "artifact_paths", "cost_usd", "reserved_usd", "estimate_cost_usd", "progress",
         "refine_cost_usd", "budget_usd", "model_calls", "events", "admin_actions", "failure_detail", "files_deleted", "deleting", "retiring",
-        "input_sha256", "delivery", "notice",
+        "input_sha256", "delivery", "notice", "pending_calls",
         "activity", "timings", "ready_at", "capacity_waits",  # speed plan 2026-10-08: timing and status only, no paper text
         "topics", "waited_sec", "waiting_since",  # algorithm revision 2026-10-09: how each research topic was routed; time spent waiting
     }
@@ -1004,6 +1009,8 @@ def without_paper_text[T: JobView](job: T) -> T:
     by paper checks. Used for admin views (support never sees papers) and for jobs past retention
     (the paper must not outlive its files)."""
     update: dict = {}
+    if job.failure is not None:
+        update["failure"] = job.failure.model_copy(update={"user_message": "Processing stopped before a result was ready."})
     for name in ("analysis", "analysis_after"):
         result = getattr(job, name)
         if result is not None:
@@ -1045,7 +1052,7 @@ def _admin_view(job: Job) -> AdminJob:
         model_calls=job.model_calls,
         events=job.events,
         admin_actions=job.admin_actions,
-        failure_detail=job.failure_detail,
+        failure_detail=(f"code={job.failure.code} attempts={job.attempts}" if job.failure is not None else None),
         timings=job.timings,
     )
 
@@ -1129,6 +1136,13 @@ def _claim_and_requeue(rt: Runtime, job: Job, requeue) -> Job | None:
     def claim(item) -> bool:
         return item is not None and not item.deleting and (item.active_job == job.id or not step_running(rt, item))
 
+    original_requeue = requeue
+
+    def requeue(j: Job, w: Wallet):
+        if j.status == JobStatus.FAILED:
+            _check_active_limit(rt, j.owner_uid)
+        return original_requeue(j, w)
+
     def with_item(store_update, item_id: str):
         def run(j: Job, w: Wallet, item):
             if not claim(item):
@@ -1148,6 +1162,11 @@ def _claim_and_requeue(rt: Runtime, job: Job, requeue) -> Job | None:
         return with_item(rt.store.update_job_wallet_and_datalab, job.datalab_id)
     pair = rt.store.update_job_and_wallet(job.id, requeue)
     return pair[0] if pair else None
+
+
+def _check_active_limit(rt: Runtime, uid: str) -> None:
+    if rt.store.count_active(uid) >= rt.settings.max_active_jobs_per_user:
+        raise LimitExceeded(f"You already have {rt.settings.max_active_jobs_per_user} jobs in progress. Wait for one to finish.", code="ACTIVE_JOB_LIMIT")
 
 
 def _step_item(rt: Runtime, job: Job) -> "Project | Work | DataProject | None | bool":

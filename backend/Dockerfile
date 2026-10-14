@@ -1,5 +1,5 @@
 # One image, deployed twice: SERVICE_ROLE=api (public) and SERVICE_ROLE=worker (internal only).
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PORT=8080
 WORKDIR /srv
@@ -14,8 +14,10 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml ./
+COPY constraints.txt ./
+ENV PIP_CONSTRAINT=/srv/constraints.txt
 COPY app ./app
-RUN pip install --no-cache-dir ".[cloud]" \
+RUN pip install --no-cache-dir -c constraints.txt ".[cloud]" \
     && python -m app.latex.package \
     && useradd --create-home --uid 10001 paperaid
 USER paperaid

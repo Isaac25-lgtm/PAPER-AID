@@ -117,7 +117,7 @@ def self_test() -> None:
     doc = Document()
     doc.add_heading("A title", 0)
     doc.add_heading("1. Section", 1)
-    p = doc.add_paragraph("Text with “quotes” — dashes, 50% & $5, x_y, a # b, 10°C, ≥ 3, α and café. ")
+    p = doc.add_paragraph("Text with “quotes” — dashes, 50% & $5, x_y, a # b, 10°C, ≥ 3, α and café. Sample formula: χ²Np(1−p). ")
     p.add_run("Bold").bold = True
     p.add_run(" and ").italic = True
     doc.add_paragraph("An item", style="List Bullet")

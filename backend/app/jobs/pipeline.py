@@ -12,6 +12,7 @@ being saved; the job's spend ceiling bounds even that."""
 import hashlib
 import json
 import logging
+import math
 import random
 import re
 import secrets
@@ -171,7 +172,7 @@ class StageContext:
     def document(self) -> DocumentModel:
         return DocumentModel.model_validate(self.get_json("document.json"))
 
-    def update(self, mutate) -> Job:
+    def update(self, mutate, *, spend_day: str = "", admission: bool = False) -> Job:
         def owned(j: Job) -> Job | None:
             if self.phase == "job" and (j.status != JobStatus.PROCESSING or j.stage != self.job.stage or j.lease_owner != self.owner):
                 return None
@@ -181,15 +182,53 @@ class StageContext:
                 return None
             return mutate(j)
 
-        updated = self.rt.store.update(self.job.id, owned)
+        daily_limit = self.rt.settings.daily_ai_budget_usd
+        updated = (self.rt.store.update_ai_spend(self.job.id, spend_day, daily_limit, admission, owned)
+                   if spend_day and daily_limit is not None else self.rt.store.update(self.job.id, owned))
         if updated is None:
             raise StageContinues()
         self.job = updated
         return updated
 
     def ai(self, runner: type[AIRunner] = AIRunner) -> AIRunner:
+        def reserve(fingerprint: str, amount: float, cap: float) -> str:
+            from app.ai.costs import ensure_within_budget
+            from app.jobs.models import CallIntent
+
+            # Persist and release the same micro-dollar amount; rounding only the
+            # running total stranded a tiny allowance after fully accounted calls.
+            amount = math.ceil(amount * 1_000_000) / 1_000_000
+            call_id = secrets.token_hex(12)
+            day = utcnow().date().isoformat() if self.rt.settings.daily_ai_budget_usd is not None else ""
+
+            def begin(j: Job) -> Job:
+                if len(j.pending_calls) >= 128:
+                    raise PermanentStageError("CALL_RECOVERY_LIMIT", "PaperAid could not safely resume the AI requests. Nothing was charged; please contact support.")
+                spent = (j.estimate_cost_usd - j.estimate.cost_base_usd if self.phase == "estimate" and j.estimate
+                         else j.cost_usd - j.estimate_cost_usd) + j.reserved_usd
+                ensure_within_budget(spent, amount, cap)
+                j.pending_calls[call_id] = CallIntent(fingerprint=fingerprint, amount=amount, day=day, phase=self.phase, owner=self.owner)
+                j.reserved_usd = round(j.reserved_usd + amount, 6)
+                return j
+
+            self.update(begin, spend_day=day, admission=True)
+            return call_id
+
         def record(call: ModelCall) -> None:
+            current = self.rt.store.get(self.job.id)
+            intent = current.pending_calls.get(call.call_id) if current and call.call_id else None
+
             def add(j: Job) -> Job:
+                if call.call_id:
+                    if any(c.call_id == call.call_id for c in j.model_calls):
+                        return j  # a repeated persistence callback must not charge the allowance twice
+                    pending = j.pending_calls.get(call.call_id)
+                    if pending is None:
+                        raise PermanentStageError("CALL_INTENT_MISSING", "PaperAid could not verify the AI request's accounting. Nothing was charged.")
+                    if pending.owner != self.owner or pending.phase != call.phase:
+                        raise PermanentStageError("CALL_INTENT_MISMATCH", "PaperAid could not verify the AI request's accounting. Nothing was charged.")
+                    j.pending_calls.pop(call.call_id)
+                    j.reserved_usd = round(max(0.0, j.reserved_usd - pending.amount), 6)
                 j.model_calls = (j.model_calls + [call])[-200:]
                 j.cost_usd = round(j.cost_usd + call.cost_usd, 6)
                 j.reserved_usd = round(j.reserved_usd + call.reserved_usd, 6)
@@ -199,7 +238,18 @@ class StageContext:
                     j.refine_cost_usd = round(j.refine_cost_usd + call.cost_usd, 6)
                 return j
 
-            self.update(add)
+            if not call.call_id:
+                self.update(add)
+                return
+            # A replaced attempt may still receive an already-purchased answer. It can
+            # settle only its own durable allowance, never publish or change job state.
+            # Discarding its usage would conceal expense and strand an unknown allowance.
+            day, limit = intent.day if intent else "", self.rt.settings.daily_ai_budget_usd
+            updated = (self.rt.store.update_ai_spend(self.job.id, day, limit, False, add)
+                       if day and limit is not None else self.rt.store.update(self.job.id, add))
+            if updated is None:
+                raise StageContinues()
+            self.job = updated
 
         estimate = self.job.estimate if self.phase == "estimate" else None
 
@@ -217,7 +267,8 @@ class StageContext:
         from app.jobs import capacity
 
         gate = capacity.gate(self.rt.store, self.rt.settings, self.job.id) if self.rt.settings.capacity_gate else None  # estimates too (Codex audit, finding 11)
-        return runner(self.rt.settings, record, spent, budget, cache=_ResponseCache(self), heartbeat=self.heartbeat, phase=self.phase, engine=engine, gate=gate)
+        return runner(self.rt.settings, record, spent, budget, cache=_ResponseCache(self), heartbeat=self.heartbeat,
+                      phase=self.phase, engine=engine, gate=gate, reserve_call=reserve)
 
     def activity(self, kind: str, done: int = 0, total: int = 0, note: str = "") -> None:
         """Tell the student what the stage is doing now (speed plan 2026-10-08). Never fails the stage."""
@@ -671,7 +722,7 @@ def _run_estimate_task(rt: Runtime, job_id: str) -> None:
         except StageContinues:
             return
         logger.exception("estimate crashed")
-        _estimate_failed(rt, job_id, run_id, ctx.owner, "INTERNAL", ESTIMATE_FAILURE, f"{type(exc).__name__}: {exc}", True)
+        _estimate_failed(rt, job_id, run_id, ctx.owner, "INTERNAL", ESTIMATE_FAILURE, type(exc).__name__, True)
         return
     _finish_estimate(rt, job_id, run_id, ctx.owner, passages, guide_words)
 
@@ -1423,7 +1474,7 @@ def _run_step(rt: Runtime, job_id: str) -> None:
         except StageContinues:
             return
         logger.exception("stage crashed", extra={"fields": {"stage": stage.value}})
-        _handle_failure(rt, job_id, stage, ctx.owner, "INTERNAL", GENERIC_FAILURE, f"{type(exc).__name__}: {exc}", True, timing("RETRY", "INTERNAL"))
+        _handle_failure(rt, job_id, stage, ctx.owner, "INTERNAL", GENERIC_FAILURE, type(exc).__name__, True, timing("RETRY", "INTERNAL"))
         return
 
     def complete(j: Job, w: Wallet) -> tuple[Job, Wallet] | None:

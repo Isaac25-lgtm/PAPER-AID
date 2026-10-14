@@ -2,7 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import SecretStr, model_validator
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.ai.gemini import CONFIRMED_MODELS, GeminiModel, Thinking, VertexPrice
@@ -196,6 +196,9 @@ class Settings(BaseSettings):
     # Product rules
     payments_enabled: bool = False
     processing_enabled: bool = True
+    # Optional operator budget, independent of student prices. Applies to calls admitted on a
+    # UTC day, including conservative unknown usage. No production amount is invented here.
+    daily_ai_budget_usd: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     queue_concurrency: int = 5
     max_active_jobs_per_user: int = 3
     # The flood guard in front of the public API, per instance (requests per second, and the burst allowed).
@@ -207,6 +210,8 @@ class Settings(BaseSettings):
     submits_per_hour: int = 10
     uploads_per_hour: int = 20  # feedback, guides, rebuilt downloads and PDFs, per student (Codex audit 56c4f83 M21)
     max_upload_bytes: int = 20 * 1024 * 1024
+    max_request_body_bytes: int = Field(default=4 * 1024 * 1024, gt=0)  # includes a 600k-character escaped pasted reading
+    upload_concurrency: int = Field(default=2, ge=1, le=4)  # parsing/validation work per API process
     max_words: int = 25_000
     max_pdf_pages: int = 150
     retention_days: int = 30

@@ -21,6 +21,7 @@ def test_a_call_waits_for_the_calls_under_way_to_settle_before_it_says_the_budge
     runner = object.__new__(AIRunner)
     spent = {"usd": 0.0}
     runner._spent, runner._budget, runner._inflight, runner._inflight_lock = (lambda: spent["usd"]), 0.40, 0.25, threading.Condition()
+    runner._durable_inflight = 0.0  # this stand-in bypasses AIRunner.__init__; no durable callbacks
     waited = {"done": False}
 
     def second_call():

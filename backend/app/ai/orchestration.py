@@ -153,9 +153,9 @@ STEPS: dict[str, Step] = {
     # is told to the student as a note on their plan (Codex's re-audit of d4d2bc7: v4 called them "correct as they stand").
     # v6 (Codex's audit of 6e513af): the sentences code could not judge are given to be read ("forYourJudgement"); so from w-evaluate-v3.
     # v7: attribution, quotation and conditional wording are judged against the evidence, never automatically passed.
-    "p_review": Step("lead", Stage.AUDITING, "p-review-v8", 8000),
-    "p_review_peer": Step("writer", Stage.AUDITING, "p-review-v8", 8000),
-    "p_fix": Step("writer", Stage.AUDITING, "p-fix-v6", 16000),  # v3: the same rules as p-draft-v3
+    "p_review": Step("lead", Stage.AUDITING, "p-review-v9", 8000),
+    "p_review_peer": Step("writer", Stage.AUDITING, "p-review-v9", 8000),
+    "p_fix": Step("writer", Stage.AUDITING, "p-fix-v7", 16000),
     "p_readiness": Step("lead", Stage.AUDITING, "p-readiness-v1", 8000),
     # Workflow 2 (algorithm revision 2026-10-09): the final editor of a chapter's sections, as for works (w_edit).
     "p_edit": Step("lead", Stage.AUDITING, "p-edit-v1", 16000),
@@ -859,6 +859,7 @@ class AIRunner:
         phase: Literal["estimate", "job"] = "job",
         engine: Engine | None = None,
         gate: Callable[[str, bool], tuple[Callable[[], None], int]] | None = None,
+        reserve_call: Callable[[str, float, float], str] | None = None,
     ):
         self.settings = settings
         self._engine = engine or current_engine(settings)
@@ -884,6 +885,11 @@ class AIRunner:
         # The shared limit on Gemini calls (app.jobs.capacity): each call holds a slot while it runs. None: no limit
         # (estimates, Data Lab operations and tests run without one).
         self._gate = gate
+        self._reserve_call = reserve_call
+        self._durable_inflight = 0.0  # own live allowances already included by the durable spent reader
+
+    def _accounted_spent(self) -> float:
+        return max(0.0, self._spent() - self._durable_inflight)
 
     def model_for(self, task: str) -> str:
         return model_for_engine(self._engine, task)
@@ -929,7 +935,7 @@ class AIRunner:
 
     def _must_wait(self, estimate: float, cap: float) -> bool:
         """The call does not fit beside the calls under way but would fit on what is really spent."""
-        return self._inflight > 0 and self._spent() + estimate <= cap < self._spent() + self._inflight + estimate
+        return self._inflight > 0 and self._accounted_spent() + estimate <= cap < self._accounted_spent() + self._inflight + estimate
 
     def _settled(self, estimate: float, cap: float | None = None) -> bool:
         """Called holding the lock, before a call reserves its estimate: while it does not fit beside the calls under
@@ -1093,11 +1099,13 @@ class AIRunner:
                     with self._inflight_lock:  # a call running alongside (together) counts at its estimate until recorded
                         again = self._must_wait(estimate, cap)  # a call alongside reserved while this one took its slot
                         if not again:
-                            spent = self._spent() + self._inflight
+                            spent = self._accounted_spent() + self._inflight
                             costs.ensure_within_budget(spent, estimate, cap)
                             max_tokens = costs.affordable_output_tokens(provider_name, model, prompt_chars, limit, cap - spent - fee, prices, table, long_prices)
                             if max_tokens < min(costs.MIN_OUTPUT_TOKENS, limit):
                                 costs.ensure_within_budget(spent, float("inf"), cap)
+                            call_id = self._reserve_call(key, estimate, cap) if self._reserve_call else ""
+                            self._durable_inflight += estimate if call_id else 0.0
                             self._inflight += estimate
                 except BaseException:
                     release()
@@ -1115,12 +1123,12 @@ class AIRunner:
                     release()  # the call is over, answered or not: its slot is free for the next
             except (RetryableStageError, PermanentStageError) as exc:
                 try:
-                    if provider_name == "vertex":
+                    if provider_name == "vertex" or call_id:
                         # Google bills only requests that succeed. A request that may have succeeded before its answer
                         # was lost (timeout, broken connection, unreadable answer) reserves its estimate against the
                         # job's cap: kept apart from confirmed cost, so reports never show it as spent.
                         unknown = exc.code in UNKNOWN_BILLING
-                        self._record(ModelCall(stage=step.stage, phase=self._phase, provider=provider_name, model=model,
+                        self._record(ModelCall(call_id=call_id, stage=step.stage, phase=self._phase, provider=provider_name, model=model,
                                                prompt_version=prompt, input_tokens=0, output_tokens=0, cached_tokens=0,
                                                latency_ms=int((time.monotonic() - started) * 1000), cost_usd=0, reserved_usd=estimate if unknown else 0,
                                                task=task, role=step.role, workflow_stage=stage, thinking_level=thinking,
@@ -1130,6 +1138,7 @@ class AIRunner:
                 finally:  # released only once the record is saved: a call alongside never sees spending dip (Codex review 2026-10-07, finding 2)
                     with self._inflight_lock:
                         self._inflight -= estimate
+                        self._durable_inflight -= estimate if call_id else 0.0
                         self._inflight_lock.notify_all()
                 fallback_ok = provider_name == "vertex" and exc.code in {"PROVIDER_UNAVAILABLE", "VERTEX_TIMEOUT", "VERTEX_CONNECTION_LOST",
                                                                           "VERTEX_RATE_LIMIT", "VERTEX_MODEL_UNAVAILABLE"}
@@ -1137,17 +1146,26 @@ class AIRunner:
                     self._heartbeat()
                     continue
                 raise
+            except BaseException:
+                # The allowance is intentionally retained for a request with no durable outcome.
+                # Free local waiters as well as the capacity slot, then propagate the interruption.
+                with self._inflight_lock:
+                    self._inflight -= estimate
+                    self._durable_inflight -= estimate if call_id else 0.0
+                    self._inflight_lock.notify_all()
+                raise
             break
-        u = result.usage
-        error_code = result.error_code
-        cost = costs.cost_usd(result.provider, result.model, u.input_tokens, u.output_tokens, u.cached_tokens, prices, u.cache_write_tokens,
-                              u.search_calls, billable_units=u.billable_units, unit_prices=self.settings.model_unit_prices, long_prices=long_prices)
-        # An answer without usable usage was billed by an amount PaperAid cannot verify: what the counts do
-        # not cover of the call's estimate is reserved, as for a lost answer (Codex review 2026-10-07, finding 9).
-        unmetered = max(0.0, estimate - cost) if error_code == "VERTEX_USAGE_MISSING" else 0.0
         try:
+            u = result.usage
+            error_code = result.error_code
+            cost = costs.cost_usd(result.provider, result.model, u.input_tokens, u.output_tokens, u.cached_tokens, prices, u.cache_write_tokens,
+                                  u.search_calls, billable_units=u.billable_units, unit_prices=self.settings.model_unit_prices, long_prices=long_prices)
+            # An answer without usable usage was billed by an amount PaperAid cannot verify:
+            # retain its uncovered allowance, as for an answer lost during transmission.
+            unmetered = max(0.0, estimate - cost) if error_code == "VERTEX_USAGE_MISSING" else 0.0
             self._record(
                 ModelCall(
+                    call_id=call_id,
                     stage=step.stage,
                     phase=self._phase,
                     provider=result.provider,
@@ -1175,6 +1193,7 @@ class AIRunner:
         finally:
             with self._inflight_lock:
                 self._inflight -= estimate
+                self._durable_inflight -= estimate if call_id else 0.0
                 self._inflight_lock.notify_all()
         if self._spent() > cap:
             # A search that ran more queries than reserved can pass the cap: what it bought is used, nothing

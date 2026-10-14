@@ -27,7 +27,7 @@ TOKEN = re.compile(r"⟦(E[0-9a-f]{6})(\|n)?⟧")
 CITATION = re.compile(r"⟦(?P<narrative>E[0-9a-f]{6})\|n⟧|\s*⟦E[0-9a-f]{6}⟧(?:\s*(?:[,;]|and\b|&)?\s*⟦E[0-9a-f]{6}⟧)*")
 ANY_TOKEN = re.compile(r"⟦[^⟧]*⟧")
 TYPED_CITATION = re.compile(r"\([A-Z][^()]{0,80}?,\s*(?:19|20)\d{2}[a-z]?(?:,\s*p+\.\s*\d+)?\)|\b[A-Z][A-Za-z'’-]+(?:\s+et\s+al\.)?\s+\((?:19|20)\d{2}[a-z]?\)")
-FIGURE = re.compile(r"(?<![\w.])\d{1,3}(?:,\d{3})+(?:\.\d+)?%?|(?<![\w.])\d+(?:\.\d+)?%?")
+FIGURE = re.compile(r"(?<![\w.])[-+−]?\d{1,3}(?:,\d{3})+(?:\.\d+)?%?|(?<![\w.])[-+−]?\d+(?:\.\d+)?%?")
 PAST_TENSE = re.compile(
     r"\b(?:this|the present|the current|the proposed) (?:study|research) (?:was|were|found|used|employed|collected|showed|revealed|established|adopted)\b"
     r"|\bdata (?:was|were) (?:collected|analysed|analyzed|gathered|obtained|coded|entered)\b"
@@ -63,10 +63,14 @@ def dated(item: EvidenceItem) -> str:
 def dedupe(items: Iterable[EvidenceItem]) -> list[EvidenceItem]:
     """One entry per id; a usable copy wins over one that could not be confirmed."""
     kept: dict[str, EvidenceItem] = {}
+    retracted: set[str] = set()
     for item in items:
+        if item.source.retracted:
+            retracted.add(item.source.doi or item.source.url)
         if item.id not in kept or (item.usable and not kept[item.id].usable):
             kept[item.id] = item
-    return list(kept.values())
+    return [item.model_copy(update={"source": item.source.model_copy(update={"retracted": True})})
+            if (item.source.doi or item.source.url) in retracted else item for item in kept.values()]
 
 
 # --- APA rendering (6th edition, as in the UCU 2018 manual's appendix, or 7th) -------------------
@@ -278,6 +282,8 @@ def _harvard(source: EvidenceSource, letter: str = "") -> str:
     names = clean_authors(source.authors)
     who = (", ".join(names[:-1]) + " and " + names[-1]) if len(names) > 1 else (names[0] if names else clean_text(source.organisation))
     title = _ended(clean_title(source.title))
+    if source.preprint:
+        title += " [Preprint]."
     head = f"{who} ({_year(source, letter)}) {title}" if who else f"{title.rstrip('.')} ({_year(source, letter)})."
     link = f"https://doi.org/{source.doi}" if source.doi else ("" if source.url.startswith("reading:") else source.url)
     if source.kind == "ARTICLE":
@@ -297,6 +303,8 @@ def reference(source: EvidenceSource, style: CitationStyle = "APA7", letter: str
     authors = clean_authors(source.authors)
     who = _authors_apa(authors, style) if authors else clean_text(source.organisation)
     title = _ended(clean_title(source.title))
+    if source.preprint:
+        title += " [Preprint]."
     if who:
         head = f"{who}{'' if who.endswith('.') else '.'} ({_year(source, letter)}). {title}"
     else:
@@ -343,10 +351,14 @@ def cited_ids(text: str) -> list[str]:
     return [m.group(1) for m in TOKEN.finditer(text)]
 
 
-def source_context(item: EvidenceItem) -> dict[str, str]:
+def source_context(item: EvidenceItem, status: bool = False) -> dict[str, str]:
     """Recorded provenance, not a certificate of suitability. Source kinds come from metadata, not model guesses."""
-    return {"sourceKind": item.source.kind, "metadataOrigin": item.source.metadata, "access": item.access,
-            "retrievedOn": item.retrieved_on, "sourceTitle": item.source.title, "sourceUrl": item.source.url}
+    out = {"sourceKind": "PREPRINT" if item.source.preprint else item.source.kind, "metadataOrigin": item.source.metadata, "access": item.access,
+           "retrievedOn": item.retrieved_on, "sourceTitle": item.source.title, "sourceUrl": item.source.url}
+    if status:
+        out["retractionStatus"] = ("KNOWN_RETRACTED" if item.source.retracted else "NOT_KNOWN_RETRACTED" if item.source.retraction_checked
+                                   else "NOT_APPLICABLE" if item.source.kind not in ("ARTICLE", "BOOK") else "NOT_CHECKED")
+    return out
 
 
 def citation_problems(text: str, usable: set[str]) -> list[str]:
@@ -366,9 +378,21 @@ def _figures(text: str) -> set[str]:
     return {f.replace(",", "") for f in FIGURE.findall(text)}
 
 
+def _quantity_key(value: str) -> str:
+    """Equivalent decimal spelling, preserving sign and percent units. No rounding."""
+    percent = "%" if value.endswith("%") else ""
+    raw = value.removesuffix("%").replace("−", "-").lstrip("+")
+    sign = "-" if raw.startswith("-") else ""
+    whole, _, fraction = raw.lstrip("-").partition(".")
+    whole, fraction = whole.lstrip("0") or "0", fraction.rstrip("0")
+    return sign + whole + ("." + fraction if fraction else "") + percent
+
+
 def _plain_figure(figure: str) -> bool:
     """Years, small counts and section numbers are not statistics that need a source."""
     value = figure.rstrip("%")
+    if value.startswith(("-", "−")):
+        return False
     if figure.endswith("%"):
         return False
     try:
@@ -400,7 +424,9 @@ def figure_problems(paragraph: str, library: dict[str, EvidenceItem], allowed_te
     known = _figures(allowed_text)
     for item in cited:
         known |= _figures(item.passage) | _figures(item.statement)
-    missing = sorted(f for f in _figures(REFERENCE.sub(" ", ANY_TOKEN.sub(" ", paragraph))) if not _plain_figure(f) and f not in known)
+    quantities = {_quantity_key(f) for f in known}
+    missing = sorted(f for f in _figures(REFERENCE.sub(" ", ANY_TOKEN.sub(" ", paragraph)))
+                     if not _plain_figure(f) and _quantity_key(f) not in quantities)
     return [f"The figure {f} is not in the evidence cited in this paragraph or in your plan." for f in missing]
 
 
