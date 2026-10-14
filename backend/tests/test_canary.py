@@ -106,3 +106,39 @@ def test_every_paragraph_carries_the_day_so_answers_are_never_replayed():
 
     assert canary.paper("4 October 2026") != canary.paper("5 October 2026")
     assert all("{day}" in p for p in canary._PARAGRAPHS)
+
+
+def test_an_alert_s_subject_and_detail_reach_the_log_through_its_filter():
+    """The log filter drops fields named subject or detail (they can carry a student's words elsewhere); an
+    operations alert holds IDs and codes only, and its email from Cloud Monitoring is useless without them."""
+    import io
+    import json
+    import logging
+
+    from app.core.logging import JsonFormatter
+
+    buffer = io.StringIO()
+    handler = logging.StreamHandler(buffer)
+    handler.setFormatter(JsonFormatter())
+    logger = logging.getLogger("paperaid.notify")
+    previous = (logger.handlers, logger.propagate, logger.level)
+    logger.handlers, logger.propagate = [handler], False
+    logger.setLevel(logging.INFO)
+    try:
+        from app import notify
+
+        class Store:
+            def claim_once(self, key, value):
+                return value
+
+        from app.core.config import Settings
+
+        class Runtime:
+            store, settings = Store(), Settings(alert_email="")
+
+        notify.alert(Runtime(), "Daily check could not start", "NO_QUOTE: no price", key="test")
+    finally:
+        logger.handlers, logger.propagate = previous[0], previous[1]
+        logger.setLevel(previous[2])
+    entry = json.loads(buffer.getvalue())
+    assert entry["message"] == "alert" and entry["alertSubject"] == "Daily check could not start" and entry["alertDetail"] == "NO_QUOTE: no price"

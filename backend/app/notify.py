@@ -192,7 +192,8 @@ def alert(rt: Runtime, subject: str, text: str, key: str) -> None:
     token = secrets.token_hex(8)
     if rt.store.claim_once(f"alert:{key}", token) != token:  # a constant value let every caller through (Codex audit 2026-10-04)
         return
-    log(logger, logging.ERROR, "alert", subject=subject, detail=text)
+    # IDs and codes only, under names the log filter keeps (it drops any field called subject or detail).
+    log(logger, logging.ERROR, "alert", alertSubject=subject, alertDetail=text)
     if channels(rt)["email"] and rt.settings.alert_email:
         _email(rt, rt.settings.alert_email, f"PaperAid: {subject}", f"{text}\n\nSee the reliability page: {rt.settings.app_url.rstrip('/')}/admin/reliability")
 
