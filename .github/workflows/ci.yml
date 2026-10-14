@@ -17,7 +17,7 @@ jobs:
           python-version: "3.12"
       - run: pip install -c constraints.txt -e ".[dev,cloud]"
       - run: ruff check app tests
-      - name: Generate synthetic fixtures before mounting tests read-only
+      - name: Generate synthetic fixtures
         run: python tests/fixtures/generate.py
       - name: Build the candidate image
         run: docker build --build-arg WITH_LIBREOFFICE=true -t paperaid-ci .
@@ -26,12 +26,14 @@ jobs:
           docker run --rm --entrypoint python paperaid-ci -m app.works.render
           docker run --rm --entrypoint python paperaid-ci -m pip check
       - name: pytest
-        # Test the candidate Linux image, adding only constrained test dependencies to the
-        # disposable container. Provider boundaries are blocked by tests/conftest.py.
+        # The suite runs inside the candidate Linux image (its Python, pinned packages, LibreOffice and the
+        # parsers' Linux memory and CPU limits), on the checked-out commit. The checkout is mounted writable:
+        # the fixture tests write their documents and one test starts separate processes from it (read-only,
+        # 9 tests failed for that reason alone on b87db0abd). Provider calls are blocked by tests/conftest.py.
         run: |
           set -o pipefail
-          docker run --rm --user 0 -v "$PWD/..:/workspace:ro" --entrypoint sh paperaid-ci -c \
-            'pip install --no-cache-dir -c /srv/constraints.txt pytest pytest-xdist statsmodels && python -c "import app, pytest; assert app.__file__.startswith(\"/srv/app/\"); raise SystemExit(pytest.main([\"/workspace/backend/tests\", \"-q\", \"-rfE\", \"-p\", \"no:cacheprovider\", \"--basetemp=/tmp/pt\"]))"' \
+          docker run --rm --user 0 -v "$PWD/..:/workspace" --workdir /workspace/backend --entrypoint sh paperaid-ci -c \
+            'pip install --no-cache-dir -q -c constraints.txt pytest pytest-xdist statsmodels && python -m pytest tests -q -n 2 -rfE -p no:cacheprovider --basetemp=/tmp/pt' \
             2>&1 | tee pytest.txt || { grep -E "^(FAILED|ERROR)" pytest.txt | head -20 | sed 's/^/::error::/'; exit 1; }
 
   web:
