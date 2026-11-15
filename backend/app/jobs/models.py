@@ -31,7 +31,6 @@ class ServiceId(StrEnum):
     CONCEPT_NOTE = "CONCEPT_NOTE"  # funding and project concept notes
     COURSEWORK = "COURSEWORK"
     FUNDING_PROPOSAL = "FUNDING_PROPOSAL"
-    DATALAB = "DATALAB"  # Data Lab (owner decision 2026-10-03)
 
 
 WORK_SERVICES = (ServiceId.CONCEPT_NOTE, ServiceId.COURSEWORK, ServiceId.FUNDING_PROPOSAL)
@@ -117,9 +116,6 @@ class ServiceSelection(Camel):
     # and plan steps on their own; the first document's price includes the plan, and a document that
     # is not delivered returns everything. Older releases ignore it.
     bundled: bool = False
-    # A Data Lab analysis report (owner decision 2026-10-03), priced by its tier (DL_SMALL ...).
-    datalab: Literal["NONE", "REPORT", "THEMES"] = "NONE"  # THEMES: a qualitative analysis (owner decision 2026-10-04)
-    datalab_band: str = ""
 
     def services(self) -> list[ServiceId]:
         ids = []
@@ -135,8 +131,6 @@ class ServiceSelection(Camel):
             ids.append(ServiceId.PROPOSAL)
         if self.work != "NONE" and self.work_kind != "NONE":
             ids.append(ServiceId(self.work_kind))
-        if self.datalab != "NONE":
-            ids.append(ServiceId.DATALAB)
         return ids
 
 
@@ -765,7 +759,6 @@ class JobView(Camel):
     fix_notes: dict[str, list[str]] = {}  # "Fix selected": the AI Check's findings on each chosen passage
     project_id: str | None = None  # a step of a proposal project: its result is saved to the project
     work_id: str | None = None  # a step of a work (concept note, coursework, funding proposal)
-    datalab_id: str | None = None  # a Data Lab report: its result is saved to the Data Lab project
     outputs: list[OutputFile] = []
     failure: JobFailure | None = None
     progress: Progress | None = None  # the check in progress while AUDITING (works)

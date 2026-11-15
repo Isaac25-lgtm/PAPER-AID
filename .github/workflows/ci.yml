@@ -33,7 +33,7 @@ jobs:
         run: |
           set -o pipefail
           docker run --rm --user 0 -v "$PWD/..:/workspace" --workdir /workspace/backend --entrypoint sh paperaid-ci -c \
-            'pip install --no-cache-dir -q -c constraints.txt pytest pytest-xdist statsmodels && python -m pytest tests -q -n 2 -rfE -p no:cacheprovider --basetemp=/tmp/pt' \
+            'pip install --no-cache-dir -q -c constraints.txt pytest pytest-xdist && python -m pytest tests -q -n 2 -rfE -p no:cacheprovider --basetemp=/tmp/pt' \
             2>&1 | tee pytest.txt || { grep -E "^(FAILED|ERROR)" pytest.txt | head -20 | sed 's/^/::error::/'; exit 1; }
 
   web:

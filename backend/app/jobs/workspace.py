@@ -18,7 +18,7 @@ from app.core.logging import log
 from app.documents import groups as paragraph_groups
 from app.documents import protect
 from app.documents.docx_io import apply_group_rewrites, apply_revisions, read_docx
-from app.documents.intake import inspect_upload
+from app.documents.intake import inspect_upload, read_stored_docx
 from app.documents.model import DocumentModel
 from app.documents.pdf_io import read_pdf
 from app.formatting.apply import apply_formatting
@@ -60,7 +60,7 @@ def document(rt: Runtime, user: User, job_id: str) -> dict[str, Any]:
         model = DocumentModel.model_validate(raw)
     elif job.source is not None:  # not processed yet: the paper as uploaded, so it shows at once
         data = rt.files.get(job.source.path)
-        model = read_docx(data) if job.source.format == "DOCX" else read_pdf(data, rt.settings.max_pdf_pages)
+        model = read_stored_docx(data, rt.settings.max_words) if job.source.format == "DOCX" else read_pdf(data, rt.settings.max_pdf_pages)
     else:
         raise NotFound("Upload your paper first.")
     blocks = [{"id": b.id, "kind": b.kind, "level": b.level, "section": b.section, "text": b.text} for b in model.blocks if b.text.strip()]
@@ -179,7 +179,7 @@ def _with_choices(rt: Runtime, job: Job, block_map: dict[str, str] | None = None
     raw = _internal(rt, job, "document.json")
     if job.refinement is None:  # a formatting-only result uses the same layout operations and mapping
         saved = {"revised": {}, "deep": False}
-        raw = raw or read_docx(rt.files.get(job.source.path)).model_dump()
+        raw = raw or read_stored_docx(rt.files.get(job.source.path), rt.settings.max_words).model_dump()
     if saved is None or raw is None:
         return None
     model = DocumentModel.model_validate(raw)

@@ -59,13 +59,12 @@ class WorkSummary(Camel):
     """One piece of a person's work as the left panel and the dashboard show it: where it is, never what it says."""
 
     id: str
-    section: Literal["Coursework", "Funding", "Research proposals", "Data analysis"]
-    kind: Literal["COURSEWORK", "CONCEPT_NOTE", "FUNDING_PROPOSAL", "PROPOSAL", "DATALAB"]
+    section: Literal["Coursework", "Funding", "Research proposals"]
+    kind: Literal["COURSEWORK", "CONCEPT_NOTE", "FUNDING_PROPOSAL", "PROPOSAL"]
     title: str
     updated_at: datetime
-    state: Literal["WRITING", "FAILED", "READY", "READY_WITH_WARNINGS", "NEEDS_ATTENTION", "NOT_STARTED", "CHAPTERS", "CONCEPT", "REPORT", "ANALYSES", "NOT_ANALYSED", "NO_DATA"]
+    state: Literal["WRITING", "FAILED", "READY", "READY_WITH_WARNINGS", "NEEDS_ATTENTION", "NOT_STARTED", "CHAPTERS", "CONCEPT"]
     chapters: list[int] = []  # a proposal: the chapters written
-    analyses: int = 0  # a data project: its analyses
 
 
 @api.get("/me/work", response_model=list[WorkSummary])
@@ -97,11 +96,6 @@ def your_work(user: User = Depends(current_user), rt: Runtime = Depends(get_runt
         state = ("WRITING" if service.step_running(rt, p) else "FAILED" if not written and not concept and (p.auto_failure or ended_badly(p.jobs)) else "CHAPTERS" if written else "CONCEPT" if concept else "NOT_STARTED")
         out.append(WorkSummary(id=p.id, section="Research proposals", kind="PROPOSAL", title=(p.plan.title if p.plan else "") or p.inputs.topic, updated_at=p.updated_at,
                                state=state, chapters=written))
-    for d in rt.store.list_datalab(user.uid):
-        if d.deleting:
-            continue
-        state = "WRITING" if service.step_running(rt, d) else "REPORT" if d.reports else "FAILED" if ended_badly(d.jobs) else "ANALYSES" if d.analyses else "NOT_ANALYSED" if d.source or d.documents else "NO_DATA"
-        out.append(WorkSummary(id=d.id, section="Data analysis", kind="DATALAB", title=d.title, updated_at=d.updated_at, state=state, analyses=len(d.analyses)))
     return sorted(out, key=lambda item: item.updated_at, reverse=True)
 
 
@@ -435,8 +429,6 @@ def task_cleanup(rt: Runtime = Depends(get_runtime)) -> dict:
         "expired": service.cleanup_expired(rt),
         "projectsExpired": service.cleanup_expired_projects(rt),
         "worksExpired": service.cleanup_expired_works(rt),
-        "datalabExpired": service.cleanup_expired_datalab(rt),
-        "datalabOrphans": service.sweep_datalab_files(rt),
         "projectsMigrated": service.migrate_legacy_project_files(rt),
         "ledgersBackfilled": service.backfill_ledgers(rt),
     }

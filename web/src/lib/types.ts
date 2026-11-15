@@ -2,7 +2,7 @@
 // generated from its Pydantic models; until then this file mirrors that plan.
 import type { Level, ProposalReview } from './proposal-types'
 
-export type ServiceId = 'AI_CHECK' | 'REFINE' | 'FORMAT' | 'TEMPLATE_FORMAT' | 'REDRAFT' | 'LATEX' | 'SOURCE_CHECK' | 'PROPOSAL' | 'CONCEPT_NOTE' | 'COURSEWORK' | 'FUNDING_PROPOSAL' | 'DATALAB'
+export type ServiceId = 'AI_CHECK' | 'REFINE' | 'FORMAT' | 'TEMPLATE_FORMAT' | 'REDRAFT' | 'LATEX' | 'SOURCE_CHECK' | 'PROPOSAL' | 'CONCEPT_NOTE' | 'COURSEWORK' | 'FUNDING_PROPOSAL'
 /** soon = not built yet; not_configured = the server's AI keys are not set; invite_only = testing is
  *  limited to invited testers and this visitor isn't one (or isn't signed in). */
 export type Availability = 'available' | 'soon' | 'not_configured' | 'invite_only'
@@ -483,11 +483,10 @@ export interface PublicConfig {
 /** One piece of a person's work as the left panel and the dashboard show it (GET /api/me/work). */
 export interface WorkSummary {
   id: string
-  section: 'Coursework' | 'Funding' | 'Research proposals' | 'Data analysis'
-  kind: 'COURSEWORK' | 'CONCEPT_NOTE' | 'FUNDING_PROPOSAL' | 'PROPOSAL' | 'DATALAB'
+  section: 'Coursework' | 'Funding' | 'Research proposals'
+  kind: 'COURSEWORK' | 'CONCEPT_NOTE' | 'FUNDING_PROPOSAL' | 'PROPOSAL'
   title: string
   updatedAt: string
-  state: 'WRITING' | 'FAILED' | 'READY' | 'READY_WITH_WARNINGS' | 'NEEDS_ATTENTION' | 'NOT_STARTED' | 'CHAPTERS' | 'CONCEPT' | 'REPORT' | 'ANALYSES' | 'NOT_ANALYSED' | 'NO_DATA'
+  state: 'WRITING' | 'FAILED' | 'READY' | 'READY_WITH_WARNINGS' | 'NEEDS_ATTENTION' | 'NOT_STARTED' | 'CHAPTERS' | 'CONCEPT'
   chapters: number[]
-  analyses: number
 }

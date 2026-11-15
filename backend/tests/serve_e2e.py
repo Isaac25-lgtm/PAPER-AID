@@ -30,7 +30,6 @@ def main() -> None:
             "FLOOD_CLIENT_RATE": "100000", "FLOOD_INSTANCE_RATE": "100000", "AI_CHECK_ENABLED": "true",  # the journeys run from one address  # the Gemini workflow, as in production; the stand-in answers every stage
             # Every work service on, with test prices, so the browser journeys can run them.
             "WORKS_ENABLED": '["CONCEPT_NOTE","COURSEWORK","FUNDING_PROPOSAL"]', "WORKS_PUBLIC": "true",
-            "DATALAB_ENABLED": "true",
             "MODEL_PRICES": '{"fake:gpt-6-sol":[0,0,0],"fake:gpt-6-luna":[0,0,0],"fake:claude-sonnet-5-5":[0,0,0],"fake:claude-opus-5-5":[0,0,0],"fake:gemini-3.8-flash":[0,0,0],"fake:gemini-3.5-flash-lite":[0,0,0],"fake:gemini-3.1-pro-preview":[0,0,0]}',
             "ADMIN_EMAILS": '["demo@paperaid.app"]',
             "ENV": "local",
@@ -43,8 +42,7 @@ def main() -> None:
 
     # Test prices for the work services, in the browser-test backend only (the product has none until the owner sets them).
     work_tokens = {"WORK_READ": 1, "CN_PLAN": 2, "CN_BRIEF": 3, "CN_STANDARD": 4, "CN_EXTENDED": 6, "CW_PLAN": 2, "CW_1500": 4, "CW_3000": 6, "CW_5000": 8, "CW_8000": 11,
-                   "FP_PLAN": 3, "FP_COMPACT": 8, "FP_STANDARD": 12, "FP_COMPREHENSIVE": 18, "WORK_REVISE": 2,
-                   "DL_SMALL": 3, "DL_STANDARD": 5, "DL_LARGE": 8, "QL_SMALL": 4, "QL_STANDARD": 7, "QL_LARGE": 12}
+                   "FP_PLAN": 3, "FP_COMPACT": 8, "FP_STANDARD": 12, "FP_COMPREHENSIVE": 18, "WORK_REVISE": 2}
     os.environ["FIXED_TOKENS"] = json.dumps({**Settings(_env_file=None).fixed_tokens, **work_tokens})
     get_settings.cache_clear()
     # Even a later accidental bypass of the stand-in must never become a paid Vertex call.

@@ -1,7 +1,7 @@
 import * as Menu from '@radix-ui/react-dropdown-menu'
 import { clsx } from 'clsx'
 import type { LucideIcon } from 'lucide-react'
-import { ChartColumn, FileCheck2, FilePen, FolderOpen, House, LogOut, Menu as MenuIcon, NotebookPen, Plus, Search, Settings, ShieldCheck, Wallet } from 'lucide-react'
+import { FileCheck2, FilePen, FolderOpen, House, LogOut, Menu as MenuIcon, NotebookPen, Plus, Search, Settings, ShieldCheck, Wallet } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router'
 import { TermsDialog } from '../../features/account/terms'
@@ -36,7 +36,6 @@ const HOME: NavItem[] = [
 const SECTIONS_NAV: NavItem[] = [
   { to: '/app/works', label: 'Coursework & funding', icon: NotebookPen, service: 'COURSEWORK', active: (p) => p.startsWith('/app/works'), groups: ['Coursework', 'Funding'] },
   { to: '/app/projects', label: 'Research proposals', icon: FilePen, service: 'PROPOSAL', active: (p) => p.startsWith('/app/projects'), groups: ['Research proposals'] },
-  { to: '/app/datalab', label: 'Data Lab', icon: ChartColumn, service: 'DATALAB', active: (p) => p.startsWith('/app/datalab'), groups: ['Data analysis'] },
   { to: '/app/new?service=PAPER_CHECK', label: 'Paper Check', icon: Search, service: 'REFINE', active: (p, s) => p === '/app/new' && s.includes('PAPER_CHECK') },
   { to: '/app/new?service=ACADEMIC_FORMAT', label: 'Academic formatting', icon: FileCheck2, service: 'FORMAT', active: (p, s) => p === '/app/new' && s.includes('ACADEMIC_FORMAT') },
 ]

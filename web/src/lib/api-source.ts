@@ -2,7 +2,6 @@
 // supplies (a Firebase ID token in production, a local developer identity when running locally).
 import { DataError, type DataSource, type JobQuery, type Notifications } from './data'
 import type { ChapterView, Comparison, EvidenceItem, Project, Rulebook, StepQuote } from './proposal-types'
-import type { AnalysisResult, DataPreview, DataProject, IdentifierRules, Places, ReportDocument } from './datalab-types'
 import type { Work, WorkDocumentView, WorkStepQuote } from './work-types'
 import type { AdminJob, AdminSummary, FileMeta, ImageMeta, Job, JobDocument, LedgerEntry, Page, PublicConfig, QuoteResponse, Wallet, WalletSummary, WorkSummary } from './types'
 
@@ -73,7 +72,7 @@ export function createApiSource({ config, getAuthHeaders }: Options): DataSource
   }
 
   /** A Word file built on request: fetched with the student's credentials and saved by the browser. */
-  /** `fileName` without an extension takes it from the file's type (the cleaned data is Excel, or CSV when large). */
+  /** `fileName` without an extension takes it from the file's type. */
   async function saveFile(path: string, fileName: string): Promise<void> {
     const res = await fetch(path, { headers: await getAuthHeaders() })
     if (!res.ok) {
@@ -341,66 +340,6 @@ export function createApiSource({ config, getAuthHeaders }: Options): DataSource
       download: (id, fileName, version) => saveFile(`/api/works/${id}/export${query({ version })}`, fileName),
       downloadPdf: (id, fileName, version) => saveFile(`/api/works/${id}/export.pdf${query({ version })}`, fileName),
       remove: (id) => request<void>(`/api/works/${id}`, { method: 'DELETE' }),
-    },
-
-    datalab: {
-      list: () => request<DataProject[]>('/api/datalab'),
-      get: (id) =>
-        request<DataProject>(`/api/datalab/${encodeURIComponent(id)}`).catch((err: unknown) => {
-          if (err instanceof DataError && err.status === 404) return null
-          throw err
-        }),
-      create: (title, purpose, kind = 'QUANT') => request<DataProject>('/api/datalab', { method: 'POST', body: JSON.stringify({ title, purpose, kind }) }),
-      addDocument(id, file, choice) {
-        const form = new FormData()
-        form.append('file', file)
-        form.append('label', choice.label)
-        form.append('consent', String(choice.consent))
-        form.append('country', choice.country)
-        form.append('replace', JSON.stringify(choice.replace))
-        return request<DataProject>(`/api/datalab/${id}/documents`, { method: 'POST', body: form })
-      },
-      addText: (id, text, choice) => request<DataProject>(`/api/datalab/${id}/documents/text`, { method: 'POST', body: JSON.stringify({ ...choice, text }) }),
-      removeDocument: (id, documentId) => request<DataProject>(`/api/datalab/${id}/documents/${documentId}`, { method: 'DELETE' }),
-      startThemes: async (id) => {
-        await request<Job>(`/api/datalab/${id}/themes`, { method: 'POST' })
-      },
-      downloadCodebook: (id, fileName, version) => saveFile(`/api/datalab/${id}/report/codebook${query({ version: version ? String(version) : null })}`, fileName),
-      update: (id, change) => request<DataProject>(`/api/datalab/${id}/details`, { method: 'POST', body: JSON.stringify(change) }),
-      upload(id, file, choice) {
-        const form = new FormData()
-        form.append('file', file)
-        form.append('country', choice.country)
-        form.append('consent', String(choice.consent))
-        form.append('removed', JSON.stringify(choice.removed))
-        return request<DataProject>(`/api/datalab/${id}/dataset`, { method: 'POST', body: form })
-      },
-      countries: () => request<{ iso3: string; name: string; available: boolean }[]>('/api/datalab/countries'),
-      identifierRules: () => request<IdentifierRules>('/api/datalab/identifier-rules'),
-      chooseSheet: (id, name) => request<DataProject>(`/api/datalab/${id}/sheet`, { method: 'POST', body: JSON.stringify({ name }) }),
-      preview: (id, offset = 0) => request<DataPreview>(`/api/datalab/${id}/preview${query({ offset: offset ? String(offset) : null })}`),
-      editVariable: (id, name, edit) =>
-        request<DataProject>(`/api/datalab/${id}/variables/${encodeURIComponent(name)}`, { method: 'POST', body: JSON.stringify(edit) }),
-      decide: (id, stepId, accept) => request<DataProject>(`/api/datalab/${id}/cleaning/${stepId}`, { method: 'POST', body: JSON.stringify({ accept }) }),
-      undo: (id) => request<DataProject>(`/api/datalab/${id}/undo`, { method: 'POST' }),
-      analyse: (id, spec) => request<DataProject>(`/api/datalab/${id}/analyses`, { method: 'POST', body: JSON.stringify(spec) }),
-      places: () => request<Places>('/api/datalab/places'),
-      setObjective: (id, analysisId, objective) =>
-        request<DataProject>(`/api/datalab/${id}/analyses/${analysisId}/objective`, { method: 'POST', body: JSON.stringify({ objective }) }),
-      analysis: (id, analysisId) => request<AnalysisResult>(`/api/datalab/${id}/analyses/${analysisId}`),
-      chartUrl: async (id, analysisId) => URL.createObjectURL(await blob(`/api/datalab/${id}/analyses/${analysisId}/chart.png`)),
-      removeAnalysis: (id, analysisId) => request<DataProject>(`/api/datalab/${id}/analyses/${analysisId}`, { method: 'DELETE' }),
-      startReport: async (id, analyses = [], missingOk = []) => {
-        await request<Job>(`/api/datalab/${id}/report`, { method: 'POST', body: JSON.stringify({ analyses, missingOk }) })
-      },
-      report: (id, version) => request<ReportDocument>(`/api/datalab/${id}/report${query({ version: version ? String(version) : null })}`),
-      downloadReport: (id, fileName, version) => saveFile(`/api/datalab/${id}/report/export${query({ version: version ? String(version) : null })}`, fileName),
-      downloadReportPdf: (id, fileName, version) => saveFile(`/api/datalab/${id}/report/export.pdf${query({ version: version ? String(version) : null })}`, fileName),
-      downloadWorkbook: (id, fileName) => saveFile(`/api/datalab/${id}/workbook`, fileName),
-      makeCleaned: (id) => request<DataProject>(`/api/datalab/${id}/cleaned`, { method: 'POST' }),
-      downloadCleaned: (id, fileName) => saveFile(`/api/datalab/${id}/cleaned`, fileName),
-      remove: (id) => request<void>(`/api/datalab/${id}`, { method: 'DELETE' }),
-      forProposal: (proposalId) => request<DataProject>(`/api/datalab/for-proposal/${proposalId}`, { method: 'POST' }),
     },
 
     admin: {

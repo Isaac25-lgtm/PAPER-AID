@@ -10,11 +10,11 @@ import { PageHero } from '../marketing/info-pages'
 
 /** The terms people accept (owner decision 2026-10-04): plain wording until the lawyer's replaces it, as a new version. */
 const TERMS = [
-  { title: 'What PaperAid does', body: 'PaperAid checks, formats, writes and analyses your work for you, using its own code and AI models. You remain the author and are responsible for what you submit, and for following your institution’s and funder’s rules about AI.' },
-  { title: 'Your data and your participants', body: 'You may upload only data you have the right to use: with your participants’ consent and any ethics approval your study needs. Remove names, phone numbers and ID numbers before you upload, or let PaperAid remove or leave out the columns it recognises. PaperAid can’t guarantee it finds every identifier.' },
-  { title: 'What we do with it', body: 'PaperAid uses your files and data only to produce your results. The AI service PaperAid uses sees only what each step needs. For numbers, that is the results PaperAid’s own code has calculated, never your dataset’s individual records. For interviews and other transcripts, it reads the passages it analyses, after the names and contact details you listed are replaced. It never uses any of it to train its models. Files are deleted automatically after the period shown on each page, and you can delete them, or your account, at any time.' },
+  { title: 'What PaperAid does', body: 'PaperAid checks, formats and writes your work for you, using its own code and AI models. You remain the author and are responsible for what you submit, and for following your institution’s and funder’s rules about AI.' },
+  { title: 'What you upload', body: 'You may upload only files you have the right to use. Leave out your participants’ names, phone numbers and ID numbers.' },
+  { title: 'What we do with it', body: 'PaperAid uses your files only to produce your results. The AI service PaperAid uses sees only what each step needs, and never uses any of it to train its models. Files are deleted automatically after the period shown on each page, and you can delete them, or your account, at any time.' },
   { title: 'Credits', body: 'Credits are reserved when a step starts and charged only for what is delivered. A step that can’t be finished is not charged.' },
-  { title: 'Changes', body: 'When these terms change, we ask you to accept the new version before your next paid step or data upload.' },
+  { title: 'Changes', body: 'When these terms change, we ask you to accept the new version before your next paid step.' },
 ]
 
 export function TermsPage() {

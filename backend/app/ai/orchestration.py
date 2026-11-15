@@ -203,17 +203,6 @@ STEPS: dict[str, Step] = {
     "w_edit": Step("EVALUATOR", Stage.AUDITING, "w-edit-v1", 16000),
     "w_flag": Step("INTEGRITY", Stage.AUDITING, "w-flag-v1", 4000),
     "w_resolve": Step("EVALUATOR", Stage.AUDITING, "w-resolve-v1", 16000),
-    # Data Lab reports (owner decision 2026-10-03): code computes every number; the writer interprets
-    # the results through number tokens, and the one final reviewer (Sol) approves the exact narrative.
-    "d_report": Step("WRITER", Stage.DRAFTING, "d-report-v1", 16000),
-    "d_report_review": Step("EVALUATOR", Stage.AUDITING, "d-report-review-v3", 8000),
-    "d_chapter4": Step("WRITER", Stage.DRAFTING, "d-chapter4-v2", 16000),  # Chapter Four of a research proposal, by objective
-    # Qualitative Data Lab (owner decision 2026-10-04): the analyst codes the transcripts with quotes code
-    # checks word for word; the writer builds themes citing quotes by reference; the final reviewer (Sol)
-    # approves the assembled report.
-    "q_code": Step("ANALYST", Stage.DRAFTING, "q-code-v1", 12000),
-    "q_themes": Step("WRITER", Stage.DRAFTING, "q-themes-v2", 16000),
-    "q_review": Step("EVALUATOR", Stage.AUDITING, "q-review-v2", 8000),
 }
 
 
@@ -226,7 +215,7 @@ DRAFTING_TASKS = {"critique", "refine", "repair", "redraft", "redraft_fix", "ver
 # Sonnet, so Sol never approves wording it finalised itself (owner decision 2026-09-30) ...
 FINALISED_BY_DRAFTER = {"p_finalise", "p_profile_finalise", "spec_finalise"}
 # ... and these works reviews are Sol's final decisions instead of the evaluator's.
-FINAL_REVIEW_TASKS = {"w_plan_review", "w_results_review", "w_final", "d_report_review", "q_review", "w_edit", "w_resolve"}
+FINAL_REVIEW_TASKS = {"w_plan_review", "w_results_review", "w_final", "w_edit", "w_resolve"}
 # The final editor's steps (workflow 2): part of a job's cap is kept for them (AIRunner.hold_back).
 EDITOR_TASKS = frozenset({"w_edit", "w_flag", "w_resolve", "p_edit", "p_flag", "p_resolve"})
 # The final editor's model could not answer: the stage waits with its draft kept (nothing else approves in its place).

@@ -4,8 +4,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.datalab import pipeline as datalab
-from app.datalab.report import ReportDocument, ReportSection
 from app.proposals.ai import SectionText, Table
 from app.works import pipeline
 from tests.test_codex_20261007b import WORKED, _inp
@@ -51,42 +49,5 @@ def test_preservation_wins_across_multiple_instructions():
     assert not pipeline._remove_figure_requested(["Remove the graph", "Keep the graph"])
 
 
-@pytest.mark.parametrize("mode", ["REPORT", "CHAPTER_FOUR"])
-def test_a_long_datalab_review_fits_without_growing_its_manifest(monkeypatch, mode):
-    monkeypatch.setattr(datalab, "FINAL_PART_WORDS", 900)
-    monkeypatch.setattr(datalab, "_dataset", lambda inp: {"records": 100})
-    body = " ".join(f"word{i}" for i in range(12000))
-    appendix = " ".join(f"appendix{i}" for i in range(300))
-    document = ReportDocument(title="Synthetic report", subtitle="Results", sections=[
-        ReportSection(key="results", heading="Results", paragraphs=[body]),
-    ], appendices=[ReportSection(key="appendix", heading="Appendix", paragraphs=[appendix])])
-    inp = SimpleNamespace(mode=mode, alpha=0.05, objectives=["Assess the outcome"],
-                          chapter_three=[SimpleNamespace(model_dump=lambda: {"methods": "method " * 80})])
-    sent = []
-
-    def review(payload):
-        datalab.check_review_size(payload)
-        sent.append(payload)
-        return datalab.Review(verdict="PASS", rules=[datalab.RuleVerdict(rule=r, status="PASS", note="Checked") for r in payload["rules"]], issues=[])
-
-    answer = datalab._review(SimpleNamespace(final_review=review), inp, document,
-                            [{"record": "context " * 280}], [], set())
-    assert answer is not None and answer.verdict == "PASS"
-    assert len(sent) > 10 and all(datalab._words(p) <= 900 for p in sent)
-    assert all(len(p["manifest"]) == 2 for p in sent)
-    for payload in sent:
-        assert {m["key"] for m in payload["manifest"]} == {"results", "appendix"}
-    # Every word of the reviewed document survives splitting, in order and exactly once.
-    restored = {"results": [], "appendix": []}
-    for payload in sent:
-        for section in payload["document"]["sections"]:
-            restored[section["key"]].extend(p["text"] for p in section["paragraphs"])
-    assert " ".join(restored["results"]) == body
-    assert " ".join(restored["appendix"]) == appendix
-    assert "-" in sent[0]["manifest"][0]["part"]
 
 
-def test_an_unfit_repeated_context_is_refused_before_review(monkeypatch):
-    monkeypatch.setattr(datalab, "FINAL_PART_WORDS", 900)
-    with pytest.raises(datalab.PermanentStageError):
-        datalab.bounded_parts([], {"context": "word " * 950})

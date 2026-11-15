@@ -48,7 +48,6 @@ const GROUP_LIST: Record<StartChoice['group'], { to: string; label: string }> = 
   'Coursework': { to: '/app/works', label: 'Your coursework' },
   'Research proposals': { to: '/app/projects', label: 'Your proposals' },
   'Funding': { to: '/app/works?section=FUNDING', label: 'Your funding documents' },
-  'Data analysis': { to: '/app/datalab', label: 'Your data projects' },
   'Your own paper': { to: '/app/history', label: 'Your papers' },
 }
 

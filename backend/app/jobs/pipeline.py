@@ -1373,13 +1373,7 @@ def work_stage(stage: Stage):
 
 
 def run_step(rt: Runtime, job_id: str) -> None:
-    """One queued task: a job's next stage, or a piece of Data Lab data work (`dop_` ids, Codex audit
-    finding 13: the worker, not the public API, reads files and runs analyses)."""
-    if job_id.startswith("dop_"):
-        from app.datalab.service import run_op
-
-        run_op(rt, job_id)
-        return
+    """One queued task: a job's next stage."""
     token = job_id_var.set(job_id)
     try:
         _run_step(rt, job_id)
@@ -1424,12 +1418,7 @@ def _run_step(rt: Runtime, job_id: str) -> None:
     since = job.ready_at or job.queued_at  # when its turn in the queue began
     queued_ms = int((started - since).total_seconds() * 1000) if since else 0
     ctx = StageContext(rt, job)
-    if job.selection.datalab != "NONE":
-        from app.datalab import pipeline as datalab_pipeline  # Data Lab imports the job service, which the worker's module must not import first
-        from app.datalab import qual
-
-        run = (qual.STAGES if job.selection.datalab == "THEMES" else datalab_pipeline.STAGES)[stage]
-    elif job.selection.work != "NONE":
+    if job.selection.work != "NONE":
         run = work_stage(stage)
     elif job.selection.proposal == "REVIEW":
         run = proposal_review.STAGES.get(stage) or STAGES[stage]

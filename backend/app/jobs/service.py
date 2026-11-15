@@ -16,9 +16,7 @@ from app.analysis import signals
 from app.core.config import Settings
 from app.core.errors import AppError, Conflict, Forbidden, InvalidDocument, LimitExceeded, NotFound, PermanentStageError
 from app.core.logging import log
-from app.datalab.models import DataProject
-from app.documents.docx_io import read_docx
-from app.documents.intake import inspect_upload
+from app.documents.intake import inspect_upload, read_stored_docx
 from app.formatting.guideline import MAX_GUIDE_WORDS
 from app.formatting.presets import PRESETS, PUBLIC_PRESETS
 from app.integrations.store import cursor_of
@@ -62,12 +60,12 @@ from app.works.models import Work
 
 logger = logging.getLogger("paperaid.jobs")
 
-BUILT = ("AI_CHECK", "REFINE", "FORMAT", "TEMPLATE_FORMAT", "SOURCE_CHECK", "REDRAFT", "LATEX", "PROPOSAL", "CONCEPT_NOTE", "COURSEWORK", "FUNDING_PROPOSAL", "DATALAB")
-NEEDS_AI = ("AI_CHECK", "REFINE", "TEMPLATE_FORMAT", "SOURCE_CHECK", "REDRAFT", "PROPOSAL", "CONCEPT_NOTE", "COURSEWORK", "FUNDING_PROPOSAL", "DATALAB")
+BUILT = ("AI_CHECK", "REFINE", "FORMAT", "TEMPLATE_FORMAT", "SOURCE_CHECK", "REDRAFT", "LATEX", "PROPOSAL", "CONCEPT_NOTE", "COURSEWORK", "FUNDING_PROPOSAL")
+NEEDS_AI = ("AI_CHECK", "REFINE", "TEMPLATE_FORMAT", "SOURCE_CHECK", "REDRAFT", "PROPOSAL", "CONCEPT_NOTE", "COURSEWORK", "FUNDING_PROPOSAL")
 WORKS = ("CONCEPT_NOTE", "COURSEWORK", "FUNDING_PROPOSAL")
-# Data Lab (owner decision 2026-10-03): its analyses are code; its report uses the work roles. Offered
-# like a work service: switched on and priced first, testers and admins while the pilot is closed.
-GATED = (*WORKS, "DATALAB")
+# The work services are offered once switched on and priced: testers and admins while the pilot is closed.
+# (Data Lab was removed on the owner's instruction, 2026-11-15; its last code is tagged `datalab-last`.)
+GATED = WORKS
 SEARCHING = ("SOURCE_CHECK", "PROPOSAL", *WORKS)  # services with web research steps
 
 
@@ -78,9 +76,8 @@ def availability(settings: Settings, user: "User | None" = None) -> dict[str, st
     result = {}
     search_ready = settings.search_configured
     for service in ("AI_CHECK", "REFINE", "FORMAT", "TEMPLATE_FORMAT", "REDRAFT", "LATEX", "SOURCE_CHECK", "PROPOSAL", *GATED):
-        switched_on = settings.datalab_enabled if service == "DATALAB" else service in settings.works_enabled
-        # Data Lab's analyses are code and free, so it opens without prices; its paid report checks its own (app.datalab.service).
-        priced = service == "DATALAB" or work_prices_set(settings, service)
+        switched_on = service in settings.works_enabled
+        priced = work_prices_set(settings, service)
         # The hidden AI check stays open to the daily canary's own account only: its diagnostic run, never a student's (Codex review 2026-10-07, finding 11).
         hidden = service == "AI_CHECK" and not settings.ai_check_enabled and not (user is not None and settings.canary_uid and user.uid == settings.canary_uid)
         if service not in BUILT or (service in GATED and (not switched_on or not priced)) or hidden:
@@ -168,8 +165,6 @@ def public_config(rt: Runtime, user: "User | None" = None) -> dict:
 
 
 def pipeline_for(selection: ServiceSelection) -> list[Stage]:
-    if selection.datalab in ("REPORT", "THEMES"):  # computed (or coded) first, then written, reviewed and exported
-        return [Stage.DRAFTING, Stage.AUDITING, Stage.EXPORTING]
     if selection.work == "READ":
         return [Stage.ANALYSING, Stage.EXPORTING]
     if selection.work == "PLAN":
@@ -447,8 +442,8 @@ def request_quote(rt: Runtime, user: User, job_id: str, selection: ServiceSelect
         raise AppError("That service is not available right now.", code="SERVICE_UNAVAILABLE")
     if selection.proposal not in ("NONE", "REVIEW") or job.project_id:
         raise AppError("Proposal steps are started from the proposal's page.", code="PROPOSAL_STEP")
-    if selection.work != "NONE" or selection.datalab != "NONE" or selection.bundled or job.work_id or job.datalab_id:
-        # A work step or a Data Lab report is priced only by its own page, on its frozen input.
+    if selection.work != "NONE" or selection.bundled or job.work_id:
+        # A work step is priced only by its own page, on its frozen input.
         raise AppError("This step is started from its own page.", code="WORK_STEP")
     if selection.proposal == "REVIEW" and (len(services) > 1 or selection.writing != "NONE"):
         raise AppError("A proposal review runs on its own. Start another job for other services.", code="REVIEW_ALONE")
@@ -539,7 +534,7 @@ def _fix_scope(rt: Runtime, job: Job, blocks: list[str]) -> int:
     assert job.source is not None
     if job.source.format != "DOCX":
         raise AppError("Fixing passages needs the Word file. Upload the .docx version of this paper.", code="PDF_AI_CHECK_ONLY")
-    model = read_docx(rt.files.get(job.source.path))
+    model = read_stored_docx(rt.files.get(job.source.path), rt.settings.max_words)
     editable = {b.id: b for b in model.blocks if b.editable and b.kind in ("paragraph", "list_item")}
     if len(set(blocks)) != len(blocks) or any(b not in editable for b in blocks):
         raise AppError("Choose the passages to fix from your writing check.", code="INVALID_SELECTION")
@@ -613,18 +608,17 @@ def _priced_input_intact(j: Job) -> bool:
     the project input frozen when it was priced."""
     if j.quote is None:
         return False
-    if j.project_id or j.work_id or j.datalab_id:
+    if j.project_id or j.work_id:
         return j.input_sha256 is not None and j.quote.source_sha256 == j.input_sha256
     return j.source is not None and j.quote.source_sha256 == j.source.sha256
 
 
 ProjectGate = Callable[[Job, Project | None], Project | None]
 WorkGate = Callable[[Job, Work | None], Work | None]
-DataGate = Callable[[Job, DataProject | None], DataProject | None]
 
 
 def submit(rt: Runtime, user: User, job_id: str, quote_id: str, project_gate: ProjectGate | None = None, work_gate: WorkGate | None = None,
-           reservation: tuple[str, int] | None = None, data_gate: DataGate | None = None) -> JobView:
+           reservation: tuple[str, int] | None = None) -> JobView:
     """Accept a quote. A proposal step is submitted through its project (app.proposals.service),
     whose `project_gate` runs in the same transaction as the hold: it refuses (None) or returns the
     project with the step claimed, so a project can never be deleted between its claim and the
@@ -637,8 +631,6 @@ def submit(rt: Runtime, user: User, job_id: str, quote_id: str, project_gate: Pr
         raise AppError("Start this step from the proposal's page.", code="PROPOSAL_STEP")
     if job.work_id and work_gate is None:
         raise AppError("Start this step from its page.", code="WORK_STEP")
-    if job.datalab_id and data_gate is None:
-        raise AppError("Start this report from its Data Lab page.", code="DATALAB_STEP")
     if job.status in state.SUBMITTED and job.quote and job.quote.id == quote_id:
         return job.view()  # double click or retried request: the same submission, nothing new
     if job.status != JobStatus.QUOTED or job.quote is None or job.quote.id != quote_id:
@@ -710,16 +702,6 @@ def submit(rt: Runtime, user: User, job_id: str, quote_id: str, project_gate: Pr
 
         triple_work = rt.store.update_job_wallet_and_work(job.id, job.work_id, accept_work)
         result = (triple_work[0], triple_work[1]) if triple_work else None
-    elif job.datalab_id:
-        assert data_gate is not None
-
-        def accept_data(j: Job, w: Wallet, d: DataProject | None) -> tuple[Job, Wallet, DataProject] | None:
-            claimed = data_gate(j, d)
-            accepted = accept(j, w) if claimed is not None else None
-            return (accepted[0], accepted[1], claimed) if accepted is not None and claimed is not None else None
-
-        triple_data = rt.store.update_job_wallet_and_datalab(job.id, job.datalab_id, accept_data)
-        result = (triple_data[0], triple_data[1]) if triple_data else None
     else:
         result = rt.store.update_job_and_wallet(job.id, accept)
     updated = result[0] if result else None
@@ -746,7 +728,7 @@ def list_jobs(rt: Runtime, user: User, status: str | None, service: str | None, 
     else:
         statuses = {JobStatus(status)} if status and status != "ALL" else state.SUBMITTED
     jobs, next_cursor = rt.store.list(user.uid, statuses, service if service and service != "ALL" else None, cursor, min(limit, 50))
-    jobs = [j for j in jobs if not j.project_id and not j.work_id and not j.datalab_id]  # project, work and Data Lab steps are shown on their own page
+    jobs = [j for j in jobs if not j.project_id and not j.work_id]  # project and work steps are shown on their own page
     if status == "DRAFT":
         jobs = [j for j in jobs if j.source is not None and not j.deleting and not j.files_deleted]
     return Page[JobView](items=[j.view() for j in jobs], next_cursor=next_cursor)
@@ -896,8 +878,6 @@ def delete_account(rt: Runtime, user: User) -> int:
         _erase_project(rt, project)
     for work in rt.store.list_works(user.uid):
         _erase_work(rt, work)
-    for data_project in rt.store.list_datalab(user.uid):
-        _erase_datalab(rt, data_project)
 
     def tombstone(w: Wallet) -> Wallet:
         return Wallet(uid=w.uid, email="", closing=True, grant_ops=w.grant_ops)
@@ -991,7 +971,7 @@ SUPPORT_FIELDS = frozenset(
     {
         "id", "status", "stage", "payment_status", "selection", "services", "pipeline", "source", "guideline", "logo", "quote", "estimate",
         "billing", "outcome", "warnings", "protected", "dismissed", "rejected_changes", "source_job", "latex", "formatting", "scope_words",
-        "project_id", "work_id", "datalab_id", "outputs", "failure", "created_at", "queued_at", "completed_at", "expires_at",
+        "project_id", "work_id", "outputs", "failure", "created_at", "queued_at", "completed_at", "expires_at",
         "owner_uid", "owner_email", "completed_stages", "generation", "attempts", "lease_until", "lease_owner", "artifact_paths", "cost_usd", "reserved_usd", "estimate_cost_usd", "progress",
         "refine_cost_usd", "budget_usd", "model_calls", "events", "admin_actions", "failure_detail", "files_deleted", "deleting", "retiring",
         "input_sha256", "delivery", "notice", "pending_calls",
@@ -1158,8 +1138,6 @@ def _claim_and_requeue(rt: Runtime, job: Job, requeue) -> Job | None:
         return with_item(rt.store.update_job_wallet_and_project, job.project_id)
     if job.work_id:
         return with_item(rt.store.update_job_wallet_and_work, job.work_id)
-    if job.datalab_id:
-        return with_item(rt.store.update_job_wallet_and_datalab, job.datalab_id)
     pair = rt.store.update_job_and_wallet(job.id, requeue)
     return pair[0] if pair else None
 
@@ -1169,15 +1147,13 @@ def _check_active_limit(rt: Runtime, uid: str) -> None:
         raise LimitExceeded(f"You already have {rt.settings.max_active_jobs_per_user} jobs in progress. Wait for one to finish.", code="ACTIVE_JOB_LIMIT")
 
 
-def _step_item(rt: Runtime, job: Job) -> "Project | Work | DataProject | None | bool":
-    """The project, work or Data Lab project a step belongs to (None when it is gone), or False for
+def _step_item(rt: Runtime, job: Job) -> "Project | Work | None | bool":
+    """The project or work a step belongs to (None when it is gone), or False for
     a job that belongs to none."""
     if job.project_id:
         return rt.store.get_project(job.project_id)
     if job.work_id:
         return rt.store.get_work(job.work_id)
-    if job.datalab_id:
-        return rt.store.get_datalab(job.datalab_id)
     return False
 
 
@@ -1305,7 +1281,7 @@ def cleanup_expired(rt: Runtime) -> int:
     return cleaned
 
 
-def step_running(rt: Runtime, p: Project | Work | DataProject) -> bool:
+def step_running(rt: Runtime, p: Project | Work) -> bool:
     """A step of this project (or work) is queued or running. Its claim (`active_job`) is set in the
     same transaction that holds the step's credits (app.jobs.service.submit)."""
     return bool(p.active_job) and (step := rt.store.get(p.active_job or "")) is not None and step.status in ACTIVE
@@ -1433,73 +1409,6 @@ def _erase_work(rt: Runtime, work: Work, expired_before: datetime | None = None)
     rt.files.delete_prefix(work.storage_prefix())
     rt.store.delete_work(work.id)
     return True
-
-
-def _erase_datalab(rt: Runtime, project: DataProject, expired_before: datetime | None = None) -> bool:
-    """Delete a Data Lab project: its record, its dataset and results, and every report job run for
-    it. Claimed first, like a work."""
-
-    def mark(d: DataProject) -> DataProject | None:
-        if d.deleting:
-            return d
-        if expired_before is not None and d.expires_at >= expired_before:
-            return None
-        if step_running(rt, d):
-            return None
-        d.deleting = True
-        return d
-
-    if rt.store.update_datalab(project.id, mark) is None:
-        return False
-    for job in every_job(rt, project.owner_uid, None):
-        if job.datalab_id != project.id:
-            continue
-        claimed = _mark_deleting(rt, job.id)
-        if claimed is None:
-            if rt.store.get(job.id) is not None:
-                return False
-            continue
-        _erase(rt, claimed)
-    rt.files.delete_prefix(project.storage_prefix())
-    rt.store.delete_datalab(project.id)
-    return True
-
-
-def cleanup_expired_datalab(rt: Runtime) -> int:
-    """Delete Data Lab projects 30 days after the researcher's last action, like works."""
-    cutoff, erased = utcnow(), 0
-    for project_id in rt.store.expired_datalab_ids(cutoff):
-        project = rt.store.get_datalab(project_id)
-        if project is not None:
-            erased += _erase_datalab(rt, project, expired_before=cutoff)
-    return erased
-
-
-ORPHAN_AGE = timedelta(hours=2)  # far longer than any piece of data work runs
-
-
-def sweep_datalab_files(rt: Runtime) -> int:
-    """Delete Data Lab files no project record names, once they are old enough that no data work can
-    still be about to name them (a worker that stopped between writing and saving; Codex audit, finding 1)."""
-    removed = 0
-    cutoff = utcnow() - ORPHAN_AGE
-    for project_id in rt.store.all_datalab_ids():
-        p = rt.store.get_datalab(project_id)
-        if p is None or p.deleting:
-            continue
-        named = {p.source.path} if p.source else set()
-        named |= {v.path for v in p.versions} | {v.profile for v in p.versions} | {s.params_path for s in p.steps if s.params_path}
-        named |= {path for a in p.analyses for path in (a.path, a.path.removesuffix(".json") + ".png", a.path.removesuffix(".json") + ".rows")}
-        named |= {path for r in p.reports for path in (r.path, r.docx, r.workbook) if path} | {d.path for d in p.documents}
-        if p.cleaned is not None:
-            named.add(p.cleaned.path)
-        if p.op is not None and p.op.kind == "LOAD":
-            named.add(str(p.op.params.get("path", "")))
-        for path, written in rt.files.list(p.storage_prefix()):
-            if path not in named and written < cutoff:
-                rt.files.delete(path)
-                removed += 1
-    return removed
 
 
 def cleanup_expired_works(rt: Runtime) -> int:

@@ -86,6 +86,13 @@ def inspect_upload(data: bytes, filename: str, max_bytes: int, max_words: int, m
     return model
 
 
+def read_stored_docx(data: bytes, max_words: int) -> DocumentModel:
+    """A Word file PaperAid already accepted, read again (the paper's preview before processing, a passage's
+    price, a rebuild): through the same bounded child process as the upload, never on the API's own heap
+    (production readiness audit, 2026-11-15: several large previews at once could exhaust an API instance)."""
+    return _isolated_docx(data, max_words)
+
+
 def _isolated_docx(data: bytes, max_words: int) -> DocumentModel:
     """ZIP byte bounds alone cannot bound the memory of a hostile XML tree."""
     if not _PARSER_SLOT.acquire(timeout=5):

@@ -59,8 +59,6 @@ class Reliability(Camel):
 def service_of(job: Job) -> str:
     """One name per kind of job, as admins read it."""
     s = job.selection
-    if s.datalab != "NONE":
-        return "Data Lab report"
     if s.work != "NONE":
         kind = {"COURSEWORK": "Coursework", "CONCEPT_NOTE": "Concept note", "FUNDING_PROPOSAL": "Funding proposal"}.get(s.work_kind, s.work_kind)
         return f"{kind}: {s.work.lower()}"

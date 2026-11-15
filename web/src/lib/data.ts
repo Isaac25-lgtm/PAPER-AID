@@ -18,7 +18,6 @@ import type {
   WalletSummary,
   WorkSummary,
 } from './types'
-import type { AnalysisResult, AnalysisSpec, DataPreview, DataProject, IdentifierRules, Places, ReportDocument, TranscriptChoice, UploadChoice, VariableKind } from './datalab-types'
 import type { ChapterView, CitationStyle, Comparison, EvidenceItem, FeedbackStatus, FrameworkStyle, Project, ProposalInputs, ProposalPlan, Rulebook, SampleSize, StepId, StepQuote, TitlePage, Variables } from './proposal-types'
 import type { Budget, ResultsModel, SourceRole, Work, WorkCitation, WorkDocumentView, WorkInputs, WorkKind, WorkPlan, WorkStep, WorkStepQuote } from './work-types'
 
@@ -181,47 +180,6 @@ export interface DataSource {
     download(id: string, fileName: string, version?: number): Promise<void>
     downloadPdf(id: string, fileName: string, version?: number): Promise<void>
     remove(id: string): Promise<void>
-  }
-  /** Data Lab (owner decision 2026-10-03): datasets analysed by code, written up as an analysis report. */
-  datalab: {
-    list(): Promise<DataProject[]>
-    get(id: string): Promise<DataProject | null>
-    create(title: string, purpose: string, kind?: 'QUANT' | 'QUAL'): Promise<DataProject>
-    /** Qualitative: a transcript file, or pasted text, kept after the names listed are replaced. */
-    addDocument(id: string, file: File, choice: TranscriptChoice): Promise<DataProject>
-    addText(id: string, text: string, choice: TranscriptChoice): Promise<DataProject>
-    removeDocument(id: string, documentId: string): Promise<DataProject>
-    startThemes(id: string): Promise<void>
-    downloadCodebook(id: string, fileName: string, version?: number): Promise<void>
-    update(id: string, change: { title?: string; purpose?: string; alpha?: number; threshold?: number }): Promise<DataProject>
-    upload(id: string, file: File, choice: UploadChoice): Promise<DataProject>
-    countries(): Promise<{ iso3: string; name: string; available: boolean }[]>
-    identifierRules(): Promise<IdentifierRules>
-    chooseSheet(id: string, name: string): Promise<DataProject>
-    preview(id: string, offset?: number): Promise<DataPreview>
-    editVariable(id: string, name: string, edit: { label?: string; kind?: VariableKind; excluded?: boolean; survey?: 'DESIGN' | 'NOT_DESIGN' }): Promise<DataProject>
-    decide(id: string, stepId: string, accept: boolean): Promise<DataProject>
-    undo(id: string): Promise<DataProject>
-    /** Checked at once, run by the worker: follow the project's `op` to the result. */
-    analyse(id: string, spec: AnalysisSpec): Promise<DataProject>
-    setObjective(id: string, analysisId: string, objective: number | null): Promise<DataProject>
-    /** Uganda's regions and sub-regions, for the map step. */
-    places(): Promise<Places>
-    analysis(id: string, analysisId: string): Promise<AnalysisResult>
-    chartUrl(id: string, analysisId: string): Promise<string>
-    removeAnalysis(id: string, analysisId: string): Promise<DataProject>
-    /** `missingOk`: Chapter Four objectives the researcher confirmed have no analysis. */
-    startReport(id: string, analyses?: string[], missingOk?: number[]): Promise<void>
-    report(id: string, version?: number): Promise<ReportDocument>
-    downloadReport(id: string, fileName: string, version?: number): Promise<void>
-    downloadReportPdf(id: string, fileName: string, version?: number): Promise<void>
-    downloadWorkbook(id: string, fileName: string): Promise<void>
-    /** The researcher's own cleaned data (individual records): made by the worker, then downloaded. */
-    makeCleaned(id: string): Promise<DataProject>
-    downloadCleaned(id: string, fileName: string): Promise<void>
-    remove(id: string): Promise<void>
-    /** Chapter Four: the Data Lab project for a research proposal's data (created on first use). */
-    forProposal(proposalId: string): Promise<DataProject>
   }
   admin: {
     summary(): Promise<AdminSummary>

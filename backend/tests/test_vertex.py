@@ -244,13 +244,11 @@ def test_unsupported_schemas_rejected_before_sdk(sdk, bad):
 
 def schemas():
     from app.ai import orchestration as o
-    from app.datalab import pipeline as d
-    from app.datalab import qual as q
     from app.formatting.guideline import SPEC_SCHEMA
     from app.proposals import ai as p
     from app.proposals import profile
     from app.works import ai as w
-    items = [(module.__name__ + "." + name, value) for module in (o, d, q, p, w, profile)
+    items = [(module.__name__ + "." + name, value) for module in (o, p, w, profile)
              for name, value in vars(module).items() if isinstance(value, dict) and value.get("type") == "object"]
     items.append(("formatting.SPEC_SCHEMA", SPEC_SCHEMA))
     return items

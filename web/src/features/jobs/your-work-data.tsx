@@ -1,4 +1,4 @@
-import { ChartColumn, FilePen, HandCoins, Lightbulb, NotebookPen } from 'lucide-react'
+import { FilePen, HandCoins, Lightbulb, NotebookPen } from 'lucide-react'
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useData } from '../../lib/data'
 import { createRefresher, startPolling } from '../../lib/refresher'
@@ -6,7 +6,7 @@ import type { StartChoice } from '../../lib/start'
 import type { WorkSummary } from '../../lib/types'
 import type { WorkspaceStatus } from '../workspace/parts'
 
-/** One piece of the student's work: a coursework, funding document, proposal or dataset, with one plain status. */
+/** One piece of the student's work: a coursework, funding document or proposal, with one plain status. */
 export interface WorkItem {
   key: string
   title: string
@@ -26,7 +26,6 @@ export const SECTION_LISTS: { group: StartChoice['group']; label: string; to: st
   { group: 'Coursework', label: 'Coursework', to: '/app/works' },
   { group: 'Research proposals', label: 'Research proposals', to: '/app/projects' },
   { group: 'Funding', label: 'Funding', to: '/app/works?section=FUNDING' },
-  { group: 'Data analysis', label: 'Data Lab', to: '/app/datalab' },
 ]
 
 const KINDS: Record<WorkSummary['kind'], { label: string; icon: typeof NotebookPen; path: string }> = {
@@ -34,7 +33,6 @@ const KINDS: Record<WorkSummary['kind'], { label: string; icon: typeof NotebookP
   CONCEPT_NOTE: { label: 'Concept note', icon: Lightbulb, path: '/app/works' },
   FUNDING_PROPOSAL: { label: 'Funding proposal', icon: HandCoins, path: '/app/works' },
   PROPOSAL: { label: 'Research proposal', icon: FilePen, path: '/app/projects' },
-  DATALAB: { label: 'Data Lab', icon: ChartColumn, path: '/app/datalab' },
 }
 
 function status(s: WorkSummary): WorkspaceStatus {
@@ -46,10 +44,6 @@ function status(s: WorkSummary): WorkspaceStatus {
     case 'NEEDS_ATTENTION': return { label: 'Needs your attention', tone: 'input' }
     case 'CHAPTERS': return { label: s.chapters.length === 3 ? 'Chapters 1–3 written' : `Chapter ${s.chapters.join(', ')} written`, tone: 'ready' }
     case 'CONCEPT': return { label: 'Concept paper written', tone: 'ready' }
-    case 'REPORT': return { label: 'Report ready', tone: 'ready' }
-    case 'ANALYSES': return { label: `${s.analyses} analys${s.analyses === 1 ? 'is' : 'es'}`, tone: 'idle' }
-    case 'NOT_ANALYSED': return { label: 'Not analysed yet', tone: 'idle' }
-    case 'NO_DATA': return { label: 'No data yet', tone: 'idle' }
     default: return { label: 'Not started', tone: 'idle' }
   }
 }
@@ -58,7 +52,7 @@ function item(s: WorkSummary): WorkItem {
   const kind = KINDS[s.kind]
   return {
     key: s.id, title: s.title, kind: kind.label, icon: kind.icon, updated: s.updatedAt, to: `${kind.path}/${s.id}`, status: status(s), group: s.section,
-    done: ['READY', 'READY_WITH_WARNINGS', 'CHAPTERS', 'CONCEPT', 'REPORT'].includes(s.state),
+    done: ['READY', 'READY_WITH_WARNINGS', 'CHAPTERS', 'CONCEPT'].includes(s.state),
   }
 }
 

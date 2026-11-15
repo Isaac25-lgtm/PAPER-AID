@@ -9,7 +9,6 @@ import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
-import pandas as pd
 import pytest
 
 from app.core.errors import InvalidDocument
@@ -121,17 +120,6 @@ def test_admin_failure_diagnostics_cannot_repeat_student_text(client):
     assert "PRIVATE_SENTINEL" in client.get(f"/api/jobs/{job_id}", headers=STUDENT).text
 
 
-def test_cross_tab_rejects_actual_cardinality_before_allocating(monkeypatch):
-    from app.datalab.engine import stats
-    from app.datalab.models import AnalysisSpec, Variable
-
-    frame = pd.DataFrame({"a": [f"a{i}" for i in range(100)], "b": [f"b{i}" for i in range(100)]})
-    variables = {name: Variable(name=name, kind="CATEGORICAL", stored="text", valid=100, missing=0, distinct=2) for name in frame.columns}
-    def forbidden(*a, **kw):
-        raise AssertionError("Dense grid was allocated before the limit")
-    monkeypatch.setattr(pd, "crosstab", forbidden)
-    result = stats.run(stats.Context(frame, variables, 1), AnalysisSpec(kind="CROSSTAB", variables=["a", "b"]))
-    assert result.status == "NOT_ESTIMABLE"
 
 
 def test_simultaneous_last_slot_submits_are_admitted_atomically(client, monkeypatch):

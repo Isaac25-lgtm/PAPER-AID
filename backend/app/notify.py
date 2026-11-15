@@ -38,8 +38,6 @@ def channels(rt: Runtime) -> dict[str, bool]:
 
 def _what(job: Job) -> str:
     s = job.selection
-    if s.datalab != "NONE":
-        return "analysis report"
     if s.work_kind != "NONE":
         return {"COURSEWORK": "coursework", "CONCEPT_NOTE": "concept note", "FUNDING_PROPOSAL": "funding proposal"}[s.work_kind]
     if s.proposal == "CONCEPT":
@@ -57,8 +55,6 @@ def _link(rt: Runtime, job: Job) -> str:
         return f"{base}/app/works/{job.work_id}"
     if job.project_id:
         return f"{base}/app/projects/{job.project_id}"
-    if job.datalab_id:
-        return f"{base}/app/datalab/{job.datalab_id}"
     return f"{base}/app/jobs/{job.id}"
 
 

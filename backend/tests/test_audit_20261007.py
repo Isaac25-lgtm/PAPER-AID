@@ -187,7 +187,7 @@ def test_a_pipeline_that_passes_its_own_findings_gets_no_second_copy(sdk):
     answers[:] = [response(), response()]
     ai, _ = runner(flat(), budget=50)
     for round_ in ai.audit_rounds(2):
-        ai._call("d_report_review", {"part": "1 of 1", **({"previousIssues": ["x"]} if round_ else {})}, SCHEMA, Answer)
+        ai._call("w_final", {"part": "1 of 1", **({"previousIssues": ["x"]} if round_ else {})}, SCHEMA, Answer)
     assert "previousAudit" not in calls[1]["contents"]
 
 
@@ -234,13 +234,14 @@ def test_a_link_from_the_request_or_without_a_search_is_not_a_source_of_this_sea
 # --- 8. The terms describe what each kind of data sends -----------------------------------------------------
 
 
-def test_the_terms_disclose_transcripts_and_were_versioned_again():
+def test_the_terms_were_versioned_again_when_data_lab_was_removed():
+    """Transcripts were disclosed in 2026-10-07; Data Lab and its wording were removed in 2026-11-15 (owner)."""
     from pathlib import Path
 
     from app.core.config import Settings
 
-    assert Settings(_env_file=None).terms_version == "2026-10-07"
+    assert Settings(_env_file=None).terms_version == "2026-11-15"
     terms = (Path(__file__).parents[2] / "web/src/features/account/terms.tsx").read_text(encoding="utf-8")
-    assert "transcripts" in terms and "after the names and contact details you listed are replaced" in terms
+    assert "transcripts" not in terms and "dataset" not in terms
     assert not any(name in terms for name in ("OpenAI", "Anthropic", "Gemini"))
 

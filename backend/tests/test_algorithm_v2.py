@@ -1567,7 +1567,7 @@ def test_your_work_is_one_light_line_each_and_reads_no_document(v2, monkeypatch)
     assert full["status"] in ("READY", "READY_WITH_WARNINGS") and full["activeJob"] is None
     # finished: the record's claim on its step no longer counts, exactly as in the full view
     assert [(i["id"], i["section"], i["kind"], i["state"]) for i in listed.json()] == [(work["id"], "Coursework", "COURSEWORK", full["status"])]
-    assert set(listed.json()[0]) == {"id", "section", "kind", "title", "updatedAt", "state", "chapters", "analyses"}  # where it is, never what it says
+    assert set(listed.json()[0]) == {"id", "section", "kind", "title", "updatedAt", "state", "chapters"}  # where it is, never what it says
     assert v2.get("/api/me/work").status_code in (401, 403)  # only the signed-in person's own
 
 
@@ -1616,27 +1616,13 @@ def test_work_whose_latest_step_failed_or_was_stopped_is_never_listed_as_not_sta
     assert _states(simple)[fresh["id"]] == "NOT_STARTED"
 
 
-def test_a_proposal_or_a_data_report_that_failed_is_listed_as_failed(simple, monkeypatch):
-    from datetime import timedelta
-    from types import SimpleNamespace
-
-    from app.datalab.models import DataProject
-    from app.jobs.models import JobStatus, utcnow
-    from app.runtime import get_runtime
+def test_a_proposal_that_failed_is_listed_as_failed(simple):
     from tests.test_proposals import _create, _run
 
     simple.models.overrides["p_plan"] = lambda payload: (_ for _ in ()).throw(PermanentStageError("PLAN_FAILED", "No plan could be made. Nothing was charged.", "test"))
     pid = _create(simple)["id"]
     job = _run(simple, pid, "PLAN")
     assert job["status"] == "FAILED" and _states(simple)[pid] == "FAILED"
-
-    rt = get_runtime()
-    uid = rt.store.get_project(pid).owner_uid
-    data = DataProject(id="dl_test", owner_uid=uid, owner_email="demo@paperaid.app", title="Survey", expires_at=utcnow() + timedelta(days=30), jobs=["job_report"])
-    monkeypatch.setattr(type(rt.store), "list_datalab", lambda self, owner: [data])
-    real = type(rt.store).get
-    monkeypatch.setattr(type(rt.store), "get", lambda self, job_id: SimpleNamespace(status=JobStatus.FAILED) if job_id == "job_report" else real(self, job_id))
-    assert _states(simple)["dl_test"] == "FAILED"  # its report could not be finished: never "No data yet"
 
 
 def test_an_unsound_placed_statement_is_told_to_the_student_as_a_note_on_their_plan(client):

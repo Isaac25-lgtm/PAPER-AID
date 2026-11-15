@@ -2,26 +2,20 @@
 """Codex's second review of 2026-10-07 (code at 6eaa1ee) and its fixes: one regression per finding, each
 reproducing the original case. No paid model calls."""
 
-import io
 from types import SimpleNamespace
 
 import httpx
-import pandas as pd
 import pytest
 
 from app.ai import orchestration, vertex
 from app.analysis import fetch
 from app.core.errors import PermanentStageError, RetryableStageError
-from app.datalab.engine import disclosure, filters
-from app.datalab.engine.maps import _breaks, _legend_numbers
-from app.datalab.models import Filter, Variable
 from app.jobs import pipeline as jobs_pipeline
 from app.jobs.models import JobStatus, Stage
 from app.proposals.ai import Figure, SectionText, Table
 from app.works import pipeline
 from app.works.ai import Final, FinalRule
 from tests.test_api import STUDENT, start_job, wait
-from tests.test_datalab import lab  # noqa: F401  (the Data Lab fixture)
 
 WORKED = {"caption": "Worked example", "illustrative": True,
           "rows": [["Case", "Price ($)", "Quantity"], ["Before", "900", "250"], ["After", "860", "205"]]}
@@ -104,26 +98,8 @@ def test_a_finished_jobs_workspace_reads_the_attempts_own_artifacts(client):
 # --- 3. no small count escapes through details or subtraction -----------------------------------------------
 
 
-def test_record_counts_and_missing_notes_never_reveal_a_small_group():
-    assert disclosure.records_used(3, 100, 5) == "hidden to protect privacy"  # three used
-    assert disclosure.records_used(97, 100, 5) == "hidden to protect privacy"  # three left out, by subtraction
-    assert disclosure.records_used(60, 100, 5) == "60 of 100"
-    frame = pd.DataFrame({"age": [1.0] * 94 + [None] * 6, "sex": ["F"] * 100})
-    variables = {"age": Variable(name="age", kind="NUMERIC", stored="number", valid=94, missing=6, distinct=1),
-                 "sex": Variable(name="sex", kind="CATEGORICAL", stored="text", valid=100, missing=0, distinct=1)}
-    _, notes = filters.mask(frame, [Filter(variable="age", op="BETWEEN", low="0")], variables, threshold=10)
-    assert notes and "6" not in notes[0] and "protected" in notes[0].lower()
 
 
-def test_an_analysis_leaving_out_a_few_people_is_not_shared(lab):
-    from tests.test_datalab import _analyse, _project
-
-    rows = "".join(f"{50 + i % 30},{'F' if i % 2 else 'M'}" + chr(10) for i in range(60))
-    data = "score,sex" + chr(10) + rows + ",F" + chr(10) + ",M" + chr(10) + ",F" + chr(10)
-    view = _project(lab, data)
-    result = _analyse(lab, view["id"], {"kind": "DESCRIBE", "variables": ["score"]})
-    assert result["status"] == "NOT_ESTIMABLE" and not result["tables"]
-    assert "cannot be shared" in result["warnings"][0]
 
 
 # --- 4. no final-review request above the bound, ever ---------------------------------------------------
@@ -217,24 +193,8 @@ def test_a_graph_is_removed_only_on_an_explicit_request():
 # --- 10. a large export is safe to open in a spreadsheet ------------------------------------------------------
 
 
-def test_the_large_csv_export_keeps_formula_like_text_inert():
-    from app.datalab.service import _safe_csv
-
-    data = pd.DataFrame({"=HYPERLINK(1)": ["=SUM(A1:A9)", "+1+1", "plain", "@cmd"], "n": [1, -2, 3, 4]})
-    text = _safe_csv(data).decode("utf-8-sig")
-    frame = pd.read_csv(io.StringIO(text), dtype=str)
-    assert list(frame.columns)[0] == "'=HYPERLINK(1)" and frame.iloc[0, 0] == "'=SUM(A1:A9)" and frame.iloc[2, 0] == "plain"
-    assert frame.iloc[1, 1] == "-2"  # numbers stay numbers
 
 
 # --- 11. legends never repeat a limit -----------------------------------------------------------------------
 
 
-def test_legend_limits_are_distinct_for_tight_and_constant_values():
-    tight = [0.40001, 0.40002, 0.5, 0.6]
-    shown = _legend_numbers(tight, whole=False)
-    assert len({shown(b) for b in tight}) == len(tight)
-    import numpy as np
-
-    constant = _breaks(np.array([5.0, 5.0, 5.0]))
-    assert constant == [5.0, 5.0] and _legend_numbers(constant, whole=False)(5.0) == "5.0"

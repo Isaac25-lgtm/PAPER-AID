@@ -1,47 +1,16 @@
 """Codex's audit of 8ebecb4..6373ceb (2026-10-04): each reproduction it reported, as a regression test."""
 
-import io
-import json
-import time
 
-import pytest
-from docx import Document
 
-from app.datalab import qual
-from app.datalab.engine import stats
-from app.datalab.models import AnalysisSpec
 from tests.test_api import STUDENT
-from tests.test_datalab import CSV, _act, _analyse, _project
-from tests.test_datalab import lab as lab  # noqa: F401 (the fixture)
-from tests.test_datalab_maps import _map
-from tests.test_datalab_qual import PRICES
 
 H = STUDENT
 
 
-@pytest.fixture
-def qlab(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATALAB_ENABLED", "true")
-    from app.core.config import Settings
-
-    monkeypatch.setenv("FIXED_TOKENS", json.dumps({**Settings(_env_file=None).fixed_tokens, **PRICES}))
-    from tests.conftest import _client
-
-    yield from _client(tmp_path, monkeypatch, "fixed")
 
 
-def _qual(client, title="Reaching care"):
-    return client.post("/api/datalab", headers=H, json={"title": title, "purpose": "How do mothers reach care?", "kind": "QUAL"}).json()
 
 
-def _settled(client, pid, timeout=60):
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        view = client.get(f"/api/datalab/{pid}", headers=H).json()
-        if view["reports"] or view["reportFailure"]:
-            return view
-        time.sleep(0.2)
-    raise AssertionError(view)
 
 
 TALK = ("The walk to the clinic takes most of the morning for women in our village, and when labour starts at night there is no transport. "
@@ -52,107 +21,29 @@ TALK = ("The walk to the clinic takes most of the morning for women in our villa
 # --- 1. identifiers in labels, file names and every phone layout --------------------------------------------------
 
 
-@pytest.mark.parametrize("number", ["+256 772 123 456", "0772 123456", "0772-123-456", "(0772) 123 456", "256772123456"])
-def test_phone_numbers_in_any_layout_are_replaced(number):
-    text, n = qual.pseudonymise(f"Call me on {number} tomorrow.", [])
-    assert "[phone]" in text and not any(ch.isdigit() for ch in text) and n == 1
 
 
-def test_years_dates_and_figures_are_not_phone_numbers():
-    text = "Between 2019 and 2021, on 12/03/2020, we paid 20,000 shillings for 3 trips of 15 km."
-    assert qual.pseudonymise(text, [])[0] == text
 
 
-def test_a_name_in_the_label_and_file_name_never_reaches_storage_or_a_model(qlab):
-    from app.runtime import get_runtime
-
-    p = _qual(qlab)
-    doc = Document()
-    doc.add_paragraph(f"Agnes Akello said: {TALK} Call +256 772 123 456 or 0772 123456.")
-    buffer = io.BytesIO()
-    doc.save(buffer)
-    view = qlab.post(f"/api/datalab/{p['id']}/documents", headers=H, files={"file": ("Agnes Akello.docx", buffer.getvalue(), "application/octet-stream")},
-                     data={"label": "Agnes Akello", "consent": "true", "replace": json.dumps([["Agnes Akello", "Participant A"]])}).json()
-    stored = get_runtime().store.get_datalab(p["id"]).documents[0]
-    text = get_runtime().files.get(stored.path).decode()
-    assert stored.label == "Participant A" and "Agnes" not in stored.name and view["documents"][0]["label"] == "Participant A"
-    assert "Agnes" not in text and "772" not in text and text.count("[phone]") == 2
-    qlab.post(f"/api/datalab/{p['id']}/themes", headers=H)
-    _settled(qlab, p["id"])
-    sent = [r for t, r in zip(qlab.models.tasks, qlab.models.requests, strict=True) if t.startswith("q_")]
-    assert sent and all("Agnes" not in r and "772" not in r for r in sent)
 
 
-def test_a_code_that_would_identify_someone_is_refused(qlab):
-    p = _qual(qlab)
-    for pairs in ([["Agnes Akello", "Agnes A."]], [["Agnes Akello", ""]], [["Agnes Akello", "0772 123456"]]):
-        r = qlab.post(f"/api/datalab/{p['id']}/documents/text", headers=H, json={"label": "Interview 1", "text": f"Agnes Akello: {TALK}", "consent": True,
-                                                                                  "replace": pairs})
-        assert r.status_code == 400 and r.json()["code"] == "INVALID_REPLACEMENT", pairs
 
 
 # --- 2. every quotation that ships is reviewed; a withheld one ships nowhere ---------------------------------------
 
 
-def test_the_codebook_carries_only_quotations_the_reviewer_saw(qlab):
-    from openpyxl import load_workbook
-
-    p = _qual(qlab)
-    other = ("Some mothers fear the costs of gloves and a mama kit that the facility asks for during delivery. Traditional birth attendants are "
-             "near and they know us well. I have seen two women lose their babies at home, so now I tell my neighbours to go early.")
-    for n, text in ((1, TALK), (2, other)):
-        qlab.post(f"/api/datalab/{p['id']}/documents/text", headers=H, json={"label": f"Interview {n}", "text": text, "consent": True})
-    default = qlab.models.default
-    gone = []
-
-    def withholding(payload):
-        answer = default("q_themes", payload)
-        last = payload["codes"][0]["quotes"][-1]  # a quote no theme cites, that would identify someone
-        gone.append(last["text"])
-        return {**answer, "withheld": [last["ref"]]}
-
-    qlab.models.overrides["q_themes"] = withholding
-    qlab.post(f"/api/datalab/{p['id']}/themes", headers=H)
-    view = _settled(qlab, p["id"])
-    assert view["reports"], view["reportFailure"]
-    review = " ".join(r for t, r in zip(qlab.models.tasks, qlab.models.requests, strict=True) if t == "q_review")
-    book = load_workbook(io.BytesIO(qlab.get(f"/api/datalab/{p['id']}/report/codebook", headers=H).content))
-    quotes = [row[1] for row in book["Quotes"].iter_rows(min_row=2, values_only=True)]
-    assert quotes and all(q in review for q in quotes) and "Appendix B. Quotations" in review
-    report = json.dumps(qlab.get(f"/api/datalab/{p['id']}/report", headers=H).json(), ensure_ascii=False)
-    assert gone and gone[0] not in quotes and gone[0] not in report  # withheld: in neither the codebook nor the report
 
 
 # --- 3. a small denominator is hidden with its count and rate --------------------------------------------------------
 
 
-def test_a_rate_map_hides_a_small_population():
-    rows = {"district": ["Kampala", "Gulu", "Pader", "Kitgum", "Lira"], "cases": [1, 40, 35, 50, 45], "population": [3, 300000, 200000, 150000, 400000]}
-    rated, _ = _map(rows, AnalysisSpec(kind="MAP", variables=["district"], data_form="TOTALS", total="cases", denominator="population", method="RATE"))
-    kampala = next(r for r in rated.tables[0].rows if r[0].text == "Kampala")
-    assert [c.text for c in kampala[1:]] == ["–", "–", "–"]
-    assert sum(1 for r in rated.tables[0].rows if r[2].text == "–") >= 2  # with a complement, so the total can't give it away
 
 
-def test_a_hidden_row_comes_after_the_shown_ones_so_its_place_reveals_nothing():
-    rows = {"district": ["Gulu"] * 12 + ["Pader"] * 3 + ["Kitgum"] * 8 + ["Lira"] * 20}
-    counted, _ = _map(rows, AnalysisSpec(kind="MAP", variables=["district"], method="COUNT"))
-    marks = [r[1].text == "–" for r in counted.tables[0].rows]
-    assert any(marks) and marks == sorted(marks)
 
 
 # --- 4. analyses released together are compared on the rows they used ----------------------------------------------
 
 
-def test_two_analyses_one_person_apart_after_missing_values_are_not_released_together(lab):
-    rows = ["id,score,group"] + [f"{i:04d},{50 + i % 30},{['a', 'b'][i % 2] if i != 7 else ''}" for i in range(1, 101)]
-    p = lab.post("/api/datalab", headers=H, json={"title": "Scores", "purpose": "Scores"}).json()
-    _act(lab, p["id"], f"/api/datalab/{p['id']}/dataset", files={"file": ("s.csv", "\n".join(rows).encode(), "text/csv")}, data={"consent": "true"})
-    _analyse(lab, p["id"], {"kind": "DESCRIBE", "variables": ["score"]})  # 100 people
-    compared = _analyse(lab, p["id"], {"kind": "COMPARE_TWO", "variables": ["score", "group"]})  # 99: one has no group
-    # Since disclosure-v3 (Codex review 2026-10-07) an analysis that leaves out fewer people than the threshold is
-    # withheld when it is calculated, so the two can never be released together to single that person out.
-    assert compared["status"] == "NOT_ESTIMABLE" and not compared["tables"] and "cannot be shared" in compared["warnings"][0]
 
 
 # --- 5. the missing-figures exception covers the matching free-text objection ---------------------------------------
@@ -203,96 +94,34 @@ def test_a_reversal_on_unchanged_wording_counts_only_with_its_reason():
 # --- 6. a late worker can't overwrite the winning attempt ---------------------------------------------------------------
 
 
-def test_a_superseded_attempt_never_changes_the_operation(lab):
-    from app.datalab import service
-    from app.runtime import get_runtime
-
-    rt = get_runtime()
-    view = _project(lab)
-    p = rt.store.get_datalab(view["id"])
-    op = p.op.model_copy()
-
-    def won(q):
-        q.op.status, q.op.attempt, q.op.result = "DONE", "winner", "an_1"
-        return q
-
-    rt.store.update_datalab(view["id"], won)
-    upload = op.params.get("path", "")
-    assert upload and rt.files.exists(upload)
-    own = f"{p.storage_prefix()}/late-attempt.txt"
-    rt.files.put(own, b"late result", "text/plain")
-    service._end_op(rt, view["id"], op, "late", [upload, own], "Your data changed.", "DATA_CHANGED")
-    after = rt.store.get_datalab(view["id"]).op
-    assert after.status == "DONE" and after.result == "an_1" and not after.code
-    assert rt.files.exists(upload) and not rt.files.exists(own)
 
 
 # --- 7. long inputs are split inside a paragraph or section ---------------------------------------------------------
 
 
-def test_one_long_paragraph_is_cut_into_batches_within_the_bound():
-    inp = qual.QualInput(project_id="p", title="t", question="q", documents=[qual.QualDoc(id="d1", label="A", path="x", sha256="s", words=20000)])
-    text = " ".join(["Mothers walk far to the clinic." for _ in range(4000)])  # 20,000 words, one paragraph
-    batches = qual._batches(inp, {"d1": text})
-    assert len(batches) >= 3 and all(sum(len(p["text"].split()) for p in b) <= qual.BATCH_WORDS for b in batches)
 
 
-def test_one_long_section_is_reviewed_in_parts_within_the_bound():
-    from app.ai.orchestration import FINAL_PART_WORDS
-    from app.datalab.pipeline import _words, document_parts
-    from app.datalab.report import ReportDocument, ReportSection
-
-    long = ReportSection(key="results", heading="Results", paragraphs=["Scores were similar across districts. " * 4000])
-    document = ReportDocument(title="R", subtitle="", sections=[long])
-    repeated = {"analyses": [{"record": "x " * 500}]}
-    parts, manifest = document_parts(document, None, repeated)
-    assert len(parts) >= 3 and all(_words(part) + _words(repeated) + _words(manifest) <= FINAL_PART_WORDS for part in parts)
 
 
 # --- 8. a quotation is exported as the transcript has it ---------------------------------------------------------------
 
 
-def test_a_quote_keeps_the_transcripts_own_wording():
-    source = "The US provided equipment to the clinic last year, and the nurses were trained."
-    coded = qual.Coded.model_validate({"codes": [{"code": "Support", "description": "d", "quotes": [{"document": "d1", "text": "The us provided equipment to the clinic"}]}]})
-    kept, dropped = qual.verified_quotes(coded, [{"id": "d1", "label": "A", "text": source}], {"d1": source})
-    assert dropped == 0 and kept[0]["quotes"][0]["text"] == "The US provided equipment to the clinic"
-    assert qual._locate("“the nurses were  trained”", "and “The nurses were\ntrained” said she") is not None
 
 
 # --- 9. the transcript limits hold against a concurrent upload ----------------------------------------------------------
 
 
-def test_limits_are_checked_again_inside_the_update(qlab, monkeypatch):
-    from app.datalab import service
-    from app.runtime import get_runtime
-
-    rt = get_runtime()
-    monkeypatch.setattr(rt.settings, "datalab_qual_max_documents", 2)
-    p = _qual(qlab)
-    for n in (1, 2):
-        qlab.post(f"/api/datalab/{p['id']}/documents/text", headers=H, json={"label": f"Interview {n}", "text": TALK, "consent": True})
-    stale = rt.store.get_datalab(p["id"]).model_copy(update={"documents": rt.store.get_datalab(p["id"]).documents[:1]})
-    real = service._owned
-    monkeypatch.setattr(service, "_owned", lambda rt_, user, pid: stale if pid == p["id"] else real(rt_, user, pid))  # read before the competing upload landed
-    r = qlab.post(f"/api/datalab/{p['id']}/documents/text", headers=H, json={"label": "Interview 3", "text": TALK, "consent": True})
-    assert r.status_code == 400 and r.json()["code"] == "TOO_MANY_DOCUMENTS" and len(rt.store.get_datalab(p["id"]).documents) == 2
 
 
 # --- 10. a totals map counts its rows as rows --------------------------------------------------------------------------
 
 
-def test_a_totals_map_reports_rows_used_not_the_sum_of_its_totals():
-    rows = {"district": ["Gulu", "Pader", "Kitgum", "Lira", "Kampala"], "cases": [10, 20, 30, 40, 50]}
-    mapped, _ = _map(rows, AnalysisSpec(kind="MAP", variables=["district"], data_form="TOTALS", total="cases"))
-    assert mapped.record.rows_used == 5 and mapped.record.rows_available == 5
-    assert any("150" in c for c in mapped.record.coding)
 
 
 # --- 11. one message, one alert ------------------------------------------------------------------------------------------
 
 
-def test_an_alert_is_sent_once_however_many_callers(lab, monkeypatch):
+def test_an_alert_is_sent_once_however_many_callers(client, monkeypatch):
     from app import notify
     from app.runtime import get_runtime
 
@@ -307,7 +136,7 @@ def test_an_alert_is_sent_once_however_many_callers(lab, monkeypatch):
     assert len(sent) == 1
 
 
-def test_a_retry_sends_only_what_is_still_owed_and_only_when_due(lab, monkeypatch):
+def test_a_retry_sends_only_what_is_still_owed_and_only_when_due(client, monkeypatch):
     from app import notify
     from app.jobs.models import Notice
     from app.runtime import get_runtime
@@ -317,12 +146,12 @@ def test_a_retry_sends_only_what_is_still_owed_and_only_when_due(lab, monkeypatc
     monkeypatch.setattr(notify, "_targets", lambda rt_, job: {"email": "a@b.test", "sms": "+256772123456"})
     monkeypatch.setattr(notify, "_email", lambda *a: sent.append("email") or True)
     monkeypatch.setattr(notify, "_sms", lambda *a: sent.append("sms") or True)
-    view = _project(lab)
-    _analyse(lab, view["id"], {"kind": "DESCRIBE", "variables": ["district"]})
-    job_id = _analyse_job(lab, rt, view)
     from datetime import timedelta
 
-    from app.jobs.models import utcnow
+    from app.jobs.models import Job, JobStatus, utcnow
+
+    job_id = "job_retry_owed"  # any finished job owes its notice the same way
+    rt.store.create(Job(id=job_id, owner_uid="test", owner_email="test@example.com", status=JobStatus.COMPLETED, expires_at=utcnow()))
 
     def owed(j):
         j.notice = Notice(key="COMPLETED:1", outcome="READY", channels={"email": "SENT", "sms": "FAILED"}, attempts=1, next_at=utcnow() + timedelta(minutes=5))
@@ -337,25 +166,11 @@ def test_a_retry_sends_only_what_is_still_owed_and_only_when_due(lab, monkeypatc
     assert sent == ["sms"]  # the email was sent already; the SMS once
 
 
-def _analyse_job(lab, rt, view):
-    lab.post(f"/api/datalab/{view['id']}/report", headers=H, json={})
-    deadline = time.time() + 30
-    while time.time() < deadline:
-        p = rt.store.get_datalab(view["id"])
-        if p.jobs:
-            return p.jobs[-1]
-        time.sleep(0.1)
-    raise AssertionError("no job")
 
 
 # --- 12. a report never leaves out a chosen analysis silently --------------------------------------------------------
 
 
-def test_a_removed_analysis_in_a_report_request_is_refused(lab):
-    view = _project(lab)
-    first = _analyse(lab, view["id"], {"kind": "DESCRIBE", "variables": ["district"]})
-    r = lab.post(f"/api/datalab/{view['id']}/report", headers=H, json={"analyses": [first["id"], "an_deleted"]})
-    assert r.status_code == 400 and r.json()["code"] == "UNKNOWN_ANALYSES"
 
 
 # --- 13. a provider problem raises one alert from any paid path --------------------------------------------------------
@@ -374,13 +189,5 @@ def test_a_provider_problem_alerts_from_estimates_and_steps_alike(monkeypatch):
     assert "notified" not in providers.MISCONFIGURED
 
 
-def test_stats_context_records_the_rows_an_analysis_used():
-    from tests.test_datalab_maps import _setup
-
-    frame, variables, _ = _setup({"score": [1.0, 2.0, None, 4.0, 5.0, 6.0]}, 2)
-    ctx = stats.Context(frame, variables, 1, threshold=2)
-    stats._complete(ctx, ["score"])
-    assert list(ctx.used) == [0, 1, 3, 4, 5]
 
 
-assert CSV  # the shared survey used by _project

@@ -1,5 +1,5 @@
 import { clsx } from 'clsx'
-import { BookCheck, Check, Download, Lock } from 'lucide-react'
+import { BookCheck, Download, Lock } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 
 /* Live illustrations for the home page's features (owner 2026-10-04: "live and representative of the stuff it is
@@ -114,25 +114,25 @@ function Lines({ widths, shown = widths.length }: { widths: number[]; shown?: nu
 
 const pill = (active: boolean) => clsx('rounded-md px-2 py-1 transition-colors duration-300', active ? 'bg-brand-50 text-brand-700' : 'text-fg-subtle')
 
-// --- Academic research: a chapter written from confirmed sources, then the results chapter from the data -------------
+// --- Academic research: a chapter written from confirmed sources, then the sample size worked out by code -----------
 
 const RESEARCH: Step[] = [
-  { ms: 1300, at: 'write' }, { ms: 700, at: 'write', click: true }, { ms: 3600, at: 'text' }, { ms: 1200, at: 'ch4' }, { ms: 700, at: 'ch4', click: true }, { ms: 3200, at: 'table' },
+  { ms: 1300, at: 'write' }, { ms: 700, at: 'write', click: true }, { ms: 3600, at: 'text' }, { ms: 1200, at: 'ch3' }, { ms: 700, at: 'ch3', click: true }, { ms: 3200, at: 'table' },
 ]
 
 export function ResearchLive() {
   const stage = useRef<HTMLDivElement>(null)
   const step = useScript(stage, RESEARCH, 5)
-  const results = step >= 5
+  const methods = step >= 5
   return (
     <Window title="Malaria vaccine uptake in Mukono" stage={stage} cursor={RESEARCH[step]}>
       <div className="flex gap-1 border-b border-line px-3 py-2 text-[11px] font-medium">
         <span className={pill(false)}>Plan</span>
-        <span className={pill(!results)}>Chapter One</span>
-        <span data-at="ch4" className={pill(results)}>Chapter Four · Results</span>
+        <span className={pill(!methods)}>Chapter One</span>
+        <span data-at="ch3" className={pill(methods)}>Chapter Three · Methodology</span>
       </div>
       <div className="h-[16rem] p-4">
-        {!results ? (
+        {!methods ? (
           <>
             <p className="text-[13px] font-semibold text-fg">1.1 Background to the study</p>
             <p data-at="text" className="mt-3 min-h-[3.4rem] font-serif text-[12.5px] leading-relaxed text-fg">
@@ -149,106 +149,19 @@ export function ResearchLive() {
           </>
         ) : (
           <div data-at="table" className="animate-[fadein_.5s_ease-out]">
-            <p className="text-[13px] font-semibold text-fg">4.2 Objective 1: Uptake by distance to a facility</p>
-            <p className="mt-2 text-[11px] font-medium text-fg">Table 4.1. Children fully vaccinated, by distance</p>
+            <p className="text-[13px] font-semibold text-fg">3.4 Sample size</p>
+            <p className="mt-2 text-[11px] font-medium text-fg">Table 3.1. Sample size for the caregiver survey</p>
             <table className="mt-1.5 w-full text-[11px]">
-              <thead><tr className="border-b border-line text-left text-fg-subtle"><th className="py-1 font-medium">Distance</th><th className="font-medium">n</th><th className="font-medium">Vaccinated</th></tr></thead>
               <tbody className="text-fg">
-                <tr className="border-b border-line"><td className="py-1">Under 5 km</td><td>212</td><td>71.2%</td></tr>
-                <tr className="border-b border-line"><td className="py-1">5 km or more</td><td>148</td><td>52.7%</td></tr>
+                <tr className="border-b border-line"><td className="py-1 text-fg-subtle">Caregivers in the sub-county (N)</td><td>1,200</td></tr>
+                <tr className="border-b border-line"><td className="py-1 text-fg-subtle">Confidence · margin of error</td><td>95% · 5%</td></tr>
+                <tr className="border-b border-line"><td className="py-1 text-fg-subtle">Sample size (n)</td><td className="font-medium">292</td></tr>
               </tbody>
             </table>
-            <p className="mt-3 font-serif text-[12px] leading-relaxed text-fg-muted">Uptake was higher among caregivers living under 5 km from a facility (χ²(1) = 12.4, p &lt; .001).</p>
-            <p className="mt-2 text-[10px] text-fg-subtle">Illustrative data · not study findings</p>
+            <p className="mt-3 font-serif text-[12px] leading-relaxed text-fg-muted">The sample was calculated with Cochran’s formula and corrected for the finite population of caregivers.</p>
+            <p className="mt-2 text-[10px] text-fg-subtle">Illustrative figures · calculated by code, never by a model</p>
           </div>
         )}
-      </div>
-    </Window>
-  )
-}
-
-// --- Data analysis: a comparison run, explained, added to the report ------------------------------------------------------
-
-const DATA: Step[] = [{ ms: 1100, at: 'compare' }, { ms: 700, at: 'compare', click: true }, { ms: 1900, at: 'chart' }, { ms: 1600, at: 'stats' }, { ms: 900, at: 'add' }, { ms: 700, at: 'add', click: true }, { ms: 2200, at: 'add' }]
-
-export function DataLive() {
-  const stage = useRef<HTMLDivElement>(null)
-  const step = useScript(stage, DATA, 6)
-  const run = step >= 2
-  const bars = [{ label: 'Female', h: 74 }, { label: 'Male', h: 61 }]
-  return (
-    <Window title="Data Lab · example data" stage={stage} cursor={DATA[step]}>
-      <div className="flex flex-wrap gap-1.5 border-b border-line px-3 py-2 text-[11px] font-medium">
-        <span className="rounded-md border border-line px-2 py-1 text-fg-subtle">Describe</span>
-        <span data-at="compare" className={clsx('rounded-md border px-2 py-1 transition-colors', step >= 1 ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-line text-fg-subtle')}>Compare two groups</span>
-        <span className="rounded-md border border-line px-2 py-1 text-fg-subtle">Relate</span>
-        <span className="rounded-md border border-line px-2 py-1 text-fg-subtle">Map</span>
-      </div>
-      <div className="h-[16rem] p-4">
-        <p className="text-[12px] font-medium text-fg">Exam score by sex</p>
-        <div data-at="chart" className="mt-2 flex h-20 items-end gap-8 border-b border-line px-8">
-          {bars.map((b) => (
-            <div key={b.label} className="flex h-full flex-1 flex-col justify-end">
-              <div className="w-full rounded-t-sm bg-brand-500/85 transition-[height] duration-700 ease-out" style={{ height: run ? `${b.h}%` : '0%' }} />
-            </div>
-          ))}
-        </div>
-        <div className="mt-1 flex gap-8 px-8 text-center text-[10px] text-fg-subtle">{bars.map((b) => <span key={b.label} className="flex-1">{b.label}</span>)}</div>
-        <div data-at="stats" className={clsx('mt-2.5 flex flex-wrap gap-1.5 text-[11px] transition-opacity duration-500', step >= 3 ? 'opacity-100' : 'opacity-0')}>
-          <span className="rounded border border-line px-2 py-1 text-fg">Difference 4.2 (95% CI 1.1 to 7.3)</span>
-          <span className="rounded border border-line px-2 py-1 text-fg">Hedges’ g 0.31</span>
-          <span className="rounded border border-line px-2 py-1 text-fg">p = .008</span>
-        </div>
-        <div className="mt-2.5 flex items-center justify-between">
-          <span className={clsx('flex items-center gap-1 text-[11px] text-emerald-700 transition-opacity duration-300', step >= 6 ? 'opacity-100' : 'opacity-0')}><Check className="size-3.5" /> Added to your report</span>
-          <span data-at="add" className={clsx('rounded-md px-2.5 py-1 text-[11px] font-medium text-white transition-colors', step === 5 ? 'bg-brand-700' : 'bg-brand-600')}>Add to report</span>
-        </div>
-      </div>
-    </Window>
-  )
-}
-
-// --- Geospatial: maps of several countries, cycling, with the same look --------------------------------------------------
-
-const MAPS = [
-  { file: 'uga', label: 'Uganda by district', note: 'Official UBOS boundaries. Shading illustrative.' },
-  { file: 'ken', label: 'Kenya by county', note: 'Shading illustrative. PaperAid maps Uganda today; more countries are being added.' },
-  { file: 'nga', label: 'Nigeria by state', note: 'Shading illustrative. PaperAid maps Uganda today; more countries are being added.' },
-  { file: 'ind', label: 'India by state', note: 'Shading illustrative. PaperAid maps Uganda today; more countries are being added.' },
-  { file: 'tza', label: 'Tanzania by region', note: 'Shading illustrative. PaperAid maps Uganda today; more countries are being added.' },
-  { file: 'bra', label: 'Brazil by state', note: 'Shading illustrative. PaperAid maps Uganda today; more countries are being added.' },
-  { file: 'gha', label: 'Ghana by region', note: 'Shading illustrative. PaperAid maps Uganda today; more countries are being added.' },
-  { file: 'zaf', label: 'South Africa by province', note: 'Shading illustrative. PaperAid maps Uganda today; more countries are being added.' },
-]
-const MAP_STEPS: Step[] = MAPS.flatMap(() => [{ ms: 1500, at: 'legend-hi' }, { ms: 2600, at: 'map-hot' }])
-
-export function MapLive() {
-  const stage = useRef<HTMLDivElement>(null)
-  const step = useScript(stage, MAP_STEPS, 0)
-  const index = Math.floor(step / 2) % MAPS.length
-  const shades = ['#3f4be3', '#5562ef', '#7886f7', '#a3affc', '#c9d0fe', '#e3e7ff']
-  return (
-    <Window title="Map · example data" stage={stage} cursor={MAP_STEPS[step]}>
-      <div className="relative h-[16rem] p-4">
-        <div className="grid h-[12.4rem] grid-cols-[1fr_auto] items-center gap-4">
-          <div className="relative h-full">
-            {MAPS.map((m, i) => (
-              <img key={m.file} src={`/maps/${m.file}.svg`} alt="" loading="lazy"
-                className={clsx('absolute inset-0 m-auto max-h-full max-w-full transition-opacity duration-700', i === index ? 'opacity-100' : 'opacity-0')} />
-            ))}
-            <span data-at="map-hot" className="absolute top-[38%] left-[46%] size-1" />
-            <span className={clsx('absolute top-[30%] left-[50%] rounded bg-fg px-1.5 py-0.5 text-[10px] text-white shadow transition-opacity duration-300', step % 2 === 1 ? 'opacity-100' : 'opacity-0')}>
-              Higher than most areas
-            </span>
-          </div>
-          <div className="space-y-1 text-[10px] text-fg-subtle">
-            {shades.map((c, i) => (
-              <p key={c} data-at={i === 0 ? 'legend-hi' : undefined} className="flex items-center gap-1.5"><span className="size-2.5 rounded-sm" style={{ background: c }} /> {i === 0 ? 'Highest' : i === 5 ? 'Lowest' : ''}</p>
-            ))}
-          </div>
-        </div>
-        <p className="mt-1 text-[11px] font-medium text-fg">{MAPS[index].label}</p>
-        <p className="text-[10px] text-fg-subtle">{MAPS[index].note}</p>
       </div>
     </Window>
   )

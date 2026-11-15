@@ -14,7 +14,7 @@ await page.getByLabel('Email').fill('demo@paperaid.app')
 await page.getByLabel('Password').fill('e2e-password')
 await page.getByRole('button', { name: 'Sign in', exact: true }).click()
 await page.waitForURL(/\/app/)
-const pages = [['home', '/app'], ['new', '/app/new'], ['work', '/app/work'], ['datalab', '/app/datalab'], ['works', '/app/works'], ['projects', '/app/projects'],
+const pages = [['home', '/app'], ['new', '/app/new'], ['work', '/app/work'], ['works', '/app/works'], ['projects', '/app/projects'],
   ['paper-check', '/app/new?service=PAPER_CHECK'], ['start-coursework', '/app/start/coursework'], ['settings', '/app/settings']]
 for (const [name, path] of pages) {
   await page.goto(`${base}${path}`)
@@ -25,7 +25,7 @@ for (const [name, path] of pages) {
 // the first piece of work of each kind, as the student sees it
 await page.goto(`${base}/app/work`)
 await page.waitForLoadState('networkidle').catch(() => {})
-for (const [name, pattern] of [['work-doc', /\/app\/works\/wrk_/], ['proposal', /\/app\/projects\/prj_/], ['job', /\/app\/jobs\/job_/], ['dl-project', /\/app\/datalab\/dl_/]]) {
+for (const [name, pattern] of [['work-doc', /\/app\/works\/wrk_/], ['proposal', /\/app\/projects\/prj_/], ['job', /\/app\/jobs\/job_/]]) {
   const href = await page.evaluate((src) => [...document.querySelectorAll('a[href]')].map((a) => a.getAttribute('href')).find((h) => new RegExp(src).test(h)), pattern.source)
   if (!href) continue
   await page.goto(`${base}${href}`)

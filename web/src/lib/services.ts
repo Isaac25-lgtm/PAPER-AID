@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { BookCheck, Braces, ChartColumn, FileCheck2, GraduationCap, HandCoins, Lightbulb, NotebookPen, PenLine, Search, Shuffle } from 'lucide-react'
+import { BookCheck, Braces, FileCheck2, GraduationCap, HandCoins, Lightbulb, NotebookPen, PenLine, Search, Shuffle } from 'lucide-react'
 import type { Availability, FindingCategory, JobStatus, ReasonCode, ServiceId, Stage, WritingStyle } from './types'
 
 interface ServiceInfo {
@@ -19,7 +19,7 @@ export const INVITE_ONLY_REASON = 'Open to invited testers while PaperAid is in 
  *  them: Redraft, Ask for changes, Source check and Finish live in Paper Check; university templates
  *  and LaTeX are finishing choices. `service` is whose availability the section follows. */
 export interface SectionInfo {
-  id: 'PAPER_CHECK' | 'PROPOSALS' | 'ACADEMIC_FORMAT' | 'COURSEWORK' | 'FUNDING' | 'DATALAB'
+  id: 'PAPER_CHECK' | 'PROPOSALS' | 'ACADEMIC_FORMAT' | 'COURSEWORK' | 'FUNDING'
   service: ServiceId
   name: string
   short: string
@@ -55,10 +55,10 @@ export const SECTIONS: SectionInfo[] = [
     id: 'PROPOSALS',
     service: 'PROPOSAL',
     name: 'Academic research',
-    short: 'Your research from concept paper and proposal to results: Chapters One to Three from researched sources, then Chapter Four from your data. Or a review of a proposal you wrote.',
+    short: 'Your research from concept paper to proposal: Chapters One to Three from researched sources. Or a review of a proposal you wrote.',
     icon: GraduationCap,
-    accepts: 'Your topic and study details, your data for the results, or your proposal as DOCX or PDF',
-    youGet: ['Chapter One written as soon as you start, from sources PaperAid confirmed', 'Chapters Two and Three, and changes from your supervisor\'s comments or your own', 'Chapter Four, the results, written objective by objective from your analysed data', 'The complete document in Word, PDF or LaTeX'],
+    accepts: 'Your topic and study details, or your proposal as DOCX or PDF',
+    youGet: ['Chapter One written as soon as you start, from sources PaperAid confirmed', 'Chapters Two and Three, and changes from your supervisor\'s comments or your own', 'The complete document in Word, PDF or LaTeX'],
     untouched: ['Facts only you can give: population sizes, instruments and approvals are asked for, never invented'],
     to: '/app/projects',
   },
@@ -157,15 +157,6 @@ export const SERVICES: Record<ServiceId, ServiceInfo> = {
     youGet: ['Eligibility and requirements read from the call', 'Logframe, workplan and M&E table that agree with each other', 'Every budget sum worked out for you'],
     untouched: ['Your figures: budget lines, targets and dates are yours, never invented; any PaperAid cannot know are marked for you to fill in'],
   },
-  DATALAB: {
-    name: 'Data Lab',
-    short: 'Numbers, maps and interviews analysed and written up, every number calculated by code.',
-    icon: ChartColumn,
-    accepts: 'CSV or Excel (.xlsx) for numbers and maps; text, Word or PDF transcripts for interviews',
-    youGet: ['Data checks and cleaning you confirm', 'Analyses with effect sizes and confidence intervals, and maps of Uganda', 'Themes from interviews with quotes checked word for word',
-      'A report in Word and PDF, and an Excel workbook'],
-    untouched: ['Your original file: every change makes a new version', 'Columns that may identify people: left out by default; names you list replaced in transcripts'],
-  },
   LATEX: {
     name: 'LaTeX conversion',
     short: 'Convert your paper into a clean, compilable LaTeX project.',
@@ -201,20 +192,6 @@ export const PUBLIC_SECTIONS: SectionInfo[] = [
     youGet: ['Eligibility and requirements read from the call', 'Logframe, workplan and M&E table that agree with each other', 'Every budget sum worked out for you'],
     untouched: ['Your figures: budget lines, targets and dates are yours, never invented; any PaperAid cannot know are marked for you to fill in'],
     to: '/app/start/funding',
-  },
-  {
-    id: 'DATALAB',
-    service: 'DATALAB',
-    name: 'Data Lab',
-    short: 'Quantitative, geospatial and qualitative analysis: PaperAid checks your data, runs the analyses you choose and writes up the report, every number calculated by code.',
-    icon: ChartColumn,
-    accepts: 'A dataset as CSV or Excel (.xlsx), or interview transcripts as text, Word or PDF',
-    youGet: ['Quantitative: describe a variable, compare two groups, relate two categories, correlate two numbers, with effect sizes and confidence intervals, filtered by any variable',
-      'Geospatial: maps by district, subcounty, sub-region or region of Uganda, as counts or rates, from official boundaries',
-      'Qualitative: codes and themes that answer your question, every quote checked word for word against its transcript',
-      'A report in Word and PDF (or Chapter Four of your proposal), and an Excel workbook or codebook'],
-    untouched: ['Your original file: never changed', 'Columns that may identify people: left out by default, and small counts never shown', 'Names you list: replaced in transcripts before anything is stored'],
-    to: '/app/datalab',
   },
   SECTIONS[0],
   SECTIONS[2],

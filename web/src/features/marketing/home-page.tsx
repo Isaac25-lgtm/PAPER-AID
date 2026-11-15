@@ -1,11 +1,11 @@
-import { ArrowRight, Ban, ChartColumn, ChevronDown, FilePen, HandCoins, Lock, MapPinned, NotebookPen, Search, ShieldCheck, Trash2 } from 'lucide-react'
+import { ArrowRight, Ban, ChevronDown, FilePen, HandCoins, Lock, NotebookPen, Search, ShieldCheck, Trash2 } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { ButtonLink } from '../../components/ui/button'
 import { Eyebrow } from '../../components/ui/primitives'
 import { useData } from '../../lib/data'
 import { useTitle } from '../../lib/use-title'
 import { HeroPreview } from './hero-preview'
-import { DataLive, FundingLive, MapLive, PaperLive, ResearchLive } from './live-visuals'
+import { FundingLive, PaperLive, ResearchLive } from './live-visuals'
 import { FinalCta, PricingModel, Reveal } from './sections'
 
 /** The public home page (redesign 2026-10-04): Jenni's calm structure with PaperAid's own content. Every
@@ -15,9 +15,9 @@ export function HomePage() {
   const { config } = useData()
 
   const steps = [
-    { title: 'Tell us what you need', body: 'Your question or brief, your topic, a funder’s call, a dataset or your own paper. A few questions, nothing else to set up.' },
-    { title: 'PaperAid does the work', body: 'It reads what you gave it, finds and confirms sources, writes and checks every requirement, or analyses your data with every number calculated by code.' },
-    { title: 'Review and download', body: 'Read the result on screen, ask for changes in your own words, then download Word, PDF or Excel.' },
+    { title: 'Tell us what you need', body: 'Your question or brief, your topic, a funder’s call or your own paper. A few questions, nothing else to set up.' },
+    { title: 'PaperAid does the work', body: 'It reads what you gave it, finds and confirms sources, writes and checks every requirement.' },
+    { title: 'Review and download', body: 'Read the result on screen, ask for changes in your own words, then download Word or PDF.' },
   ]
 
   return (
@@ -26,7 +26,7 @@ export function HomePage() {
         <Reveal className="mx-auto max-w-3xl text-center">
           <h1 className="text-[2.6rem] leading-[1.05] font-medium tracking-[-0.035em] text-fg sm:text-[3.9rem]">From first idea to finished paper.</h1>
           <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-fg-muted">
-            PaperAid is where researchers and students plan, research, analyse, write, check and format academic work, with every source confirmed and
+            PaperAid is where researchers and students plan, research, write, check and format academic work, with every source confirmed and
             every number calculated by code.
           </p>
           <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
@@ -50,8 +50,6 @@ export function HomePage() {
             { icon: FilePen, label: 'Academic research' },
             { icon: NotebookPen, label: 'Coursework' },
             { icon: HandCoins, label: 'Funding' },
-            { icon: ChartColumn, label: 'Data analysis' },
-            { icon: MapPinned, label: 'Geospatial analysis' },
             { icon: Search, label: 'Your own paper' },
           ].map((s) => (
             <li key={s.label} className="flex items-center gap-2">
@@ -70,18 +68,10 @@ export function HomePage() {
             <p className="mt-3 max-w-2xl text-lg leading-relaxed text-fg-muted">Not a chatbot. Tell PaperAid what you need, press Start, and come back to a document you can review, change and download.</p>
           </Reveal>
           <div className="mt-16 space-y-24">
-            <Feature eyebrow="Academic research and coursework" title="Your research from proposal to results, and coursework to your brief"
-              body={['A concept paper, then the proposal (Chapters One to Three) written to your institution’s guide; then your data analysed and Chapter Four, the results, written objective by objective. Coursework written to your question and brief.',
+            <Feature eyebrow="Academic research and coursework" title="Your research proposal, and coursework to your brief"
+              body={['A concept paper, then the proposal (Chapters One to Three) written to your institution’s guide, with the sample size worked out by code from your own figures. Coursework written to your question and brief.',
                 'Every reference is a source PaperAid found and confirmed, in your referencing style. Nothing is cited that it couldn’t check.']}
               visual={<ResearchLive />} />
-            <Feature eyebrow="Data analysis" title="Analyse your data without leaving your work" flip
-              body={['Describe, compare, relate and correlate, filtered by any variable, with effect sizes and confidence intervals. Themes from interviews and focus groups, every quote checked word for word against its transcript.',
-                'Small counts are never shown, and every number is calculated by code, never by a model.']}
-              visual={<DataLive />} />
-            <Feature eyebrow="Geospatial analysis" title="See where it happens, on official maps"
-              body={['Map your records, totals or rates by district, subcounty, sub-region or region, on official boundaries. Zoom to one region or the districts you choose, with their neighbours for context.',
-                'Every map comes with its table, and areas with too few records to show safely are hidden.']}
-              visual={<MapLive />} />
             <Feature eyebrow="Funding concept notes and proposals" title="From concept note to full proposal, answering everything the call asks" flip
               body={['A concept note for a call or a funder, and the full funding proposal, written to the call. The logframe, workplan and M&E table come from one results model, so they always agree.',
                 'Every budget sum is worked out for you. Figures only you can give are marked for you to fill in, never invented.']}
