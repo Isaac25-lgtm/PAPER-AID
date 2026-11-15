@@ -41,12 +41,11 @@ try {
   await page.getByRole('button', { name: 'Add credits' }).click()
   await page.getByText(/Their balance is now/).first().waitFor()
 
-  // The dashboard (owner, 2026-10-10): what can be started, by section, and no list of work on it.
+  // The dashboard (owner, 2026-11-15: like Jenni's): what can be started; recent work appears once there is some.
   await page.goto(`${base}/app`)
   await page.getByRole('heading', { name: 'What you can do' }).waitFor()
   await page.getByRole('heading', { name: 'Coursework', exact: true }).waitFor()
   await page.getByRole('link', { name: /Your coursework/ }).waitFor()
-  if (await page.getByText('Continue working').count()) throw new Error('the dashboard still lists work')
   await page.getByText(/credits/).first().waitFor()
   await shot('01-dashboard')
   await page.goto(`${base}/app/new`)
@@ -170,7 +169,7 @@ try {
   if (await page.getByText(/Applying your changes/).count()) throw new Error('a chapter being written was shown as applying changes')
   step('proposal: Continue to Chapter Two opens it, with its progress, until it is written')
 
-  // Your work lists all three, by section; the left panel lists them under their sections; the dashboard does not.
+  // Your work lists all three, by section; the left panel lists them under their sections; the dashboard shows them as recent work.
   await page.goto(`${base}/app/work`)
   await page.getByText('Safer deliveries in Kamuli').first().waitFor()
   await page.getByRole('heading', { name: 'Research proposals', exact: true }).waitFor()
@@ -180,9 +179,10 @@ try {
   await panel.getByRole('link', { name: /Safer deliveries in Kamuli/ }).first().waitFor()
   await page.goto(`${base}/app`)
   await page.getByRole('link', { name: /Your coursework \(\d+\)/ }).waitFor()
-  if (await page.getByRole('main').getByText('Safer deliveries in Kamuli').count()) throw new Error('the dashboard lists work')
+  await page.getByRole('heading', { name: 'Recent work' }).waitFor()
+  await page.getByRole('main').getByRole('link', { name: /Safer deliveries in Kamuli/ }).first().waitFor()
   await shot('13b-dashboard-with-work')
-  step('your work is by section, in the left panel too, and not on the dashboard')
+  step('your work is by section, in the left panel too, and recent work is on the dashboard')
 
   // A phone: the workspace stacks, nothing scrolls sideways.
   await page.setViewportSize({ width: 390, height: 844 })

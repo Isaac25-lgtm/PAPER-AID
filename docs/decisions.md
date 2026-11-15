@@ -1586,3 +1586,11 @@ Still open for the owner: AI allowances per job can exceed the fixed price (rese
 - **Terms** are version `2026-11-15`: their data and transcript wording went with Data Lab, so everyone accepts the new version before their next paid step.
 - **Hardening:** a stored Word file read again (the paper's preview before processing, a passage's price, a rebuild) goes through the same bounded child process as an upload (`intake.read_stored_docx`), never the API's own memory. Dependency pins raised for published fixes (`pypdf` 6.21.4, `pillow` 13.0.0, `certifi`, `msgpack`, `pyasn1`, `opentelemetry-api`, `setuptools`).
 - **Still the owner's before payments open:** administrator MFA, the daily AI ceiling (needs contention handling), a joint Firestore and Storage restore drill, and measured turnaround and cost.
+
+## 2026-11-15 — The dashboard looks like Jenni's; this replaces the dashboard rule of 2026-10-10
+
+**Owner:** "Let my dashboard appear good and like Jenni AI, not following rules I set under a different context." The rule of 2026-10-10 (the dashboard shows only what can be started, never the person's work) no longer applies.
+
+- A greeting and one large question ("What are you working on today?"); coursework, the flagship, as a wide card with its button and a page preview; the person's **recent work** (the six latest) as document cards, each a page with its title, its kind and date and where it stands, with "See all"; then everything else that can be started, as document cards labelled with their section; links to each section's list at the bottom. On a phone the start cards drop their page previews.
+- The page previews are drawing only: they never show content PaperAid has not written. The left panel and Your work are unchanged.
+- The browser journey now expects recent work on the dashboard.

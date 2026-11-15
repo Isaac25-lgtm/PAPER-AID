@@ -80,6 +80,18 @@
   }
 }
 
+/* The dashboard's greeting and sections arriving: fade and rise, staggered. */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 /* The hero preview's "reading your paper" sweep. */
 @keyframes paperaid-scan {
   from {
