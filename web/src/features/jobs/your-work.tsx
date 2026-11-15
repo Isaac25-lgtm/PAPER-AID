@@ -121,7 +121,7 @@ export function DashboardPage() {
   return (
     <div className="pb-10">
       <header className="animate-[rise_.6s_cubic-bezier(.2,.8,.3,1)_both]">
-        <h1 className="text-[2rem] leading-[1.1] font-semibold tracking-[-0.035em] text-fg sm:text-[2.6rem]">
+        <h1 className="text-[2rem] leading-[1.1] font-semibold tracking-[-0.025em] text-fg sm:text-[2.6rem]">
           {greeting()}
           {firstName ? `, ${firstName}` : ''}
         </h1>
@@ -166,7 +166,7 @@ export function DashboardPage() {
               {STANDING.map((s) => (
                 <div key={s.label}>
                   <dt className="sr-only">{s.label}</dt>
-                  <dd className="text-[1.9rem] leading-none font-semibold text-fg tabular-nums">{all.filter((i) => s.tones.includes(i.status.tone)).length}</dd>
+                  <dd className="font-mono text-[1.9rem] leading-none font-semibold text-fg">{all.filter((i) => s.tones.includes(i.status.tone)).length}</dd>
                   <dd className="mt-1.5 text-[13px] text-fg-muted" aria-hidden>{s.label}</dd>
                 </div>
               ))}

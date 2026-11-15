@@ -1,10 +1,13 @@
 @import "tailwindcss";
-@import "@fontsource-variable/inter";
+@import "@fontsource-variable/inter-tight";
+@import "@fontsource-variable/jetbrains-mono";
 @import "@fontsource-variable/source-serif-4";
 
 /* PaperAid design tokens. Every colour, radius and shadow in the UI comes from here. */
 @theme {
-  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  /* The type of PaperAid Pro, which the owner chose (2026-11-15): Inter Tight for text, JetBrains Mono for figures. */
+  --font-sans: "Inter Tight Variable", "Inter Tight", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   --font-serif: "Source Serif 4 Variable", Georgia, "Times New Roman", serif;
 
   /* Calm academic redesign (owner decision 2026-10-04): an indigo-blue accent on white and neutral greys,
@@ -142,7 +145,7 @@
   }
   body {
     @apply bg-surface text-fg font-sans antialiased;
-    font-feature-settings: "kern", "calt";
+    font-feature-settings: normal;
   }
   h1, h2, h3, h4 {
     @apply tracking-tight text-fg;
