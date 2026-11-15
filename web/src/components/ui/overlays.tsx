@@ -2,7 +2,7 @@ import * as DialogPrimitive from '@radix-ui/react-dialog'
 import * as TabsPrimitive from '@radix-ui/react-tabs'
 import { clsx } from 'clsx'
 import { X } from 'lucide-react'
-import type { ComponentProps, ReactNode } from 'react'
+import { useLayoutEffect, useRef, type ComponentProps, type ReactNode } from 'react'
 
 interface DialogProps {
   open: boolean
@@ -13,12 +13,30 @@ interface DialogProps {
   footer?: ReactNode
 }
 
+/** The control that opened a dialog, focused again when it closes (by Escape, Cancel or the close button): our
+ *  dialogs are opened from state, not from a Radix trigger, so Radix alone would leave focus on the page body. */
+function useReturnFocus(open: boolean) {
+  const opener = useRef<HTMLElement | null>(null)
+  useLayoutEffect(() => {
+    if (open && document.activeElement instanceof HTMLElement && document.activeElement !== document.body) opener.current = document.activeElement
+  }, [open])
+  return (event: Event) => {
+    const target = opener.current
+    opener.current = null
+    if (target?.isConnected) {
+      event.preventDefault()
+      target.focus()
+    }
+  }
+}
+
 export function Dialog({ open, onOpenChange, title, description, children, footer }: DialogProps) {
+  const returnFocus = useReturnFocus(open)
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-fg/40 backdrop-blur-[2px]" />
-        <DialogPrimitive.Content className="fixed inset-x-4 top-1/2 z-50 mx-auto max-w-md -translate-y-1/2 rounded-2xl bg-surface p-6 shadow-raised focus:outline-none">
+        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-scrim backdrop-blur-[2px]" />
+        <DialogPrimitive.Content onCloseAutoFocus={returnFocus} className="fixed inset-x-4 top-1/2 z-50 mx-auto max-w-md -translate-y-1/2 rounded-2xl bg-surface p-6 shadow-raised focus:outline-none">
           <DialogPrimitive.Title className="pr-8 text-lg font-semibold">{title}</DialogPrimitive.Title>
           {description && <DialogPrimitive.Description className="mt-2 text-sm text-fg-muted">{description}</DialogPrimitive.Description>}
           {children && <div className="mt-4">{children}</div>}
@@ -33,11 +51,12 @@ export function Dialog({ open, onOpenChange, title, description, children, foote
 }
 
 export function Drawer({ open, onOpenChange, title, children }: Omit<DialogProps, 'footer' | 'description'>) {
+  const returnFocus = useReturnFocus(open)
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-fg/40" />
-        <DialogPrimitive.Content className="fixed inset-y-0 right-0 z-50 flex w-[min(20rem,85vw)] flex-col bg-surface shadow-raised focus:outline-none">
+        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-scrim" />
+        <DialogPrimitive.Content onCloseAutoFocus={returnFocus} className="fixed inset-y-0 right-0 z-50 flex w-[min(20rem,85vw)] flex-col bg-surface shadow-raised focus:outline-none">
           <div className="flex h-16 items-center justify-between border-b border-line px-4">
             <DialogPrimitive.Title className="text-sm font-semibold text-fg-muted">{title}</DialogPrimitive.Title>
             <DialogPrimitive.Close className="rounded-md p-2 text-fg-subtle hover:bg-surface-muted hover:text-fg" aria-label="Close menu">

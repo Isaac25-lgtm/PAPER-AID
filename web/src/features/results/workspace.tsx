@@ -355,7 +355,7 @@ export function Workspace({ job: initial }: { job: Job }) {
                           setCategory('AI_LIKE')
                         }}
                         aria-pressed={strength === s}
-                        className={clsx('flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold ring-1 ring-inset', strength === s ? 'bg-fg text-white ring-fg' : 'ring-line-strong')}
+                        className={clsx('flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold ring-1 ring-inset', strength === s ? 'bg-fg text-surface ring-fg' : 'ring-line-strong')}
                       >
                         <span className={clsx('size-2 rounded-full', SEVERITY_BAR[s])} aria-hidden /> {STRENGTH_CHIP[s]} {strengthCount(s)}
                       </button>

@@ -27,3 +27,11 @@ def test_a_concept_note_never_starts_chapter_one_and_continues_into_the_full_pro
     assert continued["goal"] == "FULL" and continued["activeJob"] is None
     chapter = client.post(f"/api/projects/{project['id']}/steps", headers=STUDENT, json={"step": "CHAPTER_1"})
     assert chapter.status_code == 200, chapter.json()
+
+
+def test_a_research_concept_note_is_listed_as_its_own_kind(client):
+    """Owner, 2026-11-15: research concept notes and research proposals are separate sections."""
+    concept = client.post("/api/projects", headers=STUDENT, json={**DETAILS, "goal": "CONCEPT"}).json()
+    full = client.post("/api/projects", headers=STUDENT, json=DETAILS).json()
+    kinds = {i["id"]: i["kind"] for i in client.get("/api/me/work", headers=STUDENT).json()}
+    assert kinds[concept["id"]] == "RESEARCH_CONCEPT" and kinds[full["id"]] == "PROPOSAL"

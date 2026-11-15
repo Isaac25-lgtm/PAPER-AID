@@ -10,13 +10,25 @@ import { useTitle } from '../../lib/use-title'
 import type { Work, WorkKind } from '../../lib/work-types'
 import { KIND_LABELS, ReadinessBadge, VARIANT_LABELS } from './shared'
 
-/** Coursework, or Funding (concept notes and funding proposals): the two new sections. */
-export type Section = 'COURSEWORK' | 'FUNDING'
-const SECTION_KINDS: Record<Section, WorkKind[]> = { COURSEWORK: ['COURSEWORK'], FUNDING: ['CONCEPT_NOTE', 'FUNDING_PROPOSAL'] }
+/** One service per page (owner, 2026-11-15: never mixed): coursework, funding concept notes or funding proposals.
+ *  FUNDING, both funding kinds together, is kept for links made before. */
+export type Section = 'COURSEWORK' | 'CONCEPT_NOTE' | 'FUNDING_PROPOSAL' | 'FUNDING'
+const SECTION_KINDS: Record<Section, WorkKind[]> = {
+  COURSEWORK: ['COURSEWORK'], CONCEPT_NOTE: ['CONCEPT_NOTE'], FUNDING_PROPOSAL: ['FUNDING_PROPOSAL'], FUNDING: ['CONCEPT_NOTE', 'FUNDING_PROPOSAL'],
+}
+const SECTIONS = Object.keys(SECTION_KINDS) as Section[]
 const SECTION_TEXT: Record<Section, { title: string; description: string }> = {
   COURSEWORK: {
     title: 'Coursework',
     description: 'Essays, reports, case studies, literature reviews, short research papers and reflective work, planned from your brief and written from confirmed sources.',
+  },
+  CONCEPT_NOTE: {
+    title: 'Funding concept notes',
+    description: 'Concept notes for a call or a funder: what the call requires, read and quoted, and a draft checked against every rule and limit.',
+  },
+  FUNDING_PROPOSAL: {
+    title: 'Funding proposals',
+    description: 'Full funding proposals written to the call, with the logframe, workplan and budget tables built from your figures.',
   },
   FUNDING: {
     title: 'Funding',
@@ -33,7 +45,8 @@ function reason(availability: string | undefined) {
 
 export function WorksPage() {
   const [params] = useSearchParams()
-  const section: Section = params.get('section') === 'FUNDING' ? 'FUNDING' : 'COURSEWORK'
+  const asked = params.get('section') as Section | null
+  const section: Section = asked && SECTIONS.includes(asked) ? asked : 'COURSEWORK'
   useTitle(SECTION_TEXT[section].title)
   const data = useData()
   const [works, setWorks] = useState<Work[] | null>(null)

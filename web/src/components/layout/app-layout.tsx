@@ -1,7 +1,7 @@
 import * as Menu from '@radix-ui/react-dropdown-menu'
 import { clsx } from 'clsx'
 import type { LucideIcon } from 'lucide-react'
-import { FileCheck2, FilePen, FolderOpen, House, LogOut, Menu as MenuIcon, Monitor, Moon, NotebookPen, Plus, Search, Settings, ShieldCheck, Sun, Wallet } from 'lucide-react'
+import { FileCheck2, FilePen, FolderOpen, HandCoins, House, Lightbulb, LogOut, Menu as MenuIcon, Monitor, Moon, NotebookPen, Plus, ScanSearch, ScrollText, Search, Settings, ShieldCheck, Sun, Wallet } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router'
 import { TermsDialog } from '../../features/account/terms'
@@ -22,6 +22,8 @@ interface NavItem {
   icon: LucideIcon
   active: (path: string, search: string) => boolean
   service?: ServiceId // shown only when this service is offered
+  /** Shown greyed as "Coming soon" while its service is announced but not built, and never a link. */
+  soon?: boolean
 }
 
 const HOME: NavItem[] = [
@@ -29,10 +31,21 @@ const HOME: NavItem[] = [
   { to: '/app/work', label: 'Your work', icon: FolderOpen, active: (p) => p === '/app/work' || p.startsWith('/app/jobs') || p.startsWith('/app/history') },
 ]
 
-/** One list of sections, the same for researchers and students (owner decision 2026-10-04). */
+const on = (s: string, value: string) => new URLSearchParams(s).get('section') === value
+
+/** One list of sections, the same for researchers and students (owner decision 2026-10-04), each service its own
+ *  section in the owner's order (2026-11-15: coursework and funding were never to be mixed), then the AI checker,
+ *  announced and not yet built, then the person's own paper. */
 const SECTIONS_NAV: NavItem[] = [
-  { to: '/app/works', label: 'Coursework & funding', icon: NotebookPen, service: 'COURSEWORK', active: (p) => p.startsWith('/app/works') },
-  { to: '/app/projects', label: 'Research proposals', icon: FilePen, service: 'PROPOSAL', active: (p) => p.startsWith('/app/projects') },
+  { to: '/app/works?section=COURSEWORK', label: 'Coursework', icon: NotebookPen, service: 'COURSEWORK',
+    active: (p, s) => p === '/app/works' && (!new URLSearchParams(s).get('section') || on(s, 'COURSEWORK')) },
+  { to: '/app/projects?goal=CONCEPT', label: 'Research concept note', icon: Lightbulb, service: 'PROPOSAL',
+    active: (p, s) => p === '/app/projects' && new URLSearchParams(s).get('goal') === 'CONCEPT' },
+  { to: '/app/projects', label: 'Research proposal', icon: FilePen, service: 'PROPOSAL',
+    active: (p, s) => p === '/app/projects' && new URLSearchParams(s).get('goal') !== 'CONCEPT' },
+  { to: '/app/works?section=CONCEPT_NOTE', label: 'Funding concept note', icon: ScrollText, service: 'CONCEPT_NOTE', active: (p, s) => p === '/app/works' && on(s, 'CONCEPT_NOTE') },
+  { to: '/app/works?section=FUNDING_PROPOSAL', label: 'Funding proposal', icon: HandCoins, service: 'FUNDING_PROPOSAL', active: (p, s) => p === '/app/works' && on(s, 'FUNDING_PROPOSAL') },
+  { to: '', label: 'AI checker', icon: ScanSearch, service: 'AI_CHECK', soon: true, active: () => false },
   { to: '/app/new?service=PAPER_CHECK', label: 'Paper Check', icon: Search, service: 'REFINE', active: (p, s) => p === '/app/new' && s.includes('PAPER_CHECK') },
   { to: '/app/new?service=ACADEMIC_FORMAT', label: 'Academic formatting', icon: FileCheck2, service: 'FORMAT', active: (p, s) => p === '/app/new' && s.includes('ACADEMIC_FORMAT') },
 ]
@@ -66,7 +79,8 @@ function Shell() {
     navigate('/')
   }
   const offered = (item: NavItem) => !item.service || (config.availability[item.service] && config.availability[item.service] !== 'soon')
-  const sections = SECTIONS_NAV.filter(offered)
+  // the AI checker is listed only while its service is announced as coming (availability 'soon')
+  const sections = SECTIONS_NAV.filter((item) => (item.soon ? item.service !== undefined && config.availability[item.service] === 'soon' : offered(item)))
   const initials = (user?.displayName || user?.email || '?').slice(0, 2).toUpperCase()
   const navLink = (item: NavItem, big = false) => {
     const active = item.active(location.pathname, location.search)
@@ -79,6 +93,16 @@ function Shell() {
       </Link>
     )
   }
+
+  /** A service announced but not built yet: greyed, labelled, and not a link (no placeholder page behind it). */
+  const soonItem = (item: NavItem, big = false) => (
+    <div key={item.label} aria-disabled="true" title="Coming soon"
+      className={clsx('flex cursor-default items-center gap-2.5 rounded-lg px-2.5 font-medium text-fg-subtle', big ? 'py-3 text-base' : 'py-1.5 text-sm')}>
+      <item.icon className={clsx(big ? 'size-5' : 'size-[18px]', 'text-fg-subtle/70')} aria-hidden />
+      <span className="flex-1">{item.label}</span>
+      <span className="rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium text-fg-subtle ring-1 ring-line">Coming soon</span>
+    </div>
+  )
 
   const newMenu = (
     <Menu.Root>
@@ -147,7 +171,7 @@ function Shell() {
         <nav aria-label="App" className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-3">
           {HOME.map((item) => navLink(item))}
           {sections.length > 0 && <p className="mt-5 mb-1 px-2.5 text-[11px] font-semibold tracking-[0.08em] text-fg-subtle uppercase">Sections</p>}
-          {sections.map((item) => navLink(item))}
+          {sections.map((item) => (item.soon ? soonItem(item) : navLink(item)))}
         </nav>
         <div className="flex flex-col gap-0.5 border-t border-line-strong px-3 py-3">
           {footerLinks.map((item) => navLink(item))}
@@ -193,7 +217,7 @@ function Shell() {
         <nav aria-label="App mobile" className="flex flex-col gap-0.5">
           {HOME.map((item) => navLink(item, true))}
           {sections.length > 0 && <p className="mt-4 mb-1 px-2.5 text-xs font-semibold tracking-[0.08em] text-fg-subtle uppercase">Sections</p>}
-          {sections.map((item) => navLink(item, true))}
+          {sections.map((item) => (item.soon ? soonItem(item, true) : navLink(item, true)))}
           <p className="mt-4 mb-1 px-2.5 text-xs font-semibold tracking-[0.08em] text-fg-subtle uppercase">Start new</p>
           {choices.map((c) => (
             <Link key={c.id} to={c.to} className="flex items-center gap-2.5 rounded-lg px-2.5 py-3 text-base font-medium text-fg hover:bg-surface-muted">

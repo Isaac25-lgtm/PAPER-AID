@@ -18,35 +18,36 @@ function unavailableReason(availability: string) {
   return null
 }
 
+/** Research proposals, or with `?goal=CONCEPT` research concept notes (owner, 2026-11-15: separate sections). */
 export function ProjectsPage() {
-  useTitle('Research proposals')
+  const [params] = useSearchParams()
+  const concept = params.get('goal') === 'CONCEPT'
+  useTitle(concept ? 'Research concept notes' : 'Research proposals')
   const data = useData()
   const [projects, setProjects] = useState<Project[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const blocked = unavailableReason(data.config.availability.PROPOSAL)
 
   useEffect(() => {
+    setProjects(null)
     data.projects
       .list()
-      .then(setProjects)
+      .then((all) => setProjects(all.filter((p) => (p.goal === 'CONCEPT') === concept)))
       .catch((e: unknown) => setError(e instanceof DataError ? e.message : 'We could not load your proposals.'))
-  }, [data])
+  }, [data, concept])
 
   return (
     <>
       <PageHeader
-        title="Research proposals"
-        description="Plan, research and write your research proposal chapter by chapter, or check one you have already written."
+        title={concept ? 'Research concept notes' : 'Research proposals'}
+        description={concept
+          ? 'A short concept note for your research topic, from confirmed sources, that you can continue into the full proposal.'
+          : 'Plan, research and write your research proposal chapter by chapter, or check one you have already written.'}
         actions={
           !blocked && (
-            <div className="flex flex-wrap gap-2">
-              <ButtonLink to="/app/start/concept-paper" variant="secondary">
-                <Plus className="size-4" aria-hidden /> New concept note
-              </ButtonLink>
-              <ButtonLink to="/app/start/proposal">
-                <Plus className="size-4" aria-hidden /> New proposal
-              </ButtonLink>
-            </div>
+            <ButtonLink to={concept ? '/app/start/concept-paper' : '/app/start/proposal'}>
+              <Plus className="size-4" aria-hidden /> {concept ? 'New concept note' : 'New proposal'}
+            </ButtonLink>
           )
         }
       />
@@ -60,7 +61,7 @@ export function ProjectsPage() {
           {error}
         </Alert>
       )}
-      <Card className="mb-6 flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
+      {!concept && <Card className="mb-6 flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex gap-3">
           <FileSearch className="mt-0.5 size-5 shrink-0 text-brand-700" aria-hidden />
           <div>
@@ -71,7 +72,7 @@ export function ProjectsPage() {
         <ButtonLink to="/app/new?review=1" variant="secondary" size="sm">
           Review my proposal
         </ButtonLink>
-      </Card>
+      </Card>}
       {projects === null && !error ? (
         <div className="space-y-3">
           <Skeleton className="h-24 rounded-2xl" />
@@ -80,16 +81,18 @@ export function ProjectsPage() {
       ) : projects && projects.length === 0 ? (
         <EmptyState
           icon={<GraduationCap className="size-6" aria-hidden />}
-          title="No proposals yet"
+          title={concept ? 'No concept notes yet' : 'No proposals yet'}
           action={
             !blocked && (
-              <ButtonLink to="/app/start/proposal">
-                <Plus className="size-4" aria-hidden /> Start a proposal
+              <ButtonLink to={concept ? '/app/start/concept-paper' : '/app/start/proposal'}>
+                <Plus className="size-4" aria-hidden /> {concept ? 'Start a concept note' : 'Start a proposal'}
               </ButtonLink>
             )
           }
         >
-          Start from your topic. PaperAid researches the evidence and writes Chapter One, then each chapter when you ask.
+          {concept
+            ? 'Start from your topic. PaperAid researches the evidence and writes your concept note; you can continue it into the full proposal.'
+            : 'Start from your topic. PaperAid researches the evidence and writes Chapter One, then each chapter when you ask.'}
         </EmptyState>
       ) : (
         <ul className="space-y-3">

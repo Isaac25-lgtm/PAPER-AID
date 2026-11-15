@@ -16,7 +16,7 @@ from app.analysis import signals
 from app.core.config import Settings
 from app.core.errors import AppError, Conflict, Forbidden, InvalidDocument, LimitExceeded, NotFound, PermanentStageError
 from app.core.logging import log
-from app.documents.intake import inspect_upload, read_stored_docx
+from app.documents.intake import inspect_upload, read_stored
 from app.formatting.guideline import MAX_GUIDE_WORDS
 from app.formatting.presets import PRESETS, PUBLIC_PRESETS
 from app.integrations.store import cursor_of
@@ -434,6 +434,8 @@ def request_quote(rt: Runtime, user: User, job_id: str, selection: ServiceSelect
         raise Conflict("This job has already been submitted.")
     if job.source is None:
         raise AppError("Upload your paper first.", code="NO_FILE")
+    if job.source.word_count > rt.settings.max_words:  # a new quote meets today's limit (Codex audit, 2026-11-15)
+        raise AppError(f"This document is longer than the {rt.settings.max_words:,}-word limit. Upload the chapters you need separately.", code="DOCUMENT_TOO_LONG")
     services = selection.services()
     if not services:
         raise AppError("Choose at least one service.", code="NO_SERVICE")
@@ -534,7 +536,7 @@ def _fix_scope(rt: Runtime, job: Job, blocks: list[str]) -> int:
     assert job.source is not None
     if job.source.format != "DOCX":
         raise AppError("Fixing passages needs the Word file. Upload the .docx version of this paper.", code="PDF_AI_CHECK_ONLY")
-    model = read_stored_docx(rt.files.get(job.source.path), rt.settings.max_words)
+    model = read_stored(rt.files.get(job.source.path), job.source, rt.settings.max_words, rt.settings.max_pdf_pages)
     editable = {b.id: b for b in model.blocks if b.editable and b.kind in ("paragraph", "list_item")}
     if len(set(blocks)) != len(blocks) or any(b not in editable for b in blocks):
         raise AppError("Choose the passages to fix from your writing check.", code="INVALID_SELECTION")
@@ -641,6 +643,8 @@ def submit(rt: Runtime, user: User, job_id: str, quote_id: str, project_gate: Pr
         raise Conflict("Your file changed after it was priced. Request a new quote.", code="QUOTE_MISMATCH")
     if any(availability(rt.settings, user).get(service.value) != "available" for service in job.quote.selection.services()):
         raise AppError("That service is not available right now.", code="SERVICE_UNAVAILABLE")
+    if job.source is not None and job.source.word_count > rt.settings.max_words:  # checked again before anything is held
+        raise AppError(f"This document is longer than the {rt.settings.max_words:,}-word limit. Upload the chapters you need separately.", code="DOCUMENT_TOO_LONG")
     if rt.store.count_active(user.uid) >= rt.settings.max_active_jobs_per_user:
         raise LimitExceeded(
             f"You already have {rt.settings.max_active_jobs_per_user} jobs in progress. Submit this one when one of them finishes.",
@@ -1109,7 +1113,7 @@ def resumable(rt: Runtime, job: Job | None) -> bool:
 
 
 def _claim_and_requeue(rt: Runtime, job: Job, requeue) -> Job | None:
-    """Queue a failed step again, claiming its project, work or Data Lab project in the same
+    """Queue a failed step again, claiming its project or work in the same
     transaction as the job and wallet (as a submission does): a deleted item, or another of its steps
     running, refuses. One path for student resume and admin retry (Codex audit, finding 7)."""
 

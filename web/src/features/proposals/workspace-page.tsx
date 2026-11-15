@@ -620,7 +620,7 @@ function Workspace({ project, onChange, onReload }: { project: Project; onChange
                   {s.key === 'framework' && figure && (
                     <figure className="my-5">
                       <figcaption className="mb-2 text-sm font-semibold">Figure {shown === CONCEPT ? '1' : '1.1'}: Conceptual framework</figcaption>
-                      <img src={figure} alt={project.framework} className="w-full rounded border border-[#ddd]" />
+                      <img src={figure} alt={project.framework} className="w-full rounded border border-line-strong" />
                       <p className="mt-1.5 text-xs"><i>Note.</i> {project.frameworkNote || 'Arrows show the associations this study will examine; they do not imply proven causes.'}</p>
                       <a href={figure} download={`${stem} – conceptual framework.png`} className="mt-2 inline-block text-xs font-semibold text-brand-700 hover:underline">
                         Download the figure

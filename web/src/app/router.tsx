@@ -1,6 +1,6 @@
 import { FileQuestion } from 'lucide-react'
 import { useState } from 'react'
-import { createBrowserRouter, isRouteErrorResponse, Outlet, ScrollRestoration, useRouteError } from 'react-router'
+import { createBrowserRouter, isRouteErrorResponse, Outlet, ScrollRestoration, useLocation, useRouteError } from 'react-router'
 import { AppLayout } from '../components/layout/app-layout'
 import { Logo } from '../components/layout/logo'
 import { PublicLayout } from '../components/layout/public-layout'
@@ -10,6 +10,7 @@ import { HomePage } from '../features/marketing/home-page'
 import { TermsPage } from '../features/account/terms'
 import { FeaturesPage, PricingPage, PrivacyPage } from '../features/marketing/info-pages'
 import { isStaleBuildError, reloadForUpdate } from '../lib/stale-build'
+import { usePublicPagesInDay } from '../lib/theme'
 
 // Signed-in and admin screens load on demand, so the public site stays light on mobile data.
 const lists = () => import('../features/jobs/list-pages')
@@ -18,6 +19,7 @@ const proposals = () => import('../features/proposals/projects-page')
 const works = () => import('../features/works/works-page')
 
 function Root() {
+  usePublicPagesInDay(useLocation().pathname)
   return (
     <>
       <ScrollRestoration />

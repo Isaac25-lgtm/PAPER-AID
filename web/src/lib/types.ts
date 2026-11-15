@@ -484,7 +484,7 @@ export interface PublicConfig {
 export interface WorkSummary {
   id: string
   section: 'Coursework' | 'Funding' | 'Research proposals'
-  kind: 'COURSEWORK' | 'CONCEPT_NOTE' | 'FUNDING_PROPOSAL' | 'PROPOSAL'
+  kind: 'COURSEWORK' | 'CONCEPT_NOTE' | 'FUNDING_PROPOSAL' | 'PROPOSAL' | 'RESEARCH_CONCEPT'
   title: string
   updatedAt: string
   state: 'WRITING' | 'FAILED' | 'READY' | 'READY_WITH_WARNINGS' | 'NEEDS_ATTENTION' | 'NOT_STARTED' | 'CHAPTERS' | 'CONCEPT'

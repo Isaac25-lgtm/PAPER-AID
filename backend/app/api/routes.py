@@ -60,7 +60,9 @@ class WorkSummary(Camel):
 
     id: str
     section: Literal["Coursework", "Funding", "Research proposals"]
-    kind: Literal["COURSEWORK", "CONCEPT_NOTE", "FUNDING_PROPOSAL", "PROPOSAL"]
+    # RESEARCH_CONCEPT: a research concept note, a proposal project started for its concept paper (owner, 2026-11-15:
+    # each service is its own section in the left panel and on the dashboard)
+    kind: Literal["COURSEWORK", "CONCEPT_NOTE", "FUNDING_PROPOSAL", "PROPOSAL", "RESEARCH_CONCEPT"]
     title: str
     updated_at: datetime
     state: Literal["WRITING", "FAILED", "READY", "READY_WITH_WARNINGS", "NEEDS_ATTENTION", "NOT_STARTED", "CHAPTERS", "CONCEPT"]
@@ -94,7 +96,7 @@ def your_work(user: User = Depends(current_user), rt: Runtime = Depends(get_runt
         written = sorted(c.number for c in p.chapters if c.current and c.number != 4)
         concept = any(c.number == 4 and c.current for c in p.chapters)
         state = ("WRITING" if service.step_running(rt, p) else "FAILED" if not written and not concept and (p.auto_failure or ended_badly(p.jobs)) else "CHAPTERS" if written else "CONCEPT" if concept else "NOT_STARTED")
-        out.append(WorkSummary(id=p.id, section="Research proposals", kind="PROPOSAL", title=(p.plan.title if p.plan else "") or p.inputs.topic, updated_at=p.updated_at,
+        out.append(WorkSummary(id=p.id, section="Research proposals", kind="RESEARCH_CONCEPT" if p.goal == "CONCEPT" else "PROPOSAL", title=(p.plan.title if p.plan else "") or p.inputs.topic, updated_at=p.updated_at,
                                state=state, chapters=written))
     return sorted(out, key=lambda item: item.updated_at, reverse=True)
 

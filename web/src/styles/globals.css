@@ -26,6 +26,10 @@
   /* A filled control's pressed or hovered shade: its own token, so it stays deep at night. */
   --color-brand-strong: #3540c7;
   --color-brand-stronger: #2d35a0;
+  /* A destructive button's fill (white text on it in both themes) and the dim behind a dialog. */
+  --color-danger: #dc2626;
+  --color-danger-strong: #b91c1c;
+  --color-scrim: rgb(16 24 40 / 0.45);
 
   --color-surface: #ffffff;
   --color-surface-subtle: #f9fafb;
@@ -78,6 +82,9 @@
   --color-brand-950: #eceeff;
   --color-brand-strong: #4652e6;
   --color-brand-stronger: #3a45d0;
+  --color-danger: #c81e1e;
+  --color-danger-strong: #a51616;
+  --color-scrim: rgb(0 0 0 / 0.62);
 
   --color-red-50: #2b1517;
   --color-red-100: #3c1b1e;
@@ -89,6 +96,7 @@
   --color-red-700: #fca5a5;
   --color-red-800: #fecaca;
   --color-red-900: #fee2e2;
+  --color-red-950: #fff1f1;
 
   --color-amber-50: #2a2210;
   --color-amber-100: #3a2d13;
@@ -110,6 +118,8 @@
   --color-emerald-600: #34d399;
   --color-emerald-700: #6ee7b7;
   --color-emerald-800: #a7f3d0;
+  --color-emerald-900: #d1fae5;
+  --color-emerald-950: #ecfdf5;
 
   --color-violet-50: #241b3e;
   --color-violet-100: #2e2253;
@@ -117,6 +127,7 @@
   --color-violet-300: #5c43a8;
   --color-violet-500: #8b5cf6;
   --color-violet-800: #ddd6fe;
+  --color-violet-900: #ede9fe;
 
   --color-sky-50: #0f2533;
   --color-sky-100: #133247;
@@ -126,6 +137,7 @@
   --color-sky-500: #0ea5e9;
   --color-sky-600: #38bdf8;
   --color-sky-800: #bae6fd;
+  --color-sky-900: #e0f2fe;
 
   --color-rose-50: #2d1520;
   --color-rose-100: #3e1b2b;
@@ -133,6 +145,7 @@
   --color-rose-500: #f43f5e;
   --color-rose-600: #fb7185;
   --color-rose-800: #fecdd3;
+  --color-rose-900: #ffe4e6;
 
   --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4);
   --shadow-raised: 0 12px 28px -8px rgb(0 0 0 / 0.55), 0 0 0 1px rgb(255 255 255 / 0.06);

@@ -8,7 +8,7 @@ import { startChoices, type StartChoice } from '../../lib/start'
 import { useTitle } from '../../lib/use-title'
 import { useAuth } from '../auth/auth-context'
 import { StatusChip } from '../workspace/parts'
-import { SECTION_LISTS, useYourWork, type WorkItem } from './your-work-data'
+import { KINDS, SECTION_LISTS, useYourWork, type WorkItem } from './your-work-data'
 
 function ItemRow({ item }: { item: WorkItem }) {
   return (
@@ -45,12 +45,7 @@ function greeting() {
 }
 
 /** Where "Your own paper" keeps its list: paper checks and formatting are jobs, with their own history. */
-const GROUP_LIST: Record<StartChoice['group'], { to: string; label: string }> = {
-  'Coursework': { to: '/app/works', label: 'Your coursework' },
-  'Research proposals': { to: '/app/projects', label: 'Your proposals' },
-  'Funding': { to: '/app/works?section=FUNDING', label: 'Your funding documents' },
-  'Your own paper': { to: '/app/history', label: 'Your papers' },
-}
+const PAPERS = '/app/history'
 
 /** The counts on the dashboard's "Your work" card, by where each piece stands. */
 const STANDING: { label: string; tones: WorkItem['status']['tone'][] }[] = [
@@ -114,8 +109,9 @@ export function DashboardPage() {
   const recent = [...all].sort((a, b) => b.updated.localeCompare(a.updated)).slice(0, 2) // two at most (owner, 2026-11-15); "See all" gives the total
   const writing = choices.filter((c) => c.group !== 'Your own paper')
   const ownPaper = choices.filter((c) => c.group === 'Your own paper')
-  const groups = [...new Set(writing.map((c) => c.group))]
-  const count = (group: string) => all.filter((i) => i.group === group).length
+  // each service its own list (owner, 2026-11-15), shown when the service is offered
+  const lists = SECTION_LISTS.filter((l) => data.config.availability[l.service] && data.config.availability[l.service] !== 'soon')
+  const count = (type: WorkItem['type']) => all.filter((i) => i.type === type).length
   const today = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
 
   return (
@@ -172,13 +168,13 @@ export function DashboardPage() {
               ))}
             </dl>
             <ul className="mt-5 space-y-0.5 border-t border-line pt-3">
-              {groups.map((g) => {
-                const Icon = writing.find((c) => c.group === g)?.icon ?? FolderOpen
+              {lists.map((l) => {
+                const Icon = KINDS[l.type].icon
                 return (
-                  <li key={g}>
-                    <Link to={GROUP_LIST[g].to} className="-mx-2 flex items-center gap-2.5 rounded-lg px-2 py-2 text-[15px] text-fg hover:bg-surface-subtle hover:text-brand-700">
+                  <li key={l.type}>
+                    <Link to={l.to} className="-mx-2 flex items-center gap-2.5 rounded-lg px-2 py-2 text-[15px] text-fg hover:bg-surface-subtle hover:text-brand-700">
                       <Icon className="size-[18px] shrink-0 text-fg-subtle" aria-hidden />
-                      <span className="flex-1">{GROUP_LIST[g].label}{count(g) > 0 ? ` (${count(g)})` : ''}</span>
+                      <span className="flex-1">{l.yours}{count(l.type) > 0 ? ` (${count(l.type)})` : ''}</span>
                     </Link>
                   </li>
                 )
@@ -190,7 +186,7 @@ export function DashboardPage() {
             <section aria-labelledby="own-paper" className={clsx(panel, 'p-5')}>
               <div className="flex items-baseline justify-between gap-3">
                 <h2 id="own-paper" className={label}>Your own paper</h2>
-                <Link to={GROUP_LIST['Your own paper'].to} className="text-[13px] font-medium text-brand-700 hover:underline">History</Link>
+                <Link to={PAPERS} className="text-[13px] font-medium text-brand-700 hover:underline">History</Link>
               </div>
               <ul className="mt-3 space-y-0.5">
                 {ownPaper.map((c) => (
@@ -219,7 +215,7 @@ export function YourWorkPage() {
   const { items, error } = useYourWork()
   const [params] = useSearchParams()
   const only = params.get('section')
-  const sections = SECTION_LISTS.filter((s) => !only || s.group === only)
+  const sections = SECTION_LISTS.filter((s) => !only || s.type === only)
 
   return (
     <>
@@ -238,14 +234,14 @@ export function YourWorkPage() {
       ) : items && items.length ? (
         <div className="space-y-8">
           {sections.map((section) => {
-            const mine = items.filter((i) => i.group === section.group)
+            const mine = items.filter((i) => i.type === section.type)
             if (!mine.length) return null
             const pending = mine.filter((i) => !i.done)
             const done = mine.filter((i) => i.done)
             return (
-              <section key={section.group} aria-labelledby={`work-${section.label}`}>
+              <section key={section.type} aria-labelledby={`work-${section.type}`}>
                 <div className="mb-2 flex items-center justify-between">
-                  <h2 id={`work-${section.label}`} className="text-[15px] font-medium text-fg">{section.label}</h2>
+                  <h2 id={`work-${section.type}`} className="text-[15px] font-medium text-fg">{section.label}</h2>
                   <Link to={section.to} className="text-sm font-medium text-brand-700 hover:underline">Open {section.label.toLowerCase()}</Link>
                 </div>
                 {pending.length > 0 && (

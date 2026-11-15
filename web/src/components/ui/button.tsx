@@ -12,7 +12,7 @@ const variants: Record<Variant, string> = {
   secondary: 'bg-surface text-fg border border-line shadow-[0_1px_2px_rgb(16_24_40/0.04)] hover:bg-surface-subtle hover:border-line-strong',
   subtle: 'bg-brand-50 text-brand-700 hover:bg-brand-100',
   ghost: 'text-fg-muted hover:bg-surface-muted hover:text-fg',
-  danger: 'bg-red-600 text-white hover:bg-red-700',
+  danger: 'bg-danger text-white hover:bg-danger-strong',
   inverse: 'bg-surface text-brand-700 hover:bg-brand-50',
 }
 

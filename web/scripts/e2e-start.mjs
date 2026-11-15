@@ -30,6 +30,21 @@ const LONG = { timeout: 240_000 }
 const DEV = { Authorization: 'Dev demo@paperaid.app' } // the browser-test backend's sign-in, for reading what was saved
 
 try {
+  // Night mode stays inside the app (Codex audit, 2026-11-15): with night saved, a signed-out visit to /app is sent
+  // to sign-in, and sign-in shows day.
+  {
+    const fresh = await browser.newContext()
+    const signedOut = await fresh.newPage()
+    await signedOut.goto(`${base}/sign-in`)
+    await signedOut.evaluate(() => localStorage.setItem('paperaid.appearance', 'dark'))
+    await signedOut.goto(`${base}/app`)
+    await signedOut.waitForURL(/\/sign-in/)
+    await signedOut.getByRole('button', { name: 'Sign in', exact: true }).waitFor()
+    const theme = await signedOut.evaluate(() => document.documentElement.dataset.theme ?? 'day')
+    if (theme !== 'day') throw new Error(`sign-in kept the app's night mode (${theme})`)
+    await fresh.close()
+    step('a signed-out visit with night saved reaches sign-in in day')
+  }
   await page.goto(`${base}/sign-in`)
   await page.getByLabel('Email').fill('demo@paperaid.app')
   await page.getByLabel('Password').fill('e2e-password')
@@ -40,6 +55,20 @@ try {
   await page.getByLabel('Amount (credits)').fill('1000')
   await page.getByRole('button', { name: 'Add credits' }).click()
   await page.getByText(/Their balance is now/).first().waitFor()
+
+  // Night and day from the left panel; a dialog closed with Escape gives focus back to the button that opened it.
+  await page.goto(`${base}/app/settings`)
+  await page.getByRole('radio', { name: 'Night' }).click()
+  if ((await page.evaluate(() => document.documentElement.dataset.theme)) !== 'dark') throw new Error('night mode did not apply')
+  const opener = page.getByRole('button', { name: 'Delete my account' })
+  await opener.click()
+  await page.getByRole('dialog').waitFor()
+  await page.keyboard.press('Escape')
+  await page.getByRole('dialog').waitFor({ state: 'detached' })
+  await page.waitForFunction(() => document.activeElement?.textContent?.trim() === 'Delete my account', null, { timeout: 3_000 })
+    .catch(() => { throw new Error('focus did not return to the button that opened the dialog') })
+  await page.getByRole('radio', { name: 'Day' }).click()
+  step('night and day switch; the deletion dialog returns focus to its button')
 
   // The dashboard (owner, 2026-11-15): a greeting, Continue writing, Start something new, and Your work beside them.
   await page.goto(`${base}/app`)
@@ -177,7 +206,11 @@ try {
   await page.getByText(/^Done \(\d+\)$/).first().waitFor()
   await shot('13-your-work')
   const panel = page.getByRole('navigation', { name: 'App', exact: true })
-  await panel.getByRole('link', { name: 'Research proposals' }).waitFor()
+  for (const name of ['Coursework', 'Research concept note', 'Research proposal', 'Funding concept note', 'Funding proposal']) await panel.getByRole('link', { name, exact: true }).waitFor()
+  // the AI checker is listed as coming soon, never as a link, while the server says it is coming (as in production)
+  const aiCheck = (await (await page.request.get(`${base}/api/config`)).json()).availability.AI_CHECK
+  if (aiCheck === 'soon') await panel.getByText('AI checker').waitFor()
+  if (await panel.getByRole('link', { name: /AI checker/ }).count()) throw new Error('the AI checker is a link')
   if (await panel.getByRole('link', { name: /Safer deliveries in Kamuli/ }).count()) throw new Error('the left panel lists work')
   await page.goto(`${base}/app`)
   await page.getByRole('link', { name: /Your coursework \(\d+\)/ }).waitFor()

@@ -313,7 +313,10 @@ def _extract(ctx: StageContext, source_sha: str, guide_sha: str | None, formatti
     if hashlib.sha256(data).hexdigest() != source_sha:
         raise PermanentStageError("SOURCE_CHANGED", "Your file changed after it was priced. Please start a new job.")
     try:  # the worker repeats every security check; it never trusts the upload step alone
-        model = inspect_upload(data, job.source.name, settings.max_upload_bytes, settings.max_words, settings.max_pdf_pages)
+        # at the limits the file was accepted at, if today's are lower: work already priced is never refused for a
+        # limit lowered after it was accepted (Codex audit, 2026-11-15)
+        model = inspect_upload(data, job.source.name, settings.max_upload_bytes, max(settings.max_words, job.source.word_count),
+                               max(settings.max_pdf_pages, job.source.page_estimate))
     except InvalidDocument as exc:
         raise PermanentStageError(exc.code, exc.message) from exc
     ctx.put_json("document.json", model.model_dump())
@@ -1485,7 +1488,7 @@ def _run_step(rt: Runtime, job_id: str) -> None:
 
     result = rt.store.update_job_and_wallet(job_id, complete)
     if result is None:
-        # A step that completed itself (a work, proposal or Data Lab publication): its last stage's timing is added
+        # A step that completed itself (a work or proposal publication): its last stage's timing is added
         # here, or the reports would show the job without its final stage (Codex audit through ea0599e, finding 12).
         done = timing("DONE")
 

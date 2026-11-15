@@ -8,6 +8,7 @@ import subprocess
 import sys
 import zipfile
 from pathlib import PurePosixPath
+from typing import Literal, Protocol
 
 from app.core.errors import InvalidDocument, LimitExceeded
 from app.documents.docx_io import read_docx
@@ -86,11 +87,24 @@ def inspect_upload(data: bytes, filename: str, max_bytes: int, max_words: int, m
     return model
 
 
-def read_stored_docx(data: bytes, max_words: int) -> DocumentModel:
-    """A Word file PaperAid already accepted, read again (the paper's preview before processing, a passage's
-    price, a rebuild): through the same bounded child process as the upload, never on the API's own heap
-    (production readiness audit, 2026-11-15: several large previews at once could exhaust an API instance)."""
-    return _isolated_docx(data, max_words)
+class Accepted(Protocol):
+    """What PaperAid recorded about a file when it accepted it (`FileMeta`)."""
+
+    format: Literal["DOCX", "PDF"]
+    word_count: int
+    page_estimate: int
+
+
+def read_stored(data: bytes, accepted: Accepted, max_words: int, max_pdf_pages: int) -> DocumentModel:
+    """A file PaperAid already accepted, read again (the paper before processing, a passage's price, a rebuild, the
+    worker's check of what was priced): always through the bounded child process, never on the API's own heap
+    (production readiness audit, 2026-11-15). Its limits are today's or what the file held when it was accepted,
+    whichever is larger, so lowering a limit never locks a person out of a file already accepted (Codex audit,
+    2026-11-15); a new quote is held to today's limit where it is priced (`service.request_quote`)."""
+    words = max(max_words, accepted.word_count)
+    if accepted.format == "DOCX":
+        return _isolated_docx(data, words)
+    return read_pdf(data, max(max_pdf_pages, accepted.page_estimate), words)
 
 
 def _isolated_docx(data: bytes, max_words: int) -> DocumentModel:

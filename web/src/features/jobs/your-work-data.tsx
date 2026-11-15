@@ -1,9 +1,9 @@
-import { FilePen, HandCoins, Lightbulb, NotebookPen } from 'lucide-react'
+import { FilePen, HandCoins, Lightbulb, NotebookPen, ScrollText } from 'lucide-react'
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useData } from '../../lib/data'
 import { createRefresher, startPolling } from '../../lib/refresher'
 import type { StartChoice } from '../../lib/start'
-import type { WorkSummary } from '../../lib/types'
+import type { ServiceId, WorkSummary } from '../../lib/types'
 import type { WorkspaceStatus } from '../workspace/parts'
 
 /** One piece of the student's work: a coursework, funding document or proposal, with one plain status. */
@@ -11,6 +11,8 @@ export interface WorkItem {
   key: string
   title: string
   kind: string
+  /** Which of the person's services it belongs to (each its own section since 2026-11-15). */
+  type: WorkSummary['kind']
   icon: typeof NotebookPen
   status: WorkspaceStatus
   updated: string
@@ -21,18 +23,23 @@ export interface WorkItem {
   done: boolean
 }
 
-/** Where each section keeps its own list (owner, 2026-10-10: the work lives in the left panel, by section). */
-export const SECTION_LISTS: { group: StartChoice['group']; label: string; to: string }[] = [
-  { group: 'Coursework', label: 'Coursework', to: '/app/works' },
-  { group: 'Research proposals', label: 'Research proposals', to: '/app/projects' },
-  { group: 'Funding', label: 'Funding', to: '/app/works?section=FUNDING' },
+/** Each service's own list, in the owner's order (2026-11-15: coursework, research concept notes, research proposals,
+ *  funding concept notes, funding proposals; each its own section, never mixed). `service` is whose availability
+ *  decides whether it is shown. */
+export const SECTION_LISTS: { type: WorkSummary['kind']; label: string; yours: string; to: string; service: ServiceId }[] = [
+  { type: 'COURSEWORK', label: 'Coursework', yours: 'Your coursework', to: '/app/works?section=COURSEWORK', service: 'COURSEWORK' },
+  { type: 'RESEARCH_CONCEPT', label: 'Research concept notes', yours: 'Your research concept notes', to: '/app/projects?goal=CONCEPT', service: 'PROPOSAL' },
+  { type: 'PROPOSAL', label: 'Research proposals', yours: 'Your research proposals', to: '/app/projects', service: 'PROPOSAL' },
+  { type: 'CONCEPT_NOTE', label: 'Funding concept notes', yours: 'Your funding concept notes', to: '/app/works?section=CONCEPT_NOTE', service: 'CONCEPT_NOTE' },
+  { type: 'FUNDING_PROPOSAL', label: 'Funding proposals', yours: 'Your funding proposals', to: '/app/works?section=FUNDING_PROPOSAL', service: 'FUNDING_PROPOSAL' },
 ]
 
-const KINDS: Record<WorkSummary['kind'], { label: string; icon: typeof NotebookPen; path: string }> = {
+export const KINDS: Record<WorkSummary['kind'], { label: string; icon: typeof NotebookPen; path: string }> = {
   COURSEWORK: { label: 'Coursework', icon: NotebookPen, path: '/app/works' },
-  CONCEPT_NOTE: { label: 'Concept note', icon: Lightbulb, path: '/app/works' },
-  FUNDING_PROPOSAL: { label: 'Funding proposal', icon: HandCoins, path: '/app/works' },
+  RESEARCH_CONCEPT: { label: 'Research concept note', icon: Lightbulb, path: '/app/projects' },
   PROPOSAL: { label: 'Research proposal', icon: FilePen, path: '/app/projects' },
+  CONCEPT_NOTE: { label: 'Funding concept note', icon: ScrollText, path: '/app/works' },
+  FUNDING_PROPOSAL: { label: 'Funding proposal', icon: HandCoins, path: '/app/works' },
 }
 
 function status(s: WorkSummary): WorkspaceStatus {
@@ -51,7 +58,7 @@ function status(s: WorkSummary): WorkspaceStatus {
 function item(s: WorkSummary): WorkItem {
   const kind = KINDS[s.kind]
   return {
-    key: s.id, title: s.title, kind: kind.label, icon: kind.icon, updated: s.updatedAt, to: `${kind.path}/${s.id}`, status: status(s), group: s.section,
+    key: s.id, title: s.title, kind: kind.label, type: s.kind, icon: kind.icon, updated: s.updatedAt, to: `${kind.path}/${s.id}`, status: status(s), group: s.section,
     done: ['READY', 'READY_WITH_WARNINGS', 'CHAPTERS', 'CONCEPT'].includes(s.state),
   }
 }

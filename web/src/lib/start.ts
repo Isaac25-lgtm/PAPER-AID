@@ -1,9 +1,9 @@
 import type { LucideIcon } from 'lucide-react'
-import { FileCheck2, FilePen, HandCoins, Lightbulb, NotebookPen, Search } from 'lucide-react'
+import { FileCheck2, FilePen, HandCoins, Lightbulb, NotebookPen, ScrollText, Search } from 'lucide-react'
 import type { PublicConfig, ServiceId } from './types'
 
 /** What a student can start, in the order PaperAid offers it (owner decision 2026-10-01: coursework,
- *  the flagship, first). Writing services start with one Start (`/app/start/...`); Paper Check and
+ *  the flagship, first; 2026-11-15: then research concept note, research proposal, funding concept note, funding proposal). Writing services start with one Start (`/app/start/...`); Paper Check and
  *  Academic Formatting keep their own upload pages. Names say what PaperAid does, never how. */
 export interface StartChoice {
   id: StartType | 'PAPER_CHECK' | 'ACADEMIC_FORMAT'
@@ -28,17 +28,17 @@ export const START_CHOICES: StartChoice[] = [
     benefits: ['Every part of the question answered', 'Sources in your referencing style'],
   },
   {
+    id: 'concept-paper', service: 'PROPOSAL', group: 'Research proposals', name: 'Research concept note', icon: Lightbulb, to: '/app/start/concept-paper', action: 'Write my concept note',
+    short: 'A short concept paper for your research topic, before the full proposal.',
+    benefits: ['From confirmed sources', 'Continue into the full proposal later'],
+  },
+  {
     id: 'proposal', service: 'PROPOSAL', group: 'Research proposals', name: 'Research proposal', icon: FilePen, to: '/app/start/proposal', action: 'Write Chapter One',
     short: 'Chapters One to Three, written to your institution’s guide.',
     benefits: ['Chapter One from confirmed sources', 'A conceptual framework figure'],
   },
   {
-    id: 'concept-paper', service: 'PROPOSAL', group: 'Research proposals', name: 'Academic concept paper', icon: Lightbulb, to: '/app/start/concept-paper', action: 'Write my concept paper',
-    short: 'A short concept paper for your research topic, before the full proposal.',
-    benefits: ['From confirmed sources', 'Continue into the full proposal later'],
-  },
-  {
-    id: 'concept-note', service: 'CONCEPT_NOTE', group: 'Funding', name: 'Funding concept note', icon: Lightbulb, to: '/app/start/concept-note', action: 'Write my concept note',
+    id: 'concept-note', service: 'CONCEPT_NOTE', group: 'Funding', name: 'Funding concept note', icon: ScrollText, to: '/app/start/concept-note', action: 'Write my concept note',
     short: 'A concept note for a call or a funder, checked against what it asks.',
     benefits: ['What the call requires, read for you', 'Every limit and form box checked'],
   },

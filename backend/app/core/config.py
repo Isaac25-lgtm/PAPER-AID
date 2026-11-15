@@ -167,7 +167,7 @@ class Settings(BaseSettings):
     # The daily canary (owner roadmap 2026-10-03): a writing check on a fixed paper from a dedicated
     # account, paid from that account's credits. Off until the account is set up.
     # The terms people accept (owner decision 2026-10-04): a new version is asked for again before the
-    # next paid step or Data Lab upload. The lawyer's wording replaces the plain one under a new version.
+    # next paid step. The lawyer's wording replaces the plain one under a new version.
     terms_version: str = "2026-11-15"  # Data Lab removed, its data and transcript wording with it (owner, 2026-11-15)
     canary_enabled: bool = False
     canary_uid: str = ""

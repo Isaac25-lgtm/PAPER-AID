@@ -36,3 +36,6 @@ web/codex_*/
 
 # imported country boundaries (uploaded to Cloud Storage, never committed)
 backend/.boundaries/
+
+# TypeScript incremental build state (generated)
+*.tsbuildinfo

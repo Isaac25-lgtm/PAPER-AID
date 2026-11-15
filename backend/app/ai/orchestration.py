@@ -872,7 +872,7 @@ class AIRunner:
         self._held_for: frozenset[str] = frozenset()
         self._audits: dict[str, list[Any]] = {}  # this loop's earlier answers of each approval review
         # The shared limit on Gemini calls (app.jobs.capacity): each call holds a slot while it runs. None: no limit
-        # (estimates, Data Lab operations and tests run without one).
+        # (estimates and tests run without one).
         self._gate = gate
         self._reserve_call = reserve_call
         self._durable_inflight = 0.0  # own live allowances already included by the durable spent reader

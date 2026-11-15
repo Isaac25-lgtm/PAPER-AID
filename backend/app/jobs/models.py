@@ -338,8 +338,8 @@ class Wallet(Camel):
     notify_email: bool = True
     notify_sms: bool = False
     phone: str = ""
-    # The terms the person accepted, and when (owner decision 2026-10-04): required before a paid step or a
-    # Data Lab upload; a newer version is asked for again.
+    # The terms the person accepted, and when (owner decision 2026-10-04): required before a paid step;
+    # a newer version is asked for again.
     terms_version: str = ""
     terms_accepted_at: datetime | None = None
     ledger_backfilled: bool = False  # entries from before the complete history was kept were copied into it

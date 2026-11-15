@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useState } from 'react'
 
 /** Day, night, or whatever the computer uses (owner, 2026-11-15). A convenience of this browser only: kept in its
  *  local storage, so it can be missing (a private window, cleared site data) and the app then shows day. */
@@ -52,4 +52,13 @@ export function useAppearance(): [Appearance, (value: Appearance) => void] {
     setAppearance(value)
   }
   return [appearance, choose]
+}
+
+/** Pages outside the signed-in app are always day (Codex audit, 2026-11-15): the first-paint script in index.html
+ *  applies night to /app and /admin before React loads, and when a signed-out visit is sent on to sign-in the app
+ *  shell never mounts to take it off again. Mounted once at the router's root; inside the app the shell decides. */
+export function usePublicPagesInDay(pathname: string) {
+  useLayoutEffect(() => {
+    if (!/^\/(app|admin)(\/|$)/.test(pathname)) delete document.documentElement.dataset.theme
+  }, [pathname])
 }
