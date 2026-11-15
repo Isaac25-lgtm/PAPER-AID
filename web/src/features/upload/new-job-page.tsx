@@ -104,9 +104,9 @@ function CustomLayoutFields({ value, onChange }: { value: CustomLayout | null; o
 
 function Step({ n, title, description, children, disabled }: { n: number; title: string; description?: string; children: ReactNode; disabled?: boolean }) {
   return (
-    <section className={clsx('rounded-2xl border border-line bg-white p-5 shadow-card sm:p-6', disabled && 'opacity-60')} aria-disabled={disabled}>
+    <section className={clsx('rounded-2xl border border-line bg-surface p-5 shadow-card sm:p-6', disabled && 'opacity-60')} aria-disabled={disabled}>
       <div className="mb-5 flex items-start gap-3">
-        <span className="grid size-7 shrink-0 place-items-center rounded-full bg-brand-700 text-sm font-semibold text-white">{n}</span>
+        <span className="grid size-7 shrink-0 place-items-center rounded-full bg-brand-strong text-sm font-semibold text-white">{n}</span>
         <div>
           <h2 className="text-base font-semibold">{title}</h2>
           {description && <p className="mt-0.5 text-sm text-fg-muted">{description}</p>}
@@ -140,7 +140,7 @@ function OptionCard({ name, checked, onSelect, title, body, badge, disabledReaso
       <input type="radio" name={name} checked={checked} disabled={disabled} onChange={onSelect} className="sr-only" />
       <span
         aria-hidden
-        className={clsx('mt-0.5 grid size-5 shrink-0 place-items-center rounded-full border-2', checked ? 'border-brand-600 bg-brand-600' : 'border-line-strong bg-white')}
+        className={clsx('mt-0.5 grid size-5 shrink-0 place-items-center rounded-full border-2', checked ? 'border-brand-600 bg-brand-600' : 'border-line-strong bg-surface')}
       >
         {checked && <Check className="size-3 text-white" strokeWidth={3} />}
       </span>

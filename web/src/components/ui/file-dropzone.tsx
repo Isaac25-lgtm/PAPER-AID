@@ -39,7 +39,7 @@ export function FileDropzone({ label, hint, accept, onFile, compact, disabled }:
         disabled && 'opacity-60',
       )}
     >
-      <div className={clsx('grid place-items-center rounded-full bg-white text-brand-700 shadow-card ring-1 ring-line', compact ? 'mb-2 size-9' : 'mb-4 size-12')}>
+      <div className={clsx('grid place-items-center rounded-full bg-surface text-brand-700 shadow-card ring-1 ring-line', compact ? 'mb-2 size-9' : 'mb-4 size-12')}>
         <UploadCloud className={compact ? 'size-4' : 'size-5'} aria-hidden />
       </div>
       <label htmlFor={id} className="cursor-pointer text-sm font-semibold text-fg">
@@ -66,7 +66,7 @@ export function FileDropzone({ label, hint, accept, onFile, compact, disabled }:
 
 export function FileChip({ name, meta, progress, onRemove }: { name: string; meta?: string; progress?: number; onRemove?: () => void }) {
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-line bg-white p-3 shadow-card">
+    <div className="flex items-center gap-3 rounded-xl border border-line bg-surface p-3 shadow-card">
       <div className="grid size-10 shrink-0 place-items-center rounded-lg border border-line text-fg-muted">
         <FileText className="size-5" aria-hidden />
       </div>

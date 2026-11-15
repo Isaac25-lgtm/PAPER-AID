@@ -260,7 +260,7 @@ function WorkPageOne({ kind, draftId, onSaved, onCreated }: { kind: WorkKind; dr
                 aria-checked={variant === v}
                 onClick={() => setVariant(v)}
                 className={`rounded-full border px-3.5 py-1.5 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-brand-600 ${
-                  variant === v ? 'border-brand-600 bg-brand-50 text-brand-800' : 'border-line-strong bg-white text-fg-muted hover:border-brand-300'
+                  variant === v ? 'border-brand-600 bg-brand-50 text-brand-800' : 'border-line-strong bg-surface text-fg-muted hover:border-brand-300'
                 }`}
               >
                 {VARIANT_LABELS[v]}
@@ -488,7 +488,7 @@ function WorkPageTwo({ work, onChange, onBack }: { work: Work; onChange: (w: Wor
           ))}
         </Card>
         {shown.some((q) => !required(q) && !upFront.has(q.id)) && (
-          <details className="rounded-2xl border border-line bg-white p-5 shadow-card">
+          <details className="rounded-2xl border border-line bg-surface p-5 shadow-card">
             <summary className="cursor-pointer text-base font-semibold">More details (optional)</summary>
             <p className="mt-1 text-sm text-fg-muted">PaperAid uses sensible defaults for anything you leave, and says so in your document where it matters.</p>
             <div className="mt-4 space-y-4">
@@ -499,7 +499,7 @@ function WorkPageTwo({ work, onChange, onBack }: { work: Work; onChange: (w: Wor
           </details>
         )}
         {work.kind === 'COURSEWORK' && (
-          <details className="rounded-2xl border border-line bg-white p-5 shadow-card">
+          <details className="rounded-2xl border border-line bg-surface p-5 shadow-card">
             <summary className="cursor-pointer text-base font-semibold">Cover page details (optional)</summary>
             <p className="mt-1 text-sm text-fg-muted">Printed under the title only. Never sent to an AI model or a search.</p>
             <div className="mt-4 grid gap-4 sm:grid-cols-2">

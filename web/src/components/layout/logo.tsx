@@ -17,7 +17,7 @@ export function Logo({ to = '/', className }: { to?: string; className?: string 
   return (
     <Link to={to} className={clsx('flex items-center gap-2.5 rounded-md', className)} aria-label="PaperAid home">
       <LogoMark className="size-8" />
-      <span className="text-[1.25rem] font-semibold tracking-tight text-fg">PaperAid</span>
+      <span className="text-[1.25rem] font-bold tracking-[-0.03em] text-fg">PaperAid</span>
     </Link>
   )
 }

@@ -80,7 +80,7 @@ function AuthShell({
   const [params] = useSearchParams();
   const [googleError, setGoogleError] = useState<string | null>(null);
   return (
-    <div className="flex min-h-dvh flex-col bg-white">
+    <div className="flex min-h-dvh flex-col bg-surface">
       <header className="mx-auto flex h-16 w-full max-w-6xl items-center px-4 sm:px-6">
         <Logo />
       </header>
@@ -129,7 +129,7 @@ function AuthShell({
           </div>
           <p className="mt-6 text-center text-sm text-fg-muted">{footer}</p>
           {mode === "local" && (
-            <p className="mt-4 rounded-lg bg-white/70 p-3 text-center text-xs text-fg-subtle ring-1 ring-line">
+            <p className="mt-4 rounded-lg bg-surface/70 p-3 text-center text-xs text-fg-subtle ring-1 ring-line">
               Local test sign-in, on this computer only: any email with an
               8-character password works. Admin pages open for the emails in
               ADMIN_EMAILS in backend/.env. Google sign-in appears once the

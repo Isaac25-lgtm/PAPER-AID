@@ -77,7 +77,7 @@ export function WorkspaceHeader({ title, meta, status, onWord, onPdf, extra }: {
 export function Paper({ children }: { children: ReactNode }) {
   return (
     <article
-      className="mx-auto w-full max-w-[48rem] bg-white px-1 py-4 text-[16px] leading-[1.8] text-[#111] sm:px-4"
+      className="mx-auto w-full max-w-[48rem] bg-surface px-1 py-4 text-[16px] leading-[1.8] text-fg sm:px-4"
       style={{ fontFamily: "'Times New Roman', Times, 'Liberation Serif', serif" }}
     >
       {children}
@@ -139,7 +139,7 @@ export function DocTable({ caption, rows }: { caption: string; rows: string[][] 
         <thead>
           <tr>
             {rows[0].map((c, i) => (
-              <th key={i} className="border border-[#999] bg-[#f3f4f6] px-2 py-1.5 text-left font-semibold">
+              <th key={i} className="border border-line-strong bg-surface-muted px-2 py-1.5 text-left font-semibold">
                 {c}
               </th>
             ))}
@@ -149,7 +149,7 @@ export function DocTable({ caption, rows }: { caption: string; rows: string[][] 
           {rows.slice(1).map((row, r) => (
             <tr key={r}>
               {row.map((c, i) => (
-                <td key={i} className={clsx('border border-[#999] px-2 py-1.5 align-top', c.includes('to be added') && 'bg-amber-50 font-semibold text-amber-900')}>
+                <td key={i} className={clsx('border border-line-strong px-2 py-1.5 align-top', c.includes('to be added') && 'bg-amber-50 font-semibold text-amber-900')}>
                   {c}
                 </td>
               ))}
@@ -188,7 +188,7 @@ export function PanelSection({ title, badge, defaultOpen = true, children }: { t
   const [open, setOpen] = useState(defaultOpen)
   const id = useId()
   return (
-    <section className="rounded-2xl border border-line bg-white shadow-card">
+    <section className="rounded-2xl border border-line bg-surface shadow-card">
       <button className="flex w-full items-center gap-2 px-5 py-4 text-left" aria-expanded={open} aria-controls={id} onClick={() => setOpen((o) => !o)}>
         <span className="flex-1 text-base font-semibold text-fg">{title}</span>
         {badge}

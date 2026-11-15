@@ -137,7 +137,7 @@ export function StartProgress({ jobId, phase, title, estimate, onDone }: { jobId
         </Alert>
       )}
       <div className="mt-6 flex flex-wrap gap-2">
-        <Link to="/app" className="inline-flex min-h-10 items-center rounded-lg border border-line bg-white px-4 text-sm font-semibold text-fg hover:bg-surface-muted">
+        <Link to="/app" className="inline-flex min-h-10 items-center rounded-lg border border-line bg-surface px-4 text-sm font-semibold text-fg hover:bg-surface-muted">
           Go to dashboard
         </Link>
         <Button variant="ghost" loading={stopping} onClick={requestStop}>
@@ -165,7 +165,7 @@ export function StoppedCard({ message, onRetry, busy, error, title = "We couldn'
         <Button loading={busy} onClick={onRetry}>
           {retryLabel}
         </Button>
-        <Link to="/app" className="inline-flex min-h-10 items-center rounded-lg border border-line bg-white px-4 text-sm font-semibold text-fg hover:bg-surface-muted">
+        <Link to="/app" className="inline-flex min-h-10 items-center rounded-lg border border-line bg-surface px-4 text-sm font-semibold text-fg hover:bg-surface-muted">
           Go to dashboard
         </Link>
       </div>

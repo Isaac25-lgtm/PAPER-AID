@@ -70,7 +70,7 @@ function DataProvider({ children }: { children: ReactNode }) {
             )}
           </p>
         </div>
-        <button className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-800" onClick={() => setAttempt((n) => n + 1)}>
+        <button className="rounded-lg bg-brand-strong px-4 py-2 text-sm font-semibold text-white hover:bg-brand-stronger" onClick={() => setAttempt((n) => n + 1)}>
           Try again
         </button>
       </Splash>

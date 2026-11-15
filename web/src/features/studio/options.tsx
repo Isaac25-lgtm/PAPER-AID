@@ -65,7 +65,7 @@ function OptionCard({ checked, onSelect, title, body, badge, disabledReason, nam
       )}
     >
       <input type="radio" name={name} checked={checked} disabled={!!disabledReason} onChange={onSelect} className="sr-only" />
-      <span aria-hidden className={clsx('mt-0.5 grid size-5 shrink-0 place-items-center rounded-full border-2', checked ? 'border-brand-600 bg-brand-600' : 'border-line-strong bg-white')}>
+      <span aria-hidden className={clsx('mt-0.5 grid size-5 shrink-0 place-items-center rounded-full border-2', checked ? 'border-brand-600 bg-brand-600' : 'border-line-strong bg-surface')}>
         {checked && <Check className="size-3 text-white" strokeWidth={3} />}
       </span>
       <span className="min-w-0">

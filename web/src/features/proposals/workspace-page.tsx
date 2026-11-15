@@ -146,7 +146,7 @@ function FrameworkCard({ project, running, onChange }: { project: Project; runni
       <div className="space-y-3">
         <label className="block text-sm">
           <span className="font-medium">Style</span>
-          <select className="mt-1 block h-10 w-full rounded-lg border border-line bg-white px-3 text-sm" value={project.frameworkStyle ?? 'MONO'}
+          <select className="mt-1 block h-10 w-full rounded-lg border border-line bg-surface px-3 text-sm" value={project.frameworkStyle ?? 'MONO'}
             disabled={busy} onChange={(e) => save({ style: e.target.value as FrameworkStyle })}>
             {STYLES_ORDER.map((id) => <option key={id} value={id}>{STYLE_NAMES[id]}</option>)}
           </select>
@@ -582,7 +582,7 @@ function Workspace({ project, onChange, onReload }: { project: Project; onChange
           {tabs.map((n) => (
             <button key={n} role="tab" aria-selected={shown === n} onClick={() => setShown(n)}
               className={clsx('inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-semibold transition-colors',
-                shown === n ? 'bg-white text-brand-800 shadow-card ring-1 ring-brand-300' : 'text-fg-muted hover:bg-white')}>
+                shown === n ? 'bg-surface text-brand-800 shadow-card ring-1 ring-brand-300' : 'text-fg-muted hover:bg-surface')}>
               {NAMES[n]} {written.has(n) && <Check className="size-4 text-brand-700" aria-label="written" />}
               {writing === n && !written.has(n) && <Loader2 className="size-4 animate-spin text-brand-700" aria-label="being written" />}
             </button>

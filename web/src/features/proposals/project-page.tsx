@@ -32,7 +32,7 @@ function Progress({ project }: { project: Project }) {
   return (
     <ol className="mb-6 grid grid-cols-2 gap-2 sm:grid-cols-4">
       {steps.map((s) => (
-        <li key={s.label} className={clsx('flex items-center gap-2 rounded-xl border p-3 text-sm', s.done ? 'border-brand-300 bg-brand-50' : 'border-line bg-white')}>
+        <li key={s.label} className={clsx('flex items-center gap-2 rounded-xl border p-3 text-sm', s.done ? 'border-brand-300 bg-brand-50' : 'border-line bg-surface')}>
           {s.done ? <CheckCircle2 className="size-4 text-brand-700" aria-hidden /> : <Circle className={clsx('size-4', s.started ? 'text-amber-600' : 'text-fg-subtle')} aria-hidden />}
           <span className="font-medium">{s.label}</span>
           <span className="ml-auto text-xs text-fg-subtle">{s.done ? 'Approved' : s.started ? 'Drafted' : ''}</span>

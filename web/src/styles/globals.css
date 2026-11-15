@@ -20,6 +20,9 @@
   --color-brand-800: #2d35a0;
   --color-brand-900: #282f7e;
   --color-brand-950: #191d4b;
+  /* A filled control's pressed or hovered shade: its own token, so it stays deep at night. */
+  --color-brand-strong: #3540c7;
+  --color-brand-stronger: #2d35a0;
 
   --color-surface: #ffffff;
   --color-surface-subtle: #f9fafb;
@@ -42,6 +45,96 @@
   --shadow-raised: 0 12px 24px -8px rgb(16 24 40 / 0.1), 0 0 0 1px rgb(16 24 40 / 0.04);
 }
 
+/* Night mode (owner, 2026-11-15): the signed-in app only. The app shell sets data-theme="dark" on <html> when the
+   person chooses night, or follows the computer when they choose "system"; public pages never carry it. Every
+   colour the app uses is a token, so night swaps the tokens: surfaces dark, text light, the pale tints used for
+   chips and highlights become deep tints, and the deep shades used for text become light. Filled buttons keep a
+   vivid brand colour with white text. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --color-surface: #121418;
+  --color-surface-subtle: #181b20;
+  --color-surface-muted: #22262d;
+  --color-line: #2c3038;
+  --color-line-strong: #3d424c;
+  --color-fg: #eceef2;
+  --color-fg-muted: #b6bbc6;
+  --color-fg-subtle: #8c929e;
+
+  --color-brand-50: #1b1f3f;
+  --color-brand-100: #232858;
+  --color-brand-200: #2f3677;
+  --color-brand-300: #4652b4;
+  --color-brand-400: #6f7cf5;
+  --color-brand-500: #7a86f8;
+  --color-brand-600: #5562ef;
+  --color-brand-700: #a6b0ff;
+  --color-brand-800: #bfc6ff;
+  --color-brand-900: #d6dbff;
+  --color-brand-950: #eceeff;
+  --color-brand-strong: #4652e6;
+  --color-brand-stronger: #3a45d0;
+
+  --color-red-50: #2b1517;
+  --color-red-100: #3c1b1e;
+  --color-red-200: #5e252a;
+  --color-red-300: #8c323a;
+  --color-red-400: #f87171;
+  --color-red-500: #ef4444;
+  --color-red-600: #f47a7a;
+  --color-red-700: #fca5a5;
+  --color-red-800: #fecaca;
+  --color-red-900: #fee2e2;
+
+  --color-amber-50: #2a2210;
+  --color-amber-100: #3a2d13;
+  --color-amber-200: #5b4519;
+  --color-amber-300: #8a661c;
+  --color-amber-400: #fbbf24;
+  --color-amber-500: #f59e0b;
+  --color-amber-600: #fbbf24;
+  --color-amber-700: #fcd34d;
+  --color-amber-800: #fde68a;
+  --color-amber-900: #fef3c7;
+  --color-amber-950: #fffbeb;
+
+  --color-emerald-50: #0f2a21;
+  --color-emerald-100: #123828;
+  --color-emerald-200: #18513c;
+  --color-emerald-300: #1f7a56;
+  --color-emerald-500: #10b981;
+  --color-emerald-600: #34d399;
+  --color-emerald-700: #6ee7b7;
+  --color-emerald-800: #a7f3d0;
+
+  --color-violet-50: #241b3e;
+  --color-violet-100: #2e2253;
+  --color-violet-200: #3f2e73;
+  --color-violet-300: #5c43a8;
+  --color-violet-500: #8b5cf6;
+  --color-violet-800: #ddd6fe;
+
+  --color-sky-50: #0f2533;
+  --color-sky-100: #133247;
+  --color-sky-200: #1a4561;
+  --color-sky-300: #236690;
+  --color-sky-400: #38bdf8;
+  --color-sky-500: #0ea5e9;
+  --color-sky-600: #38bdf8;
+  --color-sky-800: #bae6fd;
+
+  --color-rose-50: #2d1520;
+  --color-rose-100: #3e1b2b;
+  --color-rose-300: #902f53;
+  --color-rose-500: #f43f5e;
+  --color-rose-600: #fb7185;
+  --color-rose-800: #fecdd3;
+
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-raised: 0 12px 28px -8px rgb(0 0 0 / 0.55), 0 0 0 1px rgb(255 255 255 / 0.06);
+}
+
 @layer base {
   html {
     -webkit-text-size-adjust: 100%;
@@ -49,7 +142,7 @@
   }
   body {
     @apply bg-surface text-fg font-sans antialiased;
-    font-feature-settings: "cv11", "ss01";
+    font-feature-settings: "kern", "calt";
   }
   h1, h2, h3, h4 {
     @apply tracking-tight text-fg;

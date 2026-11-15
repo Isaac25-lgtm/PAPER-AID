@@ -299,7 +299,7 @@ export function Workspace({ job: initial }: { job: Job }) {
           {job.refinement && (
             <div className="flex gap-1 rounded-lg bg-surface-muted p-1 text-sm font-medium" role="tablist">
               {(['changes', 'findings'] as const).map((v) => (
-                <button key={v} role="tab" aria-selected={view === v} onClick={() => setView(v)} className={clsx('flex-1 rounded-md py-1.5', view === v ? 'bg-white shadow-sm' : 'text-fg-muted')}>
+                <button key={v} role="tab" aria-selected={view === v} onClick={() => setView(v)} className={clsx('flex-1 rounded-md py-1.5', view === v ? 'bg-surface shadow-sm' : 'text-fg-muted')}>
                   {v === 'changes' ? `Changes (${liveChanges.length})` : `Findings (${open.length})`}
                 </button>
               ))}
@@ -376,7 +376,7 @@ export function Workspace({ job: initial }: { job: Job }) {
                         setStrength('ALL')
                       }}
                       aria-pressed={category === c}
-                      className={clsx('rounded-full px-3 py-1 text-xs font-medium ring-1 ring-inset', category === c ? 'bg-brand-700 text-white ring-brand-700' : 'text-fg-muted ring-line-strong hover:ring-brand-300')}
+                      className={clsx('rounded-full px-3 py-1 text-xs font-medium ring-1 ring-inset', category === c ? 'bg-brand-strong text-white ring-brand-700' : 'text-fg-muted ring-line-strong hover:ring-brand-300')}
                     >
                       {c === 'ALL' ? `All (${open.length + referenceIssues})` : c === 'REFERENCES' ? `${CATEGORY_LABELS[c]} (${referenceIssues})` : `${CATEGORY_LABELS[c]} (${count(c)})`}
                     </button>

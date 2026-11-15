@@ -172,7 +172,7 @@ export function ServiceChooser() {
                 const availability = config.availability[card.service]
                 const reason = availability === 'invite_only' ? INVITE_ONLY_REASON : availability === 'not_configured' ? NOT_CONFIGURED_REASON : null
                 const body = (
-                  <div className={clsx('flex h-full flex-col rounded-2xl border bg-white p-5 transition-colors duration-200', reason ? 'border-line opacity-75' : 'border-line group-hover:border-line-strong group-hover:bg-surface-subtle')}>
+                  <div className={clsx('flex h-full flex-col rounded-2xl border bg-surface p-5 transition-colors duration-200', reason ? 'border-line opacity-75' : 'border-line group-hover:border-line-strong group-hover:bg-surface-subtle')}>
                     <div className="flex items-start gap-3">
                       <span className="grid size-9 shrink-0 place-items-center rounded-lg border border-line text-fg-muted">
                         <card.icon className="size-5" aria-hidden />

@@ -2,7 +2,7 @@ import { clsx } from 'clsx'
 import { useId, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react'
 
 const control =
-  'w-full rounded-lg border border-line-strong bg-white px-3 text-sm text-fg shadow-sm transition-colors placeholder:text-fg-subtle hover:border-brand-300 focus:border-brand-500 focus:outline-none focus:ring-3 focus:ring-brand-100 disabled:bg-surface-muted aria-invalid:border-red-400 aria-invalid:focus:ring-red-100'
+  'w-full rounded-lg border border-line-strong bg-surface px-3 text-sm text-fg shadow-sm transition-colors placeholder:text-fg-subtle hover:border-brand-300 focus:border-brand-500 focus:outline-none focus:ring-3 focus:ring-brand-100 disabled:bg-surface-muted aria-invalid:border-red-400 aria-invalid:focus:ring-red-100'
 
 /** A required field says so in words as well as with the asterisk (not by colour alone). */
 function RequiredMark() {

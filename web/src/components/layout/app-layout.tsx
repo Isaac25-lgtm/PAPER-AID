@@ -1,7 +1,7 @@
 import * as Menu from '@radix-ui/react-dropdown-menu'
 import { clsx } from 'clsx'
 import type { LucideIcon } from 'lucide-react'
-import { FileCheck2, FilePen, FolderOpen, House, LogOut, Menu as MenuIcon, NotebookPen, Plus, Search, Settings, ShieldCheck, Wallet } from 'lucide-react'
+import { FileCheck2, FilePen, FolderOpen, House, LogOut, Menu as MenuIcon, Monitor, Moon, NotebookPen, Plus, Search, Settings, ShieldCheck, Sun, Wallet } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router'
 import { TermsDialog } from '../../features/account/terms'
@@ -10,6 +10,7 @@ import { YourWorkProvider } from '../../features/jobs/your-work-data'
 import { useData } from '../../lib/data'
 import { formatTokenNumber } from '../../lib/format'
 import { startChoices } from '../../lib/start'
+import { useAppearance, type Appearance } from '../../lib/theme'
 import type { ServiceId } from '../../lib/types'
 import { useWallet } from '../../lib/use-wallet'
 import { Drawer } from '../ui/overlays'
@@ -56,6 +57,7 @@ function Shell() {
   const { config } = useData()
   const { wallet } = useWallet()
   const choices = startChoices(config)
+  const [appearance, setAppearance] = useAppearance()
 
   useEffect(() => setMenuOpen(false), [location.pathname, location.search])
 
@@ -72,19 +74,19 @@ function Shell() {
       <Link key={item.to} to={item.to} aria-current={active ? 'page' : undefined}
         className={clsx('flex items-center gap-2.5 rounded-lg px-2.5 font-medium transition-colors focus-visible:outline-2 focus-visible:outline-brand-600',
           big ? 'py-3 text-base' : 'py-1.5 text-sm',
-          active ? 'bg-brand-50 text-brand-700' : 'text-fg-muted hover:bg-surface-muted hover:text-fg')}>
-        <item.icon className={clsx(big ? 'size-5' : 'size-[18px]', active ? 'text-brand-600' : 'text-fg-subtle')} aria-hidden /> {item.label}
+          active ? 'bg-brand-50 text-brand-700' : 'text-fg hover:bg-surface-muted')}>
+        <item.icon className={clsx(big ? 'size-5' : 'size-[18px]', active ? 'text-brand-600' : 'text-fg-muted')} aria-hidden /> {item.label}
       </Link>
     )
   }
 
   const newMenu = (
     <Menu.Root>
-      <Menu.Trigger className="flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-brand-600 px-3 text-[15px] font-medium text-white shadow-[inset_0_1px_0_rgb(255_255_255/0.15),0_1px_2px_rgb(16_24_40/0.08)] transition-colors hover:bg-brand-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600">
+      <Menu.Trigger className="flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-brand-600 px-3 text-[15px] font-medium text-white shadow-[inset_0_1px_0_rgb(255_255_255/0.15),0_1px_2px_rgb(16_24_40/0.08)] transition-colors hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600">
         <Plus className="size-4" aria-hidden /> New
       </Menu.Trigger>
       <Menu.Portal>
-        <Menu.Content align="start" side="right" sideOffset={10} className="z-50 w-80 rounded-xl border border-line bg-white p-1.5 shadow-raised">
+        <Menu.Content align="start" side="right" sideOffset={10} className="z-50 w-80 rounded-xl border border-line bg-surface p-1.5 shadow-raised">
           <p className="px-3 pt-1.5 pb-1 text-[11px] font-semibold tracking-[0.08em] text-fg-subtle uppercase">Start new</p>
           {choices.map((c) => (
             <Menu.Item key={c.id} asChild>
@@ -115,7 +117,7 @@ function Shell() {
         <span className="min-w-0 flex-1 truncate text-sm text-fg-muted">{user?.email}</span>
       </Menu.Trigger>
       <Menu.Portal>
-        <Menu.Content align="start" side="top" sideOffset={8} className="z-50 w-60 rounded-xl border border-line bg-white p-1.5 shadow-raised">
+        <Menu.Content align="start" side="top" sideOffset={8} className="z-50 w-60 rounded-xl border border-line bg-surface p-1.5 shadow-raised">
           <div className="px-3 py-2">
             <p className="truncate text-sm font-medium">{user?.displayName}</p>
             <p className="truncate text-xs text-fg-subtle">{user?.email}</p>
@@ -149,12 +151,13 @@ function Shell() {
         </nav>
         <div className="flex flex-col gap-0.5 border-t border-line-strong px-3 py-3">
           {footerLinks.map((item) => navLink(item))}
+          <AppearanceSwitch value={appearance} onChange={setAppearance} />
           <div className="mt-1">{account}</div>
         </div>
       </div>
 
       <div className="flex min-h-dvh flex-col lg:pl-[248px]">
-        <header className={clsx('sticky top-0 z-20 border-b border-line bg-white/90 backdrop-blur', !config.creditsEnabled && 'lg:hidden')}>
+        <header className={clsx('sticky top-0 z-20 border-b border-line bg-surface/90 backdrop-blur', !config.creditsEnabled && 'lg:hidden')}>
           <div className="flex h-14 items-center gap-3 px-4 sm:px-6">
             <button className="-ml-1 rounded-lg p-2 text-fg-muted hover:bg-surface-muted lg:hidden" onClick={() => setMenuOpen(true)} aria-label="Open menu">
               <MenuIcon className="size-5" />
@@ -166,7 +169,7 @@ function Shell() {
               {config.creditsEnabled && wallet && <CreditsPill available={wallet.available} held={wallet.held} />}
               {config.creditsEnabled && (
                 <Link to="/app/credits"
-                  className="hidden h-8 items-center gap-1 rounded-lg bg-brand-600 px-3 text-[13px] font-medium text-white shadow-[inset_0_1px_0_rgb(255_255_255/0.15)] hover:bg-brand-700 sm:inline-flex">
+                  className="hidden h-8 items-center gap-1 rounded-lg bg-brand-600 px-3 text-[13px] font-medium text-white shadow-[inset_0_1px_0_rgb(255_255_255/0.15)] hover:bg-brand-strong sm:inline-flex">
                   <Plus className="size-3.5" aria-hidden /> Buy
                 </Link>
               )}
@@ -176,6 +179,14 @@ function Shell() {
         <main id="main" className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-8 sm:py-8">
           <Outlet />
         </main>
+        <footer className="border-t border-line-strong bg-surface-subtle">
+          <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-5 text-sm text-fg-muted sm:px-8">
+            <span>© {new Date().getFullYear()} PaperAid</span>
+            <Link to="/terms" className="hover:text-fg hover:underline">Terms</Link>
+            <Link to="/privacy" className="hover:text-fg hover:underline">Privacy</Link>
+            <Link to="/pricing" className="hover:text-fg hover:underline">Pricing</Link>
+          </div>
+        </footer>
       </div>
 
       <Drawer open={menuOpen} onOpenChange={setMenuOpen} title={user?.email ?? 'Menu'}>
@@ -191,6 +202,7 @@ function Shell() {
           ))}
           <div className="my-2 h-px bg-line" />
           {footerLinks.map((item) => navLink(item, true))}
+          <AppearanceSwitch value={appearance} onChange={setAppearance} big />
           <button onClick={handleSignOut} className="flex items-center gap-2.5 rounded-lg px-2.5 py-3 text-left text-base font-medium text-fg-muted hover:bg-surface-muted">
             <LogOut className="size-5 text-fg-subtle" aria-hidden /> Sign out
           </button>
@@ -201,13 +213,40 @@ function Shell() {
   )
 }
 
+const APPEARANCES: { value: Appearance; label: string; icon: LucideIcon }[] = [
+  { value: 'light', label: 'Day', icon: Sun },
+  { value: 'dark', label: 'Night', icon: Moon },
+  { value: 'system', label: 'Same as this device', icon: Monitor },
+]
+
+/** Day, night or the device's own setting (owner, 2026-11-15), as three small buttons beside the word Appearance. */
+function AppearanceSwitch({ value, onChange, big = false }: { value: Appearance; onChange: (value: Appearance) => void; big?: boolean }) {
+  return (
+    <div className={clsx('flex items-center justify-between gap-2 px-2.5', big ? 'py-2' : 'py-1')}>
+      <span className={clsx('font-medium text-fg-muted', big ? 'text-base' : 'text-sm')} id={big ? 'appearance-mobile' : 'appearance'}>Appearance</span>
+      <div role="radiogroup" aria-labelledby={big ? 'appearance-mobile' : 'appearance'} className="flex items-center gap-0.5 rounded-lg border border-line-strong bg-surface p-0.5">
+        {APPEARANCES.map((a) => {
+          const on = a.value === value
+          return (
+            <button key={a.value} type="button" role="radio" aria-checked={on} aria-label={a.label} title={a.label} onClick={() => onChange(a.value)}
+              className={clsx('grid place-items-center rounded-md transition-colors focus-visible:outline-2 focus-visible:outline-brand-600', big ? 'size-9' : 'size-7',
+                on ? 'bg-fg text-surface' : 'text-fg-subtle hover:bg-surface-muted hover:text-fg')}>
+              <a.icon className="size-4" aria-hidden />
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 /** The balance, with what is reserved for running work (owner decision 2026-10-01: credits go down
  *  by themselves; a reservation is shown as reserved, never as used, until the document exists). */
 function CreditsPill({ available, held }: { available: number; held: number }) {
   return (
     <Link
       to="/app/credits"
-      className="inline-flex h-8 items-center gap-2 rounded-lg border border-line bg-white px-3 text-[13px] font-medium whitespace-nowrap text-fg hover:border-line-strong"
+      className="inline-flex h-8 items-center gap-2 rounded-lg border border-line bg-surface px-3 text-[13px] font-medium whitespace-nowrap text-fg hover:border-line-strong"
       aria-label={`Credits: ${formatTokenNumber(available)}${held > 0 ? `, ${formatTokenNumber(held)} reserved` : ''}`}
     >
       <span className="size-1.5 rounded-full bg-brand-600" aria-hidden />

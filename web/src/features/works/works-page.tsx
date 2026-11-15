@@ -87,7 +87,7 @@ export function WorksPage() {
         <ul className="space-y-3">
           {works?.map((w) => (
             <li key={w.id}>
-              <Link to={`/app/works/${w.id}`} className="block rounded-2xl border border-line bg-white p-5 shadow-card transition-colors hover:border-brand-300">
+              <Link to={`/app/works/${w.id}`} className="block rounded-2xl border border-line bg-surface p-5 shadow-card transition-colors hover:border-brand-300">
                 <div className="flex flex-wrap items-center gap-2">
                   <p className="font-semibold text-fg">{w.plan?.title ?? w.inputs.title}</p>
                   <ReadinessBadge status={w.status} />

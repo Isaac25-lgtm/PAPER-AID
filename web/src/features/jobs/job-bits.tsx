@@ -96,7 +96,7 @@ export function StageTimeline({ job }: { job: Job }) {
           )}
           <span
             className={clsx(
-              'relative grid size-7 shrink-0 place-items-center rounded-full ring-4 ring-white',
+              'relative grid size-7 shrink-0 place-items-center rounded-full ring-4 ring-surface',
               step.state === 'done' && 'bg-brand-600 text-white',
               step.state === 'current' && 'bg-brand-50 text-brand-700 ring-brand-100',
               step.state === 'upcoming' && 'bg-surface-muted text-fg-subtle',

@@ -204,7 +204,7 @@ function Workspace({ work, onChange, onReload }: { work: Work; onChange: (w: Wor
                 </ul>
               </section>
             )}
-            {doc.aiNote && <p className="mt-10 border-t border-[#ccc] pt-3 text-sm">{doc.aiNote}</p>}
+            {doc.aiNote && <p className="mt-10 border-t border-line-strong pt-3 text-sm">{doc.aiNote}</p>}
           </Paper>
         </div>
         <aside className="space-y-4 lg:sticky lg:top-20 lg:max-h-[calc(100dvh-6rem)] lg:overflow-y-auto">

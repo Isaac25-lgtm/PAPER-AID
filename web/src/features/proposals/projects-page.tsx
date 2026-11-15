@@ -95,7 +95,7 @@ export function ProjectsPage() {
         <ul className="space-y-3">
           {projects?.map((p) => (
             <li key={p.id}>
-              <Link to={`/app/projects/${p.id}`} className="block rounded-2xl border border-line bg-white p-5 shadow-card transition-colors hover:border-brand-300">
+              <Link to={`/app/projects/${p.id}`} className="block rounded-2xl border border-line bg-surface p-5 shadow-card transition-colors hover:border-brand-300">
                 <div className="flex flex-wrap items-center gap-2">
                   <p className="font-semibold text-fg">{p.plan?.title ?? p.inputs.topic}</p>
                   <PlanStatusBadge status={p.planStatus} />

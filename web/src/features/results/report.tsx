@@ -103,7 +103,7 @@ export function SourceCheckPanel({ research }: { research: ResearchResult }) {
       {research.claims.length === 0 && <p className="rounded-lg bg-surface-subtle p-4 text-sm text-fg-muted">We found no public factual claims to check in this paper.</p>}
       <ul className="space-y-3">
         {research.claims.map((c) => (
-          <li key={c.id} className="rounded-xl border border-line bg-white p-4 shadow-card">
+          <li key={c.id} className="rounded-xl border border-line bg-surface p-4 shadow-card">
             <div className="flex flex-wrap items-center gap-2">
               <Badge tone={SUPPORT[c.support].tone}>{SUPPORT[c.support].label}</Badge>
               <span className="text-xs text-fg-subtle">
@@ -180,7 +180,7 @@ export function DownloadList({ jobId, outputs, expiresAt }: { jobId: string; out
   return (
     <div className="space-y-2.5">
       {outputs.map((o) => (
-        <div key={o.id} className="flex items-center gap-3 rounded-xl border border-line bg-white p-3">
+        <div key={o.id} className="flex items-center gap-3 rounded-xl border border-line bg-surface p-3">
           <div className="grid size-10 shrink-0 place-items-center rounded-lg border border-line text-fg-muted">
             <FileText className="size-5" aria-hidden />
           </div>

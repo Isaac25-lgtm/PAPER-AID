@@ -84,7 +84,7 @@ function ContinueRow({ item }: { item: WorkItem }) {
 function StartTile({ choice, wide = false }: { choice: StartChoice; wide?: boolean }) {
   return (
     <li className={wide ? 'sm:col-span-2' : undefined}>
-      <Link to={choice.to} className="group flex h-full items-start gap-4 rounded-2xl border border-line-strong bg-white p-5 transition-[box-shadow,border-color] duration-200 hover:border-brand-300 hover:shadow-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600">
+      <Link to={choice.to} className="group flex h-full items-start gap-4 rounded-2xl border border-line-strong bg-surface p-5 transition-[box-shadow,border-color] duration-200 hover:border-brand-300 hover:shadow-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600">
         <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-line bg-surface-muted text-fg-muted transition-colors group-hover:border-brand-200 group-hover:bg-brand-50 group-hover:text-brand-600">
           <Plus className="size-[18px]" aria-hidden />
         </span>
@@ -97,7 +97,7 @@ function StartTile({ choice, wide = false }: { choice: StartChoice; wide?: boole
   )
 }
 
-const panel = 'rounded-2xl border border-line-strong bg-white'
+const panel = 'rounded-2xl border border-line-strong bg-surface'
 const label = 'text-[12px] font-semibold tracking-[0.1em] text-fg-muted uppercase'
 
 /** The dashboard (owner, 2026-11-15, after the example they gave): a greeting with the date; "Continue writing" with
@@ -111,7 +111,7 @@ export function DashboardPage() {
   const choices = startChoices(data.config)
   const firstName = user?.displayName.split(' ')[0] ?? ''
   const all = items ?? []
-  const recent = [...all].sort((a, b) => b.updated.localeCompare(a.updated)).slice(0, 5)
+  const recent = [...all].sort((a, b) => b.updated.localeCompare(a.updated)).slice(0, 2) // two at most (owner, 2026-11-15); "See all" gives the total
   const writing = choices.filter((c) => c.group !== 'Your own paper')
   const ownPaper = choices.filter((c) => c.group === 'Your own paper')
   const groups = [...new Set(writing.map((c) => c.group))]
