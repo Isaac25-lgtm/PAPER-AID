@@ -41,9 +41,10 @@ try {
   await page.getByRole('button', { name: 'Add credits' }).click()
   await page.getByText(/Their balance is now/).first().waitFor()
 
-  // The dashboard (owner, 2026-11-15: like Jenni's): what can be started; recent work appears once there is some.
+  // The dashboard (owner, 2026-11-15): a greeting, Continue writing, Start something new, and Your work beside them.
   await page.goto(`${base}/app`)
-  await page.getByRole('heading', { name: 'What you can do' }).waitFor()
+  await page.getByRole('heading', { name: 'Continue writing' }).waitFor()
+  await page.getByRole('heading', { name: 'Start something new' }).waitFor()
   await page.getByRole('heading', { name: 'Coursework', exact: true }).waitFor()
   await page.getByRole('link', { name: /Your coursework/ }).waitFor()
   await page.getByText(/credits/).first().waitFor()
@@ -169,20 +170,21 @@ try {
   if (await page.getByText(/Applying your changes/).count()) throw new Error('a chapter being written was shown as applying changes')
   step('proposal: Continue to Chapter Two opens it, with its progress, until it is written')
 
-  // Your work lists all three, by section; the left panel lists them under their sections; the dashboard shows them as recent work.
+  // Your work lists all three, by section; the dashboard shows them under Continue writing; the left panel holds the sections only.
   await page.goto(`${base}/app/work`)
   await page.getByText('Safer deliveries in Kamuli').first().waitFor()
   await page.getByRole('heading', { name: 'Research proposals', exact: true }).waitFor()
   await page.getByText(/^Done \(\d+\)$/).first().waitFor()
   await shot('13-your-work')
   const panel = page.getByRole('navigation', { name: 'App', exact: true })
-  await panel.getByRole('link', { name: /Safer deliveries in Kamuli/ }).first().waitFor()
+  await panel.getByRole('link', { name: 'Research proposals' }).waitFor()
+  if (await panel.getByRole('link', { name: /Safer deliveries in Kamuli/ }).count()) throw new Error('the left panel lists work')
   await page.goto(`${base}/app`)
   await page.getByRole('link', { name: /Your coursework \(\d+\)/ }).waitFor()
-  await page.getByRole('heading', { name: 'Recent work' }).waitFor()
+  await page.getByRole('heading', { name: 'Continue writing' }).waitFor()
   await page.getByRole('main').getByRole('link', { name: /Safer deliveries in Kamuli/ }).first().waitFor()
   await shot('13b-dashboard-with-work')
-  step('your work is by section, in the left panel too, and recent work is on the dashboard')
+  step('your work is by section and under Continue writing on the dashboard; the left panel holds the sections only')
 
   // A phone: the workspace stacks, nothing scrolls sideways.
   await page.setViewportSize({ width: 390, height: 844 })

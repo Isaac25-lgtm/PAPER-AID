@@ -1,5 +1,5 @@
 import { clsx } from 'clsx'
-import { ArrowRight, Check, FolderOpen, Loader2 } from 'lucide-react'
+import { ChevronRight, FolderOpen, Plus } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router'
 import { ButtonLink } from '../../components/ui/button'
 import { Alert, Card, EmptyState, Skeleton } from '../../components/ui/primitives'
@@ -52,184 +52,163 @@ const GROUP_LIST: Record<StartChoice['group'], { to: string; label: string }> = 
   'Your own paper': { to: '/app/history', label: 'Your papers' },
 }
 
-/** A small page, drawn as a document thumbnail: decoration only, never content. */
-function PagePreview({ seed, large = false }: { seed: number; large?: boolean }) {
-  const widths = [92, 84, 96, 70, 88, 78, 94, 62, 86, 74]
-  const lines = Array.from({ length: large ? 9 : 5 }, (_, i) => widths[(i + seed * 3) % widths.length])
-  return (
-    <div aria-hidden className={clsx('rounded-t-md border border-b-0 border-line bg-white shadow-[0_8px_24px_-12px_rgb(16_24_40/0.18)] transition-transform duration-500 ease-[cubic-bezier(.2,.8,.3,1)] group-hover:-translate-y-1',
-      large ? 'w-[62%] px-5 pt-5' : 'w-[64%] px-3.5 pt-3.5')}>
-      <div className={clsx('rounded-full bg-brand-200', large ? 'mb-4 h-2.5 w-1/2' : 'mb-2.5 h-1.5 w-2/5')} />
-      <div className={large ? 'space-y-2.5' : 'space-y-1.5'}>
-        {lines.map((w, i) => <div key={i} className={clsx('rounded-full bg-surface-muted', large ? 'h-1.5' : 'h-1')} style={{ width: `${w}%` }} />)}
-      </div>
-    </div>
-  )
-}
+/** The counts on the dashboard's "Your work" card, by where each piece stands. */
+const STANDING: { label: string; tones: WorkItem['status']['tone'][] }[] = [
+  { label: 'being written', tones: ['running'] },
+  { label: 'need you', tones: ['input', 'danger'] },
+  { label: 'ready', tones: ['ready', 'warn'] },
+]
 
-/** One thing that can be started, as a document card: its page on a soft panel, then what it is. */
-function StartCard({ choice, seed }: { choice: StartChoice; seed: number }) {
+/** One piece of recent work in "Continue writing": what it is, when it changed and where it stands. */
+function ContinueRow({ item }: { item: WorkItem }) {
   return (
     <li>
-      <Link to={choice.to} className="group flex h-full flex-col overflow-hidden rounded-2xl border border-line bg-white transition-[box-shadow,border-color,translate] duration-300 hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600">
-        <div className="relative hidden h-28 items-end justify-center bg-gradient-to-b from-brand-50 to-surface-subtle sm:flex">
-          <span className="absolute top-3 left-3 flex size-8 items-center justify-center rounded-lg border border-line bg-white text-brand-600 shadow-card">
-            <choice.icon className="size-4" aria-hidden />
+      <Link to={item.to} className="group flex items-center gap-3 rounded-xl px-3 py-3 transition-colors hover:bg-surface-subtle focus-visible:outline-2 focus-visible:outline-brand-600">
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-line bg-surface-subtle text-fg-muted group-hover:text-brand-600">
+          <item.icon className="size-[18px]" aria-hidden />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[15px] font-medium text-fg group-hover:text-brand-700">{item.title}</span>
+          <span className="mt-0.5 block truncate text-xs text-fg-subtle">
+            {item.kind} · {new Date(item.updated).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
           </span>
-          <PagePreview seed={seed} />
-        </div>
-        <div className="flex flex-1 flex-col p-4 sm:border-t sm:border-line">
-          <span className="mb-2.5 flex size-8 items-center justify-center rounded-lg bg-brand-50 text-brand-600 sm:hidden">
-            <choice.icon className="size-4" aria-hidden />
-          </span>
-          <span className="text-[11px] font-medium tracking-[0.06em] text-fg-subtle uppercase">{choice.group}</span>
-          <span className="mt-1 text-[15px] font-medium text-fg group-hover:text-brand-700">{choice.name}</span>
-          <span className="mt-1 flex-1 text-[13px] leading-relaxed text-fg-subtle">{choice.short}</span>
-          <span className="mt-3 flex items-center gap-1 text-[13px] font-medium text-brand-700">
-            {choice.action} <ArrowRight className="size-3.5 transition-transform group-hover:translate-x-0.5" aria-hidden />
-          </span>
-        </div>
+        </span>
+        <span className="hidden sm:block"><StatusChip status={item.status} /></span>
+        <ChevronRight className="size-4 shrink-0 text-fg-subtle" aria-hidden />
       </Link>
     </li>
   )
 }
 
-/** One piece of recent work as a document card (owner, 2026-11-15: the dashboard looks like Jenni's): its page with
- *  its title on it, then what it is, when it changed and where it stands. */
-function RecentCard({ item }: { item: WorkItem }) {
+/** One thing that can be started: a plus, its name and what it gives. */
+function StartTile({ choice, wide = false }: { choice: StartChoice; wide?: boolean }) {
   return (
-    <li>
-      <Link to={item.to} className="group flex h-full flex-col overflow-hidden rounded-2xl border border-line bg-white transition-[box-shadow,border-color,translate] duration-300 hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600">
-        <div className="flex h-36 items-end justify-center bg-surface-subtle px-6 pt-5">
-          <div aria-hidden className="h-full w-full rounded-t-md border border-b-0 border-line bg-white px-4 pt-4 shadow-[0_8px_24px_-12px_rgb(16_24_40/0.18)] transition-transform duration-500 ease-[cubic-bezier(.2,.8,.3,1)] group-hover:-translate-y-1">
-            <p className="line-clamp-2 font-serif text-[11px] leading-snug font-semibold text-fg">{item.title}</p>
-            <div className="mt-2.5 space-y-1.5">
-              {[94, 86, 90, 72].map((w, i) => <div key={i} className="h-1 rounded-full bg-surface-muted" style={{ width: `${w}%` }} />)}
-            </div>
-          </div>
-        </div>
-        <div className="flex flex-1 flex-col gap-2 border-t border-line p-4">
-          <p className="truncate text-[15px] font-medium text-fg group-hover:text-brand-700">{item.title}</p>
-          <p className="flex items-center gap-1.5 truncate text-xs text-fg-subtle">
-            <item.icon className="size-3.5 shrink-0" aria-hidden />
-            {item.kind} · {new Date(item.updated).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}
-          </p>
-          <div className="mt-auto pt-1"><StatusChip status={item.status} /></div>
-        </div>
+    <li className={wide ? 'sm:col-span-2' : undefined}>
+      <Link to={choice.to} className="group flex h-full items-start gap-4 rounded-2xl border border-line-strong bg-white p-5 transition-[box-shadow,border-color] duration-200 hover:border-brand-300 hover:shadow-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600">
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-line bg-surface-muted text-fg-muted transition-colors group-hover:border-brand-200 group-hover:bg-brand-50 group-hover:text-brand-600">
+          <Plus className="size-[18px]" aria-hidden />
+        </span>
+        <span className="min-w-0">
+          <h3 className="text-[17px] leading-snug font-semibold tracking-[-0.01em] text-fg group-hover:text-brand-700">{choice.name}</h3>
+          <span className="mt-1 block text-sm leading-relaxed text-fg-muted">{choice.short}</span>
+        </span>
       </Link>
     </li>
   )
 }
 
-/** The first choice (coursework, the flagship), wide: what it gives, its button, and a larger page. */
-function FeaturedCard({ choice }: { choice: StartChoice }) {
-  return (
-    <Link to={choice.to} className="group grid overflow-hidden rounded-2xl border border-line bg-white transition-[box-shadow,border-color] duration-300 hover:border-brand-200 hover:shadow-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 md:grid-cols-[1.15fr_1fr]">
-      <div className="flex flex-col p-6 sm:p-7">
-        <span className="flex size-10 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
-          <choice.icon className="size-5" aria-hidden />
-        </span>
-        <span className="mt-4 text-xl font-medium tracking-[-0.01em] text-fg">{choice.name}</span>
-        <span className="mt-1.5 text-[15px] leading-relaxed text-fg-muted">{choice.short}</span>
-        <ul className="mt-4 space-y-1.5">
-          {choice.benefits.map((b) => (
-            <li key={b} className="flex items-center gap-2 text-[13px] text-fg-muted"><Check className="size-3.5 shrink-0 text-brand-600" aria-hidden /> {b}</li>
-          ))}
-        </ul>
-        <span className="mt-6 inline-flex h-9 w-fit items-center gap-1.5 rounded-lg bg-brand-600 px-4 text-sm font-medium text-white shadow-[inset_0_1px_0_rgb(255_255_255/0.15)] transition-colors group-hover:bg-brand-700">
-          {choice.action} <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" aria-hidden />
-        </span>
-      </div>
-      <div className="hidden items-end justify-center bg-gradient-to-br from-brand-50 via-brand-50/60 to-surface-subtle pt-8 md:flex">
-        <PagePreview seed={0} large />
-      </div>
-    </Link>
-  )
-}
+const panel = 'rounded-2xl border border-line-strong bg-white'
+const label = 'text-[12px] font-semibold tracking-[0.1em] text-fg-muted uppercase'
 
-/** The dashboard (owner, 2026-11-15, replacing the rule of 2026-10-10: it looks like Jenni's): a greeting, coursework
- *  first, the person's recent work as document cards, then everything else they can start. */
+/** The dashboard (owner, 2026-11-15, after the example they gave): a greeting with the date; "Continue writing" with
+ *  the person's recent work; "Start something new"; and beside them their work in numbers with each section's list,
+ *  and what can be done with their own paper. The left panel holds only the sections. Every card has a clear border. */
 export function DashboardPage() {
   useTitle('Dashboard')
   const { user } = useAuth()
   const data = useData()
-  const { items } = useYourWork()
+  const { items, error } = useYourWork()
   const choices = startChoices(data.config)
-  const groups = [...new Set(choices.map((c) => c.group))]
   const firstName = user?.displayName.split(' ')[0] ?? ''
-  const running = (items ?? []).filter((i) => i.status.tone === 'running')
-  const featured = choices.find((c) => c.group === 'Coursework') ?? choices[0]
-  const others = choices.filter((c) => c !== featured)
-  const count = (group: string) => (items ?? []).filter((i) => i.group === group).length
-  const recent = [...(items ?? [])].sort((a, b) => b.updated.localeCompare(a.updated)).slice(0, 6)
+  const all = items ?? []
+  const recent = [...all].sort((a, b) => b.updated.localeCompare(a.updated)).slice(0, 5)
+  const writing = choices.filter((c) => c.group !== 'Your own paper')
+  const ownPaper = choices.filter((c) => c.group === 'Your own paper')
+  const groups = [...new Set(writing.map((c) => c.group))]
+  const count = (group: string) => all.filter((i) => i.group === group).length
+  const today = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
 
   return (
-    <div className="mx-auto max-w-[60rem] pb-10 sm:pt-6">
-      <div className="animate-[rise_.6s_cubic-bezier(.2,.8,.3,1)_both] text-center">
-        <p className="text-sm text-fg-subtle">
+    <div className="pb-10">
+      <header className="animate-[rise_.6s_cubic-bezier(.2,.8,.3,1)_both]">
+        <h1 className="text-[2rem] leading-[1.1] font-semibold tracking-[-0.035em] text-fg sm:text-[2.6rem]">
           {greeting()}
           {firstName ? `, ${firstName}` : ''}
-        </p>
-        <h1 className="mt-2 text-[1.9rem] leading-[1.15] font-medium tracking-[-0.03em] text-fg sm:text-[2.6rem]">What are you working on today?</h1>
-        <p className="mx-auto mt-3 max-w-xl text-[15px] leading-relaxed text-fg-muted">
-          Choose what you need. PaperAid researches, writes and checks it, and you download the finished document.
-        </p>
+        </h1>
+        <p className="mt-2 text-[15px] text-fg-muted">{today}</p>
+      </header>
+
+      <div className="mt-8 grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_19rem]">
+        <div className="min-w-0 space-y-8">
+          <section aria-labelledby="continue" className={clsx(panel, 'animate-[rise_.6s_cubic-bezier(.2,.8,.3,1)_both] p-5 [animation-delay:80ms] sm:p-6')}>
+            <div className="mb-3 flex items-baseline justify-between gap-3">
+              <h2 id="continue" className={label}>Continue writing</h2>
+              {all.length > 0 && <Link to="/app/work" className="text-[13px] font-medium text-brand-700 hover:underline">See all ({all.length})</Link>}
+            </div>
+            {items === null && !error ? (
+              <Skeleton className="h-24 rounded-xl" />
+            ) : recent.length ? (
+              <ul className="-mx-2 divide-y divide-line">
+                {recent.map((item) => <ContinueRow key={item.key} item={item} />)}
+              </ul>
+            ) : (
+              <p className="rounded-xl border border-dashed border-line-strong px-4 py-7 text-center text-[15px] text-fg-muted">
+                {error ? 'Your work could not be loaded just now.' : 'Nothing yet. Choose what you need below and PaperAid starts on it.'}
+              </p>
+            )}
+          </section>
+
+          <section aria-labelledby="sections" className="animate-[rise_.6s_cubic-bezier(.2,.8,.3,1)_both] [animation-delay:160ms]">
+            <h2 id="sections" className={clsx(label, 'mb-3')}>Start something new</h2>
+            <ul className="grid gap-4 sm:grid-cols-2">
+              {writing.map((c, i) => <StartTile key={c.id} choice={c} wide={i === 0 && writing.length % 2 === 1} />)}
+            </ul>
+          </section>
+        </div>
+
+        <aside className="space-y-6 animate-[rise_.6s_cubic-bezier(.2,.8,.3,1)_both] [animation-delay:120ms]" aria-label="Your work at a glance">
+          <section aria-labelledby="your-work" className={clsx(panel, 'p-5')}>
+            <div className="flex items-baseline justify-between gap-3">
+              <h2 id="your-work" className={label}>Your work</h2>
+              <Link to="/app/work" className="text-[13px] font-medium text-brand-700 hover:underline">Open</Link>
+            </div>
+            <dl className="mt-4 grid grid-cols-3 gap-2">
+              {STANDING.map((s) => (
+                <div key={s.label}>
+                  <dt className="sr-only">{s.label}</dt>
+                  <dd className="text-[1.9rem] leading-none font-semibold text-fg tabular-nums">{all.filter((i) => s.tones.includes(i.status.tone)).length}</dd>
+                  <dd className="mt-1.5 text-[13px] text-fg-muted" aria-hidden>{s.label}</dd>
+                </div>
+              ))}
+            </dl>
+            <ul className="mt-5 space-y-0.5 border-t border-line pt-3">
+              {groups.map((g) => {
+                const Icon = writing.find((c) => c.group === g)?.icon ?? FolderOpen
+                return (
+                  <li key={g}>
+                    <Link to={GROUP_LIST[g].to} className="-mx-2 flex items-center gap-2.5 rounded-lg px-2 py-2 text-[15px] text-fg hover:bg-surface-subtle hover:text-brand-700">
+                      <Icon className="size-[18px] shrink-0 text-fg-subtle" aria-hidden />
+                      <span className="flex-1">{GROUP_LIST[g].label}{count(g) > 0 ? ` (${count(g)})` : ''}</span>
+                    </Link>
+                  </li>
+                )
+              })}
+            </ul>
+          </section>
+
+          {ownPaper.length > 0 && (
+            <section aria-labelledby="own-paper" className={clsx(panel, 'p-5')}>
+              <div className="flex items-baseline justify-between gap-3">
+                <h2 id="own-paper" className={label}>Your own paper</h2>
+                <Link to={GROUP_LIST['Your own paper'].to} className="text-[13px] font-medium text-brand-700 hover:underline">History</Link>
+              </div>
+              <ul className="mt-3 space-y-0.5">
+                {ownPaper.map((c) => (
+                  <li key={c.id}>
+                    <Link to={c.to} className="-mx-2 flex items-start gap-2.5 rounded-lg px-2 py-2 hover:bg-surface-subtle">
+                      <c.icon className="mt-0.5 size-[18px] shrink-0 text-fg-subtle" aria-hidden />
+                      <span>
+                        <span className="block text-[15px] text-fg">{c.action}</span>
+                        <span className="block text-xs leading-relaxed text-fg-subtle">{c.short}</span>
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+        </aside>
       </div>
-
-      {running.length > 0 && (
-        <Link to={running.length === 1 ? running[0].to : '/app/work'}
-          className="mx-auto mt-6 flex max-w-xl items-center gap-2.5 rounded-full border border-brand-200 bg-brand-50 px-4 py-2 text-sm text-brand-800 hover:border-brand-300 focus-visible:outline-2 focus-visible:outline-brand-600">
-          <Loader2 className="size-4 shrink-0 animate-spin" aria-hidden />
-          <span className="min-w-0 flex-1 truncate">
-            {running.length === 1 ? <>PaperAid is writing <span className="font-medium">{running[0].title}</span></> : `PaperAid is writing ${running.length} pieces of your work`}
-          </span>
-          <span className="shrink-0 font-medium">Open</span>
-        </Link>
-      )}
-
-      <section aria-labelledby="sections" className="mt-10">
-        <h2 id="sections" className="sr-only">What you can do</h2>
-        {featured && (
-          <div className="animate-[rise_.6s_cubic-bezier(.2,.8,.3,1)_both] [animation-delay:120ms]">
-            <div className="mb-3 flex items-baseline justify-between gap-3">
-              <h3 className="text-[12px] font-semibold tracking-[0.08em] text-fg-subtle uppercase">{featured.group}</h3>
-              <Link to={GROUP_LIST[featured.group].to} className="text-[13px] font-medium text-brand-700 hover:underline">
-                {GROUP_LIST[featured.group].label}
-                {count(featured.group) > 0 ? ` (${count(featured.group)})` : ''}
-              </Link>
-            </div>
-            <FeaturedCard choice={featured} />
-          </div>
-        )}
-        {recent.length > 0 && (
-          <div className="mt-10 animate-[rise_.6s_cubic-bezier(.2,.8,.3,1)_both] [animation-delay:180ms]">
-            <div className="mb-3 flex items-baseline justify-between gap-3">
-              <h3 className="text-[12px] font-semibold tracking-[0.08em] text-fg-subtle uppercase">Recent work</h3>
-              <Link to="/app/work" className="text-[13px] font-medium text-brand-700 hover:underline">See all</Link>
-            </div>
-            <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {recent.map((item) => <RecentCard key={item.key} item={item} />)}
-            </ul>
-          </div>
-        )}
-        {others.length > 0 && (
-          <div className="mt-10 animate-[rise_.6s_cubic-bezier(.2,.8,.3,1)_both] [animation-delay:220ms]">
-            <h3 className="mb-3 text-[12px] font-semibold tracking-[0.08em] text-fg-subtle uppercase">More you can start</h3>
-            <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {others.map((c, i) => <StartCard key={c.id} choice={c} seed={i + 1} />)}
-            </ul>
-          </div>
-        )}
-        <nav aria-label="Your work" className="mt-10 flex flex-wrap items-center justify-center gap-2 border-t border-line pt-6">
-          <span className="mr-1 text-[13px] text-fg-subtle">Your work:</span>
-          {groups.filter((g) => g !== featured?.group).map((g) => (
-            <Link key={g} to={GROUP_LIST[g].to} className="rounded-full border border-line bg-white px-3 py-1 text-[13px] font-medium text-fg-muted transition-colors hover:border-brand-200 hover:text-brand-700">
-              {GROUP_LIST[g].label}
-              {count(g) > 0 ? ` (${count(g)})` : ''}
-            </Link>
-          ))}
-        </nav>
-      </section>
     </div>
   )
 }
