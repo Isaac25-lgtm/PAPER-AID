@@ -100,13 +100,13 @@ export const GUIDES: Record<GuideKey, Guide> = {
       { title: 'Chapter One', detail: 'PaperAid writes Chapter One from confirmed sources, with a conceptual framework figure you can edit.' },
       { title: 'Chapters Two and Three', detail: 'Continue when you are ready, ask for changes from your supervisor’s comments, and download Word, PDF or LaTeX.' },
     ],
-    tips: ['Sample sizes are calculated by code from your own figures, never by a model.', 'Already written a proposal? Review my proposal checks it for you.'],
+    tips: ['Sample sizes are calculated by code from your own figures, never by a model.'],
   },
   'funding-concept': {
     title: 'Funding concept note',
     summary: 'A concept note for a call or a funder, checked against what the call asks.',
     steps: [
-      { title: 'Describe your idea', detail: 'A short project title and, in a sentence or two, what you propose to do.', action: { label: 'Start a concept note', to: '/app/start/concept-note' } },
+      { title: 'Describe your idea', detail: 'A short project title, the problem and who it affects, and what you propose to do about it.', action: { label: 'Start a concept note', to: '/app/start/concept-note' } },
       { title: 'Add the call', detail: 'Upload or paste the call or the funder’s guidelines, with their template if they gave one.' },
       { title: 'Check what PaperAid found', detail: 'PaperAid reads the call and shows the limits and questions it found. Keep them or correct them.' },
       { title: 'Review and download', detail: 'Every limit and form box is checked. Ask for changes, then download.' },
@@ -117,7 +117,7 @@ export const GUIDES: Record<GuideKey, Guide> = {
     title: 'Funding proposal',
     summary: 'A full proposal written to the call, with its logframe, workplan and budget tables built from your figures.',
     steps: [
-      { title: 'Describe your project', detail: 'A short project title and what you propose to do.', action: { label: 'Start a proposal', to: '/app/start/funding' } },
+      { title: 'Describe your project', detail: 'A short project title, the problem and who it affects, and what you propose to do about it.', action: { label: 'Start a proposal', to: '/app/start/funding' } },
       { title: 'Add the call', detail: 'Upload or paste the call or the funder’s guidelines, with their template if they gave one.' },
       { title: 'Check what PaperAid found', detail: 'PaperAid reads the call and shows the limits, questions and figures it found. Keep them or correct them.' },
       { title: 'Fill in your figures', detail: 'Amounts only you can give are marked as gaps. Fill them in on the page, with no AI, and every budget sum is worked out for you.' },
@@ -231,6 +231,7 @@ export const SCENES: Record<GuideKey, DemoScene> = {
     title: 'Funding concept note · Start',
     elements: [
       { id: 'title', kind: 'input', area: 'bar', text: 'Project title', grow: true },
+      { id: 'problem', kind: 'input', area: 'main', text: 'The problem, and who it affects' },
       { id: 'idea', kind: 'input', area: 'main', text: 'What you propose to do about it' },
       { id: 'call', kind: 'note', area: 'main', text: 'Upload or paste the call' },
       { id: 'found', kind: 'check', area: 'side', text: 'Limits found in the call', hidden: true },
@@ -239,6 +240,7 @@ export const SCENES: Record<GuideKey, DemoScene> = {
     ],
     frames: [
       { step: 0, to: 'title', type: 'Safer deliveries in Kamuli' },
+      { step: 0, to: 'problem', type: 'Mothers reach care late in rural Kamuli' },
       { step: 0, to: 'idea', type: 'Train village health teams to refer mothers early' },
       { step: 1, to: 'call', click: true, set: { call: 'Call pasted ✓' } },
       { step: 2, reveal: ['found', 'qs'], select: ['found', 'qs'] },
@@ -249,6 +251,7 @@ export const SCENES: Record<GuideKey, DemoScene> = {
     title: 'Funding proposal',
     elements: [
       { id: 'title', kind: 'input', area: 'bar', text: 'Project title', grow: true },
+      { id: 'problem', kind: 'input', area: 'main', text: 'The problem, and who it affects' },
       { id: 'call', kind: 'note', area: 'main', text: 'Upload or paste the call' },
       { id: 'tables', kind: 'card', area: 'main', text: 'Logframe · Workplan · Budget', sub: 'Built from one results model', hidden: true },
       { id: 'gap', kind: 'note', area: 'side', text: 'Amount to be added by you', hidden: true },
@@ -257,6 +260,7 @@ export const SCENES: Record<GuideKey, DemoScene> = {
     ],
     frames: [
       { step: 0, to: 'title', type: 'Safer deliveries in Kamuli' },
+      { step: 0, to: 'problem', type: 'Mothers reach care late in rural Kamuli' },
       { step: 1, to: 'call', click: true, set: { call: 'Call pasted ✓' } },
       { step: 2, to: 'go', click: true, reveal: ['tables', 'gap'] },
       { step: 3, to: 'gap', click: true, set: { gap: 'Your figure added ✓' }, reveal: ['saved'], select: ['gap', 'saved'] },
@@ -330,6 +334,7 @@ export const NARRATION: Record<GuideKey, string[]> = {
   ],
   'funding-concept': [
     'Give your project a short title.',
+    'Say what the problem is and who it affects.',
     'Say what you propose to do, in your own words.',
     'Add the call or the funder’s guidelines.',
     'PaperAid shows what the call asks for.',
@@ -337,6 +342,7 @@ export const NARRATION: Record<GuideKey, string[]> = {
   ],
   'funding-proposal': [
     'Give your project a short title.',
+    'Say what the problem is and who it affects.',
     'Add the call: PaperAid reads what it requires.',
     'The tables are built from one results model.',
     'Fill in your own figures; the sums are worked out.',

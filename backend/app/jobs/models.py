@@ -342,10 +342,6 @@ class Wallet(Camel):
     # a newer version is asked for again.
     terms_version: str = ""
     terms_accepted_at: datetime | None = None
-    # Day, night or the device's setting, kept with the account so it follows the person to every device (owner,
-    # 2026-11-17, after PaperAid Pro); "" when never chosen. And when the in-app notifications were last read.
-    appearance: Literal["", "light", "dark", "system"] = ""
-    inbox_read_at: datetime | None = None
     ledger_backfilled: bool = False  # entries from before the complete history was kept were copied into it
     # Credits reserved for a document started with one Start (owner decision 2026-10-01; Codex audit):
     # "work:<id>" or "project:<id>" → amount, held from Start until the document's own step holds it,
@@ -589,6 +585,16 @@ class StoredOutput(OutputFile):
     content_type: str
 
 
+class Preferences(Camel):
+    """A person's own choices, in a record of their own beside the wallet (Codex audit 2026-11-17: an older release
+    rewriting the whole wallet during a rollout or rollback must never drop them): day, night or the device's setting
+    (owner, 2026-11-17, after PaperAid Pro; "" when never chosen) and how far the in-app notifications were read."""
+
+    uid: str
+    appearance: Literal["", "light", "dark", "system"] = ""
+    inbox_read_at: datetime | None = None
+
+
 class Notice(Camel):
     """The "your work is ready" or "it stopped" message a job owes its owner (Codex audit, finding 11).
     Recorded in the same transaction as the outcome (`state.transition`), so a crash can't lose it;
@@ -597,6 +603,10 @@ class Notice(Camel):
     key: str  # the outcome it is for: COMPLETED:<generation>, FAILED:<generation> or STOPPED:<generation>
     outcome: Literal["READY", "STOPPED"]
     pending: bool = True
+    # When it was raised, and whether the in-app list shows it (never an internal step of one Start that completed):
+    # the inbox reads notices in this order (Codex audit 2026-11-17). Older notices have neither and are not listed.
+    at: datetime | None = None
+    inbox: bool = False
     channels: dict[str, str] = {}  # channel → SENT, FAILED (retryable) or PERMANENT_FAILURE
     attempts: int = 0
     next_at: datetime | None = None

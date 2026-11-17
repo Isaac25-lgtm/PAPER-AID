@@ -17,7 +17,7 @@ from typing import Literal
 import httpx
 
 from app.core.logging import log
-from app.jobs.models import Job, JobStatus, Notice, utcnow
+from app.jobs.models import Job, Notice, utcnow
 from app.runtime import Runtime
 
 logger = logging.getLogger("paperaid.notify")
@@ -100,14 +100,15 @@ def inbox(rt: Runtime, uid: str, read_at: datetime | None) -> list[dict]:
     """In-app notifications (owner, 2026-11-17, after PaperAid Pro): the same "ready" and "stopped" messages a job owes
     by email or text, newest first, for the person's latest finished jobs: never the daily canary's, and never an
     internal step of one Start that completed. Names the service and links to the work; never its content."""
-    jobs, _ = rt.store.list(uid, {JobStatus.COMPLETED, JobStatus.FAILED}, None, None, INBOX_JOBS)
+    if uid == rt.settings.canary_uid:
+        return []
     out = []
-    for job in jobs:
+    for job in rt.store.list_inbox(uid, INBOX_JOBS):  # newest notice first; only those the inbox shows
         notice = job.notice
-        if notice is None or uid == rt.settings.canary_uid or (notice.outcome == "READY" and _internal(job)):
+        if notice is None or notice.at is None:
             continue
         what = _what(job)
-        at = job.completed_at or job.created_at
+        at = notice.at
         out.append({"id": job.id, "outcome": notice.outcome, "title": f"Your {what} is ready" if notice.outcome == "READY" else f"Your {what} stopped",
                     "detail": "" if notice.outcome == "READY" else "PaperAid couldn't finish it. Nothing extra was charged.",
                     "to": _path(job), "at": at, "unread": read_at is None or at > read_at})
@@ -188,7 +189,7 @@ def stopped(rt: Runtime, job_id: str) -> None:
         key = f"STOPPED:{j.generation}"
         if j.notice is not None and j.notice.key == key:
             return None
-        j.notice = Notice(key=key, outcome="STOPPED")
+        j.notice = Notice(key=key, outcome="STOPPED", at=utcnow(), inbox=True)
         return j
 
     if rt.store.update(job_id, owe) is not None:

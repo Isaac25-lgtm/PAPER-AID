@@ -421,6 +421,7 @@ def test_deleting_a_project_or_the_account_removes_its_chapters_and_evidence(cli
     assert client.delete(f"/api/projects/{project['id']}", headers=STUDENT).status_code == 204
     assert rt.store.get_project(project["id"]) is None and not rt.files.exists(stored.evidence_files[0])
     fresh = {"Authorization": "Dev leaving@example.com"}  # no credit, so the account may be deleted
+    client.post("/api/me/terms", headers=fresh, json={"version": client.get("/api/config").json()["termsVersion"]})  # a real account accepts first
     second = _create(client, fresh)
     assert client.delete("/api/me", headers=fresh).status_code == 204
     assert rt.store.get_project(second["id"]) is None

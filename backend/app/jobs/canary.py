@@ -96,6 +96,9 @@ def run(rt: Runtime, rerun: bool = False) -> dict:
 
     user = service.User(uid=s.canary_uid, email=s.canary_email, is_admin=False, verified=True)
     day = utcnow().strftime("%d %B %Y").lstrip("0")
+    # The synthetic account follows a change of terms by itself (Codex audit 2026-11-17: a new version blocked the daily
+    # check on 2026-11-15 until its acceptance was written by hand). Never a person's account.
+    service.accept_terms(rt, user, s.terms_version)
     try:
         job_id = service.create_draft(rt, user).id
         service.upload_file(rt, user, job_id, "source", "daily-check.docx", paper(day, run_number))

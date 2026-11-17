@@ -97,11 +97,12 @@ export interface DataSource {
   notifications(): Promise<Notifications>
   setNotifications(choice: Partial<Omit<Notifications, 'available'>>): Promise<Notifications>
   /** Choices kept with the account: day, night or the device's setting (owner, 2026-11-17). */
-  preferences(): Promise<{ appearance: 'light' | 'dark' | 'system' | null; termsAccepted: boolean }>
+  preferences(): Promise<{ appearance: 'light' | 'dark' | 'system' | null; termsAccepted: boolean; termsVersion: string }>
   setPreferences(choice: { appearance: 'light' | 'dark' | 'system' }): Promise<{ appearance: 'light' | 'dark' | 'system' }>
   /** In-app notifications: the person's latest finished work, and marking them read. */
   inbox(): Promise<Inbox>
-  readInbox(): Promise<void>
+  /** Marks read up to the newest notice the person was shown. */
+  readInbox(through: string): Promise<void>
   /** The review workspace. */
   workspace: {
     document(jobId: string): Promise<JobDocument>

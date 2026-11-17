@@ -208,6 +208,7 @@ def before_draft(rt: Runtime, work: Work, spec: ResolvedSpec) -> list[ReadinessI
 
 
 def create(rt: Runtime, user: User, kind: str, variant: str, mode: str, inputs: WorkInputs, citation: CitationStyle) -> WorkView:
+    require_terms(rt, user)  # the current terms, accepted before PaperAid handles anything of theirs (Codex audit 2026-11-17)
     if not user.verified:
         raise Forbidden("Verify your email address before starting.", code="EMAIL_NOT_VERIFIED")
     if kind not in KIND_VARIANTS or variant not in KIND_VARIANTS[kind]:
@@ -371,6 +372,7 @@ def _attach(rt: Runtime, user: User, work_id: str, name: str, role: SourceRole, 
 
 
 def upload_source(rt: Runtime, user: User, work_id: str, role: SourceRole, filename: str, data: bytes) -> WorkView:
+    require_terms(rt, user)  # the current terms, accepted before PaperAid handles anything of theirs (Codex audit 2026-11-17)
     _rate_limit(rt, user, "upload", rt.settings.uploads_per_hour)
     model = inspect_upload(data, filename, rt.settings.max_upload_bytes, MAX_SOURCE_WORDS, rt.settings.max_pdf_pages, min_words=10)
     text = "\n".join(b.text for b in model.blocks if b.text.strip())
@@ -378,6 +380,7 @@ def upload_source(rt: Runtime, user: User, work_id: str, role: SourceRole, filen
 
 
 def paste_source(rt: Runtime, user: User, work_id: str, role: SourceRole, name: str, text: str) -> WorkView:
+    require_terms(rt, user)  # the current terms, accepted before PaperAid handles anything of theirs (Codex audit 2026-11-17)
     _rate_limit(rt, user, "upload", rt.settings.uploads_per_hour)
     clean = text.strip()
     words = len(clean.split())

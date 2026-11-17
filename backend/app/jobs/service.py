@@ -123,6 +123,8 @@ TERMS_REQUIRED = "Please read and accept PaperAid's terms to continue."
 def require_terms(rt: Runtime, user: User) -> None:
     """The current terms, accepted before anything paid starts or any data is uploaded."""
     wallet = rt.store.get_wallet(user.uid)
+    if wallet is not None and wallet.closing:  # a closing or closed account is told so, not asked to accept terms
+        raise Conflict("This account is being deleted, so nothing new can be started.", code="ACCOUNT_CLOSING")
     if wallet is None or wallet.terms_version != rt.settings.terms_version:
         raise AppError(TERMS_REQUIRED, code="TERMS_REQUIRED", status=403)
 
@@ -248,6 +250,7 @@ NOT_SCORABLE = "This paper has no passage long enough (25 words or more) for a w
 
 
 def create_draft(rt: Runtime, user: User) -> JobView:
+    require_terms(rt, user)  # the current terms, accepted before PaperAid handles anything of theirs (Codex audit 2026-11-17)
     if not user.verified:
         raise Forbidden("Verify your email address before starting a job. Check your inbox for the link.", code="EMAIL_NOT_VERIFIED")
     _rate_limit(rt, user, "draft", rt.settings.quotes_per_hour)
@@ -271,6 +274,7 @@ FileRole = Literal["source", "guideline"]
 
 def upload_file(rt: Runtime, user: User, job_id: str, role: FileRole, filename: str, data: bytes) -> FileMeta:
     """Attach the paper ("source") or the university formatting guide ("guideline") to a draft."""
+    require_terms(rt, user)  # the current terms, accepted before PaperAid handles anything of theirs (Codex audit 2026-11-17)
     job = _owned(rt, user, job_id)
     _rate_limit(rt, user, "upload", rt.settings.uploads_per_hour)
     if job.status not in (JobStatus.DRAFT, JobStatus.QUOTED):
@@ -341,6 +345,7 @@ MAX_LOGO_BYTES = 2_000_000
 def upload_logo(rt: Runtime, user: User, job_id: str, filename: str, data: bytes) -> ImageMeta:
     """An institution logo for the title page (PNG or JPEG, up to 2 MB). Replacing it clears the
     quote, like any file."""
+    require_terms(rt, user)  # the current terms, accepted before PaperAid handles anything of theirs (Codex audit 2026-11-17)
     from docx.image.exceptions import InvalidImageStreamError, UnexpectedEndOfFileError, UnrecognizedImageError
     from docx.image.image import Image
 
@@ -888,6 +893,7 @@ def delete_account(rt: Runtime, user: User) -> int:
 
     rt.store.update_wallet(user.uid, "", tombstone)
     rt.store.delete_ledger(user.uid)
+    rt.store.delete_preferences(user.uid)
     log(logger, logging.WARNING, "account deleted", uid=user.uid, jobs=len(claimed))
     return len(claimed)
 

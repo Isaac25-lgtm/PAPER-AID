@@ -190,6 +190,7 @@ def view(rt: Runtime, p: Project) -> ProjectView:
 
 
 def create(rt: Runtime, user: User, inputs: ProposalInputs, title_page: TitlePage, citation: CitationStyle, goal: Literal["FULL", "CONCEPT"] = "FULL") -> ProjectView:
+    require_terms(rt, user)  # the current terms, accepted before PaperAid handles anything of theirs (Codex audit 2026-11-17)
     if not user.verified:
         raise Forbidden("Verify your email address before starting a proposal.", code="EMAIL_NOT_VERIFIED")
     _require_ai(rt, user)
@@ -820,6 +821,7 @@ def _quote_profile(rt: Runtime, user: User, p: Project) -> StepQuote:
 
 def upload_guide(rt: Runtime, user: User, project_id: str, filename: str, data: bytes) -> ProjectView:
     """The institution's research guide (Word or PDF), kept as text for the profile step."""
+    require_terms(rt, user)  # the current terms, accepted before PaperAid handles anything of theirs (Codex audit 2026-11-17)
     _require_ai(rt, user)
     p = _owned(rt, user, project_id)
     if step_running(rt, p):
@@ -946,6 +948,7 @@ def _written(rt: Runtime, p: Project) -> list[feedback.Written]:
 
 def add_feedback(rt: Runtime, user: User, project_id: str, text: str, filename: str = "", data: bytes = b"") -> ProjectView:
     """A round of supervisor comments, pasted or from a file, each placed where code suggests."""
+    require_terms(rt, user)  # the current terms, accepted before PaperAid handles anything of theirs (Codex audit 2026-11-17)
     p = _owned(rt, user, project_id)
     _rate_limit(rt, user, "feedback", rt.settings.uploads_per_hour)
     read = feedback.read_file(filename, data) if data else feedback.split(text)

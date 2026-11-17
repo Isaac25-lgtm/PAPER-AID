@@ -41,6 +41,7 @@ def transition(job: Job, target: JobStatus, event: str | None = None) -> Job:
         job.stage = None
         job.lease_until = None
     if target in (S.COMPLETED, S.FAILED):  # the message it owes, recorded with the outcome itself
-        job.notice = Notice(key=f"{target.value}:{job.generation}", outcome="READY" if target == S.COMPLETED else "STOPPED")
+        internal = target == S.COMPLETED and job.selection.bundled and (job.selection.work in ("READ", "PLAN") or job.selection.proposal == "PLAN")
+        job.notice = Notice(key=f"{target.value}:{job.generation}", outcome="READY" if target == S.COMPLETED else "STOPPED", at=now, inbox=not internal)
     job.events.append(JobEvent(at=now, label=event or target.capitalize()))
     return job

@@ -41,7 +41,8 @@ export function useInbox(): InboxState {
   const markRead = () => {
     if (!inbox?.unread) return
     setInbox({ unread: 0, items: inbox.items.map((i) => ({ ...i, unread: false })) })
-    data.readInbox().catch(() => void refresher.current?.refresh()) // not recorded: the next refresh shows them unread again
+    const through = inbox.items[0]?.at // the newest notice shown: one raised after the list was fetched stays unread
+    if (through) data.readInbox(through).catch(() => void refresher.current?.refresh()) // not recorded: shown unread again
   }
   return { inbox, markRead }
 }

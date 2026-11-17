@@ -650,6 +650,7 @@ def _wallet(client, headers=STUDENT):
 
 def test_no_estimate_or_quote_without_credits(client):
     headers = {"Authorization": "Dev broke@example.com"}
+    client.post("/api/me/terms", headers=headers, json={"version": client.get("/api/config").json()["termsVersion"]})  # a real account accepts first (2026-11-17)
     job_id = client.post("/api/jobs", headers=headers).json()["id"]
     client.post(f"/api/jobs/{job_id}/files/source", headers=headers, files={"file": ("e.docx", fixture_bytes("simple_essay.docx"), "application/octet-stream")})
     for selection in (REFINE_FORMAT, {"writing": "AI_CHECK"}, {"formatting": "FORMAT", "preset": "apa7"}):
@@ -1490,6 +1491,7 @@ def test_nothing_new_can_start_while_an_account_is_being_deleted(client, monkeyp
     rt = get_runtime()
     monkeypatch.setattr(rt.settings, "credits_enabled", False)  # testing mode: a balance does not block deletion
     headers = {"Authorization": "Dev leaving2@example.com"}
+    client.post("/api/me/terms", headers=headers, json={"version": client.get("/api/config").json()["termsVersion"]})  # a real account accepts first (2026-11-17)
     first, _ = start_job(client, selection={"formatting": "FORMAT", "preset": "apa7"}, headers=headers)
     attempts = []
     original = service._erase
@@ -1606,6 +1608,7 @@ def test_a_draft_paused_before_its_write_cannot_outlive_account_deletion(client,
     monkeypatch.setattr(rt.settings, "credits_enabled", False)
     headers = {"Authorization": "Dev latedraft@example.com"}
     client.get("/api/wallet", headers=headers)
+    client.post("/api/me/terms", headers=headers, json={"version": client.get("/api/config").json()["termsVersion"]})  # a real account accepts first (2026-11-17)
     original = type(rt.store).create_if_open
     deleted = []
 

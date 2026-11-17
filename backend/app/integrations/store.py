@@ -17,7 +17,7 @@ from typing import Protocol
 from pydantic import ValidationError
 
 from app.core.errors import LimiterUnavailable, PermanentStageError, RetryableStageError
-from app.jobs.models import Job, JobStatus, LedgerEntry, Wallet
+from app.jobs.models import Job, JobStatus, LedgerEntry, Preferences, Wallet
 from app.proposals.models import Project
 from app.works.models import Work
 
@@ -61,6 +61,11 @@ class JobStore(Protocol):
     def update_job_and_wallet(self, job_id: str, mutate: PairMutator) -> tuple[Job, Wallet] | None: ...
     def find_wallets(self, email_contains: str | None, limit: int) -> list[Wallet]: ...
     def delete_wallet(self, uid: str) -> None: ...
+    # A person's own choices, beside the wallet (`Preferences`), and their notices newest first (the in-app list).
+    def get_preferences(self, uid: str) -> Preferences | None: ...
+    def update_preferences(self, uid: str, mutate: Callable[[Preferences], Preferences]) -> Preferences: ...
+    def delete_preferences(self, uid: str) -> None: ...
+    def list_inbox(self, owner_uid: str, limit: int) -> list[Job]: ...
     def ledger(self, uid: str, before: str | None, limit: int) -> list[LedgerEntry]: ...
     def backfill_ledger(self, uid: str) -> bool: ...
     def all_wallet_ids(self) -> list[str]: ...
@@ -143,6 +148,8 @@ class LocalJobStore:
         self._flags_path = root / "flags.json"
         self._wallets = root / "wallets"
         self._wallets.mkdir(parents=True, exist_ok=True)
+        self._preferences = root / "preferences"
+        self._preferences.mkdir(parents=True, exist_ok=True)
         # A job and its wallet are two files. Their paired change is first written, whole, to this
         # journal; it is removed only after both files are replaced. A leftover journal (a crash or
         # a failed write in between) is applied before anything is read again, so the two files
@@ -378,6 +385,34 @@ class LocalJobStore:
             self._wallet_path(uid).unlink(missing_ok=True)
             self._ledger_path(uid).unlink(missing_ok=True)
 
+    def _preferences_path(self, uid: str) -> Path:
+        self._wallet_path(uid)  # the same check of the id
+        return self._preferences / f"{uid}.json"
+
+    def get_preferences(self, uid: str) -> Preferences | None:
+        path = self._preferences_path(uid)
+        with self._lock:
+            return Preferences.model_validate_json(path.read_text(encoding="utf-8")) if path.exists() else None
+
+    def update_preferences(self, uid: str, mutate: Callable[[Preferences], Preferences]) -> Preferences:
+        path = self._preferences_path(uid)
+        with self._lock:
+            current = Preferences.model_validate_json(path.read_text(encoding="utf-8")) if path.exists() else Preferences(uid=uid)
+            result = mutate(current)
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(result.model_dump_json(by_alias=True), encoding="utf-8")
+            tmp.replace(path)
+            return result
+
+    def delete_preferences(self, uid: str) -> None:
+        with self._lock:
+            self._preferences_path(uid).unlink(missing_ok=True)
+
+    def list_inbox(self, owner_uid: str, limit: int) -> list[Job]:
+        jobs = [j for j in self._all() if j.owner_uid == owner_uid and j.notice is not None and j.notice.inbox and j.notice.at is not None]
+        jobs.sort(key=lambda j: (j.notice.at, j.id), reverse=True)  # type: ignore[union-attr]  # filtered just above
+        return jobs[:limit]
+
     def delete_ledger(self, uid: str) -> None:
         with self._lock:
             self._ledger_path(uid).unlink(missing_ok=True)
@@ -578,6 +613,7 @@ class FirestoreJobStore:
         self._db = firestore.Client(project=project)
         self._jobs = self._db.collection("jobs")
         self._wallets = self._db.collection("wallets")
+        self._preferences = self._db.collection("preferences")
         self._projects = self._db.collection("projects")
         self._works = self._db.collection("works")
 
@@ -793,6 +829,33 @@ class FirestoreJobStore:
     def delete_wallet(self, uid: str) -> None:
         self.delete_ledger(uid)
         self._wallets.document(uid).delete()
+
+    def get_preferences(self, uid: str) -> Preferences | None:
+        snap = self._preferences.document(uid).get()
+        return Preferences.model_validate(snap.to_dict()) if snap.exists else None
+
+    def update_preferences(self, uid: str, mutate: Callable[[Preferences], Preferences]) -> Preferences:
+        ref = self._preferences.document(uid)
+
+        @self._fs.transactional
+        def run(transaction) -> Preferences:
+            snap = ref.get(transaction=transaction)
+            result = mutate(Preferences.model_validate(snap.to_dict()) if snap.exists else Preferences(uid=uid))
+            transaction.set(ref, json.loads(result.model_dump_json(by_alias=True)))
+            return result
+
+        return run(self._db.transaction())
+
+    def delete_preferences(self, uid: str) -> None:
+        self._preferences.document(uid).delete()
+
+    def list_inbox(self, owner_uid: str, limit: int) -> list[Job]:
+        # newest notice first; equal times keep the documents' own order (Firestore sorts by document name after the
+        # explicit order). Index: ownerUid, notice.inbox, notice.at descending.
+        query = (self._jobs.where(filter=self._fs.FieldFilter("ownerUid", "==", owner_uid))
+                 .where(filter=self._fs.FieldFilter("notice.inbox", "==", True))
+                 .order_by("notice.at", direction=self._fs.Query.DESCENDING))
+        return [Job.model_validate(d.to_dict()) for d in query.limit(limit).stream()]
 
     def delete_ledger(self, uid: str) -> None:
         ledger = self._wallets.document(uid).collection("ledger")

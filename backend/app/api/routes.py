@@ -1,6 +1,7 @@
 """HTTP routes. Deliberately thin: parse input, call app.jobs.service, return its result."""
 
-from datetime import datetime
+import logging
+from datetime import UTC, datetime
 from typing import Literal
 
 from fastapi import APIRouter, Body, Depends, File, Query, Request, UploadFile
@@ -27,10 +28,12 @@ from app.jobs.models import (
     WalletView,
     utcnow,
 )
+from app.jobs.models import Preferences as PreferencesRecord
 from app.jobs.pipeline import run_step
 from app.jobs.service import User
 from app.runtime import Runtime, get_runtime
 
+_csp_logger = logging.getLogger("paperaid.csp")
 api = APIRouter(prefix="/api")
 tasks = APIRouter(prefix="/tasks", include_in_schema=False)
 
@@ -44,6 +47,41 @@ def health() -> dict:
 def ready(rt: Runtime = Depends(get_runtime)) -> dict:
     rt.store.get_flag("processing_enabled", True)  # proves the store is reachable; never calls an AI provider
     return {"status": "ready", "processingEnabled": service.processing_enabled(rt)}
+
+
+CSP_REPORT_BYTES = 8_192
+
+
+def _csp_reports(raw: object) -> list[dict]:
+    """The violations in a report, in either form browsers send: {"csp-report": {...}} or the Reporting API's list."""
+    if isinstance(raw, dict) and isinstance(raw.get("csp-report"), dict):
+        return [raw["csp-report"]]
+    if isinstance(raw, list):
+        return [r["body"] for r in raw[:10] if isinstance(r, dict) and isinstance(r.get("body"), dict)]
+    return []
+
+
+@api.post("/csp-report", status_code=204)
+async def csp_report(request: Request) -> Response:
+    """Where the browser reports what the report-only security policy would block (Codex audit 2026-11-17), so it can be
+    enforced on evidence. Unauthenticated, as browsers send it; bounded; logs the rule and the blocked host only, never
+    a full address, which can carry tokens."""
+    import json
+    from urllib.parse import urlsplit
+
+    from app.core.logging import log
+
+    body = (await request.body())[:CSP_REPORT_BYTES]
+    try:
+        reports = _csp_reports(json.loads(body))
+    except ValueError:
+        return Response(status_code=204)  # not a report: nothing to record
+    for report in reports:
+        directive = str(report.get("effective-directive") or report.get("effectiveDirective") or report.get("violated-directive") or "")[:60]
+        blocked = str(report.get("blocked-uri") or report.get("blockedURL") or "")
+        host = urlsplit(blocked).netloc or blocked.split(":")[0][:20]  # "inline", "eval" and "data" have no host
+        log(_csp_logger, logging.WARNING, "csp violation", directive=directive, blocked=host[:120])
+    return Response(status_code=204)
 
 
 @api.get("/config")
@@ -160,48 +198,51 @@ def set_notifications(body: NotificationChoice, user: User = Depends(current_use
     return _notifications(rt, user)
 
 
-class Preferences(Camel):
+class PreferencesChoice(Camel):
     appearance: Literal["light", "dark", "system"]
+
+
+class InboxRead(Camel):
+    through: datetime  # the newest notice the browser was shown: nothing later is marked read
 
 
 @api.get("/me/preferences")
 def get_preferences(user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> dict:
-    """The person's own choices kept with the account (owner, 2026-11-17): day, night or the device's setting, and
-    whether they have accepted the current terms (the app asks before anything is used, as PaperAid Pro does)."""
+    """The person's own choices (owner, 2026-11-17): day, night or the device's setting, and whether they have accepted
+    the current terms, with that version (the app asks before anything is used, as PaperAid Pro does)."""
+    prefs = rt.store.get_preferences(user.uid)
     wallet = rt.store.get_wallet(user.uid)
-    return {"appearance": (wallet.appearance if wallet else "") or None,
+    return {"appearance": (prefs.appearance if prefs else "") or None, "termsVersion": rt.settings.terms_version,
             "termsAccepted": bool(wallet and wallet.terms_version == rt.settings.terms_version)}
 
 
-@api.put("/me/preferences")
-def set_preferences(body: Preferences, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> dict:
-    def apply(w: Wallet) -> Wallet:
-        if not w.closing:
-            w.appearance = body.appearance
-        return w
-
-    rt.store.update_wallet(user.uid, user.email, apply)
+@api.post("/me/preferences")
+def set_preferences(body: PreferencesChoice, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> dict:
+    rt.store.update_preferences(user.uid, lambda p: p.model_copy(update={"appearance": body.appearance}))
     return {"appearance": body.appearance}
 
 
 @api.get("/me/inbox")
 def get_inbox(user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> dict:
-    """In-app notifications: "ready" and "stopped" for the person's latest finished work, with what is unread."""
+    """In-app notifications: "ready" and "stopped" for the person's latest work, newest first, with what is unread."""
     from app import notify
 
-    wallet = rt.store.get_wallet(user.uid)
-    items = notify.inbox(rt, user.uid, wallet.inbox_read_at if wallet else None)
+    prefs = rt.store.get_preferences(user.uid)
+    items = notify.inbox(rt, user.uid, prefs.inbox_read_at if prefs else None)
     return {"items": items, "unread": sum(1 for i in items if i["unread"])}
 
 
 @api.post("/me/inbox/read", status_code=204)
-def read_inbox(user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> Response:
-    def apply(w: Wallet) -> Wallet:
-        if not w.closing:
-            w.inbox_read_at = utcnow()
-        return w
+def read_inbox(body: InboxRead, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> Response:
+    """Marks read up to the newest notice the browser showed (never later, never in the future, never backwards):
+    a notice raised after the list was fetched stays unread (Codex audit 2026-11-17)."""
+    through = min(body.through if body.through.tzinfo else body.through.replace(tzinfo=UTC), utcnow())
 
-    rt.store.update_wallet(user.uid, user.email, apply)
+    def apply(p: "PreferencesRecord") -> "PreferencesRecord":
+        read = p.inbox_read_at
+        return p.model_copy(update={"inbox_read_at": through if read is None or through > read else read})
+
+    rt.store.update_preferences(user.uid, apply)
     return Response(status_code=204)
 
 

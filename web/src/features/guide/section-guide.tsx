@@ -11,6 +11,9 @@ import { GUIDES, NARRATION, SCENES, type GuideKey } from './scenes'
    every section's guide, and an optional welcome tour. Nothing opens by itself except a section's own panel the first
    time it is visited on a computer; closing it is remembered (per section, in this browser). */
 
+/** The narrowest window with room for the guide beside the page (sidebar 248 + content 1152 + guide 420 + margins). */
+const GUIDE_BESIDE = 1880
+
 const ORDER: GuideKey[] = ['dashboard', 'coursework', 'research-concept', 'proposal', 'funding-concept', 'funding-proposal', 'paper-check', 'formatting']
 
 function stored(key: string): string | null {
@@ -89,14 +92,16 @@ function Steps({ section, current }: { section: GuideKey; current?: number }) {
 }
 
 /** "How <section> works", pinned to the bottom right of a section's page; collapses to a small button. Open the first
- *  time on a computer, collapsed on a phone, and whatever the person last chose after that. */
+ *  time only on a screen wide enough for it to sit beside the page, and whatever the person last chose after that. */
 export function SectionGuide({ section }: { section: GuideKey }) {
   const guide = GUIDES[section]
   const key = `paperaid.guide.${section}`
   const [collapsed, setCollapsedState] = useState(() => {
     const saved = stored(key)
     if (saved) return saved === 'collapsed'
-    return typeof window !== 'undefined' && window.innerWidth < 640
+    // Open by itself only where it covers nothing: beside the page on a very wide screen (Codex audit 2026-11-17: at
+    // 1024 and 1280 px it covered the page's own controls). Elsewhere it starts as the small button.
+    return typeof window === 'undefined' || window.innerWidth < GUIDE_BESIDE
   })
   const [step, setStep] = useState(0)
   const [tips, setTips] = useState(false)

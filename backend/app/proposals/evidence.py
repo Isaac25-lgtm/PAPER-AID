@@ -440,33 +440,51 @@ def _figure_units(text: str) -> dict[str, set[str]]:
     return out
 
 
+_PER_CENT = re.compile(r"(?<=\d)\s?(?:per\s?cent|percent)\b", re.IGNORECASE)
+
+
+def _percent(text: str) -> str:
+    """"12 per cent" and "12 percent" are "12%" (Codex audit 2026-11-17: an equivalent spelling was a finding)."""
+    return _PER_CENT.sub("%", text)
+
+
 def figure_problems(paragraph: str, library: dict[str, EvidenceItem], allowed_text: str, units: bool = False) -> list[str]:
     """Figures must come from the evidence cited in the same paragraph, or from the student's
     own inputs and plan (`allowed_text`). References to the document's own sections, tables and
-    figures are not figures. With `units` (steps priced from 2026-11-17: academicPolicy 3 for works, 4 for
-    proposals), a figure written with a unit must not stand on the same number in a different unit: "12 days" in a
-    source never licenses "12 months". A number the evidence gives bare is not judged on its unit."""
+    figures are not figures.
+
+    With `units` (steps priced from 2026-11-17: academicPolicy 3 for works, 4 for proposals; Codex audit 2026-11-17),
+    quantities and units are read together: a figure written with a unit or currency must be given in that unit by
+    the evidence ("12 days" never licenses "12 months", "UGX 12" never "USD 12"); the exemption for years and small
+    counts applies only to a bare number; and a bare occurrence of the same number elsewhere ("Version 14") never
+    overrides a source that gives it in another unit. "Per cent" is "%"."""
     if SUBHEADING.match(paragraph.strip()):
         return []
-    cited = [library[i] for i in cited_ids(paragraph) if i in library]
-    known = _figures(allowed_text)
-    for item in cited:
-        known |= _figures(item.passage) | _figures(item.statement)
-    quantities = {_quantity_key(f) for f in known}
-    missing = sorted(f for f in _figures(REFERENCE.sub(" ", ANY_TOKEN.sub(" ", paragraph)))
-                     if not _plain_figure(f) and _quantity_key(f) not in quantities)
-    problems = [f"The figure {f} is not in the evidence cited in this paragraph or in your plan." for f in missing]
     if units:
-        sources = " ".join([allowed_text, *(f"{item.passage} {item.statement}" for item in cited)])
-        known_units = _figure_units(sources)
-        text = REFERENCE.sub(" ", ANY_TOKEN.sub(" ", paragraph))
-        for match in FIGURE.finditer(text):
-            figure = match.group(0).replace(",", "")
-            key, unit = _quantity_key(figure), _unit_of(text, match)
-            given = known_units.get(key, set())
-            if unit and given and "" not in given and unit not in given and not _plain_figure(figure):
-                problems.append(f"The figure {figure} {unit} is in the cited evidence only as {figure} {' or '.join(sorted(given))}.")
-    return problems
+        paragraph, allowed_text = _percent(paragraph), _percent(allowed_text)
+    cited = [library[i] for i in cited_ids(paragraph) if i in library]
+    sources = " ".join([allowed_text, *(f"{item.passage} {item.statement}" for item in cited)])
+    if units:
+        sources = _percent(sources)
+    quantities = {_quantity_key(f) for f in _figures(sources)}
+    text = REFERENCE.sub(" ", ANY_TOKEN.sub(" ", paragraph))
+    if not units:
+        missing = sorted(f for f in _figures(text) if not _plain_figure(f) and _quantity_key(f) not in quantities)
+        return [f"The figure {f} is not in the evidence cited in this paragraph or in your plan." for f in missing]
+    known_units = _figure_units(sources)
+    problems: list[str] = []
+    for match in FIGURE.finditer(text):
+        figure = match.group(0).replace(",", "")
+        key, unit = _quantity_key(figure), _unit_of(text, match)
+        if not unit and _plain_figure(figure):
+            continue  # a year or a small count, written bare
+        if key not in quantities:
+            problems.append(f"The figure {figure}{' ' + unit if unit else ''} is not in the evidence cited in this paragraph or in your plan.")
+            continue
+        explicit = known_units.get(key, set()) - {""}
+        if unit and explicit and unit not in explicit:
+            problems.append(f"The figure {figure} {unit} is in the cited evidence only as {figure} {' or '.join(sorted(explicit))}.")
+    return list(dict.fromkeys(problems))
 
 
 # A claim that research on a topic does not exist. A search that found nothing proves only that: the audit of
@@ -937,7 +955,7 @@ def sentences(paragraph: str) -> list[str]:
 
 
 def strip_unsupported(paragraph: str, library: dict[str, EvidenceItem], usable: set[str], allowed_text: str,
-                      also_allowed: Callable[[str], str] | None = None) -> str:
+                      also_allowed: Callable[[str], str] | None = None, units: bool = False) -> str:
     """The last line of defence after the fix rounds: remove each sentence that still carries an
     invalid citation or an unsupported figure. Never adds anything, and returns the paragraph exactly
     as it was when nothing is removed: its spacing and line breaks are part of the approved text.
@@ -949,7 +967,7 @@ def strip_unsupported(paragraph: str, library: dict[str, EvidenceItem], usable: 
             removed = True
             continue
         context = sentence if cited_ids(sentence) else sentence + " " + " ".join(f"⟦{i}⟧" for i in cited_ids(paragraph))
-        if figure_problems(context, library, allowed_text + (" " + also_allowed(sentence) if also_allowed else "")):
+        if figure_problems(context, library, allowed_text + (" " + also_allowed(sentence) if also_allowed else ""), units=units):
             removed = True
             if kept and LIST_MARKER.fullmatch(kept[-1]):
                 kept.pop()  # "1." whose objective was withheld is never left behind on its own

@@ -40,21 +40,21 @@ UNAVAILABLE = "PaperAid could not reach the registry of published works just now
 
 def _title_span(words: list[str], title: str) -> tuple[float, int, int]:
     """Where a registered title sits in a reference, in any style (owner, 2026-11-17, after PaperAid Pro): the best
-    fuzzy match of the title against windows of the reference's words, as (score, first word, end word). A subtitle
-    left out on one side still matches its main title."""
+    fuzzy match of the title against windows of the reference's words, as (score, first word, end word). The full
+    title is tried before its main title (the part before a colon), and an equal score keeps the longer match, so a
+    subtitle's year stays inside the title (Codex audit 2026-11-17). A one-word title counts only when exact."""
     best = (0.0, 0, 0)
-    for candidate in {title, title.split(":")[0]}:
+    main = title.split(":")[0]
+    for candidate in (title, main) if main != title else (title,):
         target = _norm(candidate)
         size = len(target.split())
-        if not target or not words or size < 2:
+        if not target or not words:
             continue
         for start in range(0, max(1, len(words) - size + 1)):
-            for width in (size - 1, size, size + 1, size + 2):
-                if width < 1:
-                    continue
+            for width in ((size,) if size == 1 else (size - 1, size, size + 1, size + 2)):
                 window = " ".join(words[start:start + width])
-                score = 1.0 if window == target else SequenceMatcher(None, window, target).ratio()
-                if score > best[0]:
+                score = 1.0 if window == target else 0.0 if size == 1 else SequenceMatcher(None, window, target).ratio()
+                if score > best[0] or (score == best[0] and score > 0 and width > best[2] - best[1]):
                     best = (score, start, start + width)
     return best
 
@@ -75,17 +75,23 @@ def _first_author_ok(before_title: list[str], first: str) -> bool | None:
     return "," not in first and (registered in " ".join(names[:len(family) + 3]))  # an organisation written a little differently
 
 
+_PUBLISHED = re.compile(r"\((1[5-9]\d{2}|20\d{2})[a-z]?[,)]")  # "(2024)", "(2024a)" or "(2024, March)": author-date's year
+
+
 def _read(entry: str, record: dict[str, str]) -> tuple[float, str, bool | None]:
     """How a reference reads against one registered record, in any referencing style: (title score, the year it
     gives, whether its first author is the registered one). Authors come before the title in APA, Harvard,
-    Vancouver, IEEE, MLA and Chicago; the year is read only outside the title, so a year inside a title never
-    counts as the publication year."""
-    words = _norm(NUMBERING.sub("", entry)).split()
+    Vancouver, IEEE, MLA and Chicago. The year is the one in brackets where the style gives one, otherwise the first
+    outside the title, so a year inside a title never counts as the publication year."""
+    body = NUMBERING.sub("", entry)
+    words = _norm(body).split()
     score, start, end = _title_span(words, record.get("title", ""))
     if score < 0.6:
         start = end = 0
+    title_text = " ".join(words[start:end])
+    bracketed = [m.group(1) for m in _PUBLISHED.finditer(body) if m.group(1) not in title_text.split()]
     outside = words[:start] + words[end:]
-    years = [w[:4] for w in outside if YEAR_WORD.fullmatch(w)]
+    years = bracketed or [w[:4] for w in outside if YEAR_WORD.fullmatch(w)]
     first = (record.get("authors") or "").split(";")[0].strip()
     return score, years[0] if years else "", _first_author_ok(words[:start], first) if score >= 0.6 else None
 
@@ -115,6 +121,10 @@ def verify(entry: str) -> ReferenceCheck:
     best = max(candidates, key=lambda r: _rank(entry, r), default=None)
     best_score, year, author = _read(entry, best) if best else (0.0, "", None)
     if best is None or best_score < 0.6:
+        return ReferenceCheck(entry=entry, status="NOT_VERIFIED", note="No registered record matches this reference. It may be a book, report or source that is not registered, so check it yourself.")
+    one_word = best is not None and len(_norm(best.get("title", "")).split()) == 1
+    if one_word and not (doi_match or (author is True and year and year == best.get("year"))):
+        # a one-word title proves little by itself: it counts with its DOI, or with its author and year (Codex audit 2026-11-17)
         return ReferenceCheck(entry=entry, status="NOT_VERIFIED", note="No registered record matches this reference. It may be a book, report or source that is not registered, so check it yourself.")
     first = best["authors"].split(";")[0].strip()
     differences = []

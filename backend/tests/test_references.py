@@ -109,3 +109,23 @@ def test_the_best_of_several_registered_records_is_chosen(lookups):
     lookups["found"] = [decoy, RECORD]
     check = references.verify(ENTRY)
     assert check.status == "PROBABLE" and check.doi == RECORD["doi"]
+
+
+def test_codex_a_one_word_title_counts_with_its_doi_or_its_author_and_year(lookups):
+    """Codex audit 2026-11-17: an exact one-word title with a valid DOI came back not verified."""
+    record = {**RECORD, "doi": "10.1000/epidemics", "title": "Epidemics", "authors": "Okello, P.", "year": "2019"}
+    lookups["works"][record["doi"]] = record
+    assert references.verify("Okello, P. (2019). Epidemics. Kampala: Fountain. https://doi.org/10.1000/epidemics").status == "VERIFIED"
+    lookups["found"] = [record]
+    assert references.verify("Okello, P. (2019). Epidemics. Kampala: Fountain.").status == "PROBABLE"
+    assert references.verify("Mensah, K. (2021). Epidemics. Accra: Sub-Saharan.").status == "NOT_VERIFIED"  # the word alone is not enough
+
+
+def test_codex_a_subtitle_year_is_not_the_publication_year(lookups):
+    """Codex audit 2026-11-17: "Global health: 2020 and beyond" published in 2024 was read as 2020."""
+    record = {**RECORD, "title": "Global health: 2020 and beyond", "authors": "Okello, P.", "year": "2024"}
+    lookups["found"] = [record]
+    assert references.verify("Okello, P. (2024). Global health: 2020 and beyond. Kampala: Fountain.").status == "PROBABLE"
+    assert references.verify("Okello P. Global health: 2020 and beyond. Kampala: Fountain; 2024.").status == "PROBABLE"
+    wrong = references.verify("Okello, P. (2021). Global health: 2020 and beyond. Kampala: Fountain.")
+    assert wrong.status == "MISMATCH" and "registered year is 2024, not 2021" in wrong.note

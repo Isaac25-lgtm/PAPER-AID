@@ -1158,8 +1158,8 @@ def _strip(inp: WorkStepInput, text: SectionText, library_items: dict[str, Evide
         plain = paragraph
         for placeholder, token in protected.items():
             plain = plain.replace(token, placeholder, 1)
-        kept = ev.strip_overclaims(ev.strip_unsupported(plain, library_items, usable, in_example) if cell else
-                                   ev.strip_unsupported(plain, library_items, usable, allowed, _framed(example)), gaps=False)
+        kept = ev.strip_overclaims(ev.strip_unsupported(plain, library_items, usable, in_example, units=getattr(inp, "academic_policy", 0) >= 3) if cell else
+                                   ev.strip_unsupported(plain, library_items, usable, allowed, _framed(example), units=getattr(inp, "academic_policy", 0) >= 3), gaps=False)
         if not cell and (notes := _notes_to_student(inp, kept)):  # what the repair rounds left: a note to the student is never delivered inside the document
             kept = " ".join(s for s in ev.sentences(kept) if s not in notes).strip()
         for placeholder, token in protected.items():

@@ -142,3 +142,13 @@ def test_an_alert_s_subject_and_detail_reach_the_log_through_its_filter():
         logger.setLevel(previous[2])
     entry = json.loads(buffer.getvalue())
     assert entry["message"] == "alert" and entry["alertSubject"] == "Daily check could not start" and entry["alertDetail"] == "NO_QUOTE: no price"
+
+
+def test_the_canary_follows_a_change_of_terms_by_itself(fixed_client, monkeypatch):
+    """Codex audit 2026-11-17: new terms blocked the daily check on 2026-11-15 until its acceptance was written by hand."""
+    alerts, sent = [], []
+    rt = _setup(monkeypatch, alerts, sent)
+    rt.store.update_wallet(CANARY_UID, CANARY, lambda w: w.model_copy(update={"terms_version": "2026-10-07"}))
+    started = fixed_client.post("/tasks/canary").json()["started"]
+    assert _finished(rt, started).status.value == "COMPLETED"
+    assert rt.store.get_wallet(CANARY_UID).terms_version == rt.settings.terms_version

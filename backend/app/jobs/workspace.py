@@ -25,7 +25,7 @@ from app.formatting.guideline import to_spec
 from app.formatting.presets import PRESETS, with_custom
 from app.jobs.models import ChangedBlock, Job, JobEvent, JobStatus, JobView, ServiceSelection, StoredFile, StoredOutput, utcnow
 from app.jobs.pipeline import StageContext, _analysis_after, with_logo
-from app.jobs.service import ACCOUNT_CLOSING, DOCX_TYPE, User, _owned, _rate_limit
+from app.jobs.service import ACCOUNT_CLOSING, DOCX_TYPE, User, _owned, _rate_limit, require_terms
 from app.runtime import Runtime
 
 logger = logging.getLogger("paperaid.workspace")
@@ -213,6 +213,7 @@ def continue_from(rt: Runtime, user: User, job_id: str, origin: str, instruction
     """The next step on the same screen: a new draft of this paper, as uploaded ("original") or as
     PaperAid finished it ("result"), priced and started like any job. With an instruction, the
     student's own request is what the writer follows for the chosen passages (or the whole paper)."""
+    require_terms(rt, user)  # the current terms, accepted before PaperAid handles anything of theirs (Codex audit 2026-11-17)
     job = _readable(rt, _owned(rt, user, job_id))
     if job.status != JobStatus.COMPLETED or job.source is None:
         raise Conflict("Wait for this job to finish first.", code="NOT_FINISHED")

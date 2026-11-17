@@ -2,7 +2,7 @@ import * as Menu from '@radix-ui/react-dropdown-menu'
 import { clsx } from 'clsx'
 import type { LucideIcon } from 'lucide-react'
 import { CircleHelp, FileCheck2, FilePen, FolderOpen, HandCoins, House, Lightbulb, LogOut, Menu as MenuIcon, Monitor, Moon, NotebookPen, Plus, ScanSearch, ScrollText, Search, Settings, ShieldCheck, Sun, Wallet } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router'
 import { ConsentGate, TermsDialog } from '../../features/account/terms'
 import { useAuth } from '../../features/auth/auth-context'
@@ -15,7 +15,9 @@ import { startChoices } from '../../lib/start'
 import { savedAppearance, useAppearance, type Appearance } from '../../lib/theme'
 import type { ServiceId } from '../../lib/types'
 import { useWallet } from '../../lib/use-wallet'
+import { Button } from '../ui/button'
 import { Drawer } from '../ui/overlays'
+import { Alert, Skeleton } from '../ui/primitives'
 import { Logo } from './logo'
 
 interface NavItem {
@@ -77,18 +79,24 @@ function Shell() {
   const choices = startChoices(config)
   const [appearance, setAppearanceHere] = useAppearance()
   const inbox = useInbox()
-  const [consent, setConsent] = useState<boolean | null>(null) // null: not known yet, so nothing is held back
-  // Day or night follows the account to every device (owner, 2026-11-17): what the account holds is applied once
-  // signed in; a choice made here is kept with the account as well as in this browser.
-  useEffect(() => {
+  // Consent before use (Codex audit 2026-11-17: never fail open): the page is shown only once the account is known to
+  // have accepted the current terms; while that is being checked, a placeholder; when it cannot be checked, a retry.
+  const [consent, setConsent] = useState<{ state: 'loading' | 'accepted' | 'required' | 'unavailable'; version: string }>({ state: 'loading', version: '' })
+  const chosenHere = useRef(false) // a choice made before the account's answer arrived is never undone by it
+  const writes = useRef<Promise<unknown>>(Promise.resolve()) // saves of the appearance go one after another, in order
+  const loadPreferences = useCallback(() => {
+    setConsent((c) => ({ ...c, state: 'loading' }))
     data.preferences().then((p) => {
-      setConsent(p.termsAccepted)
-      if (p.appearance && p.appearance !== savedAppearance()) setAppearanceHere(p.appearance)
-    }).catch(() => undefined) // not reachable now: this browser's own choice stays
+      setConsent({ state: p.termsAccepted ? 'accepted' : 'required', version: p.termsVersion })
+      // Day or night follows the account to every device (owner, 2026-11-17).
+      if (!chosenHere.current && p.appearance && p.appearance !== savedAppearance()) setAppearanceHere(p.appearance)
+    }).catch(() => setConsent((c) => ({ ...c, state: 'unavailable' })))
   }, [data]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(loadPreferences, [loadPreferences])
   const setAppearance = (value: Appearance) => {
+    chosenHere.current = true
     setAppearanceHere(value)
-    data.setPreferences({ appearance: value }).catch(() => undefined) // not saved to the account: this browser keeps it
+    writes.current = writes.current.then(() => data.setPreferences({ appearance: value })).catch(() => undefined) // not saved to the account: this browser keeps it
   }
 
   useEffect(() => setMenuOpen(false), [location.pathname, location.search])
@@ -223,7 +231,15 @@ function Shell() {
           </div>
         </header>
         <main id="main" className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-8 sm:py-8">
-          {consent === false ? <ConsentGate onAccepted={() => setConsent(true)} /> : <Outlet />}
+          {consent.state === 'accepted' ? <Outlet />
+            : consent.state === 'required' ? <ConsentGate version={consent.version} onAccepted={() => setConsent((c) => ({ ...c, state: 'accepted' }))} />
+            : consent.state === 'unavailable' ? (
+              <div className="mx-auto max-w-xl py-6">
+                <Alert tone="info" action={<Button size="sm" variant="secondary" onClick={loadPreferences}>Try again</Button>}>
+                  We could not confirm your account just now. Check your connection and try again.
+                </Alert>
+              </div>
+            ) : <Skeleton className="mx-auto mt-6 h-64 max-w-3xl rounded-2xl" />}
         </main>
         <footer className="border-t border-line-strong bg-surface-subtle">
           <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-5 text-sm text-fg-muted sm:px-8">

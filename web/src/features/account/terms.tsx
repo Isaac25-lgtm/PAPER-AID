@@ -37,25 +37,27 @@ export function TermsPage() {
   )
 }
 
-/** Before anything is used (owner, 2026-11-17, as PaperAid Pro does): an account that has not accepted the current
- *  terms sees this instead of the page it opened. Each point is ticked; agreeing records the version and the time. */
-export function ConsentGate({ onAccepted }: { onAccepted: () => void }) {
-  useTitle('Before you start')
+/** The points a person agrees to before PaperAid handles anything of theirs (owner, 2026-11-17, as PaperAid Pro does):
+ *  the same three, ticked one by one, wherever they are asked (Codex audit 2026-11-17: one flow, not a one-click prompt). */
+const POINTS = [
+  { id: 'terms', text: <>I accept the <Link to="/terms" target="_blank" className="font-medium text-brand-700 underline">terms of using PaperAid</Link>.</> },
+  { id: 'privacy', text: <>I have read the <Link to="/privacy" target="_blank" className="font-medium text-brand-700 underline">privacy summary</Link>.</> },
+  { id: 'ai', text: <>PaperAid uses AI to research, write and check. I remain the author, responsible for what I submit and for following my institution&rsquo;s or funder&rsquo;s rules about AI.</> },
+]
+
+function useConsent(version: string | null, onAccepted: () => void) {
   const data = useData()
   const [ticked, setTicked] = useState<Record<string, boolean>>({})
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const points = [
-    { id: 'terms', text: <>I accept the <Link to="/terms" target="_blank" className="font-medium text-brand-700 underline">terms of using PaperAid</Link>.</> },
-    { id: 'privacy', text: <>I have read the <Link to="/privacy" target="_blank" className="font-medium text-brand-700 underline">privacy summary</Link>.</> },
-    { id: 'ai', text: <>PaperAid uses AI to research, write and check. I remain the author, responsible for what I submit and for following my institution&rsquo;s or funder&rsquo;s rules about AI.</> },
-  ]
-  const all = points.every((p) => ticked[p.id])
+  const ready = POINTS.every((p) => ticked[p.id]) && version !== null
   const agree = async () => {
+    if (!version) return
     setBusy(true)
     setError(null)
     try {
-      await data.acceptTerms(data.config.termsVersion)
+      await data.acceptTerms(version) // the version the server says is current, never the one the page loaded with
+      setTicked({})
       onAccepted()
     } catch (e) {
       setError(e instanceof DataError ? e.message : 'That did not work. Try again.')
@@ -63,36 +65,45 @@ export function ConsentGate({ onAccepted }: { onAccepted: () => void }) {
       setBusy(false)
     }
   }
+  const points = (
+    <ul className="space-y-3">
+      {POINTS.map((p) => (
+        <li key={p.id}>
+          <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-line-strong p-3 text-sm leading-relaxed text-fg hover:bg-surface-subtle">
+            <input type="checkbox" className="mt-1 size-4 shrink-0 accent-[var(--color-brand-600)]" checked={Boolean(ticked[p.id])}
+              onChange={(e) => setTicked({ ...ticked, [p.id]: e.target.checked })} />
+            <span>{p.text}</span>
+          </label>
+        </li>
+      ))}
+    </ul>
+  )
+  return { points, ready, busy, error, agree }
+}
+
+/** Shown instead of the page an account opened until it has accepted the current terms (owner, 2026-11-17). */
+export function ConsentGate({ version, onAccepted }: { version: string; onAccepted: () => void }) {
+  useTitle('Before you start')
+  const consent = useConsent(version, onAccepted)
   return (
     <div className="mx-auto max-w-xl py-6">
       <Card className="p-6 sm:p-8">
         <h1 className="text-2xl font-semibold tracking-tight text-fg">Before you start</h1>
-        <p className="mt-2 text-[15px] leading-relaxed text-fg-muted">Please read and agree to how PaperAid works. Version {data.config.termsVersion}.</p>
-        <ul className="mt-6 space-y-3">
-          {points.map((p) => (
-            <li key={p.id}>
-              <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-line-strong p-3 text-sm leading-relaxed text-fg hover:bg-surface-subtle">
-                <input type="checkbox" className="mt-1 size-4 shrink-0 accent-[var(--color-brand-600)]" checked={Boolean(ticked[p.id])}
-                  onChange={(e) => setTicked({ ...ticked, [p.id]: e.target.checked })} />
-                <span>{p.text}</span>
-              </label>
-            </li>
-          ))}
-        </ul>
-        {error && <Alert tone="danger" className="mt-4">{error}</Alert>}
-        <Button className="mt-6 w-full" disabled={!all} loading={busy} onClick={agree}>Agree and continue</Button>
+        <p className="mt-2 text-[15px] leading-relaxed text-fg-muted">Please read and agree to how PaperAid works. Version {version}.</p>
+        <div className="mt-6">{consent.points}</div>
+        {consent.error && <Alert tone="danger" className="mt-4">{consent.error}</Alert>}
+        <Button className="mt-6 w-full" disabled={!consent.ready} loading={consent.busy} onClick={consent.agree}>Agree and continue</Button>
       </Card>
     </div>
   )
 }
 
-/** Asked when the server needs the current terms accepted (a new account by Google, or new terms). The
- *  step that asked waits: accepting carries it on at once, "Not now" stops it (owner, 2026-10-07). */
+/** Asked when a step meets terms that changed while the tab was open (the server answered TERMS_REQUIRED): the same
+ *  points as the gate, for the version the server holds now; the step carries on once they are accepted. */
 export function TermsDialog() {
   const data = useData()
   const [open, setOpen] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [version, setVersion] = useState<string | null>(null)
   const waiting = useRef<TermsAsk['resolve'][]>([])
   const settle = (accepted: boolean) => {
     for (const resolve of waiting.current.splice(0)) resolve(accepted)
@@ -102,45 +113,34 @@ export function TermsDialog() {
       event.preventDefault() // claimed: the step waits for the answer here
       const detail = (event as CustomEvent<TermsAsk | null>).detail
       if (detail) waiting.current.push(detail.resolve)
-      setError(null)
+      setVersion(null)
       setOpen(true)
+      data.preferences().then((p) => setVersion(p.termsVersion)).catch(() => setVersion(data.config.termsVersion)) // the server refuses a stale one
     }
     window.addEventListener('paperaid:terms', ask)
     return () => {
       window.removeEventListener('paperaid:terms', ask)
       settle(false)
     }
-  }, [])
+  }, [data]) // eslint-disable-line react-hooks/exhaustive-deps
   const close = (next: boolean) => {
     setOpen(next)
     if (!next) settle(false)
   }
-  const accept = async () => {
-    setBusy(true)
-    setError(null)
-    try {
-      await data.acceptTerms(data.config.termsVersion)
-      setOpen(false)
-      settle(true)
-    } catch (e) {
-      setError(e instanceof DataError ? e.message : 'That did not work. Try again.')
-    } finally {
-      setBusy(false)
-    }
-  }
+  const consent = useConsent(version, () => {
+    setOpen(false)
+    settle(true)
+  })
   return (
-    <Dialog open={open} onOpenChange={close} title="Please accept PaperAid’s terms" description="Before your next paid step or data upload. Your step carries on as soon as you accept."
+    <Dialog open={open} onOpenChange={close} title="Please accept PaperAid’s terms" description={`PaperAid’s terms changed${version ? ` (version ${version})` : ''}. Your step carries on as soon as you accept.`}
       footer={(
         <>
           <Button variant="secondary" onClick={() => close(false)}>Not now</Button>
-          <Button loading={busy} onClick={accept}>I accept</Button>
+          <Button disabled={!consent.ready} loading={consent.busy} onClick={consent.agree}>Agree and continue</Button>
         </>
       )}>
-      <div className="space-y-2 text-sm text-fg-muted">
-        {TERMS.slice(1, 3).map((t) => <p key={t.title}><span className="font-medium text-fg">{t.title}.</span> {t.body}</p>)}
-        <p>Read the full <Link to="/terms" target="_blank" className="font-medium text-brand-700 underline">terms</Link> and the <Link to="/privacy" target="_blank" className="font-medium text-brand-700 underline">privacy summary</Link>.</p>
-      </div>
-      {error && <Alert tone="danger" className="mt-3">{error}</Alert>}
+      {consent.points}
+      {consent.error && <Alert tone="danger" className="mt-3">{consent.error}</Alert>}
     </Dialog>
   )
 }

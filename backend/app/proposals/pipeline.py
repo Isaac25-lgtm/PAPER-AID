@@ -1425,7 +1425,7 @@ def _cleaned(inp: StepInput, text: SectionText, library: dict[str, EvidenceItem]
     (removing a cited sentence can leave a neighbour's figure unsupported), and every sentence that still claims no
     study exists or calls a result significant against its own interval (`evidence.strip_overclaims`)."""
     for _ in range(5):
-        paragraphs = [p for p in (evidence.strip_overclaims(evidence.strip_unsupported(p, library, usable, allowed)) for p in text.paragraphs) if p]
+        paragraphs = [p for p in (evidence.strip_overclaims(evidence.strip_unsupported(p, library, usable, allowed, units=getattr(inp, "academic_policy", 0) >= 4)) for p in text.paragraphs) if p]
         tidy = text.model_copy(update={"paragraphs": paragraphs, "table": _strip_table(inp, text, library, usable, allowed)})
         if tidy == text:
             break
@@ -1437,7 +1437,7 @@ def _strip_table(inp: StepInput, text: SectionText, library: dict[str, EvidenceI
     table_allowed = _table_allowed(inp, allowed)
 
     def clean(cell: str) -> str:
-        return evidence.strip_overclaims(evidence.strip_unsupported(cell, library, usable, table_allowed))
+        return evidence.strip_overclaims(evidence.strip_unsupported(cell, library, usable, table_allowed, units=getattr(inp, "academic_policy", 0) >= 4))
 
     return Table(caption=clean(text.table.caption), rows=evidence.strip_table_overclaims([[clean(c) for c in row] for row in text.table.rows]))
 
@@ -1676,7 +1676,7 @@ def stage_auditing(ctx: "StageContext") -> None:
             current.pop(key, None)  # never rejected new text: _merge keeps earlier wording, a finish keeps it missing
 
     for key, text in current.items():
-        cleaned = [evidence.strip_unsupported(p, library, usable, allowed) for p in text.paragraphs]
+        cleaned = [evidence.strip_unsupported(p, library, usable, allowed, units=getattr(inp, "academic_policy", 0) >= 4) for p in text.paragraphs]
         table = _strip_table(inp, text, library, usable, allowed)
         if cleaned != text.paragraphs or table != text.table:
             if approved_only:  # the final guard: nothing changes after approval

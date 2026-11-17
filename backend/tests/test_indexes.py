@@ -54,6 +54,9 @@ class _Store(FirestoreJobStore):
     def delete_ledger(self, uid: str) -> None:
         pass
 
+    def delete_preferences(self, uid: str) -> None:
+        pass
+
     def get_flag(self, name: str, default: bool) -> bool:
         return default
 
@@ -88,6 +91,7 @@ def shapes():
             service.admin_list(rt, status, svc, None, None, 20)
     service.admin_list(rt, None, None, "someone@example.com", None, 20)
     service.admin_summary(rt)
+    rt.store.list_inbox("u1", 20)  # the in-app notifications, newest notice first
     service.reconcile(rt)
     service.cleanup_expired(rt)
     service.cleanup_expired_projects(rt)
