@@ -7,6 +7,7 @@ import { DataError, useData } from '../../lib/data'
 import { formatDate } from '../../lib/format'
 import { INVITE_ONLY_REASON, NOT_CONFIGURED_REASON } from '../../lib/services'
 import { useTitle } from '../../lib/use-title'
+import { SectionGuide } from '../guide/section-guide'
 import type { Work, WorkKind } from '../../lib/work-types'
 import { KIND_LABELS, ReadinessBadge, VARIANT_LABELS } from './shared'
 
@@ -63,6 +64,7 @@ export function WorksPage() {
 
   return (
     <>
+      <SectionGuide key={section} section={section === 'COURSEWORK' ? 'coursework' : section === 'CONCEPT_NOTE' ? 'funding-concept' : 'funding-proposal'} />
       <PageHeader
         title={SECTION_TEXT[section].title}
         description={SECTION_TEXT[section].description}

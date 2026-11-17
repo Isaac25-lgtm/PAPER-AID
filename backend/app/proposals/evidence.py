@@ -414,10 +414,38 @@ LIST_MARKER = re.compile(r"\(?(?:\d{1,2}|[a-z]|[ivx]{1,4})[.)]")
 SUBHEADING = re.compile(r"^\d{1,2}(?:\.\d{1,2}){1,2} [A-Z][A-Za-z ]{2,60}$")
 
 
-def figure_problems(paragraph: str, library: dict[str, EvidenceItem], allowed_text: str) -> list[str]:
+# The unit a figure is given in (owner, 2026-11-17, after PaperAid Pro): a number written with a unit or a currency.
+# "%" stays part of the figure itself (`_quantity_key`); a percentage point is a unit of its own.
+_UNIT_AFTER = re.compile(r"\s?(percentage points?|pp|per\s?cent|days?|weeks?|months?|years?|hours?|minutes?|mg|kg|g|ml|cm|mm|km|times|fold|"
+                         r"ugx|kes|tzs|usd|eur|gbp|shillings?|dollars?|euros?|pounds?)\b", re.IGNORECASE)
+_UNIT_BEFORE = re.compile(r"(us\$|\$|usd|ugx|ushs?|kes|ksh|tzs|€|eur|£|gbp)\s?$", re.IGNORECASE)
+_UNIT_NAMES = {"percentage point": "pp", "percentage points": "pp", "per cent": "%", "percent": "%", "day": "days", "week": "weeks", "month": "months",
+               "year": "years", "hour": "hours", "minute": "minutes", "fold": "times", "us$": "usd", "$": "usd", "dollar": "usd", "dollars": "usd",
+               "ush": "ugx", "ushs": "ugx", "shilling": "shillings", "ksh": "kes", "€": "eur", "euro": "eur", "euros": "eur", "£": "gbp", "pound": "gbp", "pounds": "gbp"}
+
+
+def _unit_of(text: str, match: re.Match[str]) -> str:
+    after = _UNIT_AFTER.match(text, match.end())
+    before = _UNIT_BEFORE.search(text[max(0, match.start() - 6):match.start()])
+    raw = (after.group(1) if after else before.group(1) if before else "").lower()
+    raw = re.sub(r"\s+", " ", raw)
+    return _UNIT_NAMES.get(raw, raw)
+
+
+def _figure_units(text: str) -> dict[str, set[str]]:
+    """Each figure's quantity key with the units it is written in ("" when written bare)."""
+    out: dict[str, set[str]] = {}
+    for match in FIGURE.finditer(text):
+        out.setdefault(_quantity_key(match.group(0).replace(",", "")), set()).add(_unit_of(text, match))
+    return out
+
+
+def figure_problems(paragraph: str, library: dict[str, EvidenceItem], allowed_text: str, units: bool = False) -> list[str]:
     """Figures must come from the evidence cited in the same paragraph, or from the student's
     own inputs and plan (`allowed_text`). References to the document's own sections, tables and
-    figures are not figures."""
+    figures are not figures. With `units` (steps priced from 2026-11-17: academicPolicy 3 for works, 4 for
+    proposals), a figure written with a unit must not stand on the same number in a different unit: "12 days" in a
+    source never licenses "12 months". A number the evidence gives bare is not judged on its unit."""
     if SUBHEADING.match(paragraph.strip()):
         return []
     cited = [library[i] for i in cited_ids(paragraph) if i in library]
@@ -427,7 +455,18 @@ def figure_problems(paragraph: str, library: dict[str, EvidenceItem], allowed_te
     quantities = {_quantity_key(f) for f in known}
     missing = sorted(f for f in _figures(REFERENCE.sub(" ", ANY_TOKEN.sub(" ", paragraph)))
                      if not _plain_figure(f) and _quantity_key(f) not in quantities)
-    return [f"The figure {f} is not in the evidence cited in this paragraph or in your plan." for f in missing]
+    problems = [f"The figure {f} is not in the evidence cited in this paragraph or in your plan." for f in missing]
+    if units:
+        sources = " ".join([allowed_text, *(f"{item.passage} {item.statement}" for item in cited)])
+        known_units = _figure_units(sources)
+        text = REFERENCE.sub(" ", ANY_TOKEN.sub(" ", paragraph))
+        for match in FIGURE.finditer(text):
+            figure = match.group(0).replace(",", "")
+            key, unit = _quantity_key(figure), _unit_of(text, match)
+            given = known_units.get(key, set())
+            if unit and given and "" not in given and unit not in given and not _plain_figure(figure):
+                problems.append(f"The figure {figure} {unit} is in the cited evidence only as {figure} {' or '.join(sorted(given))}.")
+    return problems
 
 
 # A claim that research on a topic does not exist. A search that found nothing proves only that: the audit of

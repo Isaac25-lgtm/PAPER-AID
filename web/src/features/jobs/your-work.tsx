@@ -7,6 +7,7 @@ import { useData } from '../../lib/data'
 import { startChoices, type StartChoice } from '../../lib/start'
 import { useTitle } from '../../lib/use-title'
 import { useAuth } from '../auth/auth-context'
+import { SectionGuide, tourSeen, useGuidance } from '../guide/section-guide'
 import { StatusChip } from '../workspace/parts'
 import { KINDS, SECTION_LISTS, useYourWork, type WorkItem } from './your-work-data'
 
@@ -113,6 +114,7 @@ export function DashboardPage() {
   const lists = SECTION_LISTS.filter((l) => data.config.availability[l.service] && data.config.availability[l.service] !== 'soon')
   const count = (type: WorkItem['type']) => all.filter((i) => i.type === type).length
   const today = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
+  const { openTour } = useGuidance()
 
   return (
     <div className="pb-10">
@@ -122,7 +124,11 @@ export function DashboardPage() {
           {firstName ? `, ${firstName}` : ''}
         </h1>
         <p className="mt-2 text-[15px] text-fg-muted">{today}</p>
+        {!tourSeen() && (
+          <button type="button" onClick={openTour} className="mt-3 text-sm font-medium text-brand-700 hover:underline">New to PaperAid? Take the tour</button>
+        )}
       </header>
+      <SectionGuide section="dashboard" />
 
       <div className="mt-8 grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_19rem]">
         <div className="min-w-0 space-y-8">

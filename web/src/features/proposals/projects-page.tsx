@@ -9,6 +9,7 @@ import { formatDate } from '../../lib/format'
 import type { CitationStyle, Level, Project, ProposalInputs, Rulebook, StudyType, TitlePage } from '../../lib/proposal-types'
 import { INVITE_ONLY_REASON, NOT_CONFIGURED_REASON } from '../../lib/services'
 import { useTitle } from '../../lib/use-title'
+import { SectionGuide } from '../guide/section-guide'
 import { LEVELS, PlanStatusBadge, STUDY_TYPES } from './shared'
 
 function unavailableReason(availability: string) {
@@ -38,6 +39,7 @@ export function ProjectsPage() {
 
   return (
     <>
+      <SectionGuide key={concept ? 'c' : 'p'} section={concept ? 'research-concept' : 'proposal'} />
       <PageHeader
         title={concept ? 'Research concept notes' : 'Research proposals'}
         description={concept

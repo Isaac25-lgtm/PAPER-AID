@@ -1,16 +1,18 @@
 import * as Menu from '@radix-ui/react-dropdown-menu'
 import { clsx } from 'clsx'
 import type { LucideIcon } from 'lucide-react'
-import { FileCheck2, FilePen, FolderOpen, HandCoins, House, Lightbulb, LogOut, Menu as MenuIcon, Monitor, Moon, NotebookPen, Plus, ScanSearch, ScrollText, Search, Settings, ShieldCheck, Sun, Wallet } from 'lucide-react'
+import { CircleHelp, FileCheck2, FilePen, FolderOpen, HandCoins, House, Lightbulb, LogOut, Menu as MenuIcon, Monitor, Moon, NotebookPen, Plus, ScanSearch, ScrollText, Search, Settings, ShieldCheck, Sun, Wallet } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router'
-import { TermsDialog } from '../../features/account/terms'
+import { ConsentGate, TermsDialog } from '../../features/account/terms'
 import { useAuth } from '../../features/auth/auth-context'
+import { InboxBell, useInbox } from '../../features/jobs/inbox-bell'
 import { YourWorkProvider } from '../../features/jobs/your-work-data'
+import { GuidanceProvider, useGuidance } from '../../features/guide/section-guide'
 import { useData } from '../../lib/data'
 import { formatTokenNumber } from '../../lib/format'
 import { startChoices } from '../../lib/start'
-import { useAppearance, type Appearance } from '../../lib/theme'
+import { savedAppearance, useAppearance, type Appearance } from '../../lib/theme'
 import type { ServiceId } from '../../lib/types'
 import { useWallet } from '../../lib/use-wallet'
 import { Drawer } from '../ui/overlays'
@@ -57,7 +59,9 @@ const SECTIONS_NAV: NavItem[] = [
 export function AppLayout() {
   return (
     <YourWorkProvider>
+      <GuidanceProvider>
       <Shell />
+      </GuidanceProvider>
     </YourWorkProvider>
   )
 }
@@ -67,10 +71,25 @@ function Shell() {
   const navigate = useNavigate()
   const location = useLocation()
   const [menuOpen, setMenuOpen] = useState(false)
-  const { config } = useData()
+  const data = useData()
+  const { config } = data
   const { wallet } = useWallet()
   const choices = startChoices(config)
-  const [appearance, setAppearance] = useAppearance()
+  const [appearance, setAppearanceHere] = useAppearance()
+  const inbox = useInbox()
+  const [consent, setConsent] = useState<boolean | null>(null) // null: not known yet, so nothing is held back
+  // Day or night follows the account to every device (owner, 2026-11-17): what the account holds is applied once
+  // signed in; a choice made here is kept with the account as well as in this browser.
+  useEffect(() => {
+    data.preferences().then((p) => {
+      setConsent(p.termsAccepted)
+      if (p.appearance && p.appearance !== savedAppearance()) setAppearanceHere(p.appearance)
+    }).catch(() => undefined) // not reachable now: this browser's own choice stays
+  }, [data]) // eslint-disable-line react-hooks/exhaustive-deps
+  const setAppearance = (value: Appearance) => {
+    setAppearanceHere(value)
+    data.setPreferences({ appearance: value }).catch(() => undefined) // not saved to the account: this browser keeps it
+  }
 
   useEffect(() => setMenuOpen(false), [location.pathname, location.search])
 
@@ -164,8 +183,9 @@ function Shell() {
   return (
     <div className="min-h-dvh bg-surface">
       <div className="fixed inset-y-0 left-0 z-30 hidden w-[248px] flex-col border-r border-line-strong bg-surface-subtle lg:flex">
-        <div className="flex h-14 items-center px-4">
+        <div className="flex h-14 items-center justify-between px-4">
           <Logo to="/app" />
+          <InboxBell state={inbox} />
         </div>
         <div className="px-3 pb-3">{newMenu}</div>
         <nav aria-label="App" className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-3">
@@ -174,6 +194,7 @@ function Shell() {
           {sections.map((item) => (item.soon ? soonItem(item) : navLink(item)))}
         </nav>
         <div className="flex flex-col gap-0.5 border-t border-line-strong px-3 py-3">
+          <HelpLink />
           {footerLinks.map((item) => navLink(item))}
           <AppearanceSwitch value={appearance} onChange={setAppearance} />
           <div className="mt-1">{account}</div>
@@ -190,6 +211,7 @@ function Shell() {
               <Logo to="/app" />
             </div>
             <div className="ml-auto flex items-center gap-2">
+              <div className="lg:hidden"><InboxBell state={inbox} align="end" /></div>
               {config.creditsEnabled && wallet && <CreditsPill available={wallet.available} held={wallet.held} />}
               {config.creditsEnabled && (
                 <Link to="/app/credits"
@@ -201,7 +223,7 @@ function Shell() {
           </div>
         </header>
         <main id="main" className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-8 sm:py-8">
-          <Outlet />
+          {consent === false ? <ConsentGate onAccepted={() => setConsent(true)} /> : <Outlet />}
         </main>
         <footer className="border-t border-line-strong bg-surface-subtle">
           <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-5 text-sm text-fg-muted sm:px-8">
@@ -225,6 +247,7 @@ function Shell() {
             </Link>
           ))}
           <div className="my-2 h-px bg-line" />
+          <HelpLink big />
           {footerLinks.map((item) => navLink(item, true))}
           <AppearanceSwitch value={appearance} onChange={setAppearance} big />
           <button onClick={handleSignOut} className="flex items-center gap-2.5 rounded-lg px-2.5 py-3 text-left text-base font-medium text-fg-muted hover:bg-surface-muted">
@@ -261,6 +284,17 @@ function AppearanceSwitch({ value, onChange, big = false }: { value: Appearance;
         })}
       </div>
     </div>
+  )
+}
+
+/** Help: every section's guide, and the optional tour (owner, 2026-11-17). */
+function HelpLink({ big = false }: { big?: boolean }) {
+  const { openHelp } = useGuidance()
+  return (
+    <button type="button" onClick={() => openHelp()}
+      className={clsx('flex items-center gap-2.5 rounded-lg px-2.5 text-left font-medium text-fg transition-colors hover:bg-surface-muted focus-visible:outline-2 focus-visible:outline-brand-600', big ? 'py-3 text-base' : 'py-1.5 text-sm')}>
+      <CircleHelp className={clsx(big ? 'size-5' : 'size-[18px]', 'text-fg-muted')} aria-hidden /> Help
+    </button>
   )
 }
 

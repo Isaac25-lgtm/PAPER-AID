@@ -719,7 +719,7 @@ def quote_step(rt: Runtime, user: User, project_id: str, step: Step, note: str, 
             raise AppError(" ".join(blockers), code="AUTHOR_INPUT_NEEDED")
     _rate_limit(rt, user, "quote", rt.settings.quotes_per_hour)
     inp = StepInput(
-        academic_policy=3,
+        academic_policy=4,
         calculation_source=calculation_references.source(p.plan.sample_size.method) if chapter == 3 and p.plan else None,
         tell_dated=True,
         today=utcnow().date().isoformat(),
@@ -794,7 +794,7 @@ def _quote_profile(rt: Runtime, user: User, p: Project) -> StepQuote:
         raise AppError("Upload your institution's research guide first.", code="NO_GUIDE")
     _rate_limit(rt, user, "quote", rt.settings.quotes_per_hour)
     inp = StepInput(
-        academic_policy=3,
+        academic_policy=4,
         tell_dated=True,
         today=utcnow().date().isoformat(),
         project_id=p.id, step="PROFILE", chapter=0, rulebook=p.rulebook, inputs=p.inputs, plan_version=p.plan_version,

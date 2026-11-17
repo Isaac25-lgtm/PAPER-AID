@@ -23,15 +23,7 @@
       content="Check your writing, refine weak passages with citations locked, and apply academic formatting. Built for researchers and students."
     />
     <meta name="twitter:card" content="summary" />
-    <script>
-      // Night mode before the first paint, on the signed-in app only (owner, 2026-11-15); public pages stay day.
-      try {
-        if (/^\/(app|admin)(\/|$)/.test(location.pathname)) {
-          var a = localStorage.getItem('paperaid.appearance')
-          if (a === 'dark' || (a === 'system' && matchMedia('(prefers-color-scheme: dark)').matches)) document.documentElement.dataset.theme = 'dark'
-        }
-      } catch (e) {}
-    </script>
+    <script src="/theme-init.js"></script>
   </head>
   <body>
     <div id="root"></div>

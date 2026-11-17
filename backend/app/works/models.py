@@ -561,7 +561,7 @@ class WorkStepInput(Camel):
 
     tell_dated: bool = False  # as StepInput.tell_dated: only a step priced with it is told a source is dated
     today: str = ""  # as StepInput.today
-    academic_policy: Literal[0, 1, 2] = 0  # 2: source status; old inputs keep their previous payloads
+    academic_policy: Literal[0, 1, 2, 3] = 0  # 2: source status; 3: figures keep their units; old inputs keep their previous payloads
 
     work_id: str
     step: Literal["READ", "PLAN", "DRAFT", "REVISE"]

@@ -915,13 +915,13 @@ def _checks(inp: WorkStepInput, section: PlanSection, text: SectionText, library
                          "where a figure or fact only they can give is missing, the sentence is written around its marked gap and says nothing about the gap."
                          for s in _notes_to_student(inp, plain)[:2]]
         if n >= len(text.paragraphs) and text.table.illustrative:  # the worked example's own cells
-            found = ev.figure_problems(plain, library_items, allowed + " " + example)
+            found = ev.figure_problems(plain, library_items, allowed + " " + example, units=getattr(inp, "academic_policy", 0) >= 3)
         elif example and n < len(text.paragraphs):  # only a sentence framed as hypothetical may use the example's numbers
             cited = " ".join(f"⟦{i}⟧" for i in ev.cited_ids(plain))
             found = [p for s in ev.sentences(plain)
-                     for p in ev.figure_problems(s if ev.cited_ids(s) else f"{s} {cited}", library_items, allowed + (" " + example if HYPOTHETICAL.search(s) else ""))]
+                     for p in ev.figure_problems(s if ev.cited_ids(s) else f"{s} {cited}", library_items, allowed + (" " + example if HYPOTHETICAL.search(s) else ""), units=getattr(inp, "academic_policy", 0) >= 3)]
         else:
-            found = ev.figure_problems(plain, library_items, allowed)
+            found = ev.figure_problems(plain, library_items, allowed, units=getattr(inp, "academic_policy", 0) >= 3)
         problems += [p + " Use a number token for figures from the budget, Results Model or your answers." for p in found]
         problems += [f"{t} is not an available number token." for t in numbers.render(paragraph, tokens)[1]]
         if spec.source_policy == "CLOSED":

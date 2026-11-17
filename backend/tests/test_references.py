@@ -68,3 +68,44 @@ def test_an_ai_check_verifies_the_reference_list_and_admins_never_see_it(client)
     assert verification["items"][1]["status"] == "NOT_VERIFIED"  # its DOI is not registered and {i["status"] for i in verification["items"]} <= {"VERIFIED", "PROBABLE", "MISMATCH", "NOT_VERIFIED"}
     admin = client.get(f"/api/admin/jobs/{job_id}", headers=ADMIN).json()
     assert all(i["entry"] == "" for i in admin["job"]["references"]["items"])
+
+
+# --- every referencing style (owner, 2026-11-17, after PaperAid Pro): the title is found in the entry, the first author
+# is read before it and the year outside it, whatever the style.
+
+STYLES = {
+    "Vancouver": "1. Ojakaa DI, Jarvis JD. Acceptance of a malaria vaccine by caregivers of sick children in Kenya. Malar J. 2014;13(1):172.",
+    "IEEE": "[3] D. I. Ojakaa and J. D. Jarvis, \u201cAcceptance of a malaria vaccine by caregivers of sick children in Kenya,\u201d Malaria Journal, vol. 13, no. 1, 2014.",
+    "MLA": "Ojakaa, David I., and Jane D. Jarvis. \u201cAcceptance of a Malaria Vaccine by Caregivers of Sick Children in Kenya.\u201d Malaria Journal, vol. 13, no. 1, 2014.",
+    "Harvard": "Ojakaa, D.I. and Jarvis, J.D. (2014) \u2018Acceptance of a malaria vaccine by caregivers of sick children in Kenya\u2019, Malaria Journal, 13(1).",
+}
+
+
+@pytest.mark.parametrize("style", STYLES)
+def test_a_reference_in_any_style_is_matched(lookups, style):
+    lookups["found"] = [RECORD]
+    assert references.verify(STYLES[style]).status == "PROBABLE"
+    lookups["works"][RECORD["doi"]] = RECORD
+    assert references.verify(STYLES[style] + " doi:" + RECORD["doi"]).status == "VERIFIED"
+
+
+def test_a_wrong_year_or_author_is_found_in_any_style(lookups):
+    lookups["found"] = [RECORD]
+    wrong_year = references.verify(STYLES["Vancouver"].replace("2014", "2016"))
+    assert wrong_year.status == "MISMATCH" and "registered year is 2014, not 2016" in wrong_year.note
+    wrong_author = references.verify(STYLES["IEEE"].replace("D. I. Ojakaa and J. D. Jarvis", "J. D. Jarvis"))
+    assert wrong_author.status == "MISMATCH" and "registered first author is Ojakaa" in wrong_author.note
+
+
+def test_a_year_inside_a_title_is_not_the_publication_year(lookups):
+    record = {**RECORD, "title": "Uganda Vision 2040 and maternal health services", "year": "2018", "authors": "Okello, P."}
+    lookups["found"] = [record]
+    check = references.verify("Okello, P. (2018). Uganda Vision 2040 and maternal health services. Kampala: Fountain.")
+    assert check.status == "PROBABLE", check.note
+
+
+def test_the_best_of_several_registered_records_is_chosen(lookups):
+    decoy = {**RECORD, "doi": "10.1000/other", "title": "Acceptance of a malaria vaccine by caregivers in Ghana", "authors": "Mensah, K.", "year": "2019"}
+    lookups["found"] = [decoy, RECORD]
+    check = references.verify(ENTRY)
+    assert check.status == "PROBABLE" and check.doi == RECORD["doi"]

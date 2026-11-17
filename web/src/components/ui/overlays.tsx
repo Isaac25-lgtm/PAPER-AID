@@ -11,6 +11,8 @@ interface DialogProps {
   description?: ReactNode
   children?: ReactNode
   footer?: ReactNode
+  /** `wide`: the Help centre and the tour, which hold a walkthrough beside their text. */
+  size?: 'md' | 'wide'
 }
 
 /** The control that opened a dialog, focused again when it closes (by Escape, Cancel or the close button): our
@@ -30,13 +32,13 @@ function useReturnFocus(open: boolean) {
   }
 }
 
-export function Dialog({ open, onOpenChange, title, description, children, footer }: DialogProps) {
+export function Dialog({ open, onOpenChange, title, description, children, footer, size = 'md' }: DialogProps) {
   const returnFocus = useReturnFocus(open)
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-scrim backdrop-blur-[2px]" />
-        <DialogPrimitive.Content onCloseAutoFocus={returnFocus} className="fixed inset-x-4 top-1/2 z-50 mx-auto max-w-md -translate-y-1/2 rounded-2xl bg-surface p-6 shadow-raised focus:outline-none">
+        <DialogPrimitive.Content onCloseAutoFocus={returnFocus} className={clsx('fixed inset-x-4 top-1/2 z-50 mx-auto max-h-[90vh] -translate-y-1/2 overflow-y-auto rounded-2xl bg-surface p-6 shadow-raised focus:outline-none', size === 'wide' ? 'max-w-3xl' : 'max-w-md')}>
           <DialogPrimitive.Title className="pr-8 text-lg font-semibold">{title}</DialogPrimitive.Title>
           {description && <DialogPrimitive.Description className="mt-2 text-sm text-fg-muted">{description}</DialogPrimitive.Description>}
           {children && <div className="mt-4">{children}</div>}

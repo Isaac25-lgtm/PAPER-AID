@@ -1396,7 +1396,7 @@ def _checks(inp: StepInput, key: str, text: SectionText, library: dict[str, Evid
     tense = inp.chapter == 3 or key in TENSE_SECTIONS.get(inp.chapter, set())
     for paragraph in text.paragraphs:
         problems += evidence.citation_problems(paragraph, usable)
-        problems += evidence.figure_problems(paragraph, library, allowed)
+        problems += evidence.figure_problems(paragraph, library, allowed, units=getattr(inp, "academic_policy", 0) >= 4)
         problems += evidence.gap_problems(paragraph) + evidence.statistic_problems(paragraph) + evidence.copied_problems(paragraph, library)
         if getattr(inp, "academic_policy", 0):
             problems += evidence.provision_problems(paragraph, library)
@@ -1404,7 +1404,7 @@ def _checks(inp: StepInput, key: str, text: SectionText, library: dict[str, Evid
             problems += evidence.tense_problems(paragraph)
     table_allowed = _table_allowed(inp, allowed)
     for cell in _cells(text):  # a caption and a cell are read as prose is, and a row with its headings
-        found = evidence.citation_problems(cell, usable) + evidence.figure_problems(cell, library, table_allowed)
+        found = evidence.citation_problems(cell, usable) + evidence.figure_problems(cell, library, table_allowed, units=getattr(inp, "academic_policy", 0) >= 4)
         found += evidence.gap_problems(cell) + evidence.statistic_problems(cell)
         if getattr(inp, "academic_policy", 0):
             found += evidence.provision_problems(cell, library)

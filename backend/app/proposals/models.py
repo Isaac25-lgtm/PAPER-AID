@@ -470,7 +470,7 @@ class StepInput(Camel):
     # The day the step was priced, told to the models with their work: a reviewer with no date called sources of 2025
     # and 2026 "future-dated" (confirmation round, 2026-10-12). Frozen here, so a step is asked the same on a retry.
     today: str = ""
-    academic_policy: Literal[0, 1, 2, 3] = 0  # 3: supported brief points and explicit calculation assumptions
+    academic_policy: Literal[0, 1, 2, 3, 4] = 0  # 3: supported brief points and explicit calculation assumptions; 4: figures keep their units
     calculation_source: EvidenceSource | None = None  # frozen method identity, not an empirical evidence item
 
     project_id: str

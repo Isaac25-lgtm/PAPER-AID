@@ -25,6 +25,7 @@ from app.jobs.models import (
     Wallet,
     WalletSummary,
     WalletView,
+    utcnow,
 )
 from app.jobs.pipeline import run_step
 from app.jobs.service import User
@@ -157,6 +158,51 @@ def set_notifications(body: NotificationChoice, user: User = Depends(current_use
 
     rt.store.update_wallet(user.uid, user.email, apply)
     return _notifications(rt, user)
+
+
+class Preferences(Camel):
+    appearance: Literal["light", "dark", "system"]
+
+
+@api.get("/me/preferences")
+def get_preferences(user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> dict:
+    """The person's own choices kept with the account (owner, 2026-11-17): day, night or the device's setting, and
+    whether they have accepted the current terms (the app asks before anything is used, as PaperAid Pro does)."""
+    wallet = rt.store.get_wallet(user.uid)
+    return {"appearance": (wallet.appearance if wallet else "") or None,
+            "termsAccepted": bool(wallet and wallet.terms_version == rt.settings.terms_version)}
+
+
+@api.put("/me/preferences")
+def set_preferences(body: Preferences, user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> dict:
+    def apply(w: Wallet) -> Wallet:
+        if not w.closing:
+            w.appearance = body.appearance
+        return w
+
+    rt.store.update_wallet(user.uid, user.email, apply)
+    return {"appearance": body.appearance}
+
+
+@api.get("/me/inbox")
+def get_inbox(user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> dict:
+    """In-app notifications: "ready" and "stopped" for the person's latest finished work, with what is unread."""
+    from app import notify
+
+    wallet = rt.store.get_wallet(user.uid)
+    items = notify.inbox(rt, user.uid, wallet.inbox_read_at if wallet else None)
+    return {"items": items, "unread": sum(1 for i in items if i["unread"])}
+
+
+@api.post("/me/inbox/read", status_code=204)
+def read_inbox(user: User = Depends(current_user), rt: Runtime = Depends(get_runtime)) -> Response:
+    def apply(w: Wallet) -> Wallet:
+        if not w.closing:
+            w.inbox_read_at = utcnow()
+        return w
+
+    rt.store.update_wallet(user.uid, user.email, apply)
+    return Response(status_code=204)
 
 
 @api.delete("/me", status_code=204)

@@ -37,6 +37,55 @@ export function TermsPage() {
   )
 }
 
+/** Before anything is used (owner, 2026-11-17, as PaperAid Pro does): an account that has not accepted the current
+ *  terms sees this instead of the page it opened. Each point is ticked; agreeing records the version and the time. */
+export function ConsentGate({ onAccepted }: { onAccepted: () => void }) {
+  useTitle('Before you start')
+  const data = useData()
+  const [ticked, setTicked] = useState<Record<string, boolean>>({})
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const points = [
+    { id: 'terms', text: <>I accept the <Link to="/terms" target="_blank" className="font-medium text-brand-700 underline">terms of using PaperAid</Link>.</> },
+    { id: 'privacy', text: <>I have read the <Link to="/privacy" target="_blank" className="font-medium text-brand-700 underline">privacy summary</Link>.</> },
+    { id: 'ai', text: <>PaperAid uses AI to research, write and check. I remain the author, responsible for what I submit and for following my institution&rsquo;s or funder&rsquo;s rules about AI.</> },
+  ]
+  const all = points.every((p) => ticked[p.id])
+  const agree = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      await data.acceptTerms(data.config.termsVersion)
+      onAccepted()
+    } catch (e) {
+      setError(e instanceof DataError ? e.message : 'That did not work. Try again.')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <div className="mx-auto max-w-xl py-6">
+      <Card className="p-6 sm:p-8">
+        <h1 className="text-2xl font-semibold tracking-tight text-fg">Before you start</h1>
+        <p className="mt-2 text-[15px] leading-relaxed text-fg-muted">Please read and agree to how PaperAid works. Version {data.config.termsVersion}.</p>
+        <ul className="mt-6 space-y-3">
+          {points.map((p) => (
+            <li key={p.id}>
+              <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-line-strong p-3 text-sm leading-relaxed text-fg hover:bg-surface-subtle">
+                <input type="checkbox" className="mt-1 size-4 shrink-0 accent-[var(--color-brand-600)]" checked={Boolean(ticked[p.id])}
+                  onChange={(e) => setTicked({ ...ticked, [p.id]: e.target.checked })} />
+                <span>{p.text}</span>
+              </label>
+            </li>
+          ))}
+        </ul>
+        {error && <Alert tone="danger" className="mt-4">{error}</Alert>}
+        <Button className="mt-6 w-full" disabled={!all} loading={busy} onClick={agree}>Agree and continue</Button>
+      </Card>
+    </div>
+  )
+}
+
 /** Asked when the server needs the current terms accepted (a new account by Google, or new terms). The
  *  step that asked waits: accepting carries it on at once, "Not now" stops it (owner, 2026-10-07). */
 export function TermsDialog() {

@@ -21,6 +21,23 @@ import type {
 import type { ChapterView, CitationStyle, Comparison, EvidenceItem, FeedbackStatus, FrameworkStyle, Project, ProposalInputs, ProposalPlan, Rulebook, SampleSize, StepId, StepQuote, TitlePage, Variables } from './proposal-types'
 import type { Budget, ResultsModel, SourceRole, Work, WorkCitation, WorkDocumentView, WorkInputs, WorkKind, WorkPlan, WorkStep, WorkStepQuote } from './work-types'
 
+/** One in-app notification (owner, 2026-11-17): a piece of work that is ready, or that stopped. */
+export interface InboxItem {
+  id: string
+  outcome: 'READY' | 'STOPPED'
+  title: string
+  detail: string
+  /** The page of the work, inside the app. */
+  to: string
+  at: string
+  unread: boolean
+}
+
+export interface Inbox {
+  items: InboxItem[]
+  unread: number
+}
+
 export interface Notifications {
   available: { email: boolean; sms: boolean }
   notifyEmail: boolean
@@ -79,6 +96,12 @@ export interface DataSource {
   /** "Your work is ready" messages: which channels exist and the account's choices. */
   notifications(): Promise<Notifications>
   setNotifications(choice: Partial<Omit<Notifications, 'available'>>): Promise<Notifications>
+  /** Choices kept with the account: day, night or the device's setting (owner, 2026-11-17). */
+  preferences(): Promise<{ appearance: 'light' | 'dark' | 'system' | null; termsAccepted: boolean }>
+  setPreferences(choice: { appearance: 'light' | 'dark' | 'system' }): Promise<{ appearance: 'light' | 'dark' | 'system' }>
+  /** In-app notifications: the person's latest finished work, and marking them read. */
+  inbox(): Promise<Inbox>
+  readInbox(): Promise<void>
   /** The review workspace. */
   workspace: {
     document(jobId: string): Promise<JobDocument>

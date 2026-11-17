@@ -18,7 +18,7 @@ from app.jobs.models import ReferenceCheck, ReferenceVerification, utcnow
 MAX_REFERENCES = 60
 WORKERS = 6
 DOI = re.compile(r"\b(10\.\d{4,9}/[^\s\"<>]+[^\s\"<>.,;)\]])", re.I)
-YEAR = re.compile(r"\((?:19|20)\d{2}[a-z]?\)|\b(?:19|20)\d{2}[a-z]?\b")
+YEAR_WORD = re.compile(r"(?:1[5-9]|20)\d{2}[a-z]?")  # one normalised word that is a year ("2016" or "2016a")
 NUMBERING = re.compile(r"^\s*(?:\[\d+\]|\d+[.)])\s*")
 
 
@@ -38,29 +38,66 @@ def _similar(a: str, b: str) -> float:
 UNAVAILABLE = "PaperAid could not reach the registry of published works just now, so this reference was not checked. Check it yourself or try again later."
 
 
-def _same_author(surname: str, first: str) -> bool:
-    """The reference's first author is the registered first author (Codex audit 56c4f83 M22): the
-    surname of "Surname, I." or, for an organisation, its whole name. Never a later author, and never
-    the journal's name."""
+def _title_span(words: list[str], title: str) -> tuple[float, int, int]:
+    """Where a registered title sits in a reference, in any style (owner, 2026-11-17, after PaperAid Pro): the best
+    fuzzy match of the title against windows of the reference's words, as (score, first word, end word). A subtitle
+    left out on one side still matches its main title."""
+    best = (0.0, 0, 0)
+    for candidate in {title, title.split(":")[0]}:
+        target = _norm(candidate)
+        size = len(target.split())
+        if not target or not words or size < 2:
+            continue
+        for start in range(0, max(1, len(words) - size + 1)):
+            for width in (size - 1, size, size + 1, size + 2):
+                if width < 1:
+                    continue
+                window = " ".join(words[start:start + width])
+                score = 1.0 if window == target else SequenceMatcher(None, window, target).ratio()
+                if score > best[0]:
+                    best = (score, start, start + width)
+    return best
+
+
+def _first_author_ok(before_title: list[str], first: str) -> bool | None:
+    """The reference's first listed author is the registered first author: the surname of "Surname, I.", or an
+    organisation's whole name (Codex audit 56c4f83 M22: never a later author). Leading initials are skipped, as in
+    IEEE's "J. Smith". None when either side names no author."""
     registered = _norm(first.split(",")[0]) if "," in first else _norm(first)
-    given = _norm(surname)
-    return bool(given and registered) and (given == registered or ("," not in first and (given in registered or registered in given)))
+    names = list(before_title)
+    while names and len(names[0]) == 1:
+        names.pop(0)
+    if not names or not registered:
+        return None
+    family = registered.split()
+    if names[:len(family)] == family:
+        return True
+    return "," not in first and (registered in " ".join(names[:len(family) + 3]))  # an organisation written a little differently
 
 
-def _parts(entry: str) -> tuple[str, str, str]:
-    """(first author's surname, year, title) as best they can be read from an author-date entry."""
-    body = NUMBERING.sub("", entry)
-    year_match = YEAR.search(body)
-    year = re.sub(r"\D", "", year_match.group(0))[:4] if year_match else ""
-    surname = re.split(r"[,.(&]", body, maxsplit=1)[0].strip()
-    after = body[year_match.end() :] if year_match else body
-    after = after.lstrip(" ).,:")
-    title = re.split(r"(?<=[a-z0-9?!])\.\s+(?=[A-Z])", after, maxsplit=1)[0]
-    return surname, year, title.strip(" .")
+def _read(entry: str, record: dict[str, str]) -> tuple[float, str, bool | None]:
+    """How a reference reads against one registered record, in any referencing style: (title score, the year it
+    gives, whether its first author is the registered one). Authors come before the title in APA, Harvard,
+    Vancouver, IEEE, MLA and Chicago; the year is read only outside the title, so a year inside a title never
+    counts as the publication year."""
+    words = _norm(NUMBERING.sub("", entry)).split()
+    score, start, end = _title_span(words, record.get("title", ""))
+    if score < 0.6:
+        start = end = 0
+    outside = words[:start] + words[end:]
+    years = [w[:4] for w in outside if YEAR_WORD.fullmatch(w)]
+    first = (record.get("authors") or "").split(";")[0].strip()
+    return score, years[0] if years else "", _first_author_ok(words[:start], first) if score >= 0.6 else None
+
+
+def _rank(entry: str, record: dict[str, str]) -> float:
+    score, year, author = _read(entry, record)
+    registered = record.get("year", "")
+    year_ok = None if not (year and registered) else year == registered
+    return score + sum(0.1 for ok in (year_ok, author) if ok) - sum(0.2 for ok in (year_ok, author) if ok is False)
 
 
 def verify(entry: str) -> ReferenceCheck:
-    surname, year, title = _parts(entry)
     doi_match = DOI.search(entry)
     candidates: list[dict[str, str]] = []
     if doi_match:
@@ -71,29 +108,23 @@ def verify(entry: str) -> ReferenceCheck:
             return ReferenceCheck(entry=entry, status="NOT_VERIFIED", doi=doi_match.group(1), note="This DOI is not registered. Check it is typed correctly.")
         candidates = [record]
     if not candidates:
-        searched = fetch.crossref_search(entry)
+        searched = fetch.crossref_search(entry, rows=5)
         if searched is None:
             return ReferenceCheck(entry=entry, status="NOT_VERIFIED", note=UNAVAILABLE)
-        candidates = searched
-    best, best_score = None, 0.0
-    for record in candidates:
-        score = _similar(title, record["title"]) if title else 0.0
-        if score > best_score:
-            best, best_score = record, score
+        candidates = [r for r in searched if r.get("title")]
+    best = max(candidates, key=lambda r: _rank(entry, r), default=None)
+    best_score, year, author = _read(entry, best) if best else (0.0, "", None)
     if best is None or best_score < 0.6:
         return ReferenceCheck(entry=entry, status="NOT_VERIFIED", note="No registered record matches this reference. It may be a book, report or source that is not registered, so check it yourself.")
     first = best["authors"].split(";")[0].strip()
-    author_known = bool(surname and first)  # both sides name a first author: otherwise it cannot be confirmed
-    author_ok = not author_known or _same_author(surname, first)
-    year_ok = not year or not best["year"] or year == best["year"]
     differences = []
-    if not year_ok:
+    if year and best["year"] and year != best["year"]:
         differences.append(f"the registered year is {best['year']}, not {year}")
-    if not author_ok:
+    if author is False:
         differences.append(f"the registered first author is {first}")
     if best_score < 0.85:
         differences.append(f"the registered title is “{best['title']}”")
-    if doi_match and not differences and author_known and year and best["year"]:
+    if doi_match and not differences and author is True and year and best["year"]:
         status = "VERIFIED"
     elif not differences:
         status = "PROBABLE"

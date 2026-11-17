@@ -342,6 +342,10 @@ class Wallet(Camel):
     # a newer version is asked for again.
     terms_version: str = ""
     terms_accepted_at: datetime | None = None
+    # Day, night or the device's setting, kept with the account so it follows the person to every device (owner,
+    # 2026-11-17, after PaperAid Pro); "" when never chosen. And when the in-app notifications were last read.
+    appearance: Literal["", "light", "dark", "system"] = ""
+    inbox_read_at: datetime | None = None
     ledger_backfilled: bool = False  # entries from before the complete history was kept were copied into it
     # Credits reserved for a document started with one Start (owner decision 2026-10-01; Codex audit):
     # "work:<id>" or "project:<id>" → amount, held from Start until the document's own step holds it,

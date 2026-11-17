@@ -1,4 +1,5 @@
 import { clsx } from 'clsx'
+import { SectionGuide } from '../guide/section-guide'
 import { ArrowRight, Check, CheckCircle2, Info, Loader2 } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router'
@@ -164,7 +165,15 @@ export function NewJobPage() {
   // Every other job: upload, and the paper opens on its own page with the next step beside it.
   if (draft && !review) return <Navigate to={`/app/jobs/${draft}`} replace />
   if (!type && !draft) return <ServiceChooser />
-  if (type && !review) return <QuickUpload key={type.id} type={type} />
+  if (type && !review) {
+    const guide = type.id === 'PAPER_CHECK' ? 'paper-check' : type.id === 'ACADEMIC_FORMAT' ? 'formatting' : null
+    return (
+      <>
+        {guide && <SectionGuide key={guide} section={guide} />}
+        <QuickUpload key={type.id} type={type} />
+      </>
+    )
+  }
   return <NewJobForm key={type?.id ?? 'draft'} type={type} />
 }
 
